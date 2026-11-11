@@ -115,6 +115,35 @@ describe("BranchTree — local branches", () => {
     expect(props.onMergeBranch).toHaveBeenCalledWith("feat/foo");
   });
 
+  // #619
+  it("Rebase current branch onto opens the planner with the branch's full ref name", () => {
+    const { props } = renderTree();
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rebase current branch onto feat/foo…" }));
+    expect(props.onRebaseOnto).toHaveBeenCalledWith("refs/heads/feat/foo");
+  });
+
+  it("offers no rebase onto the current branch, nor on a detached HEAD", () => {
+    renderTree();
+    fireEvent.contextMenu(screen.getByText(/^main.*\(current\)$/));
+    expect(screen.queryByRole("menuitem", { name: /^Rebase current branch onto/ })).toBeNull();
+  });
+
+  it("offers no rebase on a detached HEAD", () => {
+    renderTree({ branches: [{ name: "main", isCurrent: false }, { name: "feat/foo", isCurrent: false }] });
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
+    expect(screen.getByRole("menuitem", { name: "Merge into current branch…" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /^Rebase current branch onto/ })).toBeNull();
+  });
+
+  it("disables Rebase current branch onto with the busy reason", () => {
+    renderTree({ operationDisabled: true, operationDisabledReason: "A cherry-pick is in progress." });
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
+    const item = screen.getByRole("menuitem", { name: "Rebase current branch onto feat/foo…" });
+    expect(item).toBeDisabled();
+    expect(item).toHaveAttribute("title", "A cherry-pick is in progress.");
+  });
+
   it("disables Rename/Delete/Merge menu items while a rebase is in progress", () => {
     renderTree({ operationDisabled: true, operationDisabledReason: "A rebase is in progress." });
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
@@ -693,6 +722,16 @@ describe("BranchTree — remotes", () => {
     fireEvent.contextMenu(await screen.findByText("main"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Compare with current branch" }));
     expect(onCompareBranch).toHaveBeenCalledWith("refs/remotes/origin/main", "origin/main");
+  });
+
+  // #619
+  it("Rebase current branch onto a remote-tracking branch passes its full ref", async () => {
+    const onRebaseOnto = vi.fn();
+    renderTree({ remotes: oneRemote, onListRemoteBranches: vi.fn().mockResolvedValue(["main"]), onRebaseOnto });
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    fireEvent.contextMenu(await screen.findByText("main"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rebase current branch onto origin/main…" }));
+    expect(onRebaseOnto).toHaveBeenCalledWith("refs/remotes/origin/main");
   });
 
   it("Set as upstream for current branch calls onSetUpstream directly, no dialog", async () => {

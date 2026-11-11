@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { DEFAULT_DIFF_SETTINGS, type DiffHunk, type HeadInfo, type RepoClient, type StatusEntry } from "../ipc/RepoClient";
 import { DiffSettingsContext } from "../state/useDiffSettings";
@@ -269,5 +269,214 @@ describe("empty states and conflicts (#665)", () => {
     rerender(<Pane client={client} status={withConflicts} conflictRequest onConflictRequestHandled={onConflictRequestHandled} />);
     await waitFor(() => expect(onConflictRequestHandled).toHaveBeenCalledOnce());
     expect(screen.getByRole("option", { name: /^z\.txt/ })).toHaveAttribute("aria-selected", "true");
+  });
+});
+
+// #729: a flat | tree layout for the file list (remembered per machine) and a path filter. While
+// the filter hides files, the bulk actions act on the shown files only and say so.
+describe("file tree and path filter (#729)", () => {
+  beforeEach(() => localStorage.clear());
+
+  const nested = [
+    entry("src/lib/a.ts", false),
+    entry("src/lib/b.ts", false),
+    entry("README.md", false),
+    entry("src/lib/c.ts", true),
+    entry("docs/guide.md", true),
+  ];
+  const unstagedList = () => screen.getByRole("listbox", { name: "Unstaged changes" });
+  const stagedList = () => screen.getByRole("listbox", { name: "Staged changes" });
+  const optionNames = (list: HTMLElement) =>
+    within(list)
+      .queryAllByRole("option")
+      .map((option) => option.querySelector("[title]")?.getAttribute("title"));
+  const filter = () => screen.getByRole("searchbox", { name: "Filter files" });
+
+  it("is flat by default, with full paths", () => {
+    render(<Pane client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")} status={nested} />);
+    expect(screen.getByRole("button", { name: "Flat" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Tree" })).toHaveAttribute("aria-pressed", "false");
+    expect(within(unstagedList()).queryByRole("group", { name: /src\/lib/ })).toBeNull();
+    expect(within(unstagedList()).getByRole("option", { name: /src\/lib\/a\.ts/ })).toHaveTextContent("src/lib/a.ts");
+  });
+
+  it("groups files by folder in the tree layout, folders first, and remembers the choice", () => {
+    const client = fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty");
+    const { unmount } = render(<Pane client={client} status={nested} />);
+    fireEvent.click(screen.getByRole("button", { name: "Tree" }));
+
+    expect(screen.getByRole("button", { name: "Tree" })).toHaveAttribute("aria-pressed", "true");
+    // A chain of single-child folders shows on one row.
+    const folder = within(unstagedList()).getByRole("group", { name: "src/lib" });
+    expect(optionNames(folder)).toEqual([
+      "src/lib/a.ts (Modified)",
+      "src/lib/b.ts (Modified)",
+    ]);
+    // The row shows the file's name; its accessible name keeps the whole path.
+    const row = within(folder).getByRole("option", { name: /src\/lib\/a\.ts/ });
+    expect(within(row).getByText("a.ts")).toBeInTheDocument();
+    expect(optionNames(unstagedList())).toEqual([
+      "src/lib/a.ts (Modified)",
+      "src/lib/b.ts (Modified)",
+      "README.md (Modified)",
+    ]);
+    expect(optionNames(stagedList())).toEqual(["docs/guide.md (Modified)", "src/lib/c.ts (Modified)"]);
+    expect(localStorage.getItem("working-tree-file-layout")).toBe("tree");
+
+    unmount();
+    render(<Pane client={client} status={nested} />);
+    expect(within(unstagedList()).getByRole("group", { name: "src/lib" })).toBeInTheDocument();
+  });
+
+  it("collapses a folder, and the keys skip its files", async () => {
+    localStorage.setItem("working-tree-file-layout", "tree");
+    render(<Pane client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")} status={nested} />);
+    await screen.findByText("unstaged src/lib/a.ts");
+
+    const toggle = within(unstagedList()).getByRole("button", { name: "src/lib" });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(optionNames(unstagedList())).toEqual(["README.md (Modified)"]);
+    // The current file was hidden: the shown one takes over.
+    expect(await within(viewer()).findByText("unstaged README.md")).toBeInTheDocument();
+    fireEvent.keyDown(unstagedList(), { key: "ArrowDown" });
+    expect(await within(viewer()).findByText("staged docs/guide.md")).toBeInTheDocument();
+
+    // Left and Right on a folder collapse and expand it.
+    fireEvent.keyDown(toggle, { key: "ArrowRight" });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    fireEvent.keyDown(toggle, { key: "ArrowLeft" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("stages and unstages a whole folder, leaving conflicts out", () => {
+    localStorage.setItem("working-tree-file-layout", "tree");
+    const onStageAllFiles = vi.fn();
+    const onUnstageAllFiles = vi.fn();
+    render(
+      <Pane
+        client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")}
+        status={[...nested, entry("src/lib/conflict.ts", false, "Conflicted")]}
+        actions={{ onStageAllFiles, onUnstageAllFiles }}
+      />,
+    );
+    fireEvent.click(within(unstagedList()).getByRole("button", { name: "Stage folder src/lib" }));
+    expect(onStageAllFiles).toHaveBeenCalledWith(["src/lib/a.ts", "src/lib/b.ts"]);
+    fireEvent.click(within(stagedList()).getByRole("button", { name: "Unstage folder src/lib" }));
+    expect(onUnstageAllFiles).toHaveBeenCalledWith(["src/lib/c.ts"]);
+  });
+
+  it("keeps conflicts in a flat group above the tree", () => {
+    localStorage.setItem("working-tree-file-layout", "tree");
+    render(
+      <Pane
+        client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")}
+        status={[...nested, entry("src/x/conflict.ts", false, "Conflicted")]}
+      />,
+    );
+    const conflicts = within(unstagedList()).getByRole("group", { name: /^Conflicts \(1\)/ });
+    expect(within(conflicts).getByRole("option", { name: /src\/x\/conflict\.ts/ })).toHaveTextContent("src/x/conflict.ts");
+    expect(within(conflicts).queryByRole("group")).toBeNull();
+  });
+
+  it("narrows both groups to the paths that match the filter", async () => {
+    render(<Pane client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")} status={nested} />);
+    fireEvent.change(filter(), { target: { value: "LIB" } });
+
+    expect(optionNames(unstagedList())).toEqual(["src/lib/a.ts (Modified)", "src/lib/b.ts (Modified)"]);
+    expect(optionNames(stagedList())).toEqual(["src/lib/c.ts (Modified)"]);
+    expect(screen.getByText("Changes (2 of 3)")).toBeInTheDocument();
+    expect(screen.getByText("Staged (1 of 2)")).toBeInTheDocument();
+
+    fireEvent.change(filter(), { target: { value: "nothing-like-this" } });
+    expect(screen.getAllByText("No file matches the filter.")).toHaveLength(2);
+
+    // Escape clears it.
+    fireEvent.keyDown(filter(), { key: "Escape" });
+    expect(filter()).toHaveValue("");
+    expect(optionNames(unstagedList())).toHaveLength(3);
+  });
+
+  it("stages and unstages only the shown files while filtering, and says so", () => {
+    const onStageAllFiles = vi.fn();
+    const onUnstageAllFiles = vi.fn();
+    render(
+      <Pane
+        client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")}
+        status={[...nested, entry("src/lib/new.ts", false, "New")]}
+        actions={{ onStageAllFiles, onUnstageAllFiles }}
+      />,
+    );
+    fireEvent.change(filter(), { target: { value: "lib" } });
+
+    expect(screen.queryByRole("button", { name: "Stage all" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Stage 3 shown" }));
+    expect(onStageAllFiles).toHaveBeenCalledWith(["src/lib/a.ts", "src/lib/b.ts", "src/lib/new.ts"]);
+    fireEvent.click(screen.getByRole("button", { name: "Stage 2 modified shown" }));
+    expect(onStageAllFiles).toHaveBeenLastCalledWith(["src/lib/a.ts", "src/lib/b.ts"]);
+    fireEvent.click(screen.getByRole("button", { name: "Unstage 1 shown" }));
+    expect(onUnstageAllFiles).toHaveBeenCalledWith(["src/lib/c.ts"]);
+  });
+
+  it("discards only the shown files while filtering, listing them in the confirmation", () => {
+    const onDiscardAllUnstaged = vi.fn();
+    render(
+      <Pane
+        client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")}
+        status={nested}
+        actions={{ onDiscardAllUnstaged }}
+      />,
+    );
+    fireEvent.change(filter(), { target: { value: "lib" } });
+    fireEvent.click(screen.getByRole("button", { name: "Discard 2 shown…" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Discard shown changes" });
+    const listed = within(within(dialog).getByRole("list", { name: "Files to discard" })).getAllByRole("listitem");
+    expect(listed.map((item) => item.textContent)).toEqual(["src/lib/a.ts", "src/lib/b.ts"]);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Discard 2 files" }));
+    expect(onDiscardAllUnstaged).toHaveBeenCalledWith(["src/lib/a.ts", "src/lib/b.ts"]);
+  });
+
+  it("deletes only the shown untracked files while filtering", () => {
+    const onDeleteUntracked = vi.fn();
+    render(
+      <Pane
+        client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")}
+        status={[...nested, entry("src/lib/new.ts", false, "New"), entry("notes.txt", false, "New")]}
+        actions={{ onDeleteUntracked }}
+      />,
+    );
+    fireEvent.change(filter(), { target: { value: "lib" } });
+    fireEvent.click(screen.getByRole("button", { name: "Delete 1 untracked shown…" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Delete untracked files" });
+    const listed = within(within(dialog).getByRole("list", { name: "Untracked files to delete" })).getAllByRole("listitem");
+    expect(listed.map((item) => item.textContent)).toEqual(["src/lib/new.ts"]);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete 1 file" }));
+    expect(onDeleteUntracked).toHaveBeenCalledWith(["src/lib/new.ts"]);
+  });
+
+  it("Ctrl+A selects the shown files only, and a filter change drops hidden files from the selection", async () => {
+    render(<Pane client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")} status={nested} />);
+    await screen.findByText("unstaged src/lib/a.ts");
+
+    fireEvent.keyDown(unstagedList(), { key: "a", ctrlKey: true });
+    const bar = () => screen.getByRole("group", { name: "Selected unstaged files" });
+    expect(within(bar()).getByText("3 selected")).toBeInTheDocument();
+
+    fireEvent.change(filter(), { target: { value: "lib" } });
+    expect(within(bar()).getByText("2 selected")).toBeInTheDocument();
+    fireEvent.change(filter(), { target: { value: "" } });
+    // README.md left the selection when the filter hid it.
+    expect(within(bar()).getByText("2 selected")).toBeInTheDocument();
+
+    fireEvent.change(filter(), { target: { value: "a.ts" } });
+    expect(screen.queryByRole("group", { name: "Selected unstaged files" })).toBeNull();
+    fireEvent.change(filter(), { target: { value: "" } });
+    fireEvent.keyDown(unstagedList(), { key: "a", ctrlKey: true });
+    fireEvent.change(filter(), { target: { value: ".ts" } });
+    fireEvent.keyDown(unstagedList(), { key: "a", ctrlKey: true });
+    expect(within(bar()).getByText("2 selected")).toBeInTheDocument();
   });
 });

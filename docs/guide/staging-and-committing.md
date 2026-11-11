@@ -8,6 +8,24 @@ letter (**M** modified, **A** added, **U** untracked, **D** deleted, **R** renam
 changed, **C** conflicted; hover it for the word), the path, a **⋯** menu and a stage or unstage
 button. The two buttons are always there, dimmed until you point at the row or select it.
 
+**Filter and tree.** Above the groups, **Filter files** narrows both lists to the files whose
+path contains what you type (upper and lower case alike; Escape clears it), and the group
+headings count what is shown ("Changes (2 of 14)"). While the filter hides files, the group
+buttons act on the shown files only and say so: **Stage 3 shown**, **Stage 2 modified shown**,
+**Discard 3 shown…** and **Delete 1 untracked shown…** (whose confirmations list exactly those
+files) and **Unstage 2 shown**. Ctrl+A (⌘A on macOS) selects the shown files, and a filter change
+drops hidden files from a selection, so no action ever reaches a file you can't see. The command
+palette's **Discard all changes…** and **Delete untracked files…** still act on every file.
+**Save as patch…** saves every staged change, the hidden ones too.
+
+**Flat** and **Tree** next to the filter switch the layout. The tree groups the files by folder,
+folders first; a chain of folders that only hold one folder shows on one row (`src/lib`). Click a
+folder, or press Left and Right on it, to collapse and expand it; the arrow keys then skip its
+files. The **+** or **−** on a folder stages or unstages all its files (conflicts are left out,
+as with **Stage all**). Conflicts stay in their own flat list above the tree. The layout is
+remembered on this computer for every repository, and **Preferences → Diff → Show changed files
+as a tree** sets it too.
+
 When nothing has changed, the pane says **Working tree clean** instead. In a new repository
 without commits it says **No commits yet**: add files to the repository folder, stage them and
 commit to make the first commit.

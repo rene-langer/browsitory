@@ -34,6 +34,7 @@ export function treeProps(overrides: Partial<BranchTreeProps>): BranchTreeProps 
     onOpenCreateBranchDraft: vi.fn(),
     onCloseCreateBranchDraft: vi.fn(),
     onMergeBranch: vi.fn(),
+    onRebaseOnto: vi.fn(),
     operationDisabled: false,
     operationDisabledReason: null,
     graphBranchSelection: null,

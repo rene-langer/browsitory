@@ -76,6 +76,7 @@ export function WorkspaceSidebar({
           onOpenCreateBranchDraft={appState.openCreateBranchDraft}
           onCloseCreateBranchDraft={appState.closeCreateBranchDraft}
           onMergeBranch={(branchName) => openDialog({ kind: "merge", branchName })}
+          onRebaseOnto={appState.openRebasePlanner}
           operationDisabled={repositoryOperationDisabled}
           operationDisabledReason={operationDisabledReason}
           graphBranchSelection={appState.state.graphSelection.local}
