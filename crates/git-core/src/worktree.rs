@@ -302,58 +302,16 @@ pub fn create_worktree_with(
     }
     let resolved = resolve_destination(repo, path)?;
     let path = resolved.as_path();
-    crate::repo::check_branch_not_rebased(repo, branch)?;
-    if let Some(held) = crate::repo::branch_held(
-        repo,
-        branch,
-        crate::repo::HoldRule::CheckOut { include_this: true },
-    )? {
-        return Err(held.into());
-    }
-    match std::fs::symlink_metadata(path) {
-        Ok(_) => return Err(WorktreeError::PathExists),
-        // A file where a parent folder should be is named when the parents are created.
-        Err(error)
-            if matches!(
-                error.kind(),
-                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
-            ) => {}
-        Err(_) => return Err(WorktreeError::Git),
-    }
+    check_branch_and_destination(repo, branch, path)?;
     // The worktree may live on another file system than the repository (#162): probed only
     // when the repository's setting doesn't already say case folds. A failed probe leaves the
     // repository's setting to decide, as before.
     let case_matters = crate::worktree_guard::try_folds_case(repo)?
         || crate::worktree_guard::nearest_existing(path)
             .is_some_and(|dir| probe(dir).unwrap_or(false));
-
-    let (existing, commit) = match repo.find_branch(branch, BranchType::Local) {
-        Ok(branch) => {
-            let commit = branch.get().peel_to_commit()?;
-            (Some(branch), commit)
-        }
-        Err(error) if error.code() == ErrorCode::NotFound => {
-            let start_point = start_point.ok_or(WorktreeError::StartPointRequired)?;
-            (None, repo.revparse_single(start_point)?.peel_to_commit()?)
-        }
-        Err(error) => return Err(error.into()),
-    };
-    // git2 has no checkout options for worktree add, so the tree is checked up front (#156),
-    // before anything (a new branch included) is created: when the repository's config says
-    // case matters, or the destination's file system folds case (#162).
+    let (existing, commit) = start_commit(repo, branch, start_point)?;
     let tree = commit.tree()?;
-    crate::worktree_guard::refuse_case_collision_if::<WorktreeError, &str>(
-        case_matters,
-        &crate::worktree_guard::GuardSource::Tree(&tree),
-        None,
-    )?;
-    // The new worktree's checkout starts from an empty index: with `core.ignorecase` on,
-    // libgit2's ignore-case index keeps only one name of any case pair the tree holds (#532).
-    crate::worktree_guard::refuse_case_pair_brought_in::<WorktreeError>(
-        repo,
-        &crate::worktree_guard::GuardSource::Tree(&tree),
-        None,
-    )?;
+    refuse_unsafe_tree(repo, &tree, case_matters)?;
     // Like `git worktree add`, missing parent folders of the destination are created (#200);
     // libgit2 only creates the last one. Whatever this call creates is removed again when a
     // later step fails, so a retry with the same name and branch starts clean.
@@ -367,45 +325,68 @@ pub fn create_worktree_with(
         .as_deref()
         .is_none_or(|admin| std::fs::symlink_metadata(admin).is_ok());
     let mut created_branch = false;
-    let added = (|| {
-        let reference = match existing {
-            Some(branch) => branch.into_reference(),
-            None => {
-                let new_branch = repo.branch(branch, &commit, false)?;
-                created_branch = true;
-                new_branch.into_reference()
-            }
-        };
-        let mut options = git2::WorktreeAddOptions::new();
-        options.reference(Some(&reference));
-        repo.worktree(name, path, Some(&options))
-            .map_err(|error| WorktreeError::AddFailed {
-                reason: plain_reason(&error),
-            })?;
-        Ok::<(), WorktreeError>(())
-    })();
-    let Err(mut error) = added else {
+    let added = add_worktree(
+        repo,
+        name,
+        path,
+        branch,
+        existing,
+        &commit,
+        &mut created_branch,
+    );
+    let Err(error) = added else {
         return Ok(());
     };
+    let made = Made {
+        folders: created,
+        admin,
+        admin_existed,
+        branch: created_branch,
+    };
+    Err(roll_back_add(repo, path, branch, &tree, made, error))
+}
+
+/// What a failed [`create_worktree_with`] made before it failed and must remove again.
+struct Made {
+    /// Parent folders of the destination it created, in the order it created them.
+    folders: Vec<PathBuf>,
+    /// The worktree's entry under `.git/worktrees`, when `name` is a single component.
+    admin: Option<PathBuf>,
+    /// The entry existed before the call (or there is none): not ours to remove.
+    admin_existed: bool,
+    /// The branch was created by the call.
+    branch: bool,
+}
+
+/// Removes what a failed worktree add made, and returns the error to report.
+fn roll_back_add(
+    repo: &Repository,
+    path: &Path,
+    branch: &str,
+    tree: &git2::Tree<'_>,
+    made: Made,
+    mut error: WorktreeError,
+) -> WorktreeError {
     // libgit2 makes the entry and the destination (each `mkdir` exclusive), writes `.git`,
     // `commondir` and `gitdir`, then HEAD, then checks out, and cleans up nothing when a step
     // fails (#245). An entry made by this call whose `gitdir` names this destination (or that has
     // no `gitdir` yet) is ours: it goes, with what the add wrote into the destination, so a
     // retry with the same name works and the branch isn't held as checked out.
-    let ours = admin
-        .filter(|_| !admin_existed)
+    let ours = made
+        .admin
+        .filter(|_| !made.admin_existed)
         .filter(|admin| entry_names_destination(admin, path));
     if let Some(admin) = ours {
         if let WorktreeError::AddFailed { reason } = error {
             error = if destination_written_by(&admin, path) {
-                roll_back_destination(repo, path, &tree, reason)
+                roll_back_destination(repo, path, tree, reason)
             } else {
                 WorktreeError::AddFailed { reason }
             };
         }
         let _ = std::fs::remove_dir_all(&admin);
     }
-    if created_branch {
+    if made.branch {
         if let Ok(mut new_branch) = repo.find_branch(branch, BranchType::Local) {
             let _ = new_branch.delete();
         }
@@ -419,8 +400,108 @@ pub fn create_worktree_with(
             other
         }
     };
-    remove_created_folders(&created);
-    Err(error)
+    remove_created_folders(&made.folders);
+    error
+}
+
+/// Refuses a branch a rebase is rewriting or that is checked out somewhere (this worktree
+/// included), and a destination that already exists.
+fn check_branch_and_destination(
+    repo: &Repository,
+    branch: &str,
+    path: &Path,
+) -> Result<(), WorktreeError> {
+    crate::repo::check_branch_not_rebased(repo, branch)?;
+    if let Some(held) = crate::repo::branch_held(
+        repo,
+        branch,
+        crate::repo::HoldRule::CheckOut { include_this: true },
+    )? {
+        return Err(held.into());
+    }
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Err(WorktreeError::PathExists),
+        // A file where a parent folder should be is named when the parents are created.
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            ) =>
+        {
+            Ok(())
+        }
+        Err(_) => Err(WorktreeError::Git),
+    }
+}
+
+/// The local branch `branch` and its commit, or (no such branch yet) the commit `start_point`
+/// names, which the new branch will start at.
+fn start_commit<'r>(
+    repo: &'r Repository,
+    branch: &str,
+    start_point: Option<&str>,
+) -> Result<(Option<git2::Branch<'r>>, git2::Commit<'r>), WorktreeError> {
+    match repo.find_branch(branch, BranchType::Local) {
+        Ok(branch) => {
+            let commit = branch.get().peel_to_commit()?;
+            Ok((Some(branch), commit))
+        }
+        Err(error) if error.code() == ErrorCode::NotFound => {
+            let start_point = start_point.ok_or(WorktreeError::StartPointRequired)?;
+            Ok((None, repo.revparse_single(start_point)?.peel_to_commit()?))
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// git2 has no checkout options for worktree add, so the tree is checked up front (#156),
+/// before anything (a new branch included) is created: when the repository's config says case
+/// matters, or the destination's file system folds case (#162).
+fn refuse_unsafe_tree(
+    repo: &Repository,
+    tree: &git2::Tree<'_>,
+    case_matters: bool,
+) -> Result<(), WorktreeError> {
+    crate::worktree_guard::refuse_case_collision_if::<WorktreeError, &str>(
+        case_matters,
+        &crate::worktree_guard::GuardSource::Tree(tree),
+        None,
+    )?;
+    // The new worktree's checkout starts from an empty index: with `core.ignorecase` on,
+    // libgit2's ignore-case index keeps only one name of any case pair the tree holds (#532).
+    crate::worktree_guard::refuse_case_pair_brought_in::<WorktreeError>(
+        repo,
+        &crate::worktree_guard::GuardSource::Tree(tree),
+        None,
+    )
+}
+
+/// Adds the worktree `name` at `path` on `branch`: the existing branch, or a new one at
+/// `commit` (then `created_branch` is set, so a failure can delete it again).
+fn add_worktree(
+    repo: &Repository,
+    name: &str,
+    path: &Path,
+    branch: &str,
+    existing: Option<git2::Branch<'_>>,
+    commit: &git2::Commit<'_>,
+    created_branch: &mut bool,
+) -> Result<(), WorktreeError> {
+    let reference = match existing {
+        Some(branch) => branch.into_reference(),
+        None => {
+            let new_branch = repo.branch(branch, commit, false)?;
+            *created_branch = true;
+            new_branch.into_reference()
+        }
+    };
+    let mut options = git2::WorktreeAddOptions::new();
+    options.reference(Some(&reference));
+    repo.worktree(name, path, Some(&options))
+        .map_err(|error| WorktreeError::AddFailed {
+            reason: plain_reason(&error),
+        })?;
+    Ok(())
 }
 
 /// libgit2's message as the reason of [`WorktreeError::AddFailed`], without a final period
