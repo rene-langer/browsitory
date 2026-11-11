@@ -10,6 +10,7 @@
   "open_terminal",
   "pick_repo_folder",
   "reveal_in_file_manager",
+  "run_vscode_git_command",
   "save_file_version",
   "save_patch_file",
   "set_last_seen_version"

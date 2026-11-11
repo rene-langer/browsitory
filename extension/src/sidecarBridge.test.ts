@@ -73,6 +73,7 @@ function createBridge(overrides: {
     async (_sides: { base: string; ours: string; theirs: string; output: string }) =>
       overrides.mergeEditorOpened ?? true,
   );
+  const executeCommand = vi.fn(async (_command: string) => undefined);
   const state = fakeContext();
   const bridge = new SidecarBridge({
     spawn,
@@ -90,6 +91,7 @@ function createBridge(overrides: {
     createTerminal,
     openDiff,
     openMergeEditor,
+    executeCommand,
   });
   return {
     bridge,
@@ -107,6 +109,7 @@ function createBridge(overrides: {
     createTerminal,
     openDiff,
     openMergeEditor,
+    executeCommand,
     ...state,
   };
 }
@@ -440,6 +443,30 @@ describe("SidecarBridge", () => {
       },
     ]);
   });
+  it("runs VSCode's Git: Clone and Git: Initialize Repository for the picker's buttons, and no other command", async () => {
+    const { bridge, child, postToWebview, executeCommand } = createBridge();
+    await bridge.handleWebviewMessage({ jsonrpc: "2.0", id: 1, method: "run_vscode_git_command", params: { command: "clone" } });
+    await bridge.handleWebviewMessage({ jsonrpc: "2.0", id: 2, method: "run_vscode_git_command", params: { command: "init" } });
+    await bridge.handleWebviewMessage({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "run_vscode_git_command",
+      params: { command: "workbench.action.terminal.new" },
+    });
+    await bridge.handleWebviewMessage({ jsonrpc: "2.0", id: 4, method: "run_vscode_git_command", params: { command: "toString" } });
+
+    expect(executeCommand.mock.calls).toEqual([["git.clone"], ["git.init"]]);
+    expect(postToWebview).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 1, result: null });
+    expect(postToWebview).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 2, result: null });
+    expect(postToWebview).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 3, error: expect.objectContaining({ code: -32602 }) }),
+    );
+    expect(postToWebview).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 4, error: expect.objectContaining({ code: -32602 }) }),
+    );
+    expect(child.stdin.write).not.toHaveBeenCalled();
+  });
+
   it("opens files, terminals, diffs and merges through VSCode using the sidecar's work tree root", async () => {
     const { bridge, child, postToWebview, openFile, revealInOS, createTerminal, openDiff, openMergeEditor } =
       createBridge({ mergeEditorOpened: false });
