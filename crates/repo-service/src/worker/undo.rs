@@ -1145,6 +1145,24 @@ mod tests {
         );
     }
 
+    /// #619: the branch menus and the pull's Rebase pass a full ref name; the label names the
+    /// branch as the branch list shows it.
+    #[test]
+    fn rebase_labels_name_a_branch_by_its_short_name() {
+        assert_eq!(
+            rebase_label("refs/heads/feat/x"),
+            Some("Rebase onto feat/x".into())
+        );
+        assert_eq!(
+            rebase_label("refs/remotes/origin/main"),
+            Some("Rebase onto origin/main".into())
+        );
+        assert_eq!(
+            rebase_label("refs/tags/v1"),
+            Some("Rebase onto refs/tags/v1".into())
+        );
+    }
+
     const EDITED: &str = "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d";
 
     /// #473: a one-click history edit's entry names the edit and the edited commit, not `onto`.
