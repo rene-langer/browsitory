@@ -143,6 +143,33 @@ export async function pageDiagnostics(probe?: string): Promise<string> {
           (target as HTMLElement).click();
         } else hit = "probe not found";
       }
+      const box = (el: Element | null) => {
+        if (el === null) return null;
+        const b = el.getBoundingClientRect();
+        return [Math.round(b.top), Math.round(b.height)];
+      };
+      const sectionBoxes = Array.from(document.querySelectorAll("section[aria-label]")).map((el) => [
+        el.getAttribute("aria-label"),
+        box(el),
+        box(el.querySelector("button[aria-expanded]")),
+      ]);
+      const firstSection = document.querySelector("section[aria-label='Branches']");
+      let scroller = firstSection?.parentElement ?? null;
+      while (scroller !== null && getComputedStyle(scroller).overflowY === "visible") scroller = scroller.parentElement;
+      const layout = {
+        header: box(document.querySelector("header")),
+        repository: box(document.querySelector("div[aria-label='Repository']")),
+        strip: box(document.querySelector("[aria-label='Operation status']")),
+        scroller:
+          scroller === null
+            ? null
+            : [scroller.className, box(scroller), scroller.scrollHeight, scroller.clientHeight, scroller.scrollTop],
+        sectionBoxes,
+        mainChildren: Array.from(document.querySelectorAll("main > *, [role='tabpanel'] > *")).map((el) => [
+          `${el.tagName.toLowerCase()}.${el.getAttribute("class") ?? ""}`,
+          box(el),
+        ]),
+      };
       const alerts = Array.from(document.querySelectorAll("[role='alert']")).map((el) => el.textContent ?? "");
       const sections = Array.from(document.querySelectorAll("section[aria-label]")).map((el) => el.getAttribute("aria-label"));
       return JSON.stringify(
@@ -150,6 +177,7 @@ export async function pageDiagnostics(probe?: string): Promise<string> {
           size: [window.innerWidth, window.innerHeight],
           scroll: [document.documentElement.scrollHeight, document.body.scrollHeight],
           hit,
+          layout,
           alerts,
           sections,
           text: (document.body.innerText ?? "").slice(0, 3000),
