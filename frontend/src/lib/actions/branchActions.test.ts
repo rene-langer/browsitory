@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { branchActions, rebaseOntoAction, remoteBranchActions } from "./branchActions";
+import { branchActions, branchDropActions, rebaseOntoAction, remoteBranchActions } from "./branchActions";
 
 const free = { blocked: false, reason: null };
 const busy = { blocked: true, reason: "A merge is in progress." };
@@ -93,5 +93,73 @@ describe("rebaseOntoAction", () => {
       enabled: false,
       reason: busy.reason,
     });
+  });
+});
+
+// #744: a branch dropped on a branch. Only the current branch can take a merge or a rebase, so
+// a drop must involve it; the items are the menus' Merge and Rebase under labels naming both.
+describe("branchDropActions", () => {
+  const other = { name: "other", isCurrent: false };
+  const branches = [main, feature, other];
+  const local = (name: string) => ({ kind: "local" as const, name });
+  const remote = (remoteName: string, branchName: string) => ({ kind: "remote" as const, remoteName, branchName });
+
+  it("offers merging a branch dropped on the current branch first, then rebasing onto it", () => {
+    const drop = branchDropActions(free, branches, local("feature"), local("main"));
+    expect(drop).toEqual({
+      kind: "menu",
+      items: [
+        { label: "Merge feature into main…", paletteLabel: "Merge feature into main…", enabled: true, reason: undefined, run: { kind: "merge", name: "feature" } },
+        { label: "Rebase main onto feature…", paletteLabel: "Rebase main onto feature…", enabled: true, reason: undefined, run: { kind: "rebase", onto: "refs/heads/feature" } },
+      ],
+    });
+  });
+
+  it("offers rebasing the current branch dropped on a branch first, then merging that branch", () => {
+    const drop = branchDropActions(free, branches, local("main"), local("feature"));
+    expect(drop.kind === "menu" && drop.items.map((item) => [item.label, item.run])).toEqual([
+      ["Rebase main onto feature…", { kind: "rebase", onto: "refs/heads/feature" }],
+      ["Merge feature into main…", { kind: "merge", name: "feature" }],
+    ]);
+  });
+
+  it("offers only rebasing when a remote branch is involved", () => {
+    const onto = { kind: "rebase", onto: "refs/remotes/origin/feature" };
+    const fromRemote = branchDropActions(free, branches, remote("origin", "feature"), local("main"));
+    expect(fromRemote.kind === "menu" && fromRemote.items.map((item) => [item.label, item.run])).toEqual([
+      ["Rebase main onto origin/feature…", onto],
+    ]);
+    const ontoRemote = branchDropActions(free, branches, local("main"), remote("origin", "feature"));
+    expect(ontoRemote.kind === "menu" && ontoRemote.items.map((item) => [item.label, item.run])).toEqual([
+      ["Rebase main onto origin/feature…", onto],
+    ]);
+  });
+
+  it("refuses a drop between two branches that aren't current, naming the current one", () => {
+    expect(branchDropActions(free, branches, local("feature"), local("other"))).toEqual({
+      kind: "refused",
+      reason: "Only the current branch, main, can be merged into or rebased: drop on main, or drag main.",
+    });
+    expect(branchDropActions(free, branches, remote("origin", "x"), remote("origin", "y")).kind).toBe("refused");
+  });
+
+  it("refuses every drop on a detached HEAD", () => {
+    const detached = [feature, other];
+    expect(branchDropActions(free, detached, local("feature"), local("other"))).toEqual({
+      kind: "refused",
+      reason: "Check out a branch first: a drop merges into or rebases the current branch.",
+    });
+  });
+
+  it("refuses with the busy reason while another operation runs", () => {
+    expect(branchDropActions(busy, branches, local("feature"), local("main"))).toEqual({
+      kind: "refused",
+      reason: busy.reason,
+    });
+  });
+
+  it("is a no-op for a branch dropped on itself", () => {
+    expect(branchDropActions(free, branches, local("main"), local("main"))).toEqual({ kind: "none" });
+    expect(branchDropActions(free, branches, remote("origin", "x"), remote("origin", "x"))).toEqual({ kind: "none" });
   });
 });

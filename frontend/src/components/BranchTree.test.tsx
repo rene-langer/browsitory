@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import type { RepoClient } from "../ipc/RepoClient";
 import { BranchTree } from "./BranchTree";
@@ -1409,5 +1409,161 @@ describe("BranchTree — copy items (#614)", () => {
     expect(menuNames().slice(-3)).toEqual(["Copy fetch URL", "Copy push URL", "Remove remote"]);
     fireEvent.click(screen.getByRole("menuitem", { name: "Copy push URL" }));
     expect(writeText).toHaveBeenCalledWith("git@example.com:r.git");
+  });
+});
+
+// #744: a branch dragged onto a branch. jsdom has no layout, so each drag says which element is
+// under the pointer.
+describe("BranchTree — dragging a branch onto a branch", () => {
+  const originalElementFromPoint = document.elementFromPoint;
+  beforeEach(() => {
+    localStorage.clear();
+  });
+  afterEach(() => {
+    document.elementFromPoint = originalElementFromPoint;
+    vi.useRealTimers();
+  });
+
+  const threeBranches = [
+    { name: "main", isCurrent: true },
+    { name: "feat/foo", isCurrent: false },
+    { name: "other", isCurrent: false },
+  ];
+
+  const mainRow = () => screen.getByText(/main.*\(current\)/).closest("li") as HTMLElement;
+  const fooRow = () => screen.getByRole("button", { name: "foo" });
+  const otherRow = () => screen.getByRole("button", { name: "other" });
+
+  function pressAndMove(source: HTMLElement, over: Element) {
+    document.elementFromPoint = vi.fn(() => over);
+    fireEvent.pointerDown(source, { clientX: 5, clientY: 5, button: 0 });
+    fireEvent.pointerMove(window, { clientX: 5, clientY: 40 });
+  }
+
+  function drag(source: HTMLElement, target: HTMLElement) {
+    pressAndMove(source, target);
+    fireEvent.pointerUp(window, { clientX: 5, clientY: 40 });
+  }
+
+  const menuNames = () => screen.getAllByRole("menuitem").map((item) => item.textContent);
+
+  it("a branch dropped on the current branch offers Merge first, then Rebase, and runs the choice", () => {
+    const { props } = renderTree({ branches: threeBranches });
+    pressAndMove(fooRow(), mainRow());
+    expect(mainRow()).toHaveAttribute("data-drop-position", "on");
+    expect(fooRow()).toHaveAttribute("data-dragging", "true");
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Dragging feat/foo. Drop it on main to merge or rebase; Escape cancels.",
+    );
+    fireEvent.pointerUp(window, { clientX: 5, clientY: 40 });
+
+    expect(menuNames()).toEqual(["Merge feat/foo into main…", "Rebase main onto feat/foo…", "Cancel"]);
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Dropped feat/foo on main: Merge feat/foo into main…, or Rebase main onto feat/foo…",
+    );
+    fireEvent.click(screen.getByRole("menuitem", { name: "Merge feat/foo into main…" }));
+    expect(props.onMergeBranch).toHaveBeenCalledWith("feat/foo");
+    expect(props.onRebaseOnto).not.toHaveBeenCalled();
+    expect(mainRow()).not.toHaveAttribute("data-drop-position");
+  });
+
+  it("Rebase in the drop menu opens the planner onto the dropped branch", () => {
+    const { props } = renderTree({ branches: threeBranches });
+    drag(fooRow(), mainRow());
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rebase main onto feat/foo…" }));
+    expect(props.onRebaseOnto).toHaveBeenCalledWith("refs/heads/feat/foo");
+    expect(props.onMergeBranch).not.toHaveBeenCalled();
+  });
+
+  it("the current branch dropped on a branch offers Rebase first", () => {
+    renderTree({ branches: threeBranches });
+    expect(screen.getByText(/main.*\(current\)/)).toBeInTheDocument();
+    drag(mainRow(), otherRow());
+    expect(menuNames()).toEqual(["Rebase main onto other…", "Merge other into main…", "Cancel"]);
+    expect(screen.getByRole("status")).not.toHaveTextContent("Dragging");
+  });
+
+  it("Cancel in the drop menu runs nothing", () => {
+    const { props } = renderTree({ branches: threeBranches });
+    drag(fooRow(), mainRow());
+    fireEvent.click(screen.getByRole("menuitem", { name: "Cancel" }));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(props.onMergeBranch).not.toHaveBeenCalled();
+    expect(props.onRebaseOnto).not.toHaveBeenCalled();
+  });
+
+  it("a remote branch dropped on the current branch offers Rebase only", async () => {
+    const { props } = renderTree({
+      branches: threeBranches,
+      remotes: originOnly,
+      onListRemoteBranches: vi.fn().mockResolvedValue(["topic"]),
+    });
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    const topicRow = await screen.findByRole("button", { name: "topic" });
+    drag(topicRow, mainRow());
+    expect(menuNames()).toEqual(["Rebase main onto origin/topic…", "Cancel"]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rebase main onto origin/topic…" }));
+    expect(props.onRebaseOnto).toHaveBeenCalledWith("refs/remotes/origin/topic");
+  });
+
+  it("shows why a drop between two other branches can't run, and refuses it", () => {
+    const { props } = renderTree({ branches: threeBranches });
+    pressAndMove(fooRow(), otherRow());
+    expect(otherRow()).toHaveAttribute("data-drop-position", "refused");
+    const reason = "Only the current branch, main, can be merged into or rebased: drop on main, or drag main.";
+    expect(screen.getByText(reason)).toBeInTheDocument();
+    fireEvent.pointerUp(window, { clientX: 5, clientY: 40 });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(`Can't drop here. ${reason}`);
+    expect(props.onMergeBranch).not.toHaveBeenCalled();
+  });
+
+  it("refuses the drop with the busy reason while another operation runs", () => {
+    renderTree({ branches: threeBranches, operationDisabled: true, operationDisabledReason: "A rebase is in progress." });
+    pressAndMove(fooRow(), mainRow());
+    expect(mainRow()).toHaveAttribute("data-drop-position", "refused");
+    fireEvent.pointerUp(window, { clientX: 5, clientY: 40 });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Can't drop here. A rebase is in progress.");
+  });
+
+  it("Escape cancels the drag, and a dropped row isn't also clicked", () => {
+    const onGoToBranch = vi.fn();
+    renderTree({ branches: threeBranches, onGoToBranch });
+    pressAndMove(fooRow(), mainRow());
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.pointerUp(window, { clientX: 5, clientY: 40 });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Drag cancelled.");
+    expect(mainRow()).not.toHaveAttribute("data-drop-position");
+
+    drag(fooRow(), mainRow());
+    fireEvent.click(fooRow());
+    expect(onGoToBranch).not.toHaveBeenCalled();
+  });
+
+  it("a press on a row's buttons doesn't start a drag", () => {
+    renderTree({ branches: threeBranches });
+    pressAndMove(screen.getByRole("button", { name: "Show feat/foo in graph" }), mainRow());
+    expect(mainRow()).not.toHaveAttribute("data-drop-position");
+    fireEvent.pointerUp(window, { clientX: 5, clientY: 40 });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("opens a collapsed folder hovered for a moment during a drag, without remembering it open", () => {
+    renderTree({ branches: threeBranches });
+    const folder = screen.getByRole("button", { name: "feat" });
+    fireEvent.click(folder);
+    expect(screen.queryByRole("button", { name: "foo" })).not.toBeInTheDocument();
+    const stored = localStorage.getItem("branchtree.folder.local/feat");
+
+    vi.useFakeTimers();
+    pressAndMove(mainRow(), folder);
+    act(() => vi.advanceTimersByTime(300));
+    expect(screen.queryByRole("button", { name: "foo" })).not.toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(400));
+    expect(screen.getByRole("button", { name: "foo" })).toBeInTheDocument();
+    expect(localStorage.getItem("branchtree.folder.local/feat")).toBe(stored);
+    fireEvent.keyDown(window, { key: "Escape" });
   });
 });
