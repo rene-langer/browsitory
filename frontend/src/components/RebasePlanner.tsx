@@ -12,6 +12,15 @@ import type { PresetAction } from "../lib/rebaseSelection";
 import styles from "./RebasePlanner.module.css";
 import { BlockedReason } from "./primitives/BlockedReason";
 import { describedBy } from "../lib/ariaDescribedBy";
+import { shortRefName } from "../lib/shortRefName";
+
+/**
+ * The planner's title: "Rebase onto <branch>" when `onto` is a branch's full ref name (a branch
+ * menu or the palette, #619), else "Rebase plan" (a commit from the graph).
+ */
+function plannerTitle(onto: string): string {
+  return /^refs\/(heads|remotes)\//.test(onto) ? `Rebase onto ${shortRefName(onto)}` : "Rebase plan";
+}
 
 type ActionKind = RebaseAction["kind"];
 
@@ -330,7 +339,7 @@ export function RebasePlanner({
   };
 
   return (
-    <Panel title="Rebase plan">
+    <Panel title={plannerTitle(onto)}>
       {load.kind === "loading" && <p className={styles.caption}>Loading commits…</p>}
       {load.kind === "error" && (
         <div role="alert">

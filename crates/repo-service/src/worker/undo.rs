@@ -91,14 +91,19 @@ pub(super) fn relabel_sequence(
 }
 
 /// "Rebase onto <onto>", with a commit id shortened like every other label's (the frontend's
-/// "Rebase onto here" passes the full id) and a ref name kept as it is.
+/// "Rebase onto here" passes the full id), a branch's full ref name as the branch list shows it
+/// (the branch menus and the pull's Rebase pass `refs/heads/…` or `refs/remotes/…`, #619), and
+/// any other ref name kept as it is.
 fn rebase_label(onto: &str) -> String {
     let is_full_id = matches!(onto.len(), 40 | 64) && onto.bytes().all(|b| b.is_ascii_hexdigit());
     if is_full_id {
-        format!("Rebase onto {}", short(onto))
-    } else {
-        fit(format!("Rebase onto {onto}"))
+        return format!("Rebase onto {}", short(onto));
     }
+    let name = onto
+        .strip_prefix("refs/heads/")
+        .or_else(|| onto.strip_prefix("refs/remotes/"))
+        .unwrap_or(onto);
+    fit(format!("Rebase onto {name}"))
 }
 
 /// A `StartRebase`'s label: what the user did for a one-click history edit (#473), else
@@ -1142,6 +1147,24 @@ mod tests {
         assert_eq!(
             rebase_label("origin/feature"),
             Some("Rebase onto origin/feature".into())
+        );
+    }
+
+    /// #619: the branch menus and the pull's Rebase pass a full ref name; the label names the
+    /// branch as the branch list shows it.
+    #[test]
+    fn rebase_labels_name_a_branch_by_its_short_name() {
+        assert_eq!(
+            rebase_label("refs/heads/feat/x"),
+            Some("Rebase onto feat/x".into())
+        );
+        assert_eq!(
+            rebase_label("refs/remotes/origin/main"),
+            Some("Rebase onto origin/main".into())
+        );
+        assert_eq!(
+            rebase_label("refs/tags/v1"),
+            Some("Rebase onto refs/tags/v1".into())
         );
     }
 

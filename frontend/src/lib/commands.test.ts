@@ -671,6 +671,32 @@ describe("buildCommands", () => {
     expect(merging.some((c) => c.id.startsWith("merge-branch:"))).toBe(false);
   });
 
+  // #619
+  it("offers rebase-onto per non-current local branch with its full ref, absent when detached or busy", () => {
+    const appState = makeAppState();
+    const commands = commandsFor(appState);
+    const rebase = commands.find((c) => c.id === "rebase-onto-branch:feature");
+    expect(rebase?.label).toBe("Rebase current branch onto feature…");
+    expect(rebase?.group).toBe("Branches");
+    expect(commands.some((c) => c.id === "rebase-onto-branch:main")).toBe(false);
+    rebase?.run();
+    expect(appState.openRebasePlanner).toHaveBeenCalledWith("refs/heads/feature");
+
+    const merging = commandsFor(makeAppState({ mergeMessage: "Merge branch" }));
+    expect(merging.some((c) => c.id.startsWith("rebase-onto-branch:"))).toBe(false);
+
+    const detached = commandsFor(
+      makeAppState({
+        branches: [
+          { name: "main", isCurrent: false },
+          { name: "feature", isCurrent: false },
+        ],
+        headInfo: { ...appState.state.headInfo, detachedAt: "abc1234" },
+      }),
+    );
+    expect(detached.some((c) => c.id.startsWith("rebase-onto-branch:"))).toBe(false);
+  });
+
   it("offers stash all and stash with options", () => {
     const appState = makeAppState({ status: [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }] });
     const commands = commandsFor(appState);
@@ -2276,6 +2302,7 @@ describe("agree with the branch, remote, stash and worktree menus (#509)", () =>
       onOpenCreateBranchDraft: fn(),
       onCloseCreateBranchDraft: fn(),
       onMergeBranch: fn(),
+      onRebaseOnto: fn(),
       operationDisabled: blockers.blocked,
       operationDisabledReason: blockers.reason,
       graphBranchSelection: null,
@@ -2330,6 +2357,7 @@ describe("agree with the branch, remote, stash and worktree menus (#509)", () =>
     expectAgreement(menu(branchTree(state), "Actions for feature"), ids, [
       ["Checkout", "switch-branch:feature"],
       ["Merge into current branch…", "merge-branch:feature"],
+      ["Rebase current branch onto feature…", "rebase-onto-branch:feature"],
     ], state);
     expectAgreement(menu(branchTree(state), "Actions for main"), ids, [
       ["Checkout", "switch-branch:main"],
@@ -2464,7 +2492,8 @@ function groupOf(id: string): CommandGroup {
 // #494: the commands, ids and groups before the builders were split by family. Recents are stored
 // by id, so a builder must keep the ids, and each group is now declared by the builder instead of
 // derived from the id. #583 and #592 moved the remote, diff and tag commands that had fallen
-// under "General" into their family's group. #621 added "stage-modified-files" since.
+// under "General" into their family's group. #621 added "stage-modified-files" since, #619
+// "rebase-onto-branch:<name>".
 describe("command ids and groups", () => {
   const EXPECTED: Record<keyof typeof STATES, [string, CommandGroup][]> = {
     normal: [
@@ -2508,6 +2537,7 @@ describe("command ids and groups", () => {
       ["init-submodule:libs/a", "General"],
       ["manage-credentials:origin", "Remotes"],
       ["merge-branch:feature", "Branches"],
+      ["rebase-onto-branch:feature", "Branches"],
       ["new-repository", "General"],
       ["open-current-file-in-diff-tool", "Diff"],
       ["open-current-file-in-editor", "Diff"],
@@ -2758,6 +2788,7 @@ describe("command ids and groups", () => {
       ["init-submodule:libs/a", "General"],
       ["manage-credentials:origin", "Remotes"],
       ["merge-branch:feature", "Branches"],
+      ["rebase-onto-branch:feature", "Branches"],
       ["new-repository", "General"],
       ["open-current-file-in-diff-tool", "Diff"],
       ["open-current-file-in-editor", "Diff"],

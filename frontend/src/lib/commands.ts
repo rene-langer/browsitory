@@ -1,7 +1,7 @@
 import { MAX_CONTEXT_LINES, type DiffSettings, type GraphCommit, type PullStrategy } from "../ipc/RepoClient";
 import { historyEditChecks, type HistoryEditCheck, type HistoryEditRequest } from "./historyEdits";
 import { UNAVAILABLE_REASON, type PaletteAction } from "./actions/action";
-import { branchActions } from "./actions/branchActions";
+import { branchActions, rebaseOntoAction } from "./actions/branchActions";
 import { commitActions } from "./actions/commitActions";
 import { addRemoteAction, remoteActions } from "./actions/remoteActions";
 import { stashActions, stashBlockers, stashTitle } from "./actions/stashActions";
@@ -834,6 +834,7 @@ function branchCommands(ctx: FamilyContext): Command[] {
     run: () => appState.openCreateBranchDraft("HEAD"),
   });
   const branchContext = { blockers, remoteCount: state.remotes.length, upstream: state.upstream };
+  const currentBranch = state.branches.find((branch) => branch.isCurrent)?.name ?? null;
   // Every branch but the current one.
   for (const branch of state.branches) {
     const actions = branchActions(branchContext, branch);
@@ -843,6 +844,13 @@ function branchCommands(ctx: FamilyContext): Command[] {
     offer(`merge-branch:${branch.name}`, actions.merge, ["branch", "merge", "squash", branch.name], () =>
       appState.openDialog({ kind: "merge", branchName: branch.name }),
     );
+    // #619; `null` on a detached HEAD.
+    const rebase = rebaseOntoAction(blockers, currentBranch, { kind: "local", name: branch.name });
+    if (rebase !== null) {
+      offer(`rebase-onto-branch:${branch.name}`, rebase, ["branch", "rebase", "onto", branch.name], () =>
+        appState.openRebasePlanner(rebase.onto),
+      );
+    }
   }
   // The keyboard path for the tag badge menu's "Checkout (detached)".
   if (!blocked) {

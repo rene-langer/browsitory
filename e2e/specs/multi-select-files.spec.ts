@@ -118,3 +118,60 @@ describe("Browsitory Delete untracked in the Changes heading", () => {
     expect(fs.readFileSync(path.join(E2E_REPO_PATH, KEPT), "utf8")).toBe("edited\n");
   });
 });
+
+const FILTER_DIR = "tree-filter/x";
+const FILTERED = [`${FILTER_DIR}/one.txt`, `${FILTER_DIR}/two.txt`];
+const OUTSIDE = "tree-filter-outside.txt";
+
+// The path filter and the tree layout of the change lists (#729): while the filter hides files,
+// "Stage all" stages the shown ones only; a folder's Unstage unstages its files.
+describe("Browsitory path filter and tree layout in the change lists", () => {
+  before(() => {
+    fs.mkdirSync(path.join(E2E_REPO_PATH, FILTER_DIR), { recursive: true });
+    for (const file of [...FILTERED, OUTSIDE]) fs.writeFileSync(path.join(E2E_REPO_PATH, file), `${file}\n`);
+  });
+
+  after(async () => {
+    git(E2E_REPO_PATH, "reset", "-q", "--", ...FILTERED, OUTSIDE);
+    fs.rmSync(path.join(E2E_REPO_PATH, "tree-filter"), { recursive: true, force: true });
+    fs.rmSync(path.join(E2E_REPO_PATH, OUTSIDE), { force: true });
+    // The layout is a per-machine preference: later specs expect the flat list.
+    await browser.execute(() => localStorage.removeItem("working-tree-file-layout"));
+  });
+
+  it("stages only the filtered files, then unstages their folder in the tree", async () => {
+    await $(`span=${OUTSIDE} (New)`).waitForExist({ timeout: UI_TIMEOUT });
+    const filter = await $("[data-active-repo='true'] input[aria-label='Filter files']");
+    await filter.setValue(FILTER_DIR);
+
+    const stageShown = await $("button=Stage 2 shown");
+    await stageShown.waitForExist({ timeout: UI_TIMEOUT });
+    await browser.execute((el) => (el as HTMLElement).click(), stageShown);
+    await browser.waitUntil(
+      () => {
+        const staged = git(E2E_REPO_PATH, "diff", "--cached", "--name-only").split("\n");
+        return FILTERED.every((file) => staged.includes(file));
+      },
+      { timeout: UI_TIMEOUT, timeoutMsg: "the filtered files were not staged" },
+    );
+    expect(git(E2E_REPO_PATH, "status", "--porcelain", "--", OUTSIDE).trim()).toBe(`?? ${OUTSIDE}`);
+
+    await clickInPage("[data-active-repo='true'] button[aria-pressed]", "Tree");
+    const unstageFolder = await $(`[data-active-repo='true'] button[aria-label="Unstage folder ${FILTER_DIR}"]`);
+    await unstageFolder.waitForExist({ timeout: UI_TIMEOUT });
+    await browser.execute((el) => (el as HTMLElement).click(), unstageFolder);
+    await browser.waitUntil(
+      () => {
+        const staged = git(E2E_REPO_PATH, "diff", "--cached", "--name-only").split("\n");
+        return FILTERED.every((file) => !staged.includes(file));
+      },
+      {
+        timeout: UI_TIMEOUT,
+        timeoutMsg: "the folder's files were not unstaged",
+      },
+    );
+
+    await clickInPage("[data-active-repo='true'] button[aria-pressed]", "Flat");
+    await filter.clearValue();
+  });
+});

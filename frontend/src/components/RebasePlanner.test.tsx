@@ -60,6 +60,43 @@ describe("RebasePlanner", () => {
     expect(screen.getByText("A merge is in progress.")).toBeInTheDocument();
   });
 
+  // #619: opened from a branch menu, the planner names the branch, not a ref or an id.
+  it.each([
+    ["refs/heads/feat/x", "feat/x"],
+    ["refs/remotes/origin/main", "origin/main"],
+  ])("names the branch it rebases onto (%s)", async (onto, name) => {
+    const commitsSince = vi.fn().mockResolvedValue(commits);
+    const onStartRebase = vi.fn();
+    render(
+      <RebasePlanner
+        repoPath={TEST_REPO_PATH}
+        client={fakeClient({ commitsSince })}
+        onto={onto}
+        onStartRebase={onStartRebase}
+        onCancel={vi.fn()}
+      />,
+    );
+    await screen.findByText(/add a/);
+    expect(screen.getByRole("heading", { name: `Rebase onto ${name}` })).toBeInTheDocument();
+    expect(commitsSince).toHaveBeenCalledWith(TEST_REPO_PATH, onto);
+    fireEvent.click(screen.getByText("Start rebase"));
+    expect(onStartRebase).toHaveBeenCalledWith(onto, expect.any(Array));
+  });
+
+  it("keeps its title for a commit id", async () => {
+    render(
+      <RebasePlanner
+        repoPath={TEST_REPO_PATH}
+        client={fakeClient({ commitsSince: async () => commits })}
+        onto="0123456789abcdef0123456789abcdef01234567"
+        onStartRebase={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    await screen.findByText(/add a/);
+    expect(screen.getByRole("heading", { name: "Rebase plan" })).toBeInTheDocument();
+  });
+
   it("lists commits oldest-first with a default Pick action each", async () => {
     const client = fakeClient({ commitsSince: async () => commits });
 
