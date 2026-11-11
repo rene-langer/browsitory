@@ -48,6 +48,7 @@ export function BranchTree({
   onOpenCreateBranchDraft,
   onCloseCreateBranchDraft,
   onMergeBranch,
+  onRebaseOnto,
   operationDisabled,
   operationDisabledReason,
   graphBranchSelection,
@@ -90,6 +91,8 @@ export function BranchTree({
   onOpenCreateBranchDraft: (startPoint: string) => void;
   onCloseCreateBranchDraft: () => void;
   onMergeBranch: (name: string) => void;
+  /** "Rebase current branch onto <name>…" (#619): opens the planner onto a full ref name. */
+  onRebaseOnto: (onto: string) => void;
   // `operationBlockers` (#495): every branch and remote action follows it, and so does the New
   // branch form's Create (#561), which can also switch to the new branch.
   operationDisabled: boolean;
@@ -402,6 +405,7 @@ export function BranchTree({
                     setRenameValue(name);
                   },
                   onMergeBranch,
+                  onRebaseOnto,
                   onCompareBranch,
                   onPushCurrentBranch,
                   onOpenSetUpstream: () => setUpstreamDialogOpen(true),
@@ -463,6 +467,7 @@ export function BranchTree({
               blockers,
               onCheckout: () => void checkoutRemoteBranch(rowMenu.remoteName, rowMenu.branchName),
               onSetUpstream,
+              onRebaseOnto,
               onCompareBranch,
               onIsolateGraphBranch,
               onCopy: copyToClipboard,
