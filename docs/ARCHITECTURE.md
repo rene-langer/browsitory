@@ -78,8 +78,9 @@ attempt; a synchronous spawn failure moves to `failed`, rejects that request, an
 later user retry rather than scheduling background restarts. Panel closure and extension
 deactivation dispose the webview listener and bridge, kill a live child, and drain pending ids.
 
-**Host requests and notifications (#677, #678, #679).** The extension host asks the webview to
-open repositories, show a file's or lines' history, or run a global shortcut with an id-less
+**Host requests and notifications (#677, #678, #679, #759).** The extension host asks the
+webview to open repositories, show a file's or lines' history, select a commit (from the Timeline
+view, through `useGoTo` like Go to), or run a global shortcut with an id-less
 `hostRequest` notification (`extension/src/hostRequests.ts`; `RepoClient.subscribeHostRequests`
 on the frontend). It holds them until the webview sends `hostReady`, which `useHostRequests`
 causes once the restored tabs are open, so a request's tab isn't replaced by the restore. The
@@ -2554,6 +2555,27 @@ only `error`.
   something is found) and the run summary, and never fails. It covers what mutation testing
   can't see: a test loosened in the same PR as the code. Agents answer it in the PR (see
   `AGENTS.md`'s "Task workflow").
+- Skipping unaffected jobs (`ci.yml`'s `changes` job): a pull request runs only the build and
+  test work its changes can affect. The `changes` job diffs the PR's merge commit against its
+  base and decides with two allowlists of paths known not to matter, so any other path runs
+  everything:
+  - No Rust: `frontend/` (except `frontend/src/ipc/generated/`, which Rust tests compare their
+    DTOs against), `extension/`, `e2e/`, `CHANGELOG.md` and everything docs-only. The three
+    `rust` jobs then skip their steps.
+  - Docs only: `docs/` (except a file named in `frontend/`, `extension/`, `e2e/`, `crates/` or
+    `scripts/`, such as `docs/guide/search.md`, which a frontend test imports), `changelog.d/`,
+    `README.md`, `CONTRIBUTING.md`, `AGENTS.md`, `CLAUDE.md`, `PRIVACY.md` and `mkdocs.yml`.
+    `rust`, `frontend`, `extension`, `e2e`, `e2e-vscode` and `vsix-smoke` then skip their steps;
+    `audit`, `licenses` and `changelog` always run in full. `CHANGELOG.md` and
+    `THIRD_PARTY_NOTICES.md` are not docs: the frontend and the packages read them.
+
+  Those jobs are required checks, so they never skip themselves (a skipped matrix job reports
+  one unexpanded check, and `rust (ubuntu-latest)` would never report): they run, skip every
+  step and finish green in seconds. They skip only on an explicit "false" from `changes`, so if
+  that job fails, everything runs. Pushes to main, the weekly schedule and dispatched runs
+  always run everything. A new push to a pull request cancels that pull request's older run;
+  other runs are never cancelled. A new test or build step that reads a file outside `crates/`
+  (Rust) or under `docs/` (any job) must take that path off the matching allowlist.
 
 ### Credential release acceptance
 

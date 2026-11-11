@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import type { KeyboardEvent } from "react";
 import { formatShortDate } from "../lib/formatDate";
@@ -9,6 +9,7 @@ import type { FileHistoryState } from "../state/useFileHistory";
 import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
 import { RefBadges } from "./RefBadges";
+import { useVirtualRows } from "./useVirtualRows";
 import graphStyles from "./CommitGraph.module.css";
 import styles from "./FileHistoryList.module.css";
 
@@ -33,13 +34,15 @@ export function FileHistoryList({
   const selectedId = typeof selectedRow === "object" ? selectedRow.commitId : null;
   const selectedIndex = history.entries.findIndex((e) => e.commit.id === selectedId);
 
-  const listRef = useRef<HTMLUListElement>(null);
+  // Only the rows in view render (#775), as in the commit graph (#685).
+  const [listElement, setListElement] = useState<HTMLUListElement | null>(null);
+  const virtual = useVirtualRows(listElement, history.entries.length);
 
   // Keep the keyboard-driven selection visible in a long history.
+  const { scrollToIndex } = virtual;
   useEffect(() => {
-    const selected = listRef.current?.children[selectedIndex] as HTMLElement | undefined;
-    if (typeof selected?.scrollIntoView === "function") selected.scrollIntoView({ block: "nearest" });
-  }, [selectedIndex]);
+    if (selectedIndex >= 0) scrollToIndex(selectedIndex);
+  }, [selectedIndex, scrollToIndex]);
 
   const target = history.target;
   const what = target.kind === "lines" ? `${lineRangeLabel(target.startLine, target.endLine)} of ` : "";
@@ -82,17 +85,20 @@ export function FileHistoryList({
         <p className={styles.empty}>Loading history…</p>
       )}
       <ul
-        ref={listRef}
+        ref={setListElement}
         className={graphStyles.list}
         role="listbox"
         aria-label="File history commits"
         tabIndex={0}
         onKeyDown={handleKeyDown}
         aria-keyshortcuts="ArrowUp ArrowDown Escape"
+        style={virtual.windowed ? { paddingTop: virtual.padTop, paddingBottom: virtual.padBottom } : undefined}
       >
-        {history.entries.map((entry) => (
+        {history.entries.slice(virtual.start, virtual.end).map((entry, offset) => (
           <ListRow
             key={entry.commit.id}
+            rowIndex={virtual.start + offset}
+            setSize={history.entries.length}
             className="commit-row"
             data-commit-id={entry.commit.id}
             selected={entry.commit.id === selectedId}

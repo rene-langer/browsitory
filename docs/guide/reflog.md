@@ -4,6 +4,13 @@
 branch to an earlier entry — useful for recovering from a bad reset or
 rebase. Restore moves only the branch: your files and staged changes stay as they are.
 
+Pick a reference (HEAD or a local branch) in **Reflog reference**. Each entry takes two lines:
+its message, then the short old and new commit IDs, who made the change and when ("1a2b3c4 →
+5d6e7f8 · Ada Lovelace · 2024-03-09"). Hover an entry for the full IDs, the email, the exact
+time and the commit's summary. **Restore** at the end of the row moves the reference back to
+that entry's new ID, after you confirm. A long reflog scrolls smoothly: only the entries in
+view are drawn.
+
 Like `git branch -f`, Restore refuses a branch that another worktree has checked out
 ("branch 'topic' is checked out in another worktree at '/work/topic'"), and a branch that a
 rebase started in a terminal is rebasing, in any worktree. Restore it from that worktree, or

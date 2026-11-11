@@ -32,6 +32,24 @@ function createHarness() {
   let serializer: { deserializeWebviewPanel: (panel: unknown, state: unknown) => Promise<void> } | undefined;
   /** Paths `workspace.fs.stat` finds. */
   const existing = new Set<string>();
+  /** The folders `workspace.fs.readDirectory` lists, by parent folder. */
+  const subfolders = new Map<string, string[]>();
+  const settings = new Map<string, unknown>();
+  const configurationListeners = new Set<(event: { affectsConfiguration: (section: string) => boolean }) => void>();
+  const statusBarItem = {
+    text: "",
+    tooltip: undefined as string | undefined,
+    command: undefined as string | undefined,
+    name: undefined as string | undefined,
+    visible: false,
+    show: vi.fn(() => {
+      statusBarItem.visible = true;
+    }),
+    hide: vi.fn(() => {
+      statusBarItem.visible = false;
+    }),
+    dispose: vi.fn(),
+  };
   let contentProvider:
     | { provideTextDocumentContent: (uri: { path: string; query: string }) => Promise<string> }
     | undefined;
@@ -69,6 +87,8 @@ function createHarness() {
       createWebviewPanel: vi.fn(() => panel),
       showOpenDialog: vi.fn(async () => undefined),
       showInformationMessage: vi.fn(async () => undefined),
+      showQuickPick: vi.fn(async (_items: unknown, _options?: unknown): Promise<unknown> => undefined),
+      createStatusBarItem: vi.fn(() => statusBarItem),
       activeTextEditor: undefined as
         | undefined
         | {
@@ -94,7 +114,15 @@ function createHarness() {
           if (!existing.has(uri.fsPath)) throw new Error("ENOENT");
           return {};
         }),
+        readDirectory: vi.fn(async (uri: Uri) => (subfolders.get(uri.fsPath) ?? []).map((name) => [name, 2])),
       },
+      getConfiguration: vi.fn((section: string) => ({
+        get: (key: string, fallback?: unknown) => settings.get(`${section}.${key}`) ?? fallback,
+      })),
+      onDidChangeConfiguration: vi.fn((listener: (event: { affectsConfiguration: (section: string) => boolean }) => void) => {
+        configurationListeners.add(listener);
+        return { dispose: () => configurationListeners.delete(listener) };
+      }),
       registerTextDocumentContentProvider: vi.fn(
         (_scheme: string, provider: { provideTextDocumentContent: (uri: { path: string; query: string }) => Promise<string> }) => {
           contentProvider = provider;
@@ -109,6 +137,8 @@ function createHarness() {
       file: (value: string) => fakeUri(value),
     },
     ViewColumn: { One: 1, Active: -1 },
+    StatusBarAlignment: { Left: 1, Right: 2 },
+    FileType: { File: 1, Directory: 2 },
     ExtensionMode: { Development: 1, Production: 2, Test: 3 },
   };
   const context = {
@@ -141,7 +171,13 @@ function createHarness() {
     vscode,
     panel,
     existing,
+    subfolders,
+    statusBarItem,
     commands,
+    changeSetting: (key: string, value: unknown) => {
+      settings.set(key, value);
+      for (const listener of [...configurationListeners]) listener({ affectsConfiguration: (section) => key.startsWith(section) });
+    },
     runCommand: (name: string, ...args: unknown[]) => {
       const handler = commands.get(name);
       if (!handler) throw new Error(`${name} was not registered`);
@@ -430,6 +466,123 @@ describe("extension commands and integration points (#677, #678, #679)", () => {
     expect(harness.vscode.commands.executeCommand).toHaveBeenLastCalledWith("setContext", "browsitory.webviewFocused", false);
     // Host notifications never reach the sidecar.
     expect(harness.spawn).not.toHaveBeenCalled();
+  });
+
+  it("opens a commit picked in the Timeline view in the graph (#759)", async () => {
+    harness.existing.add("/work/lib/.git");
+    activate(harness.context);
+    // What the Git timeline passes: its item (with the commit as `ref` and `id`), the file's Uri
+    // and the source.
+    const commitId = "0123456789abcdef0123456789abcdef01234567";
+    await harness.runCommand(
+      "browsitory.showCommit",
+      { id: commitId, ref: commitId, label: "Fix", contextValue: "git:file:commit" },
+      { scheme: "file", fsPath: "/work/lib/src/a.ts" },
+      "git-history",
+    );
+    await harness.dispatch({ jsonrpc: "2.0", method: "hostReady" });
+
+    expect(hostRequests()).toEqual([{ kind: "showCommit", repoPath: "/work/lib", commitId }]);
+  });
+
+  it("ignores a Timeline item that isn't a commit", async () => {
+    harness.existing.add("/work/lib/.git");
+    activate(harness.context);
+    await harness.runCommand("browsitory.showCommit", { id: "~", label: "Uncommitted Changes" }, { scheme: "file", fsPath: "/work/lib/a.ts" });
+    await harness.runCommand("browsitory.showCommit", undefined, undefined);
+
+    expect(harness.vscode.window.createWebviewPanel).not.toHaveBeenCalled();
+    expect(hostRequests()).toEqual([]);
+  });
+
+  it("asks which repositories to open when the workspace holds several, all ticked (#759)", async () => {
+    harness.vscode.workspace.workspaceFolders = [
+      { uri: { scheme: "file", fsPath: "/work/app" } },
+      { uri: { scheme: "file", fsPath: "/work/mono" } },
+    ];
+    harness.existing.add("/work/app/.git");
+    // /work/mono isn't a repository; two of its folders are, one level down.
+    harness.subfolders.set("/work/mono", ["api", "docs", "web"]);
+    harness.existing.add("/work/mono/api/.git");
+    harness.existing.add("/work/mono/web/.git");
+    // A repository nested in a repository is offered too.
+    harness.subfolders.set("/work/app", ["vendor"]);
+    harness.existing.add("/work/app/vendor/.git");
+    harness.vscode.window.showQuickPick.mockImplementation(async (items: unknown) =>
+      (items as Array<{ description: string }>).filter((item) => item.description !== "/work/mono/api"),
+    );
+    activate(harness.context);
+
+    await harness.openPanel();
+    await harness.dispatch({ jsonrpc: "2.0", method: "hostReady" });
+
+    const [items, options] = harness.vscode.window.showQuickPick.mock.calls[0] as [
+      Array<{ label: string; description: string; picked: boolean }>,
+      { canPickMany: boolean },
+    ];
+    expect(items).toEqual([
+      { label: "app", description: "/work/app", picked: true },
+      { label: "vendor", description: "/work/app/vendor", picked: true },
+      { label: "api", description: "/work/mono/api", picked: true },
+      { label: "web", description: "/work/mono/web", picked: true },
+    ]);
+    expect(options.canPickMany).toBe(true);
+    expect(hostRequests()).toEqual([{ kind: "openRepositories", paths: ["/work/app", "/work/app/vendor", "/work/mono/web"] }]);
+  });
+
+  it("opens nothing when the repository picker is cancelled", async () => {
+    harness.vscode.workspace.workspaceFolders = [
+      { uri: { scheme: "file", fsPath: "/work/app" } },
+      { uri: { scheme: "file", fsPath: "/work/lib" } },
+    ];
+    harness.existing.add("/work/app/.git");
+    harness.existing.add("/work/lib/.git");
+    activate(harness.context);
+
+    await harness.openPanel();
+
+    expect(harness.vscode.window.showQuickPick).toHaveBeenCalledOnce();
+    expect(harness.vscode.window.createWebviewPanel).not.toHaveBeenCalled();
+  });
+
+  it("doesn't ask when the active editor's file is in a repository", async () => {
+    harness.vscode.workspace.workspaceFolders = [
+      { uri: { scheme: "file", fsPath: "/work/app" } },
+      { uri: { scheme: "file", fsPath: "/work/lib" } },
+    ];
+    harness.existing.add("/work/app/.git");
+    harness.existing.add("/work/lib/.git");
+    harness.vscode.window.activeTextEditor = {
+      document: { uri: { scheme: "file", fsPath: "/work/lib/a.ts" } },
+      selection: { start: { line: 0 }, end: { line: 0, character: 0 } },
+    };
+    activate(harness.context);
+
+    await harness.openPanel();
+    await harness.dispatch({ jsonrpc: "2.0", method: "hostReady" });
+
+    expect(harness.vscode.window.showQuickPick).not.toHaveBeenCalled();
+    expect(hostRequests()).toEqual([{ kind: "openRepositories", paths: ["/work/lib"] }]);
+  });
+
+  it("shows a Browsitory button in the status bar that runs Open, unless the setting hides it (#759)", async () => {
+    activate(harness.context);
+    const item = harness.statusBarItem;
+    expect(item.text).toBe("$(git-branch) Browsitory");
+    expect(item.command).toBe("browsitory.open");
+    expect(item.tooltip).toBe("Open the active editor's repository in Browsitory");
+    expect(item.visible).toBe(true);
+
+    harness.changeSetting("browsitory.statusBar.enabled", false);
+    expect(item.visible).toBe(false);
+    harness.changeSetting("browsitory.statusBar.enabled", true);
+    expect(item.visible).toBe(true);
+  });
+
+  it("leaves the status bar button out when the setting is off at startup", async () => {
+    harness.changeSetting("browsitory.statusBar.enabled", false);
+    activate(harness.context);
+    expect(harness.statusBarItem.show).not.toHaveBeenCalled();
   });
 
   it("restores the panel after a reload, once", async () => {

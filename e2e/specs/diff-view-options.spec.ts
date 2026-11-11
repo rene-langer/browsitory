@@ -81,6 +81,8 @@ describe("Browsitory diff word wrap and whole file", () => {
     const preferences = await $("header button[aria-label='Preferences']");
     await preferences.waitForClickable();
     await preferences.click();
+    // Preferences shows one group at a time (#784).
+    await (await $("//dialog[@aria-label='Preferences']//button[@role='tab' and normalize-space(.)='Diff']")).click();
     const wordWrap = await $("//select[@id=//label[normalize-space(.)='Word wrap']/@for]");
     await wordWrap.waitForExist();
     await wordWrap.selectByVisibleText("Auto");
@@ -103,6 +105,8 @@ describe("Browsitory diff word wrap and whole file", () => {
     const preferences = await $("header button[aria-label='Preferences']");
     await preferences.waitForClickable();
     await preferences.click();
+    // Preferences shows one group at a time (#784).
+    await (await $("//dialog[@aria-label='Preferences']//button[@role='tab' and normalize-space(.)='Appearance']")).click();
     const size = await $("//input[@id=//label[normalize-space(.)='Code font size (px)']/@for]");
     await size.waitForExist();
     expect(await size.getValue()).toBe("");

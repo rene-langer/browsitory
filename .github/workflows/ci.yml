@@ -17,7 +17,107 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels that pull request's older, still-running run: only the
+# newest commit's checks matter there. Every other run (push to main, schedule, dispatch) gets a
+# group of its own (its run id), so nothing ever cancels or queues it: a group shared by main's
+# runs would cancel a queued one when a third arrived, and each main push builds its own
+# distributables. Pull request runs (refs/pull/N/merge) never share a group with those.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # Decides which build and test work a pull request needs, from the files it changes. Every
+  # job below that can skip work is a required check, so it never skips itself (a skipped
+  # matrix job reports one unexpanded check, and `rust (ubuntu-latest)` etc. would never
+  # report): it still runs and skips its steps, finishing green in seconds. Its outputs:
+  #   rust:  "false" when every changed file is on the no-Rust allowlist below; the three
+  #          `rust` jobs then skip their steps.
+  #   build: "false" when every changed file is on the docs-only allowlist below; `rust`,
+  #          `frontend`, `extension`, `e2e`, `e2e-vscode` and `vsix-smoke` then skip their
+  #          steps. audit, licenses and changelog always run in full.
+  # Fail safe: both lists name only paths known not to matter, so a new or unlisted path runs
+  # everything. Pushes to main, the schedule and dispatched runs always run everything. If this
+  # job fails, its outputs are empty, which the jobs read as "run": they `needs:` it with
+  # `if: ${{ !cancelled() }}` and skip only on an explicit "false".
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.decide.outputs.rust }}
+      build: ${{ steps.decide.outputs.build }}
+    steps:
+      # A pull request run checks out the merge commit of the PR into its base; its first parent
+      # is the base, so `HEAD^1..HEAD` is exactly what the PR changes there (depth 2 has both).
+      - uses: actions/checkout@v7
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 2
+      - name: Decide what to run
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != pull_request ]; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "Not a pull request ($EVENT): everything runs." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$(git rev-list --parents -n 1 HEAD | wc -w)" != 3 ]; then
+            echo "::error::HEAD is not the pull request's merge commit; can't tell what changed."
+            exit 1
+          fi
+          # --no-renames: a file moved out of crates/ counts its old path too.
+          git diff --name-only --no-renames HEAD^1 HEAD > changed.txt
+          # Docs-only allowlist: documentation no build or test job reads. CHANGELOG.md (the
+          # frontend's release notes) and THIRD_PARTY_NOTICES.md (bundled by the frontend,
+          # tauri-app and the VSIX) are not on it.
+          docs_only() {
+            case "$1" in
+              docs/*)
+                # A page a build or test reads is not docs-only: frontend's searchSyntax.test.ts
+                # imports docs/guide/search.md. So any path under docs/ named in code (even in
+                # a comment) runs everything; so does a git grep error (status 2).
+                status=0
+                git grep -qF -- "$1" -- frontend extension e2e crates scripts || status=$?
+                [ "$status" = 1 ] ;;
+              changelog.d/*|README.md|CONTRIBUTING.md|AGENTS.md|CLAUDE.md|PRIVACY.md|mkdocs.yml)
+                return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+          # No-Rust allowlist: files the `rust` jobs' build and tests never read. Rust tests
+          # read the frontend's generated IPC types (frontend/src/ipc/generated/) and nothing
+          # else outside crates/ (see test_support::repo_root), and tauri-app's build reads only
+          # crates/ and THIRD_PARTY_NOTICES.md (a bundle resource), never frontend/dist.
+          no_rust() {
+            case "$1" in
+              frontend/src/ipc/generated/*) return 1 ;;
+              frontend/*|extension/*|e2e/*|CHANGELOG.md) return 0 ;;
+              *) docs_only "$1" || [ "${1#docs/}" != "$1" ] ;;
+            esac
+          }
+          rust=false
+          build=false
+          while IFS= read -r f; do
+            if ! no_rust "$f"; then rust=true; echo "Rust: $f"; fi
+            if ! docs_only "$f"; then build=true; echo "Build: $f"; fi
+          done < changed.txt
+          # An empty diff (shouldn't happen) runs everything.
+          if [ ! -s changed.txt ]; then rust=true; build=true; fi
+          echo "rust=$rust" >> "$GITHUB_OUTPUT"
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          {
+            echo "## What this pull request runs"
+            echo
+            echo "- Rust jobs: $rust"
+            echo "- Build and test jobs: $build"
+            echo
+            echo "$(wc -l < changed.txt) changed files; the job log names the ones that decided."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # Every job has a timeout-minutes (#353), so a stuck download fails the job instead of holding
   # a runner for GitHub's 6-hour default. Each is about 2 to 3 times the job's slowest green run
   # in November 2026, not counting slow-mirror apt downloads (the apt steps have their own
@@ -159,15 +259,26 @@ jobs:
         run: python3 scripts/check-changelog.py --base "origin/$BASE_REF"
 
   rust:
+    needs: changes
+    # Runs even when `changes` failed (then everything runs); see there.
+    if: ${{ !cancelled() }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
+    # "true" unless the `changes` job said "false"; each step checks it.
+    env:
+      RUN_STEPS: ${{ needs.changes.outputs.rust != 'false' }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
+      # Skipped work still reports success (see the `changes` job); this says why.
+      - name: Nothing to do (see the changes job)
+        if: env.RUN_STEPS != 'true'
+        run: echo "Nothing this pull request changes affects this job." >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@v7
+        if: env.RUN_STEPS == 'true'
       - name: Install Tauri system dependencies (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: env.RUN_STEPS == 'true' && matrix.os == 'ubuntu-latest'
         # Bounded download retries that skip a slow mirror (#353). The script's download phases
         # take at most 3 x (45 + 10) + 3 x (150 + 10) s = about 11 min, plus the install from
         # the cache (under 1 min so far); see the script's "Time budget".
@@ -177,6 +288,7 @@ jobs:
             libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev libxdo-dev build-essential
       - uses: dtolnay/rust-toolchain@stable
+        if: env.RUN_STEPS == 'true'
         with:
           components: rustfmt, clippy
       # Caches ~/.cargo and the dependencies in target/ (#308). The key is the job id plus the
@@ -184,25 +296,29 @@ jobs:
       # main's cache and never write one, so a PR can't evict or poison it. The action sets
       # CARGO_INCREMENTAL=0 and never caches the workspace crates or incremental dirs.
       - uses: Swatinem/rust-cache@v2
+        if: env.RUN_STEPS == 'true'
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Format check
+        if: env.RUN_STEPS == 'true'
         run: cargo fmt --all -- --check
       - name: Clippy
+        if: env.RUN_STEPS == 'true'
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
+        if: env.RUN_STEPS == 'true'
         run: cargo test --workspace
       # #188: tests that use a throwaway gpg keyring must stop the gpg-agent gpg starts for it;
       # a leaked agent holds an inotify instance until the per-user limit runs out. Windows
       # skips the gpg tests entirely.
       - name: No leaked gpg-agent (Linux/macOS)
-        if: matrix.os != 'windows-latest'
+        if: env.RUN_STEPS == 'true' && matrix.os != 'windows-latest'
         run: scripts/check-gpg-agent-leaks.sh
       # Prints the case-insensitive probe's row table (#156, #167): `cargo test` above already
       # asserts nothing outside the repository changed, but captures the table. Built already,
       # so this only re-runs one test.
       - name: Case-insensitive probe table (macOS/Windows)
-        if: matrix.os != 'ubuntu-latest'
+        if: env.RUN_STEPS == 'true' && matrix.os != 'ubuntu-latest'
         run: cargo test -p git-core --test case_insensitive_links -- --nocapture
       # The `forge-fixture-override` feature (see crates/tauri-app/Cargo.toml's doc comment)
       # gates security-sensitive code — the forge API-base-URL override and the in-memory
@@ -211,8 +327,10 @@ jobs:
       # so a regression in that gated code is caught as a normal, fast `rust` job failure
       # instead of only surfacing as a confusing E2E failure.
       - name: Clippy (forge-fixture-override feature)
+        if: env.RUN_STEPS == 'true'
         run: cargo clippy -p tauri-app --features forge-fixture-override --all-targets -- -D warnings
       - name: Test (forge-fixture-override feature)
+        if: env.RUN_STEPS == 'true'
         run: cargo test -p tauri-app --features forge-fixture-override
 
   # Mutation testing of the code a pull request changes in git-core and repo-service: cargo-mutants
@@ -483,58 +601,98 @@ jobs:
           fi
 
   frontend:
+    needs: changes
+    # Runs even when `changes` failed (then everything runs); see there.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
       run:
         working-directory: frontend
+    # "true" unless the `changes` job said "false"; each step checks it.
+    env:
+      RUN_STEPS: ${{ needs.changes.outputs.build != 'false' }}
     steps:
+      # Skipped work still reports success (see the `changes` job); this says why.
+      - name: Nothing to do (see the changes job)
+        if: env.RUN_STEPS != 'true'
+        working-directory: .
+        run: echo "Nothing this pull request changes affects this job." >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@v7
+        if: env.RUN_STEPS == 'true'
       - uses: pnpm/action-setup@v6
+        if: env.RUN_STEPS == 'true'
         with:
           version: 12
       - uses: actions/setup-node@v7
+        if: env.RUN_STEPS == 'true'
         with:
           node-version: 24
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+        if: env.RUN_STEPS == 'true'
       - run: pnpm lint
+        if: env.RUN_STEPS == 'true'
       - run: pnpm build
+        if: env.RUN_STEPS == 'true'
       - run: pnpm test -- --run
+        if: env.RUN_STEPS == 'true'
 
   extension:
+    needs: changes
+    # Runs even when `changes` failed (then everything runs); see there.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
       run:
         working-directory: extension
+    # "true" unless the `changes` job said "false"; each step checks it.
+    env:
+      RUN_STEPS: ${{ needs.changes.outputs.build != 'false' }}
     steps:
+      # Skipped work still reports success (see the `changes` job); this says why.
+      - name: Nothing to do (see the changes job)
+        if: env.RUN_STEPS != 'true'
+        working-directory: .
+        run: echo "Nothing this pull request changes affects this job." >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@v7
+        if: env.RUN_STEPS == 'true'
       - uses: dtolnay/rust-toolchain@stable
+        if: env.RUN_STEPS == 'true'
       # Own cache (job-id key): this job builds only the dev vscode-sidecar. See the `rust` job.
       - uses: Swatinem/rust-cache@v2
+        if: env.RUN_STEPS == 'true'
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # sidecarBridge.real.test.ts spawns the real vscode-sidecar binary and never builds it
       # (#552): locally a missing binary skips the test, under CI it fails the run. So this
       # step must stay before `pnpm test`.
       - name: Build dev sidecar
+        if: env.RUN_STEPS == 'true'
         working-directory: .
         run: cargo build -p vscode-sidecar
       - uses: pnpm/action-setup@v6
+        if: env.RUN_STEPS == 'true'
         with:
           version: 12
       - uses: actions/setup-node@v7
+        if: env.RUN_STEPS == 'true'
         with:
           node-version: 24
           cache: pnpm
           cache-dependency-path: extension/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+        if: env.RUN_STEPS == 'true'
       - run: pnpm test -- --run
+        if: env.RUN_STEPS == 'true'
       - run: pnpm run test:package
+        if: env.RUN_STEPS == 'true'
       - run: pnpm run compile
+        if: env.RUN_STEPS == 'true'
       - run: pnpm run lint
+        if: env.RUN_STEPS == 'true'
 
   # Builds standalone distributables on every push to main (not PRs) so a build is always
   # test-drivable without waiting for a release tag. Short-retention CI artifacts, distinct
@@ -691,25 +849,41 @@ jobs:
   # repository (extension/e2e's smoke:vsix). e2e-vscode instead runs this checkout in
   # development mode. Runs on every PR; build-vsix checks all four targets on main.
   vsix-smoke:
+    needs: changes
+    # Runs even when `changes` failed (then everything runs); see there.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    # "true" unless the `changes` job said "false"; each step checks it.
+    env:
+      RUN_STEPS: ${{ needs.changes.outputs.build != 'false' }}
     steps:
+      # Skipped work still reports success (see the `changes` job); this says why.
+      - name: Nothing to do (see the changes job)
+        if: env.RUN_STEPS != 'true'
+        run: echo "Nothing this pull request changes affects this job." >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@v7
+        if: env.RUN_STEPS == 'true'
       - name: Install Xvfb
+        if: env.RUN_STEPS == 'true'
         # Bounded download retries that skip a slow mirror (#353). The script's download phases
         # take at most 3 x (45 + 10) + 3 x (150 + 10) s = about 11 min, plus the install from
         # the cache (under 1 min so far); see the script's "Time budget".
         timeout-minutes: 15
         run: scripts/ci-apt-install.sh xvfb dbus
       - uses: dtolnay/rust-toolchain@stable
+        if: env.RUN_STEPS == 'true'
       # Own cache (job-id key): only the release vscode-sidecar.
       - uses: Swatinem/rust-cache@v2
+        if: env.RUN_STEPS == 'true'
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: pnpm/action-setup@v6
+        if: env.RUN_STEPS == 'true'
         with:
           version: 12
       - uses: actions/setup-node@v7
+        if: env.RUN_STEPS == 'true'
         with:
           node-version: 24
           cache: pnpm
@@ -718,41 +892,62 @@ jobs:
             extension/pnpm-lock.yaml
             extension/e2e/pnpm-lock.yaml
       - run: pnpm --dir frontend install --frozen-lockfile
+        if: env.RUN_STEPS == 'true'
       - run: pnpm --dir frontend run generate:release-notes
+        if: env.RUN_STEPS == 'true'
       - run: pnpm --dir frontend exec vite build --config vite.vscode.config.ts
+        if: env.RUN_STEPS == 'true'
       - run: pnpm --dir extension install --frozen-lockfile
+        if: env.RUN_STEPS == 'true'
       - run: pnpm --dir extension run compile
+        if: env.RUN_STEPS == 'true'
       - run: cargo build --release -p vscode-sidecar
+        if: env.RUN_STEPS == 'true'
       # Stable, like release.yml while VSIX_PRE_RELEASE is "false" (add --pre-release to both
       # steps if it goes back to "true").
       - name: Package the linux-x64 .vsix
+        if: env.RUN_STEPS == 'true'
         run: >-
           pnpm --dir extension run package:vsix -- --target linux-x64
           --sidecar target/release/vscode-sidecar
           --out artifacts/browsitory-linux-x64.vsix
       - name: Check the package
+        if: env.RUN_STEPS == 'true'
         run: >-
           pnpm --dir extension run check:vsix -- --target linux-x64
           --version "$(node -p "require('./extension/package.json').version")"
           artifacts/browsitory-linux-x64.vsix
       - name: Install e2e dependencies
+        if: env.RUN_STEPS == 'true'
         working-directory: extension/e2e
         # --ignore-workspace: see e2e-vscode.
         run: pnpm install --frozen-lockfile --ignore-workspace
       - name: Install the package into VSCode and smoke-test it
+        if: env.RUN_STEPS == 'true'
         working-directory: extension/e2e
         run: >-
           dbus-run-session -- xvfb-run --auto-servernum
           pnpm --ignore-workspace smoke:vsix ../artifacts/browsitory-linux-x64.vsix
 
   e2e-vscode:
+    needs: changes
+    # Runs even when `changes` failed (then everything runs); see there.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    # "true" unless the `changes` job said "false"; each step checks it.
     env:
+      RUN_STEPS: ${{ needs.changes.outputs.build != 'false' }}
       VSCODE_E2E_REPO_PATH: /tmp/browsitory-vscode-e2e-repo
     steps:
+      # Skipped work still reports success (see the `changes` job); this says why.
+      - name: Nothing to do (see the changes job)
+        if: env.RUN_STEPS != 'true'
+        run: echo "Nothing this pull request changes affects this job." >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@v7
+        if: env.RUN_STEPS == 'true'
       - name: Install Xvfb and Tauri system dependencies (Linux)
+        if: env.RUN_STEPS == 'true'
         # Bounded download retries that skip a slow mirror (#353). The script's download phases
         # take at most 3 x (45 + 10) + 3 x (150 + 10) s = about 11 min, plus the install from
         # the cache (under 1 min so far); see the script's "Time budget".
@@ -762,14 +957,18 @@ jobs:
             libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev libxdo-dev build-essential
       - uses: dtolnay/rust-toolchain@stable
+        if: env.RUN_STEPS == 'true'
       # Own cache (job-id key): a plain `cargo build --workspace`. See the `rust` job.
       - uses: Swatinem/rust-cache@v2
+        if: env.RUN_STEPS == 'true'
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: pnpm/action-setup@v6
+        if: env.RUN_STEPS == 'true'
         with:
           version: 12
       - uses: actions/setup-node@v7
+        if: env.RUN_STEPS == 'true'
         with:
           node-version: 24
           cache: pnpm
@@ -778,19 +977,23 @@ jobs:
             extension/pnpm-lock.yaml
             extension/e2e/pnpm-lock.yaml
       - name: Build dev sidecar
+        if: env.RUN_STEPS == 'true'
         run: cargo build --workspace
       - name: Build vscode frontend (with E2E fixture auto-open baked in)
+        if: env.RUN_STEPS == 'true'
         working-directory: frontend
         run: |
           pnpm install --frozen-lockfile
           pnpm run generate:release-notes
           VITE_E2E_REPO_PATH="$VSCODE_E2E_REPO_PATH" pnpm exec vite build --config vite.vscode.config.ts
       - name: Compile extension
+        if: env.RUN_STEPS == 'true'
         working-directory: extension
         run: |
           pnpm install --frozen-lockfile
           pnpm run compile
       - name: Install e2e dependencies
+        if: env.RUN_STEPS == 'true'
         working-directory: extension/e2e
         # extension/e2e isn't a member of extension/pnpm-workspace.yaml. Its own
         # pnpm-workspace.yaml (`packages: ['.']`) stops pnpm resolving upward to extension/
@@ -798,9 +1001,11 @@ jobs:
         # second guard that treats extension/e2e as standalone.
         run: pnpm install --frozen-lockfile --ignore-workspace
       - name: Typecheck e2e specs
+        if: env.RUN_STEPS == 'true'
         working-directory: extension/e2e
         run: pnpm --ignore-workspace typecheck
       - name: Run VSCode E2E suite
+        if: env.RUN_STEPS == 'true'
         working-directory: extension/e2e
         # A `dconf watch /system/proxy/` helper process (GTK/GLib's proxy-resolver mechanism,
         # triggered by Electron) can squat the harness's CDP debug port; runTests.ts mitigates
@@ -816,16 +1021,27 @@ jobs:
         run: dbus-run-session -- xvfb-run --auto-servernum pnpm --ignore-workspace test
 
   e2e:
+    needs: changes
+    # Runs even when `changes` failed (then everything runs); see there.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
     # Fixed fixture-repo path the E2E frontend build bakes in via VITE_E2E_REPO_PATH and that
     # e2e/wdio.conf.ts's `onPrepare` hook creates before the WebDriver session starts. Must
     # match `E2E_REPO_PATH` in e2e/wdio.conf.ts (os.tmpdir() is `/tmp` on Linux runners).
+    # "true" unless the `changes` job said "false"; each step checks it.
     env:
+      RUN_STEPS: ${{ needs.changes.outputs.build != 'false' }}
       E2E_REPO_PATH: /tmp/browsitory-e2e-repo
     steps:
+      # Skipped work still reports success (see the `changes` job); this says why.
+      - name: Nothing to do (see the changes job)
+        if: env.RUN_STEPS != 'true'
+        run: echo "Nothing this pull request changes affects this job." >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@v7
+        if: env.RUN_STEPS == 'true'
       - name: Install Tauri + tauri-driver system dependencies (Linux)
+        if: env.RUN_STEPS == 'true'
         # Bounded download retries that skip a slow mirror (#353). The script's download phases
         # take at most 3 x (45 + 10) + 3 x (150 + 10) s = about 11 min, plus the install from
         # the cache (under 1 min so far); see the script's "Time budget".
@@ -845,20 +1061,25 @@ jobs:
             libjavascriptcoregtk-4.1-dev libxdo-dev build-essential \
             "$webdriver" xvfb dbus
       - uses: dtolnay/rust-toolchain@stable
+        if: env.RUN_STEPS == 'true'
       # Own cache (job-id key): this build enables the custom-protocol and
       # forge-fixture-override features, so it must not share a cache with a plain build.
       # Placed before `cargo install tauri-driver` so the installed binary is cached too.
       # See the `rust` job.
       - uses: Swatinem/rust-cache@v2
+        if: env.RUN_STEPS == 'true'
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install tauri-driver
+        if: env.RUN_STEPS == 'true'
         # tauri-driver's version is independent of any other Tauri versions.
         run: cargo install tauri-driver --locked
       - uses: pnpm/action-setup@v6
+        if: env.RUN_STEPS == 'true'
         with:
           version: 12
       - uses: actions/setup-node@v7
+        if: env.RUN_STEPS == 'true'
         with:
           node-version: 24
           cache: pnpm
@@ -866,11 +1087,13 @@ jobs:
             frontend/pnpm-lock.yaml
             e2e/pnpm-lock.yaml
       - name: Build frontend (with E2E fixture auto-open baked in)
+        if: env.RUN_STEPS == 'true'
         working-directory: frontend
         run: |
           pnpm install --frozen-lockfile
           VITE_E2E_REPO_PATH="$E2E_REPO_PATH" pnpm build
       - name: Build tauri-app (embedded-assets production mode)
+        if: env.RUN_STEPS == 'true'
         # Plain `cargo build` leaves Tauri's `dev` cfg true (see crates/tauri-app/Cargo.toml's
         # `custom-protocol` feature comment), which would make the binary load the Vite dev
         # server instead of the just-built frontend/dist above — fatal here, since no dev
@@ -884,12 +1107,15 @@ jobs:
         # outside this E2E build.
         run: cargo build --workspace --features tauri-app/custom-protocol,tauri-app/forge-fixture-override
       - name: Install e2e dependencies
+        if: env.RUN_STEPS == 'true'
         working-directory: e2e
         run: pnpm install --frozen-lockfile
       - name: Typecheck e2e specs
+        if: env.RUN_STEPS == 'true'
         working-directory: e2e
         run: pnpm typecheck
       - name: Run E2E suite
+        if: env.RUN_STEPS == 'true'
         working-directory: e2e
         # wdio.conf.ts spawns/reaps `tauri-driver` itself around the session (the pattern from
         # the official Tauri WebdriverIO guide), so `xvfb-run` just needs to wrap the one

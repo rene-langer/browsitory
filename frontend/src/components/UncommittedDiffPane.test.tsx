@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { DEFAULT_DIFF_SETTINGS, type DiffHunk, type HeadInfo, type RepoClient, type StatusEntry } from "../ipc/RepoClient";
 import { DiffSettingsContext } from "../state/useDiffSettings";
+import { OpenPreferencesContext } from "../state/openPreferences";
 import { WorkspaceActionsContext, type WorkspaceActions } from "../state/useWorkspaceActions";
 import { testWorkspaceActions } from "../test/workspaceActions";
 import { fakeRepoClient } from "../test/fakeRepoClient";
@@ -198,6 +199,23 @@ describe("working-tree view (#639)", () => {
 
     expect(await within(viewer()).findByText("unstaged new.txt")).toBeInTheDocument();
     expect(getWorkingDiff).toHaveBeenCalledWith(REPO, "new.txt", false, expect.anything());
+  });
+
+  it("with Expand untracked files off, links to the Diff preferences (#784)", async () => {
+    const openPreferences = vi.fn();
+    render(
+      <OpenPreferencesContext.Provider value={openPreferences}>
+        <Pane client={fakeRepoClient({}, "empty")} status={[entry("new.txt", false, "New")]} expandUntracked={false} />
+      </OpenPreferencesContext.Provider>,
+    );
+    fireEvent.click(await within(viewer()).findByRole("button", { name: "Diff preferences" }));
+    expect(openPreferences).toHaveBeenCalledWith("diff");
+  });
+
+  it("offers no Diff preferences link where nothing opens Preferences", async () => {
+    render(<Pane client={fakeRepoClient({}, "empty")} status={[entry("new.txt", false, "New")]} expandUntracked={false} />);
+    await within(viewer()).findByRole("button", { name: "Show contents" });
+    expect(within(viewer()).queryByRole("button", { name: "Diff preferences" })).toBeNull();
   });
 
   it("with Expand untracked files off, a tracked file still loads at once", async () => {

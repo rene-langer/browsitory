@@ -13,10 +13,12 @@ import {
   findRepositoryRoot,
   type HostRequest,
   repoRelativePath,
+  repositoryCandidates,
   repositoryRoots,
   selectedLines,
   SHORTCUT_COMMAND_PREFIX,
   shortcutRequest,
+  timelineCommitId,
 } from "./hostRequests";
 import { FILE_VERSION_SCHEME, parseFileVersionUri } from "./toolUris";
 import { renderWebviewHtml } from "./webviewHtml";
@@ -93,6 +95,19 @@ function activeEditorFile(): string | undefined {
   const uri = vscode.window.activeTextEditor?.document.uri;
   return uri?.scheme === "file" ? uri.fsPath : undefined;
 }
+
+/** The folders directly in `folder`; none when it can't be read. */
+async function listSubfolders(folder: string): Promise<string[]> {
+  try {
+    const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(folder));
+    return entries.filter(([, type]) => (type & vscode.FileType.Directory) !== 0).map(([name]) => name);
+  } catch {
+    return [];
+  }
+}
+
+/** The setting that hides the status bar button (#759). */
+const STATUS_BAR_SETTING = "browsitory.statusBar.enabled";
 
 function workspaceFolderPaths(): string[] {
   return (vscode.workspace.workspaceFolders ?? [])
@@ -252,8 +267,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
   /**
    * "Browsitory: Open" (#677): with a resource (Explorer, Source Control), opens its repository;
-   * else the active editor's file's repository; else, when the panel opens, the workspace
-   * folders' repositories. Without any, the panel restores its tabs or shows the picker.
+   * else the active editor's file's repository; else, when the panel opens, the workspace's
+   * repositories, asking which when there are several (#759). Without any, the panel restores
+   * its tabs or shows the picker.
    */
   async function open(argument?: unknown): Promise<void> {
     const explicit = commandTargetPath(argument);
@@ -264,7 +280,15 @@ export function activate(context: vscode.ExtensionContext): void {
     else if (editorFile !== undefined) roots = await repositoryRoots([editorFile], pathExists);
     else roots = [];
     if (roots.length === 0 && explicit === undefined && opening) {
-      roots = await repositoryRoots(workspaceFolderPaths(), pathExists);
+      roots = await repositoryCandidates(workspaceFolderPaths(), listSubfolders, pathExists);
+      if (roots.length > 1) {
+        const picked = await vscode.window.showQuickPick(
+          roots.map((root) => ({ label: path.basename(root), description: root, picked: true })),
+          { canPickMany: true, title: "Open in Browsitory", placeHolder: "The repositories to open as tabs" },
+        );
+        if (picked === undefined) return;
+        roots = picked.map((item) => item.description);
+      }
     }
     const target = showPanel();
     if (roots.length > 0) sendHostRequest(target, { kind: "openRepositories", paths: roots });
@@ -295,8 +319,40 @@ export function activate(context: vscode.ExtensionContext): void {
     sendHostRequest(showPanel(), request);
   }
 
+  /** "Show Commit in Browsitory" on a commit in VSCode's Timeline view (#759). */
+  async function showCommit(item: unknown, resource: unknown): Promise<void> {
+    const commitId = timelineCommitId(item);
+    const target = commandTargetPath(resource);
+    if (commitId === undefined || target === undefined) return;
+    const root = await findRepositoryRoot(target, pathExists);
+    if (root === undefined) {
+      void vscode.window.showInformationMessage(`${path.basename(target)} isn't in a Git repository.`);
+      return;
+    }
+    sendHostRequest(showPanel(), { kind: "showCommit", repoPath: root, commitId });
+  }
+
+  // A button in the status bar that runs "Browsitory: Open" (#759), unless the setting hides it.
+  const statusBarItem = vscode.window.createStatusBarItem("browsitory.open", vscode.StatusBarAlignment.Left, 0);
+  statusBarItem.name = "Browsitory";
+  statusBarItem.text = "$(git-branch) Browsitory";
+  statusBarItem.tooltip = "Open the active editor's repository in Browsitory";
+  statusBarItem.command = "browsitory.open";
+  const updateStatusBarItem = () => {
+    if (vscode.workspace.getConfiguration("browsitory").get<boolean>("statusBar.enabled", true)) statusBarItem.show();
+    else statusBarItem.hide();
+  };
+  updateStatusBarItem();
+  context.subscriptions.push(
+    statusBarItem,
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration(STATUS_BAR_SETTING)) updateStatusBarItem();
+    }),
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand("browsitory.open", open),
+    vscode.commands.registerCommand("browsitory.showCommit", showCommit),
     // The same, as the Explorer and Source Control menus' "Open in Browsitory".
     vscode.commands.registerCommand("browsitory.openRepository", open),
     vscode.commands.registerCommand("browsitory.showFileHistory", (argument?: unknown) => showHistory(argument, false)),

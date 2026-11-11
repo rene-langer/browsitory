@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Archive, MoreHorizontal } from "lucide-react";
 import { rectAnchor } from "../lib/menuKeys";
 import type { StashEntry } from "../ipc/RepoClient";
@@ -8,6 +8,7 @@ import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { ListRow } from "./primitives/ListRow";
 import styles from "./StashPanel.module.css";
+import { useVirtualRows } from "./useVirtualRows";
 import { menuItem } from "../lib/actions/action";
 import { stashActions, stashDetails, stashTitle, type StashBlockers } from "../lib/actions/stashActions";
 import { formatAbsoluteDate } from "../lib/formatDate";
@@ -70,7 +71,9 @@ export function StashPanel({
       (commitId) => commitId != null && !stashes.some((stash) => stash.commitId === commitId),
     );
     if (gone != null) {
-      setRefocus({ position: Math.max(0, lastStashes.findIndex((stash) => stash.commitId === gone)) });
+      // That place in the new list, else its last stash (-1: none left).
+      const place = Math.max(0, lastStashes.findIndex((stash) => stash.commitId === gone));
+      setRefocus({ position: Math.min(place, stashes.length - 1) });
       if (gone === droppedCommitId) setDroppedCommitId(null);
     }
   }
@@ -78,13 +81,22 @@ export function StashPanel({
   if (pendingDrop !== null && dropStash === undefined) setPendingDrop(null);
   // The list, or the empty-state text when there is none.
   const bodyRef = useRef<HTMLElement | null>(null);
+  // Only the rows in view render (#775), as in the commit graph (#685).
+  const [listElement, setListElement] = useState<HTMLUListElement | null>(null);
+  const attachList = useCallback((element: HTMLUListElement | null) => {
+    bodyRef.current = element;
+    setListElement(element);
+  }, []);
+  const virtual = useVirtualRows(listElement, stashes.length);
   useEffect(() => {
     if (refocus === null) return;
     const active = document.activeElement;
     if (active !== null && active !== document.body && active.isConnected) return;
-    // The "…" of the stash now in that place, else the last one, else the section's header.
-    const buttons = bodyRef.current?.querySelectorAll<HTMLElement>('button[aria-haspopup="menu"]') ?? [];
-    const next = buttons.length > 0 ? buttons[Math.min(refocus.position, buttons.length - 1)] : undefined;
+    // The "…" of the stash now in that place, else the last one, else the section's header. The
+    // place was in view, so its row is rendered.
+    const next = bodyRef.current?.querySelector<HTMLElement>(
+      `:scope > li[data-row-index="${refocus.position}"] button[aria-haspopup="menu"]`,
+    );
     const header = bodyRef.current?.closest("section")?.querySelector<HTMLElement>("button");
     (next ?? header)?.focus({ preventScroll: true });
   }, [refocus]);
@@ -136,17 +148,17 @@ export function StashPanel({
       ) : (
         <>
           <ul
-            ref={(element) => {
-              bodyRef.current = element;
-            }}
+            ref={attachList}
             className={styles.list}
+            style={virtual.windowed ? { paddingTop: virtual.padTop, paddingBottom: virtual.padBottom } : undefined}
           >
-            {stashes.map((stash) => {
+            {stashes.slice(virtual.start, virtual.end).map((stash, offset) => {
               const title = stashTitle(stash);
               const details = stashDetails(stash);
               return (
                 <ListRow
                   key={stash.commitId}
+                  rowIndex={virtual.start + offset}
                   onClick={() => onSelectRow({ commitId: stash.commitId })}
                   onOpenMenu={(anchor, trigger) => openMenu({ stash, ...anchor, returnFocusTo: trigger })}
                 >

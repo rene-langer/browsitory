@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useContext, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { BlameLine, DiffHunk, DiffOptions, DiffSource, HunkOptions, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { describeError, type DescribedError } from "../lib/errorMessages";
 import { imageMimeType, isSvgPath } from "../lib/imageTypes";
+import { OpenPreferencesContext } from "../state/openPreferences";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
 import { useWholeFile } from "../state/useWholeFile";
 import { useWorkspaceActions } from "../state/useWorkspaceActions";
@@ -100,6 +101,8 @@ export function UncommittedFileViewer({
   const [imageAsText, setImageAsText] = useState(false);
   const showImage = isImage && !isConflicted && !imageAsText;
   const { settings } = useDiffSettingsContext();
+  // Links the untracked-file note to the Diff preferences (#784); absent outside the app.
+  const openPreferences = useContext(OpenPreferencesContext);
   // "Show whole file" fetches with whole-file context; hunk and line actions then pass it too.
   const wholeFile = useWholeFile(settings.contextLines);
   const diffOptions: DiffOptions = {
@@ -267,6 +270,14 @@ export function UncommittedFileViewer({
             <button type="button" onClick={onShowContents}>
               Show contents
             </button>
+            {openPreferences !== null && (
+              <>
+                {" "}
+                <button type="button" onClick={() => openPreferences("diff")}>
+                  Diff preferences
+                </button>
+              </>
+            )}
           </p>
         ) : showImage ? (
           <>

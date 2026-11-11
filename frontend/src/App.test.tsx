@@ -80,6 +80,61 @@ describe("App", () => {
     expect(screen.getByRole("tab", { name: /^b/, selected: true })).toBeInTheDocument();
   });
 
+  it("selects a commit in the graph when the VSCode extension asks, loading history for one not loaded yet (#759)", async () => {
+    let emit: (request: HostRequest) => void = () => {};
+    const subscribeHostRequests = vi.fn((listener: (request: HostRequest) => void) => {
+      emit = listener;
+      return () => {};
+    });
+    const graphCommit = (id: string, summary: string, parentIds: string[]) => ({
+      id,
+      shortId: id.slice(0, 7),
+      summary,
+      authorName: "A",
+      authorEmail: "a@example.com",
+      timestamp: 0,
+      parentIds,
+      branchRefs: [],
+      remoteBranchRefs: [],
+    });
+    const locateCommit = vi.fn(async () => null);
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getCommitGraph: async () => graphPage([graphCommit("head111", "Tip of main", ["base222"]), graphCommit("base222", "Base", [])]),
+      getHeadInfo: async () => ({
+        headId: "head111",
+        detachedAt: null,
+        headPushed: false,
+        operation: null,
+        operationLeftover: false,
+        squashMessage: null,
+        commitHooks: [],
+        sequence: null,
+        rebase: null,
+        bisect: null, terminalSequence: null, terminalRebase: null,
+      }),
+      listBranches: async () => [],
+      listStashes: async () => [],
+      getStatus: async () => [],
+      locateCommit,
+      subscribeHostRequests,
+    });
+    render(<App client={client} />);
+    await waitFor(() => expect(subscribeHostRequests).toHaveBeenCalledOnce());
+
+    act(() => emit({ kind: "showCommit", repoPath: "/repos/a", commitId: "base222" }));
+
+    // The list is mounted again once the history is read.
+    const history = () => screen.getByRole("listbox", { name: "Commit history" });
+    await waitFor(() => expect(within(history()).getByRole("option", { name: /Base/, selected: true })).toBeInTheDocument());
+
+    // Not among the loaded commits: Go to's path finds it, loading more history as needed.
+    act(() => emit({ kind: "showCommit", repoPath: "/repos/a", commitId: "old3333" }));
+    await waitFor(() => expect(locateCommit).toHaveBeenCalledWith("/repos/a", "old3333", expect.anything()));
+  });
+
   it("leaves updater UI absent unless the transport bootstrap injects it", async () => {
     const listOpenRepos = vi.fn().mockResolvedValue({ entries: [], activePath: null });
     const client = fakeClient({ listOpenRepos });
@@ -2870,6 +2925,7 @@ describe("App external tools", () => {
     await waitFor(() => expect(screen.getByLabelText("Editor command")).toHaveValue("code"));
     expect(getExternalToolSettings).toHaveBeenCalled();
     expect(getGitTools).toHaveBeenCalledWith("/repos/a");
+    fireEvent.click(screen.getByRole("tab", { name: "Commit message" }));
     expect(screen.getByRole("group", { name: "Commit message" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("spinbutton", { name: "Ruler column" })).toHaveValue(72));
 
@@ -3023,6 +3079,26 @@ describe("App external tools", () => {
     expect(await screen.findByText("Couldn't check for updates: offline")).toBeInTheDocument();
   });
 
+  it("the untracked-file note opens Preferences on the Diff group (#784)", async () => {
+    localStorage.removeItem("preferences-group");
+    render(
+      <App
+        client={toolsClient({
+          getStatus: async () => [{ path: "new.txt", oldPath: null, staged: false, kind: "New" }],
+          getDiffSettings: async () => ({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false, expandUntracked: false }),
+        })}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("option", { name: /^new\.txt ?\(New\)/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Diff preferences" }));
+    const dialog = await screen.findByRole("dialog", { name: "Preferences" });
+    expect(within(dialog).getByRole("tab", { name: "Diff" })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() =>
+      expect(within(dialog).getByRole("checkbox", { name: "Expand untracked files" })).not.toBeChecked(),
+    );
+    localStorage.removeItem("preferences-group");
+  });
+
   it("Preferences has an Updates section with the updater only (#630)", async () => {
     const check = vi.fn<UpdateCheck>().mockResolvedValue({ kind: "none" });
     const getUpdateSettings = vi.fn(async () => ({ checkAutomatically: false }));
@@ -3036,6 +3112,7 @@ describe("App external tools", () => {
     render(<App client={toolsClient({ getUpdateSettings })} updateBanner={<FakeUpdater check={check} />} />);
     await screen.findByRole("tab", { name: "a" });
     fireEvent.click(screen.getByRole("button", { name: "Preferences" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Updates" }));
     const group = screen.getByRole("group", { name: "Updates" });
     await waitFor(() =>
       expect(within(group).getByRole("checkbox", { name: "Check for updates automatically" })).not.toBeChecked(),
@@ -3182,6 +3259,7 @@ describe("App external tools", () => {
       fireEvent.click(screen.getByRole("button", { name: "Switch to dark theme" }));
       expect(document.documentElement.dataset.theme).toBe("dark");
       fireEvent.click(screen.getByRole("button", { name: "Preferences" }));
+      fireEvent.click(screen.getByRole("tab", { name: "Appearance" }));
       const theme = screen.getByRole("combobox", { name: "Theme" });
       expect(theme).toHaveValue("dark");
       fireEvent.change(theme, { target: { value: "system" } });
