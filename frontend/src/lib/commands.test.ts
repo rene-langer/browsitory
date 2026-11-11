@@ -2492,7 +2492,8 @@ function groupOf(id: string): CommandGroup {
 // #494: the commands, ids and groups before the builders were split by family. Recents are stored
 // by id, so a builder must keep the ids, and each group is now declared by the builder instead of
 // derived from the id. #583 and #592 moved the remote, diff and tag commands that had fallen
-// under "General" into their family's group. #621 added "stage-modified-files" since.
+// under "General" into their family's group. #621 added "stage-modified-files" since, #619
+// "rebase-onto-branch:<name>".
 describe("command ids and groups", () => {
   const EXPECTED: Record<keyof typeof STATES, [string, CommandGroup][]> = {
     normal: [
@@ -2536,6 +2537,7 @@ describe("command ids and groups", () => {
       ["init-submodule:libs/a", "General"],
       ["manage-credentials:origin", "Remotes"],
       ["merge-branch:feature", "Branches"],
+      ["rebase-onto-branch:feature", "Branches"],
       ["new-repository", "General"],
       ["open-current-file-in-diff-tool", "Diff"],
       ["open-current-file-in-editor", "Diff"],
@@ -2786,6 +2788,7 @@ describe("command ids and groups", () => {
       ["init-submodule:libs/a", "General"],
       ["manage-credentials:origin", "Remotes"],
       ["merge-branch:feature", "Branches"],
+      ["rebase-onto-branch:feature", "Branches"],
       ["new-repository", "General"],
       ["open-current-file-in-diff-tool", "Diff"],
       ["open-current-file-in-editor", "Diff"],
