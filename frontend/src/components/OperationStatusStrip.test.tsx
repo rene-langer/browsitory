@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { RebaseInfo, TerminalRebase, TerminalSequence } from "../ipc/RepoClient";
 import { OperationStatusStrip } from "./OperationStatusStrip";
+import { describedByText } from "../test/describedBy";
 
 const noop = () => {};
 
@@ -155,6 +156,73 @@ describe("OperationStatusStrip", () => {
     );
     expect(screen.getByRole("button", { name: "Continue" })).toHaveAttribute("aria-disabled", "true");
     expect(screen.getByRole("button", { name: "Abort cherry-pick" })).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("says why sequence Continue and Abort can't run while an action is pending, and ignores clicks (#748)", () => {
+    const onContinueSequence = vi.fn();
+    const onAbortSequence = vi.fn();
+    render(
+      <OperationStatusStrip
+        merging={false}
+        operation={null}
+        rebaseProgress={null}
+        sequence={{ kind: "CherryPick", currentStep: 1, totalSteps: 2, currentCommit: "c" }}
+        conflictCount={0}
+        pending
+        onAbortMerge={noop}
+        onAbortRebase={noop}
+        onContinueSequence={onContinueSequence}
+        onAbortSequence={onAbortSequence}
+      />,
+    );
+    for (const name of ["Continue", "Abort cherry-pick"]) {
+      const button = screen.getByRole("button", { name });
+      expect(describedByText(button)).toBe("Another action is in progress.");
+      fireEvent.click(button);
+    }
+    expect(onContinueSequence).not.toHaveBeenCalled();
+    expect(onAbortSequence).not.toHaveBeenCalled();
+  });
+
+  it("says why an interrupted rebase's and a terminal sequence's Abort can't run while pending (#748)", () => {
+    const onAbortRebase = vi.fn();
+    const { unmount } = render(
+      <OperationStatusStrip
+        merging={false}
+        operation={null}
+        rebaseProgress={{ currentStep: 1, totalSteps: 2 }}
+        rebase={{ branch: "topic", onto: "o", currentStep: 1, totalSteps: 2, health: { kind: "Diverged", reason: "HeadMoved" } }}
+        conflictCount={0}
+        pending
+        onAbortMerge={noop}
+        onAbortRebase={onAbortRebase}
+      />,
+    );
+    const abortRebase = screen.getByRole("button", { name: "Abort rebase" });
+    expect(abortRebase).toHaveAttribute("aria-disabled", "true");
+    expect(describedByText(abortRebase)).toBe("Another action is in progress.");
+    fireEvent.click(abortRebase);
+    expect(onAbortRebase).not.toHaveBeenCalled();
+    unmount();
+
+    const onAbortTerminalSequence = vi.fn();
+    render(
+      <OperationStatusStrip
+        merging={false}
+        operation={null}
+        rebaseProgress={null}
+        terminalSequence={{ kind: "CherryPick", pausedOnConflict: false, startedAt: "abc", startedAtSummary: "X", rewinds: true, commitsToRemove: 1 }}
+        conflictCount={0}
+        pending
+        onAbortMerge={noop}
+        onAbortRebase={noop}
+        onAbortTerminalSequence={onAbortTerminalSequence}
+      />,
+    );
+    const abort = screen.getByRole("button", { name: "Abort cherry-pick" });
+    expect(describedByText(abort)).toBe("Another action is in progress.");
+    fireEvent.click(abort);
+    expect(onAbortTerminalSequence).not.toHaveBeenCalled();
   });
 
   describe("a stored rebase", () => {

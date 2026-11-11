@@ -11,6 +11,7 @@ import { WorkspaceActionsContext, type WorkspaceActions } from "../state/useWork
 import { splitWorkspaceActions, testWorkspaceActions } from "../test/workspaceActions";
 import styles from "./DiffPane.module.css";
 import { fakeRepoClient } from "../test/fakeRepoClient";
+import { describedByText } from "../test/describedBy";
 
 const TEST_REPO_PATH = "/repo";
 
@@ -534,6 +535,7 @@ describe("DiffPane", () => {
         let confirm = within(dialog).getByRole("button", { name: "Discard changes", hidden: true });
         expect(confirm).toBeDisabled();
         expect(confirm).toHaveAttribute("title", reason);
+        expect(describedByText(confirm)).toBe(reason);
         fireEvent.click(confirm);
         fireEvent.click(within(dialog).getByRole("button", { name: "Cancel", hidden: true }));
 
@@ -680,6 +682,7 @@ describe("DiffPane", () => {
           const confirm = within(dialog).getByRole("button", { name: "Delete 2 files", hidden: true });
           expect(confirm).toBeDisabled();
           expect(confirm).toHaveAttribute("title", reason);
+          expect(describedByText(confirm)).toBe(reason);
           fireEvent.click(confirm);
 
           expect(onDeleteUntracked).not.toHaveBeenCalled();

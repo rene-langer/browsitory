@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { describe, expect, it, vi } from "vitest";
 import type { RemoteInfo } from "../ipc/RepoClient";
 import { RemoteCredentialsDialog } from "./RemoteCredentialsDialog";
+import { describedByText } from "../test/describedBy";
 
 const origin: RemoteInfo = {
   name: "origin",
@@ -80,6 +81,7 @@ describe("RemoteCredentialsDialog", () => {
     const useAgent = within(dialog).getByRole("button", { name: "Use SSH agent", hidden: true });
     expect(useAgent).toBeDisabled();
     expect(useAgent).toHaveAttribute("title", "A merge is in progress.");
+    expect(describedByText(useAgent)).toBe("A merge is in progress.");
     fireEvent.submit(useAgent.closest("form")!);
     expect(props.onSetAuthMode).not.toHaveBeenCalled();
     expect(props.onClose).not.toHaveBeenCalled();

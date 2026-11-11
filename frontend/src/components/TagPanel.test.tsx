@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { RemoteInfo, TagInfo } from "../ipc/RepoClient";
 import { TagPanel } from "./TagPanel";
+import { describedByText } from "../test/describedBy";
 
 const tag: TagInfo = {
   name: "v1.0.0",
@@ -252,6 +253,31 @@ describe("TagPanel", () => {
     fireEvent.click(within(bar).getByRole("button", { name: "Push" }));
 
     expect(p.onPush).toHaveBeenCalledWith("backup", ["v1.0.0"]);
+  });
+
+  it("keeps the remote picker usable while pushing is blocked: the Push button says why (#748)", () => {
+    renderPanel({ remotes: [origin, backup], pushDisabled: true, operationDisabledReason: "A transfer is in progress." });
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select v1.0.0" }));
+    const bar = screen.getByRole("group", { name: "Selected tags" });
+    const picker = within(bar).getByRole("combobox", { name: "Remote" });
+    expect(picker).toBeEnabled();
+    expect(picker).not.toHaveAttribute("title");
+    expect(describedByText(within(bar).getByRole("button", { name: "Push" }))).toBe("A transfer is in progress.");
+  });
+
+  it("says why an open delete confirmation can't delete once the repository is busy (#748)", () => {
+    const { props: p, rerender } = renderPanel();
+    openMenu("v1.0.0");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete tag…" }));
+    rerender(<TagPanel {...p} pushDisabled operationDisabledReason="A transfer is in progress." />);
+    const dialog = screen.getByRole("dialog", { name: "Delete local tag v1.0.0" });
+    const confirm = within(dialog).getByRole("button", { name: "Delete tag" });
+    expect(confirm).toBeDisabled();
+    expect(describedByText(confirm)).toBe("A transfer is in progress.");
+    expect(within(dialog).getAllByText("A transfer is in progress.")).toHaveLength(1);
+    fireEvent.click(confirm);
+    expect(p.onDelete).not.toHaveBeenCalled();
   });
 
   it("clears the selection, which hides the bar", () => {

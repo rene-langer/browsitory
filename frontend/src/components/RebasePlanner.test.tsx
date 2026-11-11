@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { RebasePlanCommit, RepoClient } from "../ipc/RepoClient";
 import { RebasePlanner } from "./RebasePlanner";
 import { fakeRepoClient } from "../test/fakeRepoClient";
+import { describedByText } from "../test/describedBy";
 
 const TEST_REPO_PATH = "/repo";
 
@@ -55,6 +56,7 @@ describe("RebasePlanner", () => {
     expect(screen.getByText("Start rebase")).toBeDisabled();
     // #521: the reason shows, as a title and as text.
     expect(screen.getByText("Start rebase")).toHaveAttribute("title", "A merge is in progress.");
+    expect(describedByText(screen.getByText("Start rebase"))).toBe("A merge is in progress.");
     expect(screen.getByText("A merge is in progress.")).toBeInTheDocument();
   });
 

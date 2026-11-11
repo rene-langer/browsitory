@@ -8,6 +8,7 @@ import { type MergeExpansion, withExpandedMerges } from "../lib/mergeExpansion";
 import type { VisitKind } from "../lib/navigationHistory";
 import { CommitGraph } from "./CommitGraph";
 import styles from "./CommitGraph.module.css";
+import { describedByText } from "../test/describedBy";
 
 const status: StatusEntry[] = [
   { path: "src/main.rs", oldPath: null, staged: false, kind: "Modified" },
@@ -1507,6 +1508,7 @@ describe("CommitGraph — tag badges", () => {
     const confirm = within(dialog).getByRole("button", { name: "Delete tag" });
     expect(confirm).toBeDisabled();
     expect(confirm).toHaveAttribute("title", "A transfer is in progress.");
+    expect(describedByText(confirm)).toBe("A transfer is in progress.");
     fireEvent.click(confirm);
     expect(onDeleteTag).not.toHaveBeenCalled();
   });

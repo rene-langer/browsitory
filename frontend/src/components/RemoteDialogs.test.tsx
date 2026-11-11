@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { RemoteInfo } from "../ipc/RepoClient";
 import type { RemoteDialog } from "../state/workspaceDialog";
 import { RemoteDialogs } from "./RemoteDialogs";
+import { describedByText } from "../test/describedBy";
 
 type Props = Parameters<typeof RemoteDialogs>[0];
 
@@ -130,6 +131,7 @@ describe("RemoteDialogs", () => {
     const confirm = screen.getByRole("button", { name: "Confirm remove", hidden: true });
     expect(confirm).toBeDisabled();
     expect(confirm).toHaveAttribute("title", "A merge is in progress.");
+    expect(describedByText(confirm)).toBe("A merge is in progress.");
     expect(screen.getByText("A merge is in progress.")).toBeInTheDocument();
     fireEvent.click(confirm);
     expect(base.onRemoveRemote).not.toHaveBeenCalled();
@@ -163,6 +165,7 @@ describe("RemoteDialogs", () => {
       const button = within(dialog).getByRole("button", { name, hidden: true });
       expect(button).toBeDisabled();
       expect(button).toHaveAttribute("title", "A rebase is in progress.");
+      expect(describedByText(button)).toBe("A rebase is in progress.");
     }
     fireEvent.submit(within(dialog).getByLabelText("Access token").closest("form")!);
     expect(base.onSetRemoteAuthMode).not.toHaveBeenCalled();
