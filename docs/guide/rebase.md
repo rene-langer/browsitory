@@ -12,8 +12,11 @@ abort.
 row has an action (Pick, Reword, Edit, Squash, Fixup, Drop) and **Move up**/**Move down**;
 Alt+Up and Alt+Down move the row you are in. **Reword** fills a message field with the commit's
 whole message, body included, for you to edit. With Squash or Fixup the group's first commit
-gets a combined message field. **Start rebase** waits until the commits (and any message being
-reworded) have loaded; if they can't be listed, the planner says why and offers **Retry**.
+gets a combined message field, filled with the whole messages of that commit and of each Squash
+row, bodies included, one after another; a Fixup row's message is left out. Edit it as you like:
+the text you type stays until the group itself changes. **Start rebase** waits until the commits
+and the messages it needs have loaded; if the commits can't be listed, the planner says why and
+offers **Retry**, and a message that can't be read is replaced by its summary, with a note.
 
 **Selecting several commits.** Ctrl/Cmd+click (mouse) toggles individual commits, which is how you
 select non-adjacent ones; Shift+click or Shift+Arrow selects a range. With two or more selected, a

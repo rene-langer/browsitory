@@ -34,15 +34,18 @@ describe("RepoTabs keyboard and ARIA", () => {
     expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-controls", repoPanelId("/repos/b"));
   });
 
-  it("ArrowRight/ArrowLeft move to and activate the neighbouring tab, wrapping", () => {
+  it("ArrowRight/ArrowLeft move the focus to the neighbouring tab, wrapping, without switching (#642)", () => {
     const onSwitchTo = setup();
     fireEvent.keyDown(screen.getByRole("tab", { name: "b" }), { key: "ArrowRight" });
-    expect(onSwitchTo).toHaveBeenLastCalledWith("/repos/c");
     expect(screen.getByRole("tab", { name: "c" })).toHaveFocus();
     fireEvent.keyDown(screen.getByRole("tab", { name: "c" }), { key: "ArrowRight" });
-    expect(onSwitchTo).toHaveBeenLastCalledWith("/repos/a");
+    expect(screen.getByRole("tab", { name: "a" })).toHaveFocus();
     fireEvent.keyDown(screen.getByRole("tab", { name: "a" }), { key: "ArrowLeft" });
-    expect(onSwitchTo).toHaveBeenLastCalledWith("/repos/c");
+    expect(screen.getByRole("tab", { name: "c" })).toHaveFocus();
+    expect(onSwitchTo).not.toHaveBeenCalled();
+    // The focused tab is a button: Enter or Space clicks it, which switches.
+    fireEvent.click(screen.getByRole("tab", { name: "c" }));
+    expect(onSwitchTo).toHaveBeenCalledExactlyOnceWith("/repos/c");
   });
 
   it("Delete closes the focused tab, even when it isn't the active one, and keeps focus in the strip", () => {
@@ -87,11 +90,12 @@ describe("RepoTabs keyboard and ARIA", () => {
     }
   });
 
-  it("Home and End jump to the first and last tab", () => {
+  it("Home and End move the focus to the first and last tab", () => {
     const onSwitchTo = setup();
     fireEvent.keyDown(screen.getByRole("tab", { name: "b" }), { key: "End" });
-    expect(onSwitchTo).toHaveBeenLastCalledWith("/repos/c");
+    expect(screen.getByRole("tab", { name: "c" })).toHaveFocus();
     fireEvent.keyDown(screen.getByRole("tab", { name: "c" }), { key: "Home" });
-    expect(onSwitchTo).toHaveBeenLastCalledWith("/repos/a");
+    expect(screen.getByRole("tab", { name: "a" })).toHaveFocus();
+    expect(onSwitchTo).not.toHaveBeenCalled();
   });
 });

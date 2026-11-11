@@ -44,6 +44,7 @@ import {
 } from "./state/updateCheck";
 import { DiffSettingsProvider } from "./state/DiffSettingsProvider";
 import { useOpenRepos } from "./state/useOpenRepos";
+import { useMountedTabs } from "./state/useMountedTabs";
 import { useTabChangeMarkers } from "./state/useTabChangeMarkers";
 import { useWorkspaces } from "./state/useWorkspaces";
 import styles from "./App.module.css";
@@ -117,6 +118,10 @@ function AppContent({
   // The tab whose "Rename tab…" dialog is open (#625).
   const [renamingTab, setRenamingTab] = useState<string | null>(null);
   const { activePath } = openRepos;
+  const mountedTabs = useMountedTabs(
+    openRepos.openRepos.map((repo) => repo.path),
+    activePath,
+  );
   const renameActiveTab = useCallback(() => setRenamingTab(activePath), [activePath]);
 
   // `RepoPicker` only surfaces errors from its own `pickRepoFolder`/`listRecentRepos` calls, and
@@ -229,9 +234,31 @@ function AppContent({
       });
     });
   }, [reopenClosedRepo]);
+  // In VSCode, Clone… and New repository… run its own Git: Clone and Git: Initialize Repository
+  // (#680), which ask for the URL or folder and offer to open the result themselves.
+  const runHostGitCommand = useCallback(
+    (command: "clone" | "init") => {
+      setPickingRepo(false);
+      client
+        .runHostGitCommand(command)
+        .catch((error: unknown) =>
+          setOpenError({ message: String(error instanceof Error ? error.message : error), path: "" }),
+        );
+    },
+    [client],
+  );
+  const cloneAndInitCommands = useMemo(
+    () =>
+      client.supportsCloneAndInit
+        ? { onCloneRepository: startClone, onNewRepository: startNewRepository }
+        : client.supportsHostGitCommands
+          ? { onCloneRepository: () => runHostGitCommand("clone"), onNewRepository: () => runHostGitCommand("init") }
+          : {},
+    [client.supportsCloneAndInit, client.supportsHostGitCommands, startClone, startNewRepository, runHostGitCommand],
+  );
   const appCommands = useMemo<AppCommands>(
     () => ({
-      ...(client.supportsCloneAndInit ? { onCloneRepository: startClone, onNewRepository: startNewRepository } : {}),
+      ...cloneAndInitCommands,
       onOpenPreferences: openPreferences,
       onOpenThirdPartyLicences: openLicences,
       onOpenUserGuide: openUserGuide,
@@ -240,9 +267,7 @@ function AppContent({
       onCheckForUpdates: checkForUpdates,
     }),
     [
-      client.supportsCloneAndInit,
-      startClone,
-      startNewRepository,
+      cloneAndInitCommands,
       openPreferences,
       openLicences,
       openUserGuide,
@@ -307,7 +332,22 @@ function AppContent({
     [client, reopenClosedTab, canReopenClosedRepo, rootFiles, loadRootFiles],
   );
 
-  const { releaseNotesView, setReleaseNotesView, closeReleaseNotes } = useReleaseNotes(client);
+  // VSCode (#680): an update shows a toast that opens the notes, not a dialog over the editor.
+  const announceUpdate = useMemo(
+    () =>
+      toolHost === "vscode"
+        ? (version: string, showNotes: () => void) =>
+            pushAppToast(`Browsitory was updated to ${version}`, {
+              tone: "info",
+              action: { label: "What’s new", run: showNotes },
+            })
+        : undefined,
+    [toolHost, pushAppToast],
+  );
+  const { releaseNotesView, setReleaseNotesView, closeReleaseNotes, welcome, dismissWelcome } = useReleaseNotes(
+    client,
+    { announce: announceUpdate, repoOpen: openRepos.openRepos.length > 0 },
+  );
 
   // Switches to the other theme; Preferences > Appearance > Theme goes back to System (#691).
   const themeToggle = themeControls && (
@@ -542,6 +582,7 @@ function AppContent({
       {openRepos.openRepos.length === 0 ? (
         <RepoPicker
           client={client}
+          welcome={welcome ? { onDismiss: dismissWelcome, onOpenUserGuide: openUserGuide } : undefined}
           onOpenRepo={openRepoTab}
           onOpenWorkspace={(workspace) => void openRepos.openWorkspace(workspace)}
           workspaces={workspaces.workspaces}
@@ -556,19 +597,17 @@ function AppContent({
           onNewRepository={appCommands?.onNewRepository}
         />
       ) : (
-        // PERF-001: only the active tab's workspace is mounted — an inactive one renders nothing
-        // rather than staying mounted `display: none`. `RepoTabs` above still renders every open
-        // tab (so switching away and back is possible); this just avoids paying N tabs' worth of
-        // steady-state DOM/IPC cost while only one is ever visible. Switching back remounts a
-        // fresh `RepoWorkspace`, which re-fetches its own status/graph on mount — already the
-        // existing behavior for a newly-opened repo, so no new loading-state code is needed.
+        // The last few shown tabs stay mounted (#642, `useMountedTabs`): an inactive one is hidden
+        // with `display: none` and keeps its view, so switching back shows it as it was. Older
+        // tabs unmount (PERF-001: N tabs' worth of DOM and IPC for one visible view), and a
+        // remount reads the repository again.
         openRepos.openRepos
-          .filter((repo) => repo.path === openRepos.activePath)
+          .filter((repo) => mountedTabs.includes(repo.path))
           .map((repo) => (
             <RepoWorkspace
               key={repo.path}
               repoPath={repo.path}
-              active
+              active={repo.path === openRepos.activePath}
               client={client}
               onOpenRepoTab={openRepoTab}
               onBusyChange={onBusyChange}

@@ -151,6 +151,33 @@ as props. The workspace renders its dialogs in `WorkspaceDialogs`, outside the s
 collapsed sidebar stays mounted but `hidden`, and a modal opened inside it would be invisible yet
 leave the page inert.
 
+### Kept tabs and changes from outside the app
+
+`App` keeps the workspaces of the last `MOUNTED_TABS` (4) shown tabs mounted
+(`frontend/src/state/useMountedTabs.ts`, #642); an inactive one is hidden with `display: none`.
+Everything in a workspace that listens globally (shortcuts, palette and drop requests, the focus
+checks below, automatic fetch) is gated by its `active` prop, so a hidden workspace never reacts.
+A hidden element has no width, so `useNarrowLayout` and `SplitView` ignore a zero width instead of
+collapsing the sidebar, and `useScrollMemory` puts the lists' scroll positions back when the tab is
+shown again. An older tab unmounts (PERF-001's reason: one visible view shouldn't cost N tabs' DOM
+and IPC) and reads the repository again when it mounts. The tab strip activates manually: arrow
+keys only move the focus.
+
+Changes made outside the app (#650) are found by polling a change stamp, not by a file system
+watcher: `git_core::change_stamp` hashes what the app shows (the work tree as `status` reads it,
+with each changed file's size and modification time; the index entries without their stat data;
+HEAD, references, the stash reflog, the configuration, the files of an operation in progress and
+each linked worktree's HEAD). Ignored files and the rest of the git folder (objects, reflogs,
+`FETCH_HEAD`) don't count. `get_change_stamp` is an ordinary worker read on both transports.
+`useAppState.refresh()` reads the stamp before its other reads (a change landing during them then
+differs), and `checkForChanges()` refreshes only when the current stamp differs from that one, so
+the app's own action, whose refresh already read the new stamp, causes no second refresh.
+`useExternalChanges` calls it while the tab is shown, the app visible and nothing of the tab
+running: every 3 s, stretched to ten times the last check's duration (at most 60 s), and at once
+on window focus, on becoming visible again (the VSCode panel's visibility included) and when the
+tab is shown. At most one check runs at a time, and none while a refresh runs. A push-based
+watcher would need the `notify` crate, whose licence (CC0-1.0) is outside the policy (#756).
+
 ### Who owns a dialog's open state
 
 Every dialog has exactly one owner, chosen by who opens and closes it (#493):
@@ -2400,7 +2427,10 @@ only `error`.
     whose text may already match something else.
   - Shared spec helpers (#500): specs run the git CLI only through `e2e/support/git.ts`
     (`git(cwd, ...args)` returns trimmed output and throws with git's stderr; `gitIn(repo)`
-    binds a repository; `gitWith` keeps output untrimmed or discards it). The child inherits
+    binds a repository; `gitWith` keeps output untrimmed or discards it). The VSCode specs
+    use the same runner (#524): it lives in `extension/e2e/src/support/git.ts` (Node built-ins
+    only, for the same `rootDir` reason as `fixtureRepo.ts` below), and `e2e/support/git.ts`
+    re-exports it next to its WebDriver waits. The child inherits
     the runner's environment, so the screenshot run's isolated HOME and git config reach it.
     `wdio.conf.ts` sets `waitforTimeout` to `UI_TIMEOUT` (`e2e/support/timeouts.ts`, 10 s), so
     a wait passes `timeout` only when it needs longer, as a named constant (`SLOW_UI_TIMEOUT`,
@@ -2451,6 +2481,15 @@ only `error`.
   artifact. Agents triage that comment (see `AGENTS.md`'s "Testing conventions"). To
   reproduce locally: `git diff origin/main...HEAD > pr.diff && cargo mutants --in-diff pr.diff
   --package git-core --package repo-service`. Frontend and extension code are not covered.
+- Removed assertions (`ci.yml`'s `removed-assertions` job, pull requests and dispatched runs
+  only, informational, #310): `scripts/report-removed-assertions.py` reads the PR's diff and
+  lists every assertion line it removes or rewrites in a test file (`assert*!` in `crates/`,
+  `expect(`/`assert` in `*.test.*` and `*.spec.*`, asserts in `scripts/test_*.py`; only a
+  multi-line assertion's first line). A changed assertion shows as removed and added. Like the
+  mutants report it posts one sticky comment (`<!-- removed-assertions -->`, created only when
+  something is found) and the run summary, and never fails. It covers what mutation testing
+  can't see: a test loosened in the same PR as the code. Agents answer it in the PR (see
+  `AGENTS.md`'s "Task workflow").
 
 ### Credential release acceptance
 

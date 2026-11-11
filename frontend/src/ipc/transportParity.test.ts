@@ -73,6 +73,12 @@ const VSCODE_UNSUPPORTED = [
 const TAURI_NO_COMMAND = ["logFrontendError"] as const satisfies readonly Method[];
 
 /**
+ * VSCode only (#680): the picker's Clone… and New repository… buttons run VSCode's own Git
+ * commands there; the desktop app clones and initializes itself, so this rejects without a call.
+ */
+const TAURI_UNSUPPORTED = ["runHostGitCommand"] as const satisfies readonly Method[];
+
+/**
  * Sidecar methods the webview never calls. The extension host itself calls them, to read file
  * versions for VSCode's diff and merge editors, to check a merge target before it opens the
  * merge editor, and to write a file version to the path picked in its save dialog.
@@ -142,7 +148,7 @@ describe("transport parity", () => {
     const { tauriRepoClient } = await import("./tauriRepoClient");
     tauriCalls = singleCalls(
       await backendCalls(tauriRepoClient, () => invoked),
-      [...SUBSCRIPTIONS, ...TAURI_NO_COMMAND],
+      [...SUBSCRIPTIONS, ...TAURI_NO_COMMAND, ...TAURI_UNSUPPORTED],
     );
     tauriNames = namesOf(tauriCalls);
 
@@ -224,6 +230,6 @@ describe("transport parity", () => {
     const tauriOnly = [...tauriNames.keys()].filter((method) => !vscodeNames.has(method));
     const vscodeOnly = [...vscodeNames.keys()].filter((method) => !tauriNames.has(method));
     expect(sorted(tauriOnly)).toEqual(sorted(VSCODE_UNSUPPORTED));
-    expect(sorted(vscodeOnly)).toEqual(sorted(TAURI_NO_COMMAND));
+    expect(sorted(vscodeOnly)).toEqual(sorted([...TAURI_NO_COMMAND, ...TAURI_UNSUPPORTED]));
   });
 });

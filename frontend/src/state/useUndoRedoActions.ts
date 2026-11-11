@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useReducer, useRef } from "react";
 import type { UseAppStateResult } from "./useAppState";
 import type { PushToast, ToastAction } from "./useToasts";
 
@@ -14,9 +14,16 @@ export const STALE_UNDO_MESSAGE =
 export function useUndoRedoActions(appState: UseAppStateResult, active: boolean, pushToast: PushToast) {
   const { undo: undoStep, redo: redoStep, refreshUndoState } = appState;
   const { pending, transfer } = appState.state;
-  // The toast stack is app-level and outlives this workspace (tab switch unmounts it), so a
-  // toast action checks it's still mounted and idle, read through refs at click time.
+  // The toast stack is app-level and outlives this workspace (a tab switch hides it, and later
+  // unmounts it, #642), so a toast action checks it's still mounted, shown and idle, read
+  // through refs at click time. The refs (and the offers' versions below) are set in layout
+  // effects, which run before the commit that shows a toast ends: a passive effect runs later,
+  // and a click in between found the toast's own Undo stale or busy (#769).
   const mounted = useRef(true);
+  const shown = useRef(active);
+  useLayoutEffect(() => {
+    shown.current = active;
+  }, [active]);
   const busy = useRef(false);
   useEffect(() => {
     mounted.current = true;
@@ -24,7 +31,7 @@ export function useUndoRedoActions(appState: UseAppStateResult, active: boolean,
       mounted.current = false;
     };
   }, []);
-  useEffect(() => {
+  useLayoutEffect(() => {
     busy.current = pending || transfer !== null;
   }, [pending, transfer]);
   // Each success toast offers the opposite step.
@@ -38,7 +45,7 @@ export function useUndoRedoActions(appState: UseAppStateResult, active: boolean,
           action: {
             label: kind === "undo" ? "Redo" : "Undo",
             run: () => {
-              if (mounted.current && !busy.current) run(other);
+              if (mounted.current && shown.current && !busy.current) run(other);
             },
           },
         });
@@ -58,14 +65,14 @@ export function useUndoRedoActions(appState: UseAppStateResult, active: boolean,
   const undoVersion = useRef({ count: 0, undo: undoLabel, redo: redoLabel });
   const offers = useRef<{ version: number | null }[]>([]);
   const [, commitOffers] = useReducer((n: number) => n + 1, 0);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const seen = undoVersion.current;
     if (seen.undo !== undoLabel || seen.redo !== redoLabel) {
       undoVersion.current = { count: seen.count + 1, undo: undoLabel, redo: redoLabel };
     }
   }, [undoLabel, redoLabel]);
   const settled = !pending && transfer === null;
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (offers.current.length === 0 || !settled) return;
     for (const offer of offers.current) offer.version = undoVersion.current.count;
     offers.current = [];
@@ -73,7 +80,7 @@ export function useUndoRedoActions(appState: UseAppStateResult, active: boolean,
   // Read at click time, so `undoToastAction` stays stable: the outcome toasts' effects list it,
   // and a new identity would show their toast again.
   const latest = useRef({ pushToast, runUndoStep });
-  useEffect(() => {
+  useLayoutEffect(() => {
     latest.current = { pushToast, runUndoStep };
   }, [pushToast, runUndoStep]);
   /** The "Undo" for the toast of an operation that just recorded an undo step. */
@@ -84,7 +91,7 @@ export function useUndoRedoActions(appState: UseAppStateResult, active: boolean,
     return {
       label: "Undo",
       run: () => {
-        if (!mounted.current || busy.current) return;
+        if (!mounted.current || !shown.current || busy.current) return;
         if (offer.version !== undoVersion.current.count) {
           latest.current.pushToast(STALE_UNDO_MESSAGE, { tone: "info" });
           return;

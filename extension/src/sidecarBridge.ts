@@ -31,7 +31,15 @@ export const NATIVE_METHODS: ReadonlySet<string> = new Set([
   // "Save as patch…" / "Apply patch…" (#448): the dialogs and the file I/O.
   "save_patch_file",
   "open_patch_file",
+  // The picker's Clone… and New repository… buttons (#680): VSCode's own Git commands.
+  "run_vscode_git_command",
 ]);
+
+/** The VSCode Git commands the webview may run (#680), by the name it sends. */
+const VSCODE_GIT_COMMANDS: Readonly<Record<string, string>> = {
+  clone: "git.clone",
+  init: "git.init",
+};
 
 /** The largest patch file "Apply patch…" reads. */
 const MAX_PATCH_FILE_BYTES = 64 * 1024 * 1024;
@@ -124,6 +132,8 @@ export interface SidecarBridgeDependencies {
     theirs: string;
     output: string;
   }) => PromiseLike<boolean>;
+  /** Runs a VSCode command (`vscode.commands.executeCommand`). */
+  readonly executeCommand: (command: string) => PromiseLike<unknown>;
 }
 
 class InvalidParamsError extends Error {}
@@ -681,6 +691,18 @@ export class SidecarBridge {
             throw new Error(`Couldn't read ${file.fsPath}: the file is larger than 64 MB`);
           }
           result = { base64: Buffer.from(bytes).toString("base64") };
+          break;
+        }
+        case "run_vscode_git_command": {
+          const params = requireParams(request, { command: "string" });
+          const name = params["command"] as string;
+          const command = Object.hasOwn(VSCODE_GIT_COMMANDS, name) ? VSCODE_GIT_COMMANDS[name] : undefined;
+          if (command === undefined) {
+            throw new InvalidParamsError(`run_vscode_git_command can't run ${name}`);
+          }
+          // VSCode asks for the URL or folder and offers to open the result itself.
+          await this.dependencies.executeCommand(command);
+          result = null;
           break;
         }
         default:

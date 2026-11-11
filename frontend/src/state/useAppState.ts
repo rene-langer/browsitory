@@ -214,6 +214,10 @@ export interface AppStateOwnMembers {
   collapseMerge(mergeId: string): void;
   refresh(): Promise<void>;
   refreshUndoState(): Promise<void>;
+  // Refreshes when the repository's change stamp differs from the one the last refresh read
+  // (#650): a change made outside the app. Does nothing while a refresh runs or before the first
+  // one, or when `wanted()` turns false while the stamp is read (an action started meanwhile).
+  checkForChanges(wanted?: () => boolean): Promise<void>;
   // Clears `state.error` without waiting for the next successful action of the same kind — the
   // global banner's dismiss control (issue #30/UX-002). See `RepoWorkspace.tsx`.
   dismissError(): void;
@@ -356,14 +360,33 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
   // ticket; a result is applied only when no read sent after it has been applied already.
   const readOrder = useRef({ issued: 0, refreshApplied: 0, undoApplied: 0 });
   const takeReadTicket = useCallback(() => ++readOrder.current.issued, []);
+  // The change stamp (#650) the newest applied refresh read, refreshes still running, and
+  // whether one has finished: `checkForChanges` compares against the first and waits for the
+  // others.
+  const changeStamp = useRef<{ stamp: string | null; running: number; settled: boolean }>({
+    stamp: null,
+    running: 0,
+    settled: false,
+  });
   const refresh = useCallback(async () => {
     let ticket = 0;
+    const tracking = changeStamp.current;
+    tracking.running += 1;
+    // Read before the reads below are sent: a change landing while they run then differs from
+    // this stamp, and the next check shows it. Optional: a failed read only means the next
+    // check refreshes once more.
+    const stampRead = Promise.resolve()
+      .then(() => client.getChangeStamp(repoPath))
+      .catch(() => null);
+    let stamp: string | null = null;
     try {
-      const [local, remote, collapseMerges] = await Promise.all([
+      const [local, remote, collapseMerges, readStamp] = await Promise.all([
         client.getGraphBranchSelection(repoPath),
         client.getGraphRemoteBranchSelection(repoPath),
         client.getGraphCollapseMerges(repoPath),
+        stampRead,
       ]);
+      stamp = readStamp;
       const limit = graphLimit.current;
       ticket = takeReadTicket();
       const [status, graphRows, branches, worktrees, submodules, reflogRefs, remotes, tags, upstream, stashes, mergeMessage, forgeRepositories, headInfo, undoState] =
@@ -416,6 +439,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         return;
       }
       order.refreshApplied = ticket;
+      tracking.stamp = stamp;
       const undoIsNewest = ticket > order.undoApplied;
       if (undoIsNewest) order.undoApplied = ticket;
       const own = refreshError.take();
@@ -479,14 +503,37 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       }
       const failure = failureError(err);
       refreshError.set(failure.error);
+      // Kept even though the reads failed: the next check must not retry (and show the same
+      // error) every few seconds. The next change, or Refresh, reloads.
+      tracking.stamp = stamp;
       setState((prev) => ({
         ...prev,
         ...failure,
         refreshGeneration: prev.refreshGeneration + 1,
         loaded: true,
       }));
+    } finally {
+      tracking.running -= 1;
+      tracking.settled = true;
     }
   }, [client, repoPath, refreshError, setState, takeReadTicket]);
+
+  const checkForChanges = useCallback(
+    async (wanted: () => boolean = () => true) => {
+      const tracking = changeStamp.current;
+      if (tracking.running > 0 || !tracking.settled) return;
+      let stamp: string;
+      try {
+        stamp = await client.getChangeStamp(repoPath);
+      } catch {
+        // The repository went away or the backend refused: quiet, like a background fetch.
+        return;
+      }
+      if (tracking.running > 0 || stamp === tracking.stamp || !wanted()) return;
+      await refresh();
+    },
+    [client, repoPath, refresh],
+  );
 
   // Cheap focus-time re-check: another process (CLI, the other frontend) may have changed what
   // undo would do. Errors are ignored — the next full refresh reports them. Ordered with
@@ -703,6 +750,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     collapseMerge,
     refresh,
     refreshUndoState,
+    checkForChanges,
     dismissError,
     ...dialogs,
     ...staging,

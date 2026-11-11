@@ -102,6 +102,40 @@ describe("global shortcuts for the core loop (#646)", () => {
     await waitFor(() => expect(stageFile).toHaveBeenCalledWith("/repos/a", "a.txt"));
   });
 
+  // #642: the last few tabs stay mounted, hidden; their global listeners must stay quiet.
+  it("runs a shortcut only in the shown tab while another tab's workspace is mounted in the background", async () => {
+    const stageFile = vi.fn(async () => {});
+    const getStatus = vi.fn(async (_path: string) => [change]);
+    const view = await renderApp(
+      shortcutClient({
+        stageFile,
+        getStatus,
+        listOpenRepos: async () => ({
+          entries: [
+            { path: "/repos/a", workspaceId: null },
+            { path: "/repos/b", workspaceId: null },
+          ],
+          activePath: "/repos/a",
+        }),
+      }),
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "b" }));
+    await waitFor(() => expect(view.container.querySelectorAll("[data-active-repo]")).toHaveLength(2));
+    await waitFor(() => expect(getStatus).toHaveBeenCalledWith("/repos/b"));
+    await screen.findByRole("listbox", { name: "Unstaged changes" });
+
+    fireEvent.keyDown(window, { key: "A", code: "KeyA", ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(stageFile).toHaveBeenCalledWith("/repos/b", "a.txt"));
+    expect(stageFile).not.toHaveBeenCalledWith("/repos/a", expect.anything());
+
+    const statusReadsOf = (path: string) => getStatus.mock.calls.filter(([repo]) => repo === path).length;
+    const readsOfA = statusReadsOf("/repos/a");
+    const readsOfB = statusReadsOf("/repos/b");
+    fireEvent.keyDown(window, { key: "F5" });
+    await waitFor(() => expect(statusReadsOf("/repos/b")).toBeGreaterThan(readsOfB));
+    expect(statusReadsOf("/repos/a")).toBe(readsOfA);
+  });
+
   it("goes to the commit message on Alt+C, also when Option typed another character", async () => {
     await renderApp(shortcutClient());
     const message = await screen.findByRole("textbox", { name: /Commit message/ });

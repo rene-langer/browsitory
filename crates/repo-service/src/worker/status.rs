@@ -14,6 +14,10 @@ pub(super) fn get_status(
     let _ = reply.send(git_core::status::status(repo).map_err(ErrorDto::from_error));
 }
 
+pub(super) fn get_change_stamp(repo: &git2::Repository, reply: Sender<Result<String, ErrorDto>>) {
+    let _ = reply.send(git_core::change_stamp::change_stamp(repo).map_err(ErrorDto::from_error));
+}
+
 pub(super) fn get_commit_graph(
     repo: &git2::Repository,
     limit: usize,
@@ -423,6 +427,11 @@ pub(super) fn commit(
 impl WorkerHandle {
     pub fn get_status(&self) -> Result<Vec<StatusEntry>, ErrorDto> {
         self.request(|tx| Command::GetStatus { reply: tx })
+    }
+
+    /// The repository's change stamp (#650); see `git_core::change_stamp`.
+    pub fn get_change_stamp(&self) -> Result<String, ErrorDto> {
+        self.request(|tx| Command::GetChangeStamp { reply: tx })
     }
 
     pub fn get_commit_graph(

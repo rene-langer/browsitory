@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
 import * as vscode from "vscode";
+import { gitIn } from "../support/git";
 import { connectToWebview } from "../support/webviewPage";
 
 describe("Browsitory VSCode extension line staging", () => {
@@ -10,7 +10,7 @@ describe("Browsitory VSCode extension line staging", () => {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) throw new Error("no workspace folder open");
     const cwd = workspaceFolder.uri.fsPath;
-    const git = (...args: string[]) => execFileSync("git", args, { cwd }).toString();
+    const git = gitIn(cwd, { trim: false });
     const file = "vscode-lines.txt";
     const target = vscode.Uri.joinPath(workspaceFolder.uri, file);
 

@@ -60,7 +60,7 @@ describe("Documentation screenshots", () => {
 
     // Open the demo from the picker's recent list, then close the E2E fixture's tab.
     await click('button[aria-label="Open another repository"]');
-    await click(`li*=${DEMO_REPO_PATH}`);
+    await click(`button*=${DEMO_REPO_PATH}`);
     await browser.waitUntil(async () => (await (await $$('[role="tab"]')).length) === 2, {
       timeoutMsg: "the demo repository did not open in a second tab",
     });

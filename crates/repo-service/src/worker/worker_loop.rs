@@ -166,15 +166,17 @@ where
         if !policy.locks_state {
             return LockOutcome::Unlocked;
         }
-        match self.state_lock.acquire_with(
-            self.contention
-                .wait(std::time::Instant::now(), policy.busy.is_some()),
-            || {
-                if let Some(pause) = &self.pause {
-                    pause.pause_here(PausePoint::LockWait);
-                }
-            },
-        ) {
+        let wait = self
+            .contention
+            .wait(std::time::Instant::now(), policy.busy.is_some());
+        if let Some(pause) = &self.pause {
+            pause.record_lock_wait(wait);
+        }
+        match self.state_lock.acquire_with(wait, || {
+            if let Some(pause) = &self.pause {
+                pause.pause_here(PausePoint::LockWait);
+            }
+        }) {
             state_lock::Acquire::Held(guard) => {
                 self.contention.held();
                 LockOutcome::Held(guard)

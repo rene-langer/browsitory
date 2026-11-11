@@ -28,11 +28,13 @@ window has three columns:
   bar and **Cancel**, or, when another action takes more than a moment, "Working…";
 - **Stash** (see [Stashes](stashes.md)), **Apply patch…** (see [Patches](patches.md#apply-a-patch-file)),
   **Undo** and **Redo** (see [Undo and redo](undo-redo.md)), and **Refresh**, which reloads the
-  repository's state;
+  repository's state (changes made outside Browsitory also show by themselves, see
+  [Changes made outside Browsitory](tabs.md#changes-made-outside-browsitory));
 - when the repository was last fetched.
 
-While a repository opens, or after you switch tabs, the graph and the Branches section show grey
-placeholder rows until the repository has been read.
+While a repository opens, or when you switch to a tab you haven't looked at for a while (see
+[Multiple repositories](tabs.md)), the graph and the Branches section show grey placeholder rows
+until the repository has been read.
 
 **When a button can't run.** A toolbar button that can't run now, such as **Push** while a
 merge is in progress, is dimmed; point at it or move the keyboard focus to it and a note under it
@@ -121,7 +123,9 @@ Each change shows at once, without a restart:
 - **Tab size**: how many columns a tab character takes in file content, from 1 to 16 (4 at
   first).
 - The sparkle button (**What's new**) opens the **Release notes**: what changed in each version. They also open
-  by themselves the first time you start a new version. The buttons at the bottom stay in view
+  by themselves the first time you start a new version (in VSCode, a notice says Browsitory was
+  updated, and its **What’s new** button opens them). The very first start shows a welcome in
+  the repository picker instead (see [Open, clone and create repositories](opening-repositories.md)). The buttons at the bottom stay in view
   while you scroll: **Close** (or Escape, or a click outside the dialog) closes them, and
   **User guide** opens this guide in your browser.
 

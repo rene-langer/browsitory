@@ -21,6 +21,8 @@ export function unused(method = "this method"): never {
  */
 export const EMPTY_RESULTS: Partial<RepoClient> = {
   listRecentRepos: async () => [],
+  listMissingRecentRepos: async () => [],
+  removeRecentRepo: async () => {},
   getAppVersion: async () => "0.0.0",
   getLastSeenVersion: async () => "0.0.0",
   setLastSeenVersion: async () => {},
@@ -34,6 +36,7 @@ export const EMPTY_RESULTS: Partial<RepoClient> = {
   updateWorkspace: async () => {},
   deleteWorkspace: async () => {},
   getGraphBranchSelection: async () => null,
+  getChangeStamp: async () => "stamp",
   getGraphRemoteBranchSelection: async () => null,
   getGraphCollapseMerges: async () => false,
   setGraphCollapseMerges: async () => {},
@@ -133,7 +136,7 @@ function throwingStub(method: string): (...args: unknown[]) => unknown {
 /**
  * A `RepoClient` for tests: each method is the one in `overrides`, or else the `fallback`'s answer
  * (see {@link FakeFallback}). It is a `Proxy`, so a method added to `RepoClient` needs no edit
- * here. `supportsCloneAndInit` defaults to `false`.
+ * here. `supportsCloneAndInit` and `supportsHostGitCommands` default to `false`.
  *
  * Spreading the result (`{ ...fakeRepoClient() }`) copies only the overrides; pass every method
  * through `overrides` instead.
@@ -146,7 +149,7 @@ export function fakeRepoClient(overrides: Partial<RepoClient> = {}, fallback: Fa
   return new Proxy(target, {
     get(obj, key, receiver) {
       if (typeof key !== "string" || key in obj || NOT_METHODS.has(key)) return Reflect.get(obj, key, receiver);
-      if (key === "supportsCloneAndInit") return false;
+      if (key === "supportsCloneAndInit" || key === "supportsHostGitCommands") return false;
       if (fallback === "empty" && key in EMPTY_RESULTS) return EMPTY_RESULTS[key as keyof RepoClient];
       if (!stubs.has(key)) stubs.set(key, throwingStub(key));
       return stubs.get(key);

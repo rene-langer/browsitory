@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { RepoClient } from "../ipc/RepoClient";
 import { RepoPicker } from "./RepoPicker";
@@ -111,6 +111,138 @@ describe("RepoPicker", () => {
   });
 });
 
+describe("RepoPicker recent repositories (#690)", () => {
+  it("removes a recent repository from the list without opening it", async () => {
+    const removeRecentRepo = vi.fn(async () => {});
+    const onOpenRepo = vi.fn();
+    const client = fakeClient({ listRecentRepos: async () => ["/repo/a", "/repo/b"], removeRecentRepo });
+    render(<RepoPicker client={client} onOpenRepo={onOpenRepo} {...workspaceProps()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Remove a from recent repositories" }));
+
+    await waitFor(() => expect(screen.queryByText("/repo/a")).toBeNull());
+    expect(removeRecentRepo).toHaveBeenCalledWith("/repo/a");
+    expect(screen.getByText("/repo/b")).toBeInTheDocument();
+    expect(onOpenRepo).not.toHaveBeenCalled();
+  });
+
+  it("keeps the entry and shows the error when removing fails", async () => {
+    const client = fakeClient({
+      listRecentRepos: async () => ["/repo/a"],
+      removeRecentRepo: async () => {
+        throw new Error("config read-only");
+      },
+    });
+    render(<RepoPicker client={client} onOpenRepo={vi.fn()} {...workspaceProps()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Remove a from recent repositories" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("config read-only");
+    expect(screen.getByText("/repo/a")).toBeInTheDocument();
+  });
+
+  it("marks a recent repository whose folder is gone, and still opens it on click", async () => {
+    const onOpenRepo = vi.fn();
+    const client = fakeClient({
+      listRecentRepos: async () => ["/repo/a", "/repo/gone"],
+      listMissingRecentRepos: async () => ["/repo/gone"],
+    });
+    render(<RepoPicker client={client} onOpenRepo={onOpenRepo} {...workspaceProps()} />);
+
+    const gone = await screen.findByRole("button", { name: /^gone Folder not found/ });
+    expect(screen.getByRole("button", { name: /^a\/repo\/a$/ })).toBeInTheDocument();
+    expect(screen.getAllByText("Folder not found")).toHaveLength(1);
+    fireEvent.click(gone);
+    expect(onOpenRepo).toHaveBeenCalledWith("/repo/gone");
+  });
+
+  it("lists every recent repository as present when the missing check fails", async () => {
+    const client = fakeClient({
+      listRecentRepos: async () => ["/repo/a"],
+      listMissingRecentRepos: async () => {
+        throw new Error("no");
+      },
+    });
+    render(<RepoPicker client={client} onOpenRepo={vi.fn()} {...workspaceProps()} />);
+
+    expect(await screen.findByText("/repo/a")).toBeInTheDocument();
+    expect(screen.queryByText("Folder not found")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("filters recent repositories and workspaces by name or path", async () => {
+    const client = fakeClient({ listRecentRepos: async () => ["/code/widget", "/code/gadget"] });
+    const aliases = new Map([["/code/gadget", "Gizmo"]]);
+    render(
+      <RepoPicker
+        client={client}
+        onOpenRepo={vi.fn()}
+        {...workspaceProps()}
+        aliases={aliases}
+        workspaces={[
+          { id: "w1", name: "Widgets", rootPath: "/ws/one", memberPaths: [] },
+          { id: "w2", name: "Tools", rootPath: "/ws/two", memberPaths: [] },
+        ]}
+      />,
+    );
+    await screen.findByText("/code/widget");
+    const filter = screen.getByRole("searchbox", { name: "Filter repositories and workspaces" });
+
+    fireEvent.change(filter, { target: { value: "WIDG" } });
+    expect(screen.getByText("/code/widget")).toBeInTheDocument();
+    expect(screen.queryByText("/code/gadget")).toBeNull();
+    expect(screen.getByText("Widgets")).toBeInTheDocument();
+    expect(screen.queryByText("Tools")).toBeNull();
+
+    fireEvent.change(filter, { target: { value: "gizmo" } });
+    expect(screen.getByText("/code/gadget")).toBeInTheDocument();
+    expect(screen.getAllByText("Nothing matches “gizmo”.")).toHaveLength(1);
+
+    fireEvent.change(filter, { target: { value: "nothing" } });
+    expect(screen.getAllByText("Nothing matches “nothing”.")).toHaveLength(2);
+  });
+
+  it("shows no filter while there is nothing to filter", async () => {
+    render(<RepoPicker client={fakeClient()} onOpenRepo={vi.fn()} {...workspaceProps()} />);
+    await screen.findByText("No recent repositories");
+    expect(screen.queryByRole("searchbox")).toBeNull();
+  });
+});
+
+describe("RepoPicker welcome (#688)", () => {
+  it("leads with the welcome, its start actions, the palette key and the user guide", async () => {
+    const onDismiss = vi.fn();
+    const onOpenUserGuide = vi.fn();
+    const onCloneRepository = vi.fn();
+    render(
+      <RepoPicker
+        client={fakeClient()}
+        onOpenRepo={vi.fn()}
+        {...workspaceProps()}
+        onCloneRepository={onCloneRepository}
+        welcome={{ onDismiss, onOpenUserGuide }}
+      />,
+    );
+    const welcome = screen.getByRole("region", { name: "Welcome to Browsitory" });
+    // The start actions sit in the welcome, not twice on the page.
+    expect(screen.getAllByRole("button", { name: "Open folder" })).toHaveLength(1);
+    fireEvent.click(within(welcome).getByRole("button", { name: "Clone…" }));
+    expect(onCloneRepository).toHaveBeenCalledOnce();
+    expect(within(welcome).getByText(/to search every command/)).toBeInTheDocument();
+    fireEvent.click(within(welcome).getByRole("button", { name: "User guide" }));
+    expect(onOpenUserGuide).toHaveBeenCalledOnce();
+    fireEvent.click(within(welcome).getByRole("button", { name: "Dismiss" }));
+    expect(onDismiss).toHaveBeenCalledOnce();
+    await screen.findByText("No recent repositories");
+  });
+
+  it("shows no welcome without the prop", async () => {
+    render(<RepoPicker client={fakeClient()} onOpenRepo={vi.fn()} {...workspaceProps()} />);
+    await screen.findByText("No recent repositories");
+    expect(screen.queryByRole("region", { name: "Welcome to Browsitory" })).toBeNull();
+  });
+});
+
 describe("RepoPicker workspaces", () => {
   const workspace = {
     id: "ws-1",
@@ -185,7 +317,7 @@ describe("RepoPicker workspaces", () => {
     await waitFor(() => expect(onDeleteWorkspace).toHaveBeenCalledWith("ws-1"));
   });
 
-  it("Open workspace root shows the WorkspaceEditor in create mode", () => {
+  it("New workspace… shows the WorkspaceEditor in create mode", () => {
     render(
       <RepoPicker
         client={fakeClient({ listRecentRepos: async () => [] })}
@@ -201,7 +333,7 @@ describe("RepoPicker workspaces", () => {
       />,
     );
 
-    fireEvent.click(screen.getByText("Open workspace root"));
+    fireEvent.click(screen.getByRole("button", { name: "New workspace…" }));
 
     expect(screen.getByText("New workspace")).toBeInTheDocument();
   });
@@ -229,7 +361,7 @@ describe("RepoPicker workspaces", () => {
       />,
     );
 
-    fireEvent.click(screen.getByText("Open workspace root"));
+    fireEvent.click(screen.getByRole("button", { name: "New workspace…" }));
     fireEvent.click(screen.getByText("Choose root folder"));
     await waitFor(() => expect(screen.getAllByRole("checkbox")).toHaveLength(2));
     fireEvent.click(screen.getByText("Save"));

@@ -1,7 +1,7 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import * as vscode from "vscode";
+import { gitIn } from "../support/git";
 import { connectToWebview } from "../support/webviewPage";
 
 describe("Browsitory VSCode extension undo", () => {
@@ -11,7 +11,7 @@ describe("Browsitory VSCode extension undo", () => {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) throw new Error("no workspace folder open");
     const cwd = workspaceFolder.uri.fsPath;
-    const git = (...args: string[]) => execFileSync("git", args, { cwd }).toString().trim();
+    const git = gitIn(cwd);
     const file = "vscode-undo.txt";
     const summary = "vscode-e2e: undo me";
     const tipBefore = git("rev-parse", "HEAD");

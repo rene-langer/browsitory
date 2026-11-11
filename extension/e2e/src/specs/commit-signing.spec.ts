@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as vscode from "vscode";
+import { gitIn } from "../support/git";
 import { connectToWebview } from "../support/webviewPage";
 
 describe("Browsitory VSCode extension commit signing", () => {
@@ -16,7 +17,7 @@ describe("Browsitory VSCode extension commit signing", () => {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) throw new Error("no workspace folder open");
     const cwd = workspaceFolder.uri.fsPath;
-    const git = (...args: string[]) => execFileSync("git", args, { cwd }).toString().trim();
+    const git = gitIn(cwd);
     const file = "vscode-signing.txt";
     const summary = "vscode-e2e: signed commit";
     const configKeys = ["commit.gpgSign", "gpg.format", "user.signingKey", "gpg.ssh.allowedSignersFile"];

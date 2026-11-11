@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
 import * as vscode from "vscode";
+import { gitIn } from "../support/git";
 import { connectToWebview } from "../support/webviewPage";
 
 describe("Browsitory VSCode extension cherry-pick", () => {
@@ -10,7 +10,7 @@ describe("Browsitory VSCode extension cherry-pick", () => {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) throw new Error("no workspace folder open");
     const cwd = workspaceFolder.uri.fsPath;
-    const git = (...args: string[]) => execFileSync("git", args, { cwd }).toString().trim();
+    const git = gitIn(cwd);
 
     const baseBranch = git("rev-parse", "--abbrev-ref", "HEAD");
     git("checkout", "-b", "vscode-e2e-pick-source");

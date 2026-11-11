@@ -142,7 +142,8 @@ export function SplitView({
     if (root === null || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver((entries) => {
       const entry = entries[entries.length - 1];
-      if (entry !== undefined) setContainerWidth(entry.contentRect.width);
+      // No width at all: hidden (a tab in the background, #642), which says nothing about room.
+      if (entry !== undefined && entry.contentRect.width > 0) setContainerWidth(entry.contentRect.width);
     });
     observer.observe(root);
     return () => observer.disconnect();

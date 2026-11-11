@@ -72,8 +72,8 @@ pub use search::{cancel_search, search_commits};
 pub use stash::{apply_stash, drop_stash, get_stash_files, list_stashes, pop_stash, save_stash};
 pub use status::{
     clear_graph_branch_selection, clear_graph_remote_branch_selection, commit,
-    discard_all_unstaged, discard_file, discard_hunk, discard_lines, get_blame, get_commit_details,
-    get_commit_diff, get_commit_files, get_commit_graph, get_commit_message,
+    discard_all_unstaged, discard_file, discard_hunk, discard_lines, get_blame, get_change_stamp,
+    get_commit_details, get_commit_diff, get_commit_files, get_commit_graph, get_commit_message,
     get_commit_rename_diff, get_commit_signature, get_commit_stats, get_file_history,
     get_graph_branch_selection, get_graph_remote_branch_selection, get_line_history, get_status,
     get_working_diff, ignore_path, locate_commit, set_graph_branch_selection,
@@ -328,6 +328,25 @@ pub fn delete_workspace(id: String) -> Result<(), ErrorDto> {
 #[tauri::command]
 pub fn list_recent_repos() -> Result<Vec<String>, ErrorDto> {
     config::list_recent_repos()
+        .map(|paths| {
+            paths
+                .into_iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect()
+        })
+        .map_err(ErrorDto::from_error)
+}
+
+#[tauri::command]
+pub fn remove_recent_repo(path: String) -> Result<(), ErrorDto> {
+    config::remove_recent_repo(Path::new(&path)).map_err(ErrorDto::from_error)
+}
+
+/// Async: it checks each recent folder on disk, which a slow network drive could hold up, and
+/// a synchronous command would hold up the window with it.
+#[tauri::command]
+pub async fn list_missing_recent_repos() -> Result<Vec<String>, ErrorDto> {
+    config::list_missing_recent_repos()
         .map(|paths| {
             paths
                 .into_iter()

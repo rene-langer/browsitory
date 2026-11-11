@@ -23,6 +23,18 @@ pub async fn get_status(
         .collect())
 }
 
+/// The repository's change stamp (#650): the frontend reloads a tab when it differs from the
+/// one its last refresh read.
+#[tauri::command]
+pub async fn get_change_stamp(
+    repo_path: String,
+    state: State<'_, AppState>,
+) -> Result<String, ErrorDto> {
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.get_change_stamp())
+        .await
+}
+
 #[tauri::command]
 pub async fn get_commit_graph(
     repo_path: String,

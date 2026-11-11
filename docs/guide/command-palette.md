@@ -132,7 +132,7 @@ In lists and diffs (Ctrl means ⌘ on macOS):
 | [ and ] | Previous and next hunk (in a diff); parent and child commit (in the commit list) |
 | Shift+[ | Choose one of a merge commit's parents (in the commit list) |
 | → / ← | Expand or collapse a merge with **Collapse merges** on (in the commit list) |
-| ← / →, Home / End | Switch tabs, with a tab focused |
+| ← / →, Home / End | Move between tabs, with a tab focused; Enter or Space switches |
 | Delete | Close the focused tab |
 | F2 | Rename the focused tab |
 | Menu key or Shift+F10 | Open the focused item's menu |

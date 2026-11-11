@@ -14,6 +14,9 @@ pub enum MergeError {
     NoConflict(String),
     #[error("'{0}' is an add/delete conflict, not a text conflict")]
     NotATextConflict(String),
+    /// `conflict_hunks` on a binary file: it has no lines to split into blocks (#720).
+    #[error("'{0}' is a binary file. Use one side's whole file, or resolve it with git.")]
+    BinaryConflict(String),
     #[error("no merge is currently in progress")]
     NotMerging,
     #[error("a merge is already in progress or has unresolved conflicts")]
@@ -264,8 +267,16 @@ pub enum MergeOutcome {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConflictSegment {
-    Clean { content: String },
-    Conflict { ours: String, theirs: String },
+    Clean {
+        content: String,
+    },
+    /// One conflicting block: each side's lines, and the common ancestor's lines (`base`, empty
+    /// when the file has no ancestor, as in an add/add conflict).
+    Conflict {
+        ours: String,
+        base: String,
+        theirs: String,
+    },
 }
 
 /// Merges `target` into the current branch. `target` is a local branch name, or a full ref name
@@ -539,35 +550,96 @@ pub(crate) fn find_conflict(repo: &Repository, path: &str) -> Result<IndexConfli
     Err(MergeError::NoConflict(path.to_string()))
 }
 
+/// Splits a conflicted text file into clean runs and conflicting blocks, each block with ours,
+/// theirs and the common ancestor's lines. An add/add conflict (no ancestor) merges against an
+/// empty base. A conflict missing a side (add/delete) is [`MergeError::NotATextConflict`], one
+/// with a binary side [`MergeError::BinaryConflict`].
 pub fn conflict_hunks(repo: &Repository, path: &str) -> Result<Vec<ConflictSegment>, MergeError> {
     let conflict = find_conflict(repo, path)?;
-    let (ancestor, our, their) = match (&conflict.ancestor, &conflict.our, &conflict.their) {
-        (Some(a), Some(o), Some(t)) => (a, o, t),
+    let (our, their) = match (&conflict.our, &conflict.their) {
+        (Some(o), Some(t)) => (o, t),
         _ => return Err(MergeError::NotATextConflict(path.to_string())),
     };
+    let ancestor = match &conflict.ancestor {
+        Some(entry) => Some(repo.find_blob(entry.id)?),
+        None => None,
+    };
+    let ours = repo.find_blob(our.id)?;
+    let theirs = repo.find_blob(their.id)?;
+    // libgit2 doesn't merge binary files: its result has no content at all.
+    if ours.is_binary()
+        || theirs.is_binary()
+        || ancestor.as_ref().is_some_and(|blob| blob.is_binary())
+    {
+        return Err(MergeError::BinaryConflict(path.to_string()));
+    }
+    let base_content = ancestor.as_ref().map_or(&[][..], |blob| blob.content());
 
-    let result = repo.merge_file_from_index(ancestor, our, their, None)?;
+    // Markers longer than any run of marker characters in the file, so a line of the file can
+    // never be read as a marker.
+    let marker_size = [base_content, ours.content(), theirs.content()]
+        .into_iter()
+        .map(longest_marker_run)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1)
+        .max(DEFAULT_MARKER_SIZE);
+    let mut base_input = git2::MergeFileInput::new();
+    base_input.content(base_content).path(path);
+    let mut ours_input = git2::MergeFileInput::new();
+    ours_input.content(ours.content()).path(path);
+    let mut theirs_input = git2::MergeFileInput::new();
+    theirs_input.content(theirs.content()).path(path);
+    // zdiff3 cuts the blocks as the default style does (lines both sides share stay outside
+    // them) and adds the ancestor's lines to each.
+    let mut options = git2::MergeFileOptions::new();
+    options
+        .style_zdiff3(true)
+        .marker_size(u16::try_from(marker_size).unwrap_or(u16::MAX));
+    let result = git2::merge_file(&base_input, &ours_input, &theirs_input, Some(&mut options))?;
     let content = String::from_utf8_lossy(result.content()).into_owned();
 
-    Ok(parse_conflict_markers(&content))
+    Ok(parse_conflict_markers(&content, marker_size))
 }
 
-// git2's default `MergeFileOptions` use `GIT_MERGE_FILE_STYLE_MERGE` (not diff3), so a conflict
-// block is exactly `<<<<<<< ...\n`ours`\n=======\n`theirs`\n>>>>>>> ...\n` — no separate
-// ancestor section to account for.
+/// git's conflict marker length.
+const DEFAULT_MARKER_SIZE: usize = 7;
+
+/// The longest run of one conflict marker character (`<`, `|`, `=`, `>`) at the start of a line.
+fn longest_marker_run(content: &[u8]) -> usize {
+    content
+        .split(|&byte| byte == b'\n')
+        .map(|line| match line.first() {
+            Some(&first) if matches!(first, b'<' | b'|' | b'=' | b'>') => {
+                line.iter().take_while(|&&byte| byte == first).count()
+            }
+            _ => 0,
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+/// Whether `line` is a conflict marker: a run of exactly `size` `marker` characters. The file's
+/// own runs are all shorter (see `longest_marker_run`).
+fn is_marker(line: &str, marker: char, size: usize) -> bool {
+    line.chars().take_while(|&c| c == marker).count() == size
+}
+
+// In zdiff3 style a conflict block is `<<<<<<< ours`, ours, `||||||| base`, the ancestor,
+// `=======`, theirs, `>>>>>>> theirs`, each marker `marker_size` characters long.
 //
 // Iterating with `split_inclusive('\n')` (rather than `.lines()`, which strips line terminators
 // including the `\r` of a CRLF ending) means every yielded piece keeps its own trailing `\n` (and
 // any preceding `\r`) attached. Segments are therefore joined with `""`, not `"\n"` — each piece
 // already carries its own terminator, so this naturally preserves the file's exact original line
 // endings, including a final line with no trailing newline at all.
-fn parse_conflict_markers(content: &str) -> Vec<ConflictSegment> {
+fn parse_conflict_markers(content: &str, marker_size: usize) -> Vec<ConflictSegment> {
     let mut segments = Vec::new();
     let mut clean_lines: Vec<&str> = Vec::new();
     let mut lines = content.split_inclusive('\n');
 
     while let Some(line) = lines.next() {
-        if line.starts_with("<<<<<<<") {
+        if is_marker(line, '<', marker_size) {
             if !clean_lines.is_empty() {
                 segments.push(ConflictSegment::Clean {
                     content: clean_lines.join(""),
@@ -575,21 +647,30 @@ fn parse_conflict_markers(content: &str) -> Vec<ConflictSegment> {
                 clean_lines.clear();
             }
             let mut ours_lines = Vec::new();
+            let mut base_lines = Vec::new();
+            let mut in_base = false;
             for line in lines.by_ref() {
-                if line.starts_with("=======") {
+                if is_marker(line, '=', marker_size) {
                     break;
                 }
-                ours_lines.push(line);
+                if is_marker(line, '|', marker_size) {
+                    in_base = true;
+                } else if in_base {
+                    base_lines.push(line);
+                } else {
+                    ours_lines.push(line);
+                }
             }
             let mut theirs_lines = Vec::new();
             for line in lines.by_ref() {
-                if line.starts_with(">>>>>>>") {
+                if is_marker(line, '>', marker_size) {
                     break;
                 }
                 theirs_lines.push(line);
             }
             segments.push(ConflictSegment::Conflict {
                 ours: ours_lines.join(""),
+                base: base_lines.join(""),
                 theirs: theirs_lines.join(""),
             });
         } else {

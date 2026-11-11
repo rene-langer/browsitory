@@ -123,6 +123,8 @@ describe("Browsitory interactive rebase", () => {
     await combinedMessageField.setValue("e2e: combined rebase commit");
 
     const startButton = await $("button=Start rebase");
+    // Start waits for the group's full messages (#721).
+    await startButton.waitForEnabled();
     await startButton.click();
 
     await browser.waitUntil(async () => (await $("li*=e2e: combined rebase commit")).isExisting());

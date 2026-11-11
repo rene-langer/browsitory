@@ -13,11 +13,11 @@ use commands::{
     delete_workspace, detect_forge_repository, discard_all_unstaged, discard_file, discard_hunk,
     discard_lines, drop_stash, fetch_all_remotes, fetch_remote, force_push_current_branch,
     forget_forge_token, forget_https_credential, get_app_version, get_appearance_settings,
-    get_blame, get_branch_compare_range, get_commit_details, get_commit_diff, get_commit_files,
-    get_commit_graph, get_commit_message, get_commit_message_settings, get_commit_rename_diff,
-    get_commit_signature, get_commit_stats, get_commit_tree, get_conflict_hunks,
-    get_current_upstream, get_diff_settings, get_external_tool_settings, get_fetch_settings,
-    get_file_at_commit, get_file_history, get_file_sides, get_git_tools,
+    get_blame, get_branch_compare_range, get_change_stamp, get_commit_details, get_commit_diff,
+    get_commit_files, get_commit_graph, get_commit_message, get_commit_message_settings,
+    get_commit_rename_diff, get_commit_signature, get_commit_stats, get_commit_tree,
+    get_conflict_hunks, get_current_upstream, get_diff_settings, get_external_tool_settings,
+    get_fetch_settings, get_file_at_commit, get_file_history, get_file_sides, get_git_tools,
     get_graph_branch_selection, get_graph_remote_branch_selection, get_head_info,
     get_last_seen_version, get_line_history, get_merge_message, get_merge_options, get_patch,
     get_range_diff, get_range_files, get_reflog, get_remote_upstreams, get_stash_files, get_status,
@@ -46,6 +46,8 @@ use commands::{
 };
 // The repository tab names (#625).
 use commands::{list_repo_aliases, set_repo_alias};
+// The picker's recent repositories: remove one, and which folders are gone (#690).
+use commands::{list_missing_recent_repos, remove_recent_repo};
 // Open or create .gitignore and .gitattributes (#624).
 use commands::{create_root_file, get_root_files};
 // Collapse merges in the commit graph (#617).
@@ -74,6 +76,7 @@ commands![
     init_repo,
     close_repo,
     get_status,
+    get_change_stamp,
     get_commit_graph,
     locate_commit,
     get_merged_commits,
@@ -126,6 +129,8 @@ commands![
     set_identity,
     pick_repo_folder,
     list_recent_repos,
+    remove_recent_repo,
+    list_missing_recent_repos,
     get_last_seen_version,
     set_last_seen_version,
     get_app_version,
