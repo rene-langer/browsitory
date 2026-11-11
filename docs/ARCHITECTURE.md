@@ -257,10 +257,21 @@ the rule and still has its own fields.
   (`StashError::DirectoryReplacedNonDirectory`, like git's "could not write file 'l' with mode
   120000: directory not empty"): the forced checkout would replace the directory and silently
   delete what the stash does not hold, such as ignored files or untracked files left out. The
-  untracked-first revert order stays as a second safety net.
+  untracked-first revert order stays as a second safety net. **Exception (#207, deliberate,
+  differs from git):** a folder that replaced a regular file, with untracked files included,
+  is stashed when it holds nothing but untracked files and links (`stashable_folder`: no
+  ignored entry, no `.git`, nothing tracked): the folder's files join the untracked commit, the
+  file's deletion goes into the worktree commit, and the revert removes the files (pruning the
+  folder) before it checks the file out. git's `stash push -u -- d` records only `d/x` (its
+  worktree tree is HEAD's, the deletion is lost), puts `d` back, and its own pop then fails
+  ("cannot create directory at 'd': File exists"); with an ignored file in `d/` it saves the
+  stash and stops half-way ("could not write file 'd'… directory not empty") with the index
+  changed. Browsitory's stash pops through `apply_in_order` (below). A folder that replaced a
+  symlink or submodule stays refused.
 - Known libgit2 stash-apply quirk, not handled: an apply can leave a `<path>~Updated upstream`
-  file next to a conflicted path of the tracked changes. For the untracked files it is refused
-  up front (`UntrackedBelowTrackedFile`, below).
+  file next to a conflicted path of the tracked changes. For the untracked files it can't happen:
+  stashes whose untracked files meet a tracked file or folder take Browsitory's own apply
+  (`apply_in_order`, below).
 - Entries in the way (#186, #208, #211). libgit2's whole stash resets with
   `GIT_CHECKOUT_FORCE` (plus `REMOVE_UNTRACKED` with untracked files, stash.c
   `reset_index_and_workdir`). Its checkout removes a non-folder where the restored tree has a
@@ -302,7 +313,8 @@ the rule and still has its own fields.
   Browsitory's stash pops in both. Known limitation: the path-limited stash's own refusals
   apply on this route. For example, a file removed from the index plus an unrelated tracked
   file `t` that is now a folder gets `DirectoryReplacedNonDirectory` for `t`, which libgit2's
-  whole stash would have handled.
+  whole stash would have handled. A folder that replaced a regular file is no longer one of them
+  when it holds only untracked files (#207, above).
 - The path-limited stash's revert (`git_checkout_tree` with the reverted paths) updates the
   index only for the files it writes. A path removed from the index whose worktree file already
   matches HEAD (an unedited `git rm --cached f`, or the unedited `d/g` of `git rm -r --cached
@@ -328,9 +340,8 @@ the rule and still has its own fields.
   path-limited stash, as it does for symlink hazards (`kept_entry_in_untracked_folder`): it
   stashes the same files git does and deletes only those. An untracked folder holding only
   ignored entries doesn't count: libgit2's iterator reports it as ignored and leaves it. Known
-  limitation: on that route the path-limited stash's own refusals apply, so a folder that
-  replaced a tracked file (which libgit2's whole stash handles) is refused as
-  `DirectoryReplacedNonDirectory` when such a folder is also present. Before, the stash
+  limitation: on that route the path-limited stash's own refusals apply (a folder that replaced
+  a tracked file is stashed only when it holds just untracked files, #207). Before, the stash
   succeeded and deleted the nested repository or ignored files.
 - An ignored file that is also `INDEX_DELETED` (`git rm --cached .env`, then ignored, then
   edited) is not in libgit2's stash (its worktree commit skips ignored files; git records it),
@@ -424,30 +435,37 @@ the rule and still has its own fields.
   pair, since its checkout is limited to the stashed paths. Only whole paths count: `D/f` and
   `d/g` are two entries to libgit2 and stash normally.
 - libgit2's stash apply checks the untracked tree out *before* the tracked changes (git does it
-  the other way round), so a stash holding an untracked file `d` and the deletion of the folder
-  `d/` can't be applied while `d/` exists: libgit2 reports success, leaves the file as
-  `d~Stashed changes` and a pop would drop the stash. `apply_stash` refuses up front with
-  `StashError::FileReplacedFolder` when an untracked-tree file's path is a real folder in the
-  worktree and the stash recorded that swap (its base has the folder, its worktree tree doesn't);
-  nothing is written, the stash is kept, and `git stash apply` handles it. A folder that appeared
-  after stashing gets `UntrackedOverFolder` ("move the folder first") instead.
-- The mirror stash (the untracked `d/x` with the deletion of the file `d`, #206). libgit2's
-  apply merges the untracked tree against the **index** (`merge_index_and_tree(NULL,
-  repo_index, untracked_tree)`, stash.c l.1117), which still has `d` because the index must
-  equal HEAD and the stash's deletion is applied after the untracked files. The directory/file
-  conflict was checked out as `d~Updated upstream` with success, and a pop dropped the stash;
-  `git stash pop` fails on it too. `apply_stash` refuses first with
-  `StashError::UntrackedBelowTrackedFile` when an untracked-tree file has a proper prefix that is
-  a stage-0 index path; nothing is written and the stash is kept. libgit2's merge compares exact
-  case. Where `worktree_guard::try_folds_case` holds (the repository sets `core.ignorecase`, or
-  always on macOS and Windows, like the case-collision walker), the check folds case
-  (`fold_name`, whole path components only), so `d/x` is refused over the indexed file `D` too
-  (#234). On a case-insensitive drive `d` is `D`, and `git stash pop` fails there as well. On a
-  case-sensitive drive with `core.ignorecase` set, git pops it; Browsitory refuses on purpose,
-  since the setting may be right (a Linux casefold folder or a vfat mount). A wrong
-  `core.ignorecase = false` on macOS or Windows still refuses. Both are the safe direction. When
-  two index paths fold together, the first in index order is reported. This also covers a file `d` committed after the stash was made. Once the deletion of `d` is
-  committed, the stash applies.
+  the other way round), and merges it against the **index** (`merge_index_and_tree(NULL,
+  repo_index, untracked_tree)`, stash.c l.1117), which still has every tracked path the stash
+  deletes. So two stash shapes can't be applied through it: an untracked file `d` with the
+  deletion of the folder `d/` (#186; libgit2 reported success and left `d~Stashed changes`, a
+  pop dropped the stash) and the mirror, an untracked `d/x` with the deletion of the file `d`
+  (#206; checked out as `d~Updated upstream` with success). `apply_stash` detects them before
+  anything is written (`untracked_file_over_folder`: an untracked file's path is a real folder
+  and the stash recorded that swap, its base has the folder and its worktree tree doesn't;
+  `untracked_below_tracked_file`: an untracked file has a proper prefix that is a stage-0 index
+  path) and applies them itself in git's order (`apply_in_order`, #229). It redoes libgit2's
+  merges with HEAD's tree for the index (both require them to match, else `StagedChanges`): the
+  worktree tree onto HEAD against the stash's base, and the index to leave behind, the index tree
+  with "Restore staged changes" (a conflict is `IndexConflict`) or else HEAD plus the stash's new
+  files (`stage_new_files`). Then one safe checkout writes the merge and the untracked files
+  together, labels "Updated upstream"/"Stashed changes"; libgit2's checkout removes before it
+  writes, so the folder (or file) is gone before the file (or folder) appears. The index
+  becomes the merge when it has conflicts, else the unstashed index, else stays; unchanged
+  entries keep their stat cache. A checkout stopping part-way is rolled back (#321). Only these
+  shapes take the route; every other stash keeps libgit2's apply (owner decision on #229).
+  Refused before writing: an untracked file at or above a path the merge keeps
+  (`FileReplacedFolder(path)`, HEAD changed a file of the folder since;
+  `UntrackedBelowTrackedFile`, a file `d` committed after stashing or changed by HEAD since,
+  reported also when the index differs from HEAD), a real folder at an untracked file's path
+  that holds anything HEAD hasn't as a file (`UntrackedOverFolder`: an untracked, ignored or
+  nested-repository entry; libgit2's safe checkout doesn't refuse that and fails with "Is a
+  directory"), a file/folder collision in the merge (`FileFolderConflict`) and a case pair
+  brought in. A local edit in the way is `WouldOverwrite`. Where names fold
+  (`try_folds_case`), paths compare folded (`fold_name`, whole components), so the mirror shape
+  over the file `D` applies too (#234). Deliberate difference: `git stash pop` fails on the
+  mirror shape (it restores untracked files first); Browsitory applies it. A folder that appeared
+  after stashing gets `UntrackedOverFolder` ("move the folder first"), as before.
 - libgit2's stash apply fails with "odb: cannot read object: null OID cannot exist" for a stashed
   file whose directory is a symlink in HEAD; `apply_stash` maps it to
   `StashError::SymlinkReplacedByDirectory` (the stash is kept). A stashed untracked file below

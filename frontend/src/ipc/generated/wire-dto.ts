@@ -279,7 +279,7 @@ export type SignatureStatus = "unsigned" | "good" | "goodUntrusted" | "bad" | "u
 
 export type StashApplyOutcome = { "kind": "Applied" } | { "kind": "Conflicted", files: Array<string>, };
 
-export type StashEntry = { index: number, message: string, commitId: string, };
+export type StashEntry = { index: number, message: string, commitId: string, branch: string | null, timestamp: number, fileCount: number, hasStagedChanges: boolean, };
 
 export type StashFiles = { tracked: Array<string>, untracked: Array<string>, untrackedCommitId: string | null, };
 

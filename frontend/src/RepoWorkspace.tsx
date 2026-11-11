@@ -663,11 +663,9 @@ export function RepoWorkspace({
       announce(`Restored ${path} from ${commitId.slice(0, 7)}`, appState.restoreFileVersion, { undoable: true })(commitId, path),
     patchActions: diffPanePatchActions,
     stashActions: {
-      onApply: appState.applyStash,
-      onPop: appState.popStash,
+      onApply: (index, restoreIndex) => void appState.applyStash(index, restoreIndex),
+      onPop: (index, restoreIndex) => void appState.popStash(index, restoreIndex),
       onDrop: (index) => void dropStash(index),
-      restoreIndex: appState.state.stashRestoreIndex,
-      onSetRestoreIndex: appState.setStashRestoreIndex,
       blockers: storedStashBlockers,
     },
     onCurrentFileChange: setCurrentFile,

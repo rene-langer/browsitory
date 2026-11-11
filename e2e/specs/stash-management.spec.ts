@@ -45,7 +45,7 @@ describe("Browsitory stash", () => {
     // before looking for the row it renders.
     await expandSidebarSection("Stashes");
 
-    const stashRow = await $("li*=WIP on");
+    const stashRow = await $("li*=WIP: ");
     await stashRow.waitForExist();
 
     // Apply sits in the row's actions menu ("…"), not inline in the row (#339).

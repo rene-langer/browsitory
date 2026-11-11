@@ -2,11 +2,15 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { StashEntry } from "../ipc/RepoClient";
 import { StashPanel } from "./StashPanel";
+import { formatAbsoluteDate, formatRelativeDate } from "../lib/formatDate";
+
+// Branch, age and file count (#657); the tests below that need others set their own.
+const META: Pick<StashEntry, "branch" | "timestamp" | "fileCount" | "hasStagedChanges"> = { branch: "main", timestamp: Math.floor(Date.now() / 1000) - 2 * 86400, fileCount: 3, hasStagedChanges: false };
 
 // Deliberately distinct message stems so `getByText` on one never matches the other.
 const stashes: StashEntry[] = [
-  { index: 0, message: "WIP on main: stash0fix uncommitted edit", commitId: "stash0" },
-  { index: 1, message: "WIP on main: stash1fix earlier edit", commitId: "stash1" },
+  { index: 0, message: "WIP on main: stash0fix uncommitted edit", commitId: "stash0", ...META },
+  { index: 1, message: "WIP on main: stash1fix earlier edit", commitId: "stash1", ...META },
 ];
 
 function panel(overrides: Partial<Parameters<typeof StashPanel>[0]> = {}) {
@@ -17,8 +21,6 @@ function panel(overrides: Partial<Parameters<typeof StashPanel>[0]> = {}) {
       onApplyStash={vi.fn()}
       onPopStash={vi.fn()}
       onDropStash={vi.fn()}
-      restoreIndex={true}
-      onSetRestoreIndex={vi.fn()}
       blockers={{ apply: null, drop: null }}
       {...overrides}
     />
@@ -34,7 +36,7 @@ function renderPanel(overrides: Partial<Parameters<typeof StashPanel>[0]> = {}) 
 
 const three: StashEntry[] = [
   ...stashes,
-  { index: 2, message: "WIP on main: stash2fix oldest edit", commitId: "stash2" },
+  { index: 2, message: "WIP on main: stash2fix oldest edit", commitId: "stash2", ...META },
 ];
 
 /** The list with `index` matching each entry's place, as the backend reports it. */
@@ -61,11 +63,31 @@ describe("StashPanel", () => {
     expect(screen.getByText(/No stashes/)).toBeInTheDocument();
   });
 
-  it("renders each stash's message", () => {
-    renderPanel();
+  it("renders each stash's name without git's branch prefix, and its branch, age and file count", () => {
+    renderPanel({
+      stashes: [
+        ...stashes,
+        { index: 2, message: "On feature: try the cache", commitId: "stash2", branch: "feature", timestamp: META.timestamp, fileCount: 1, hasStagedChanges: false },
+        { index: 3, message: "autostash", commitId: "stash3", branch: null, timestamp: META.timestamp, fileCount: 0, hasStagedChanges: false },
+      ],
+    });
 
-    expect(screen.getByText(/WIP on main: stash0fix uncommitted edit/)).toBeInTheDocument();
-    expect(screen.getByText(/WIP on main: stash1fix earlier edit/)).toBeInTheDocument();
+    expect(screen.getByText("WIP: stash0fix uncommitted edit")).toBeInTheDocument();
+    expect(screen.getByText("WIP: stash1fix earlier edit")).toBeInTheDocument();
+    expect(screen.getByText("try the cache")).toBeInTheDocument();
+    expect(screen.getByText("autostash")).toBeInTheDocument();
+    // The age follows the system's locale ("2 days ago" in English).
+    const age = formatRelativeDate(META.timestamp);
+    expect(screen.getAllByText(`On main · ${age} · 3 files`)).toHaveLength(2);
+    expect(screen.getByText(`On feature · ${age} · 1 file`)).toBeInTheDocument();
+    expect(screen.getByText(`${age} · 0 files`)).toBeInTheDocument();
+    // The full message stays in the row's tooltip.
+    expect(screen.getByText("try the cache").parentElement).toHaveAttribute(
+      "title",
+      expect.stringMatching(/^On feature: try the cache\n/),
+    );
+    // No list-wide mode switch any more (#657).
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   });
 
   it("clicking a stash row calls onSelectRow with its commit id", () => {
@@ -80,9 +102,9 @@ describe("StashPanel", () => {
   it("shows the full stash message as a tooltip, since a long one is cut off", () => {
     renderPanel();
 
-    expect(screen.getByText("WIP on main: stash0fix uncommitted edit")).toHaveAttribute(
+    expect(screen.getByText("WIP: stash0fix uncommitted edit").parentElement).toHaveAttribute(
       "title",
-      "WIP on main: stash0fix uncommitted edit",
+      `WIP on main: stash0fix uncommitted edit\n${formatAbsoluteDate(META.timestamp)}`,
     );
   });
 
@@ -90,7 +112,7 @@ describe("StashPanel", () => {
     renderPanel();
 
     const row = screen.getByText(/stash0fix/).closest("li")!;
-    const trigger = within(row).getByRole("button", { name: "Actions for WIP on main: stash0fix uncommitted edit" });
+    const trigger = within(row).getByRole("button", { name: "Actions for WIP: stash0fix uncommitted edit" });
     expect(trigger).toHaveAttribute("aria-haspopup", "menu");
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     expect(within(row).queryByRole("button", { name: "Apply" })).not.toBeInTheDocument();
@@ -109,7 +131,7 @@ describe("StashPanel", () => {
     openMenu(/stash0fix/);
     fireEvent.click(screen.getByRole("menuitem", { name: "Apply" }));
 
-    expect(onApplyStash).toHaveBeenCalledWith(0);
+    expect(onApplyStash).toHaveBeenCalledWith(0, true);
     expect(onSelectRow).not.toHaveBeenCalled();
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
@@ -204,13 +226,13 @@ describe("StashPanel", () => {
     openMenu(/stash1fix/);
 
     // A new stash pushed on top moves the opened one from index 1 to index 2.
-    const shifted: StashEntry[] = [{ index: 0, message: "WIP on main: newest", commitId: "stashN" }].concat(
+    const shifted: StashEntry[] = [{ index: 0, message: "WIP on main: newest", commitId: "stashN", ...META }].concat(
       stashes.map((stash) => ({ ...stash, index: stash.index + 1 })),
     );
     rerender(panel({ onApplyStash, stashes: shifted }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Apply" }));
 
-    expect(onApplyStash).toHaveBeenCalledWith(2);
+    expect(onApplyStash).toHaveBeenCalledWith(2, true);
   });
 
   it("closes the menu when its stash disappears from the list", () => {
@@ -244,7 +266,7 @@ describe("StashPanel", () => {
   it("finds that place in the latest list, after refreshes that moved the stash", () => {
     const { rerender } = renderPanel({ stashes: three });
     openMenu(/stash1fix/);
-    const newest = { index: 0, message: "WIP on main: stashNfix newest", commitId: "stashN" };
+    const newest = { index: 0, message: "WIP on main: stashNfix newest", commitId: "stashN", ...META };
 
     // A new stash on top moves stash1 from place 1 to place 2, then stash1 goes.
     rerender(panel({ stashes: renumber([newest, ...three]) }));
@@ -412,19 +434,39 @@ describe("StashPanel pop and restore staged changes", () => {
     openMenu(/stash1fix/);
     fireEvent.click(screen.getByRole("menuitem", { name: "Pop" }));
 
-    expect(onPopStash).toHaveBeenCalledWith(1);
+    expect(onPopStash).toHaveBeenCalledWith(1, true);
     expect(onSelectRow).not.toHaveBeenCalled();
   });
 
-  it("shows and toggles Restore staged changes", () => {
-    const onSetRestoreIndex = vi.fn();
-    renderPanel({ restoreIndex: true, onSetRestoreIndex });
+  it("offers Apply and Pop as unstaged only for a stash that recorded staged changes", () => {
+    const onApplyStash = vi.fn();
+    const onPopStash = vi.fn();
+    renderPanel({
+      stashes: [stashes[0], { ...stashes[1], hasStagedChanges: true }],
+      onApplyStash,
+      onPopStash,
+    });
 
-    const checkbox = screen.getByRole("checkbox", { name: "Restore staged changes" });
-    expect(checkbox).toBeChecked();
-    fireEvent.click(checkbox);
+    openMenu(/stash0fix/);
+    expect(screen.queryByRole("menuitem", { name: "Apply as unstaged" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Pop as unstaged" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Apply" }));
+    expect(onApplyStash).toHaveBeenLastCalledWith(0, true);
 
-    expect(onSetRestoreIndex).toHaveBeenCalledWith(false);
+    openMenu(/stash1fix/);
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "Apply",
+      "Apply as unstaged",
+      "Pop",
+      "Pop as unstaged",
+      "Drop…",
+    ]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Apply as unstaged" }));
+    expect(onApplyStash).toHaveBeenLastCalledWith(1, false);
+
+    openMenu(/stash1fix/);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pop as unstaged" }));
+    expect(onPopStash).toHaveBeenLastCalledWith(1, false);
   });
 
   it("disables Apply and Pop, not Drop, with the apply-disabled reason", () => {

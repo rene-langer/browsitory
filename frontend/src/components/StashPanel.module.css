@@ -13,12 +13,25 @@
   flex: none;
 }
 
-.message {
+.text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.message,
+.details {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
-  flex: 1 1 auto;
+}
+
+/* "On main · 2 days ago · 3 files" (#657). */
+.details {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
 }
 
 /* The row's "…" menu button; the message (flex 1 1 auto, min-width 0) takes the rest of the row.
@@ -51,13 +64,4 @@ li:focus-within > .iconButton,
   padding: var(--space-2) var(--space-3);
   color: var(--color-text-muted);
   font-size: var(--text-sm);
-}
-
-.restoreIndex {
-  flex-direction: row;
-  gap: var(--space-2);
-  align-items: baseline;
-  padding: 0 var(--space-3) var(--space-1);
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
 }

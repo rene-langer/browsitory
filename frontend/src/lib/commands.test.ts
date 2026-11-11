@@ -77,7 +77,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       forgeRepositories: [],
       pullRequests: {},
       createBranchDraft: null,
-      stashes: [{ index: 0, message: "WIP", commitId: "ccc" }],
+      stashes: [{ index: 0, message: "WIP", commitId: "ccc", branch: null, timestamp: 1700000000, fileCount: 1, hasStagedChanges: false }],
       mergeMessage: null,
       forcePushOffer: null,
       fetchPrune: null,
@@ -98,7 +98,6 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       identityRequired: null,
       pullOutcome: null,
       mergeOutcome: null,
-      stashRestoreIndex: true,
       stashOutcome: null,
       transfer: null,
       transferSubject: null,
@@ -191,7 +190,6 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     saveStash: vi.fn(),
     applyStash: vi.fn(),
     popStash: vi.fn(),
-    setStashRestoreIndex: vi.fn(),
     dropStash: vi.fn(),
     getMergeOptions: vi.fn(),
     mergeBranch: vi.fn(),
@@ -633,9 +631,29 @@ describe("buildCommands", () => {
     const applyCmd = commands.find((c) => c.id === "apply-stash:0");
     expect(applyCmd?.label).toBe("Apply stash: WIP");
     applyCmd?.run();
-    expect(appState.applyStash).toHaveBeenCalledWith(0);
+    expect(appState.applyStash).toHaveBeenCalledWith(0, true);
 
     expect(commands.some((c) => c.id === "drop-stash:0")).toBe(true);
+    // Only a stash that recorded staged changes has the unstaged variants (#657).
+    expect(commands.some((c) => c.id.startsWith("apply-stash-unstaged:"))).toBe(false);
+    expect(commands.some((c) => c.id.startsWith("pop-stash-unstaged:"))).toBe(false);
+  });
+
+  it("offers Apply and Pop as unstaged for a stash with staged changes", () => {
+    const appState = makeAppState({
+      stashes: [{ index: 0, message: "On main: wip", commitId: "ccc", branch: "main", timestamp: 1700000000, fileCount: 2, hasStagedChanges: true }],
+    });
+    const commands = commandsFor(appState);
+
+    const apply = commands.find((c) => c.id === "apply-stash-unstaged:0");
+    expect(apply?.label).toBe("Apply stash as unstaged: wip");
+    apply?.run();
+    expect(appState.applyStash).toHaveBeenCalledWith(0, false);
+    const pop = commands.find((c) => c.id === "pop-stash-unstaged:0");
+    expect(pop?.label).toBe("Pop stash as unstaged: wip");
+    pop?.run();
+    expect(appState.popStash).toHaveBeenCalledWith(0, false);
+    expect(commands.find((c) => c.id === "show-stash:0")?.label).toBe("Show stash: wip");
   });
 
   it("offers merge-branch per non-current local branch and omits it while an operation runs", () => {
@@ -674,7 +692,7 @@ describe("buildCommands", () => {
     const pop = commands.find((c) => c.id === "pop-stash:0");
     expect(pop?.label).toBe("Pop stash: WIP");
     pop?.run();
-    expect(appState.popStash).toHaveBeenCalledWith(0);
+    expect(appState.popStash).toHaveBeenCalledWith(0, true);
   });
 
   it("groups merge and stash commands", () => {
@@ -2305,8 +2323,6 @@ describe("agree with the branch, remote, stash and worktree menus (#509)", () =>
       onApplyStash: vi.fn(),
       onPopStash: vi.fn(),
       onDropStash: vi.fn(),
-      restoreIndex: true,
-      onSetRestoreIndex: vi.fn(),
       blockers: stashBlockers(state),
     });
     const stashRules = stashBlockers(state);
