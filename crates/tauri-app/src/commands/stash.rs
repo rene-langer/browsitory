@@ -10,7 +10,7 @@ pub async fn list_stashes(
     state: State<'_, AppState>,
 ) -> Result<Vec<StashEntryDto>, ErrorDto> {
     let stashes = repo_worker(&state, &repo_path)?
-        .call(move |w| w.list_stashes())
+        .read(move |w| w.list_stashes())
         .await?;
     Ok(stashes.into_iter().map(StashEntryDto::from).collect())
 }
@@ -61,7 +61,7 @@ pub async fn get_stash_files(
     state: State<'_, AppState>,
 ) -> Result<StashFilesDto, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_stash_files(commit_id))
+        .read(move |w| w.get_stash_files(commit_id))
         .await?
         .into())
 }

@@ -99,7 +99,7 @@ pub async fn get_file_sides(
 ) -> Result<FileSidesDto, ErrorDto> {
     Ok(FileSidesDto::from(
         repo_worker(&state, &repo_path)?
-            .call(move |w| w.get_file_sides(path, source.into()))
+            .read(move |w| w.get_file_sides(path, source.into()))
             .await?,
     ))
 }
@@ -114,7 +114,7 @@ pub async fn open_diff_tool(
     state: State<'_, AppState>,
 ) -> Result<(), ErrorDto> {
     let prepared = repo_worker(&state, &repo_path)?
-        .call(move |w| w.prepare_diff_tool(path, source.into()))
+        .read(move |w| w.prepare_diff_tool(path, source.into()))
         .await?;
     off_runtime(move || {
         git_core::tools::launch_diff_tool(prepared, git_core::tools::DIFF_TOOL_GRACE)
@@ -157,7 +157,7 @@ pub async fn get_git_tools(
     state: State<'_, AppState>,
 ) -> Result<GitToolsDto, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_git_tools())
+        .read(move |w| w.get_git_tools())
         .await?
         .into())
 }

@@ -3,7 +3,7 @@ use std::sync::mpsc::Sender;
 
 use git_core::stash::{StashApplyOutcome, StashEntry, StashFiles, StashOptions};
 
-use super::{Command, WorkerHandle};
+use super::{Command, ReadHandle, WorkerHandle};
 
 pub(super) fn list(repo: &mut git2::Repository, reply: Sender<Result<Vec<StashEntry>, ErrorDto>>) {
     let result = git_core::stash::list_stashes(repo).map_err(ErrorDto::from_error);
@@ -64,10 +64,6 @@ pub(super) fn drop(
 }
 
 impl WorkerHandle {
-    pub fn list_stashes(&self) -> Result<Vec<StashEntry>, ErrorDto> {
-        self.request(|reply| Command::ListStashes { reply })
-    }
-
     pub fn save_stash(&self, options: StashOptions) -> Result<(), ErrorDto> {
         self.request(|reply| Command::SaveStash { options, reply })
     }
@@ -103,10 +99,6 @@ impl WorkerHandle {
         })
     }
 
-    pub fn get_stash_files(&self, commit_id: String) -> Result<StashFiles, ErrorDto> {
-        self.request(|reply| Command::GetStashFiles { commit_id, reply })
-    }
-
     /// Drops `stash@{index}` if it is still the stash `commit_id`.
     pub fn drop_stash(&self, index: usize, commit_id: String) -> Result<(), ErrorDto> {
         self.request(|reply| Command::DropStash {
@@ -114,5 +106,15 @@ impl WorkerHandle {
             commit_id,
             reply,
         })
+    }
+}
+
+impl ReadHandle {
+    pub fn list_stashes(&self) -> Result<Vec<StashEntry>, ErrorDto> {
+        self.read(|reply| Command::ListStashes { reply })
+    }
+
+    pub fn get_stash_files(&self, commit_id: String) -> Result<StashFiles, ErrorDto> {
+        self.read(|reply| Command::GetStashFiles { commit_id, reply })
     }
 }

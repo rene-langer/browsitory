@@ -38,7 +38,7 @@ pub(crate) fn queue_search(
 ) -> Result<impl Future<Output = Result<SearchPage, ErrorDto>> + Send + 'static, String> {
     let worker = repo_worker(state, repo_path)?;
     let generation = worker.signal().claim_search_generation();
-    Ok(worker.call(move |w| w.search_commits_claimed(generation, query, selection, cursor)))
+    Ok(worker.read(move |w| w.search_commits_claimed(generation, query, selection, cursor)))
 }
 
 /// Stops the repo's in-flight search, if any. Never queued behind it — see

@@ -6,7 +6,7 @@ use std::sync::mpsc::Sender;
 
 use git_core::diff::{ChangedFile, CompareRange, DiffHunk, DiffOptions};
 
-use super::{Command, WorkerHandle};
+use super::{Command, ReadHandle};
 
 pub(super) fn get_range_files(
     repo: &git2::Repository,
@@ -67,13 +67,13 @@ pub(super) fn get_branch_compare_range(
         .send(git_core::diff::branch_compare_range(repo, &ref_name).map_err(ErrorDto::from_error));
 }
 
-impl WorkerHandle {
+impl ReadHandle {
     pub fn get_range_files(
         &self,
         from_id: String,
         to_id: String,
     ) -> Result<Vec<ChangedFile>, ErrorDto> {
-        self.request(|reply| Command::GetRangeFiles {
+        self.read(|reply| Command::GetRangeFiles {
             from_id,
             to_id,
             reply,
@@ -88,7 +88,7 @@ impl WorkerHandle {
         old_path: Option<String>,
         opts: DiffOptions,
     ) -> Result<Vec<DiffHunk>, ErrorDto> {
-        self.request(|reply| Command::GetRangeDiff {
+        self.read(|reply| Command::GetRangeDiff {
             from_id,
             to_id,
             path,
@@ -102,7 +102,7 @@ impl WorkerHandle {
         &self,
         commit_id: String,
     ) -> Result<Vec<ChangedFile>, ErrorDto> {
-        self.request(|reply| Command::GetWorkingTreeCompareFiles { commit_id, reply })
+        self.read(|reply| Command::GetWorkingTreeCompareFiles { commit_id, reply })
     }
 
     pub fn get_working_tree_compare_diff(
@@ -112,7 +112,7 @@ impl WorkerHandle {
         old_path: Option<String>,
         opts: DiffOptions,
     ) -> Result<Vec<DiffHunk>, ErrorDto> {
-        self.request(|reply| Command::GetWorkingTreeCompareDiff {
+        self.read(|reply| Command::GetWorkingTreeCompareDiff {
             commit_id,
             path,
             old_path,
@@ -122,6 +122,6 @@ impl WorkerHandle {
     }
 
     pub fn get_branch_compare_range(&self, ref_name: String) -> Result<CompareRange, ErrorDto> {
-        self.request(|reply| Command::GetBranchCompareRange { ref_name, reply })
+        self.read(|reply| Command::GetBranchCompareRange { ref_name, reply })
     }
 }

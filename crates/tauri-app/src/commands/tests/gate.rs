@@ -107,7 +107,7 @@ fn state_with_repos(dirs: &[&std::path::Path]) -> (super::super::AppState, Vec<S
 #[cfg(unix)]
 fn gate_of(state: &super::super::AppState, path: &str) -> std::sync::Arc<super::super::RepoGate> {
     let (key, _) = state.registry.get(path).unwrap();
-    state.gates.lock().unwrap()[&key].clone()
+    state.gates.lock().unwrap()[&key].main.clone()
 }
 
 #[cfg(unix)]
@@ -242,7 +242,7 @@ fn two_spellings_share_one_gate() {
 
     let via_other = super::super::repo_worker(&state, &slashed).unwrap();
     assert!(std::sync::Arc::ptr_eq(
-        &via_other.gate,
+        &via_other.gates.main,
         &gate_of(&state, &keys[0])
     ));
     let (answered_tx, answered_rx) = mpsc::channel();
@@ -387,7 +387,7 @@ fn closing_a_repo_drops_its_gate() {
     let (state, keys) = state_with_repos(&[dir.path()]);
     let first = super::super::repo_worker(&state, &keys[0]).unwrap();
     let again = super::super::repo_worker(&state, &keys[0]).unwrap();
-    assert!(std::sync::Arc::ptr_eq(&first.gate, &again.gate));
+    assert!(std::sync::Arc::ptr_eq(&first.gates, &again.gates));
 
     super::super::forget_repo(&state, &keys[0]);
 
@@ -438,7 +438,7 @@ fn closing_one_spelling_keeps_the_gate() {
     super::super::forget_repo(&state, &sub);
 
     let again = super::super::repo_worker(&state, &keys[0]).unwrap();
-    assert!(std::sync::Arc::ptr_eq(&first.gate, &again.gate));
+    assert!(std::sync::Arc::ptr_eq(&first.gates, &again.gates));
     assert_eq!(state.gates.lock().unwrap().len(), 1);
     assert!(super::super::repo_worker(&state, &sub).is_err());
     assert!(tauri::async_runtime::block_on(again.call(|w| w.get_status())).is_ok());

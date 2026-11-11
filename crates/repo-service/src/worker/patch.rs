@@ -5,7 +5,7 @@ use std::sync::mpsc::Sender;
 
 use git_core::patch::{ApplyTarget, CommitHunk, PatchApply, PatchApplyOutcome, PatchPreview};
 
-use super::{Command, WorkerHandle};
+use super::{Command, ReadHandle, WorkerHandle};
 
 /// A commit's file (or one hunk of it) to revert or apply in the working tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -124,11 +124,6 @@ impl WorkerHandle {
         self.request(|tx| Command::ApplyCommitChange { change, reply: tx })
     }
 
-    /// The patch text of `source`.
-    pub fn get_patch(&self, source: PatchSource) -> Result<Vec<u8>, ErrorDto> {
-        self.request(|tx| Command::GetPatch { source, reply: tx })
-    }
-
     /// Applies a patch file's `content` to the working tree (`how`: also to the index, or as
     /// commits with the mails' authorship), all of it or nothing. Recorded for Undo. As commits
     /// it runs `git am`'s hooks (#747), unreported; see `apply_patch_reported`.
@@ -157,9 +152,16 @@ impl WorkerHandle {
             reply,
         })
     }
+}
+
+impl ReadHandle {
+    /// The patch text of `source`.
+    pub fn get_patch(&self, source: PatchSource) -> Result<Vec<u8>, ErrorDto> {
+        self.read(|tx| Command::GetPatch { source, reply: tx })
+    }
 
     /// What a patch file's `content` holds and whether it applies; changes nothing.
     pub fn preview_patch(&self, content: Vec<u8>) -> Result<PatchPreview, ErrorDto> {
-        self.request(|tx| Command::PreviewPatch { content, reply: tx })
+        self.read(|tx| Command::PreviewPatch { content, reply: tx })
     }
 }

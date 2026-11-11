@@ -12,7 +12,7 @@ use super::policy::{reply_of, BusyReply};
 use super::rebase::{HistoryEdit, HistoryEditKind};
 use super::state_lock::{Acquire, StateGuard, StateLock, LOCK_WAIT};
 use super::undo_store::{PendingEntry, UndoEntry, UndoStacks, UndoStore, UNDO_LIMIT};
-use super::{Command, WorkerHandle};
+use super::{Command, ReadHandle, WorkerHandle};
 
 pub(super) const MAX_LABEL_CHARS: usize = 80;
 
@@ -653,16 +653,18 @@ pub(super) fn get_state(recorder: &mut UndoRecorder, reply: Sender<Result<UndoSt
 }
 
 impl WorkerHandle {
-    pub fn get_undo_state(&self) -> Result<UndoState, ErrorDto> {
-        self.request(|reply| Command::GetUndoState { reply })
-    }
-
     pub fn undo(&self) -> Result<UndoOutcome, ErrorDto> {
         self.request(|reply| Command::Undo { reply })
     }
 
     pub fn redo(&self) -> Result<UndoOutcome, ErrorDto> {
         self.request(|reply| Command::Redo { reply })
+    }
+}
+
+impl ReadHandle {
+    pub fn get_undo_state(&self) -> Result<UndoState, ErrorDto> {
+        self.read(|reply| Command::GetUndoState { reply })
     }
 }
 

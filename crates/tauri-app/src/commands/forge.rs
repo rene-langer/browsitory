@@ -11,7 +11,7 @@ pub async fn detect_forge_repository(
     state: State<'_, AppState>,
 ) -> Result<Vec<ForgeRepositoryDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.detect_forge_repository())
+        .read(move |w| w.detect_forge_repository())
         .await?
         .into_iter()
         .map(ForgeRepositoryDto::from)

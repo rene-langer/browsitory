@@ -1,4 +1,4 @@
-use super::{Command, WorkerHandle};
+use super::{Command, ReadHandle, WorkerHandle};
 use crate::wire::ErrorDto;
 use git_core::branch::{BranchInfo, StashSwitchOutcome};
 use std::sync::mpsc::Sender;
@@ -82,9 +82,6 @@ pub(super) fn rename(
     );
 }
 impl WorkerHandle {
-    pub fn list_branches(&self) -> Result<Vec<BranchInfo>, ErrorDto> {
-        self.request(|reply_tx| Command::ListBranches { reply: reply_tx })
-    }
     /// Creates `name` at `start_point`; with `checkout` it switches to it too (#656).
     pub fn create_branch(
         &self,
@@ -98,9 +95,6 @@ impl WorkerHandle {
             checkout,
             reply: reply_tx,
         })
-    }
-    pub fn switch_conflicts(&self, name: String) -> Result<Vec<String>, ErrorDto> {
-        self.request(|reply| Command::GetSwitchConflicts { name, reply })
     }
     /// Stashes the local changes, switches to `name` and, with `reapply`, pops them there (#653).
     /// `post-checkout` is reported as for [`Self::switch_branch`].
@@ -145,5 +139,14 @@ impl WorkerHandle {
             new_name,
             reply: reply_tx,
         })
+    }
+}
+
+impl ReadHandle {
+    pub fn list_branches(&self) -> Result<Vec<BranchInfo>, ErrorDto> {
+        self.read(|reply_tx| Command::ListBranches { reply: reply_tx })
+    }
+    pub fn switch_conflicts(&self, name: String) -> Result<Vec<String>, ErrorDto> {
+        self.read(|reply| Command::GetSwitchConflicts { name, reply })
     }
 }

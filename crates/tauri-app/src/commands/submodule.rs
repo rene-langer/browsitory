@@ -10,7 +10,7 @@ pub async fn list_submodules(
     state: State<'_, AppState>,
 ) -> Result<Vec<SubmoduleInfoDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.list_submodules())
+        .read(move |w| w.list_submodules())
         .await?
         .into_iter()
         .map(SubmoduleInfoDto::from)

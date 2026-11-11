@@ -1,4 +1,4 @@
-use super::{Command, WorkerHandle};
+use super::{Command, ReadHandle, WorkerHandle};
 use crate::wire::ErrorDto;
 use git_core::merge::{
     ConflictSegment, ConflictSide, FileConflictChoice, MarkResolvedOutcome, MergeOptions,
@@ -183,14 +183,6 @@ impl WorkerHandle {
             reply: tx,
         })
     }
-    /// The merge dialog's default options, from `merge.ff`.
-    pub fn merge_defaults(&self) -> Result<MergeOptions, ErrorDto> {
-        self.request(|tx| Command::GetMergeDefaults { reply: tx })
-    }
-    #[allow(dead_code)]
-    pub fn get_conflict_hunks(&self, path: String) -> Result<Vec<ConflictSegment>, ErrorDto> {
-        self.request(|tx| Command::GetConflictHunks { path, reply: tx })
-    }
     #[allow(dead_code)]
     pub fn resolve_conflict(&self, path: String, resolved_content: String) -> Result<(), ErrorDto> {
         self.request(|tx| Command::ResolveConflict {
@@ -203,10 +195,6 @@ impl WorkerHandle {
     pub fn abort_merge(&self) -> Result<(), ErrorDto> {
         self.request(|tx| Command::AbortMerge { reply: tx })
     }
-    #[allow(dead_code)]
-    pub fn get_merge_message(&self) -> Result<Option<String>, ErrorDto> {
-        self.request(|tx| Command::GetMergeMessage { reply: tx })
-    }
     pub fn resolve_add_delete_conflict(
         &self,
         path: String,
@@ -217,5 +205,20 @@ impl WorkerHandle {
             choice,
             reply: tx,
         })
+    }
+}
+
+impl ReadHandle {
+    /// The merge dialog's default options, from `merge.ff`.
+    pub fn merge_defaults(&self) -> Result<MergeOptions, ErrorDto> {
+        self.read(|tx| Command::GetMergeDefaults { reply: tx })
+    }
+    #[allow(dead_code)]
+    pub fn get_conflict_hunks(&self, path: String) -> Result<Vec<ConflictSegment>, ErrorDto> {
+        self.read(|tx| Command::GetConflictHunks { path, reply: tx })
+    }
+    #[allow(dead_code)]
+    pub fn get_merge_message(&self) -> Result<Option<String>, ErrorDto> {
+        self.read(|tx| Command::GetMergeMessage { reply: tx })
     }
 }
