@@ -604,21 +604,21 @@ describe("Updates preferences (#630)", () => {
   it("checks for updates on demand and shows what it found", async () => {
     let answer: (outcome: UpdateCheckOutcome) => void = () => {};
     const onCheckNow = vi.fn(() => new Promise<UpdateCheckOutcome>((resolve) => (answer = resolve)));
-    renderUpdates({ getUpdateSettings: async () => ({ checkAutomatically: false }) }, onCheckNow);
+    const group = renderUpdates({ getUpdateSettings: async () => ({ checkAutomatically: false }) }, onCheckNow);
     const button = screen.getByRole("button", { name: "Check for updates" });
 
     fireEvent.click(button);
     expect(onCheckNow).toHaveBeenCalledTimes(1);
     expect(button).toBeDisabled();
-    expect(screen.getByRole("status")).toHaveTextContent("Checking for updates…");
+    expect(within(group).getByRole("status")).toHaveTextContent("Checking for updates…");
 
     answer({ kind: "none" });
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Browsitory is up to date."));
+    await waitFor(() => expect(within(group).getByRole("status")).toHaveTextContent("Browsitory is up to date."));
     expect(button).toBeEnabled();
 
     fireEvent.click(button);
     answer({ kind: "ready", version: "1.2.3" });
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Update v1.2.3 is ready."));
+    await waitFor(() => expect(within(group).getByRole("status")).toHaveTextContent("Update v1.2.3 is ready."));
 
     fireEvent.click(button);
     answer({ kind: "failed", message: "no endpoint answered" });
