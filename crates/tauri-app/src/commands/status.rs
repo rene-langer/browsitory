@@ -291,6 +291,30 @@ pub async fn unstage_file(
         .await
 }
 
+/// Stages `paths` as one undo step, all or nothing (#528).
+#[tauri::command]
+pub async fn stage_paths(
+    repo_path: String,
+    paths: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), ErrorDto> {
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.stage_paths(paths))
+        .await
+}
+
+/// Unstages `paths` as one undo step, all or nothing (#528).
+#[tauri::command]
+pub async fn unstage_paths(
+    repo_path: String,
+    paths: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), ErrorDto> {
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.unstage_paths(paths))
+        .await
+}
+
 #[tauri::command]
 pub async fn stage_hunk(
     repo_path: String,
@@ -456,6 +480,18 @@ pub async fn ignore_path(
 ) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.ignore_path(pattern))
+        .await
+}
+
+/// Adds `patterns` to `.gitignore` in one write and one undo step (#528).
+#[tauri::command]
+pub async fn ignore_paths(
+    repo_path: String,
+    patterns: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), ErrorDto> {
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.ignore_paths(patterns))
         .await
 }
 

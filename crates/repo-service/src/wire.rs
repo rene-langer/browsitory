@@ -376,8 +376,16 @@ pub struct UpstreamInfoDto {
 #[serde(tag = "kind", rename_all_fields = "camelCase")]
 pub enum PullOutcomeDto {
     UpToDate,
-    FastForwarded { upstream_ref: String },
-    Diverged { upstream_ref: String },
+    FastForwarded {
+        upstream_ref: String,
+    },
+    Diverged {
+        upstream_ref: String,
+    },
+    /// Could fast-forward, but git config asks for a merge commit (#740); nothing changed.
+    NoFastForward {
+        upstream_ref: String,
+    },
 }
 
 impl From<git_core::remote::PullOutcome> for PullOutcomeDto {
@@ -389,6 +397,9 @@ impl From<git_core::remote::PullOutcome> for PullOutcomeDto {
             }
             git_core::remote::PullOutcome::Diverged { upstream_ref } => {
                 PullOutcomeDto::Diverged { upstream_ref }
+            }
+            git_core::remote::PullOutcome::NoFastForward { upstream_ref } => {
+                PullOutcomeDto::NoFastForward { upstream_ref }
             }
         }
     }

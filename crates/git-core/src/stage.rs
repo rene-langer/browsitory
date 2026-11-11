@@ -446,10 +446,71 @@ pub fn discard_all_unstaged(repo: &git2::Repository, paths: &[String]) -> Result
     Err(StageError::DiscardIncomplete { failed, message })
 }
 
-/// Appends `pattern` to the repo-root `.gitignore` unless it is already listed.
-pub fn ignore_path(repo: &git2::Repository, pattern: &str) -> Result<(), StageError> {
-    if pattern.is_empty() || pattern.contains(['\n', '\r']) || pattern.trim() != pattern {
-        return Err(StageError::InvalidPattern);
+/// Stages every one of `paths` as [`stage_file`] does, all or nothing (#528): when one fails,
+/// the index is put back as it was and that error is returned.
+pub fn stage_paths(repo: &git2::Repository, paths: &[String]) -> Result<(), StageError> {
+    for path in paths {
+        checked_relative(path)?;
+    }
+    with_index_kept_on_error(repo, || paths.iter().try_for_each(|p| stage_file(repo, p)))
+}
+
+/// Unstages every one of `paths` as [`unstage_file`] does, all or nothing (#528).
+pub fn unstage_paths(repo: &git2::Repository, paths: &[String]) -> Result<(), StageError> {
+    with_index_kept_on_error(repo, || {
+        paths.iter().try_for_each(|p| unstage_file(repo, p))
+    })
+}
+
+/// Runs `change`; when it fails, writes back the index file as it was before and re-reads the
+/// repository's index object (the worker keeps one `Repository` open), so nothing of a
+/// part-way change stays.
+fn with_index_kept_on_error(
+    repo: &git2::Repository,
+    change: impl FnOnce() -> Result<(), StageError>,
+) -> Result<(), StageError> {
+    let mut index = repo.index()?;
+    let saved = match index.path() {
+        Some(path) => match std::fs::read(path) {
+            Ok(bytes) => Some((path.to_path_buf(), Some(bytes))),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some((path.to_path_buf(), None)),
+            Err(e) => return Err(e.into()),
+        },
+        None => None,
+    };
+    let Err(error) = change() else {
+        return Ok(());
+    };
+    let restored = (|| -> Result<(), StageError> {
+        match &saved {
+            Some((path, Some(bytes))) => std::fs::write(path, bytes)?,
+            Some((path, None)) => match std::fs::remove_file(path) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+                _ => {}
+            },
+            None => {}
+        }
+        index.read(true)?;
+        Ok(())
+    })();
+    match restored {
+        Ok(()) => Err(error),
+        Err(restore) => Err(StageError::Index(git2::Error::from_str(&format!(
+            "{error}; putting the index back afterwards failed too: {restore}"
+        )))),
+    }
+}
+
+/// Appends each of `patterns` to the repo-root `.gitignore` that isn't listed there yet, in one
+/// write (#528). Every pattern is checked first: an invalid one writes nothing.
+pub fn ignore_paths(repo: &git2::Repository, patterns: &[String]) -> Result<(), StageError> {
+    for pattern in patterns {
+        if pattern.is_empty() || pattern.contains(['\n', '\r']) || pattern.trim() != pattern {
+            return Err(StageError::InvalidPattern);
+        }
+    }
+    if patterns.is_empty() {
+        return Ok(());
     }
     let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
     // Read and written through the work tree walker: never through a link (a linked
@@ -465,15 +526,25 @@ pub fn ignore_path(repo: &git2::Repository, pattern: &str) -> Result<(), StageEr
             _ => return Err(StageError::InvalidPath),
         },
     };
-    if existing.lines().any(|line| line.trim_end() == pattern) {
+    let mut listed: Vec<&str> = existing.lines().map(str::trim_end).collect();
+    let mut added = Vec::new();
+    for pattern in patterns {
+        if !listed.contains(&pattern.as_str()) {
+            listed.push(pattern);
+            added.push(pattern);
+        }
+    }
+    if added.is_empty() {
         return Ok(());
     }
-    let mut next = existing;
+    let mut next = existing.clone();
     if !next.is_empty() && !next.ends_with('\n') {
         next.push('\n');
     }
-    next.push_str(pattern);
-    next.push('\n');
+    for pattern in added {
+        next.push_str(pattern);
+        next.push('\n');
+    }
     // A link swapped in meanwhile is removed, never written through.
     let written = crate::worktree_guard::write_beneath(workdir, ".gitignore", next.as_bytes())
         .map_err(|error| {
@@ -489,6 +560,11 @@ pub fn ignore_path(repo: &git2::Repository, pattern: &str) -> Result<(), StageEr
         return Err(StageError::InvalidPath);
     }
     Ok(())
+}
+
+/// Appends `pattern` to the repo-root `.gitignore` unless it is already listed.
+pub fn ignore_path(repo: &git2::Repository, pattern: &str) -> Result<(), StageError> {
+    ignore_paths(repo, &[pattern.to_string()])
 }
 
 /// Puts `path`'s index entry back to HEAD's. Inside a folder/link pair (a folder replaced by a

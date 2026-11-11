@@ -2845,6 +2845,50 @@ describe("App", () => {
       expect(undo).not.toHaveBeenCalled();
     });
 
+    it("ignoring several files is one call whose toast offers Undo (#528)", async () => {
+      let undoState = { undo: null as string | null, redo: null as string | null };
+      const ignorePaths = vi.fn(async () => {
+        undoState = { undo: "Ignore 2 patterns", redo: null };
+      });
+      const ignorePath = vi.fn(async () => {});
+      const undo = vi.fn(async () => ({ kind: "Done" as const, label: "Ignore 2 patterns" }));
+      render(
+        <App
+          client={undoClient({
+            getStatus: async () => [
+              { path: "a.log", oldPath: null, staged: false, kind: "New" },
+              { path: "b.log", oldPath: null, staged: false, kind: "New" },
+            ],
+            getUndoState: async () => undoState,
+            ignorePaths,
+            ignorePath,
+            undo,
+          })}
+        />,
+      );
+      const header = async (path: string) =>
+        (
+          await screen.findAllByText(
+            (_, element) =>
+              element?.tagName === "SPAN" &&
+              element.closest('[role="option"]') !== null &&
+              (element.textContent ?? "").startsWith(`${path} (`),
+          )
+        )[0];
+      fireEvent.click(await header("a.log"));
+      fireEvent.click(await header("b.log"), { ctrlKey: true });
+      const bar = screen.getByRole("group", { name: "Selected unstaged files" });
+      fireEvent.click(within(bar).getByRole("button", { name: "Ignore 2 untracked files" }));
+
+      await waitFor(() => expect(ignorePaths).toHaveBeenCalledWith("/repo", ["/a.log", "/b.log"]));
+      expect(ignorePath).not.toHaveBeenCalled();
+      const notifications = screen.getByRole("status", { name: "Notifications" });
+      await within(notifications).findByText("Added 2 patterns to .gitignore");
+      await screen.findByRole("button", { name: "Undo Ignore 2 patterns" });
+      fireEvent.click(within(notifications).getByRole("button", { name: "Undo" }));
+      await waitFor(() => expect(undo).toHaveBeenCalledWith("/repo"));
+    });
+
     it("re-reads the undo state when the window regains focus", async () => {
       const getUndoState = vi.fn(async () => ({ undo: null, redo: null }));
       render(<App client={undoClient({ getUndoState })} />);

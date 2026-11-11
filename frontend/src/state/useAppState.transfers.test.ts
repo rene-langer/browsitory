@@ -220,6 +220,26 @@ describe("useAppState", () => {
     expect(rebaseCalls).toBe(0);
   });
 
+  it("records a pull that git config wants as a merge commit, without merging yet (#740)", async () => {
+    const mergeBranch = vi.fn(async () => unimplemented());
+    const client = transferClient({
+      pullCurrentUpstream: async () => ({ kind: "NoFastForward", upstreamRef: "refs/remotes/origin/main" }),
+      mergeBranch,
+    });
+
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    await act(() => result.current.pullCurrentUpstream());
+
+    expect(result.current.state.pendingPull).toEqual({
+      upstreamRef: "refs/remotes/origin/main",
+      noFastForward: true,
+    });
+    expect(result.current.state.pending).toBe(false);
+    expect(result.current.state.pullOutcome).toBeNull();
+    expect(mergeBranch).not.toHaveBeenCalled();
+  });
+
   it("dismisses a divergent pull without changing the chosen reconciliation flow", async () => {
     const client = transferClient({
       pullCurrentUpstream: async () => ({ kind: "Diverged", upstreamRef: "refs/remotes/origin/main" }),

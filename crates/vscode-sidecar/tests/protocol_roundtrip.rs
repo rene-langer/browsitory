@@ -3650,3 +3650,46 @@ fn get_commit_graph_pages_with_a_cursor() {
     assert_eq!(stale["result"]["stale"], true, "{stale}");
     assert_eq!(stale["result"]["commits"], serde_json::json!([]));
 }
+
+#[test]
+fn multi_path_staging_and_ignore_round_trip_through_the_sidecar() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "seed.txt", "s\n");
+    commit_all(&repo, "base");
+    write_file(dir.path(), "a.txt", "a\n");
+    write_file(dir.path(), "b.txt", "b\n");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let staged = sidecar.call(
+        2,
+        "stage_paths",
+        serde_json::json!({"repoPath": repo_path, "paths": ["a.txt", "b.txt"]}),
+    );
+    assert_eq!(staged["result"], serde_json::Value::Null, "{staged}");
+    let undo = sidecar.call(
+        3,
+        "get_undo_state",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(undo["result"]["undo"], "Stage 2 files", "{undo}");
+
+    let unstaged = sidecar.call(
+        4,
+        "unstage_paths",
+        serde_json::json!({"repoPath": repo_path, "paths": ["a.txt", "b.txt"]}),
+    );
+    assert_eq!(unstaged["result"], serde_json::Value::Null, "{unstaged}");
+
+    let ignored = sidecar.call(
+        5,
+        "ignore_paths",
+        serde_json::json!({"repoPath": repo_path, "patterns": ["a.txt", "b.txt"]}),
+    );
+    assert_eq!(ignored["result"], serde_json::Value::Null, "{ignored}");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join(".gitignore")).unwrap(),
+        "a.txt\nb.txt\n"
+    );
+}

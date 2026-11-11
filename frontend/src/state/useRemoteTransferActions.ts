@@ -540,13 +540,12 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
         pullOutcome: null,
       }));
       const outcome: PullOutcome = await client.pullCurrentUpstream(repoPath);
-      if (outcome.kind === "Diverged") {
-        setState((prev) => ({
-          ...prev,
-          pending: false,
-          transferSubject: null,
-          pendingPull: { upstreamRef: outcome.upstreamRef },
-        }));
+      if (outcome.kind === "Diverged" || outcome.kind === "NoFastForward") {
+        const pendingPull =
+          outcome.kind === "Diverged"
+            ? { upstreamRef: outcome.upstreamRef }
+            : { upstreamRef: outcome.upstreamRef, noFastForward: true as const };
+        setState((prev) => ({ ...prev, pending: false, transferSubject: null, pendingPull }));
         return;
       }
       // A pull fetches the upstream's remote first.

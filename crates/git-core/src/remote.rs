@@ -423,8 +423,18 @@ pub struct TagInfo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PullOutcome {
     UpToDate,
-    FastForwarded { upstream_ref: String },
-    Diverged { upstream_ref: String },
+    FastForwarded {
+        upstream_ref: String,
+    },
+    Diverged {
+        upstream_ref: String,
+    },
+    /// The branch could fast-forward, but git config asks for a merge commit (`pull.ff=false`,
+    /// `branch.<name>.mergeoptions=--no-ff`, `merge.ff=false`) and no rebase is configured
+    /// (#740). Nothing changed; the caller merges `upstream_ref` with a merge commit.
+    NoFastForward {
+        upstream_ref: String,
+    },
 }
 
 /// How a pull reconciles a branch that has diverged from its upstream (#652).
@@ -1222,6 +1232,9 @@ pub fn pull_after_fetch(
     if !repo.graph_descendant_of(upstream_oid, local_oid)? {
         return Ok(PullOutcome::Diverged { upstream_ref });
     }
+    if pull_wants_merge_commit(repo, &local_branch)? {
+        return Ok(PullOutcome::NoFastForward { upstream_ref });
+    }
 
     // Safe checkouts create files through a symlinked folder (#114).
     let upstream_tree = upstream_commit.tree()?;
@@ -1260,6 +1273,46 @@ pub fn pull_after_fetch(
     repo.reference(&local_ref, upstream_oid, true, "fast-forward pull")?;
 
     Ok(PullOutcome::FastForwarded { upstream_ref })
+}
+
+/// Whether `git pull` would make a merge commit on `branch` where it could fast-forward
+/// (#740), in git's order: `pull.ff`, else the last `--ff`/`--no-ff`/`--ff-only` in
+/// `branch.<branch>.mergeoptions`, else `merge.ff`. A configured rebase (`branch.<name>.rebase`,
+/// `pull.rebase`) fast-forwards whatever these say, as `git pull` does.
+fn pull_wants_merge_commit(repo: &Repository, branch: &str) -> Result<bool, RemoteError> {
+    if pull_defaults(repo) == Some(PullStrategy::Rebase) {
+        return Ok(false);
+    }
+    let config = repo.config()?.snapshot()?;
+    let never = |value: &str| {
+        crate::merge::fast_forward_from_merge_ff(Some(value)) == crate::merge::FastForward::Never
+    };
+    if let Some(value) = config_string(&config, "pull.ff")? {
+        return Ok(never(&value));
+    }
+    let options = config_string(&config, &format!("branch.{branch}.mergeoptions"))?;
+    let from_options = options.as_deref().and_then(|options| {
+        options
+            .split_whitespace()
+            .rev()
+            .find_map(|option| match option {
+                "--no-ff" => Some(true),
+                "--ff" | "--ff-only" => Some(false),
+                _ => None,
+            })
+    });
+    if let Some(no_ff) = from_options {
+        return Ok(no_ff);
+    }
+    Ok(config_string(&config, "merge.ff")?.is_some_and(|value| never(&value)))
+}
+
+fn config_string(config: &git2::Config, key: &str) -> Result<Option<String>, git2::Error> {
+    match config.get_string(key) {
+        Ok(value) => Ok(Some(value)),
+        Err(error) if error.code() == ErrorCode::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 pub fn list_remotes(repo: &Repository) -> Result<Vec<RemoteInfo>, RemoteError> {

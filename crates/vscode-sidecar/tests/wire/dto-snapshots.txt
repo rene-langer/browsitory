@@ -196,6 +196,7 @@ UndoOutcome/OperationInProgress {"kind":"OperationInProgress"}
 PullOutcome/UpToDate {"kind":"UpToDate"}
 PullOutcome/FastForwarded {"kind":"FastForwarded","upstreamRef":"refs/remotes/origin/main"}
 PullOutcome/Diverged {"kind":"Diverged","upstreamRef":"refs/remotes/origin/main"}
+PullOutcome/NoFastForward {"kind":"NoFastForward","upstreamRef":"refs/remotes/origin/main"}
 StashEntry/plain {"branch":"main","commitId":"1515151515151515151515151515151515151515","fileCount":3,"hasStagedChanges":true,"index":0,"message":"WIP on main: Add","timestamp":1700000000}
 StashEntry/no-branch {"branch":null,"commitId":"1616161616161616161616161616161616161616","fileCount":1,"hasStagedChanges":false,"index":1,"message":"autostash","timestamp":1700000000}
 StashApplyOutcome/Applied {"kind":"Applied"}

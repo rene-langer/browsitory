@@ -319,6 +319,15 @@ fn pull_outcome_serializes_with_a_kind_tag_and_camel_case_fields() {
         .unwrap(),
         serde_json::json!({"kind": "Diverged", "upstreamRef": "refs/remotes/origin/main"})
     );
+    assert_eq!(
+        serde_json::to_value(PullOutcomeDto::from(
+            git_core::remote::PullOutcome::NoFastForward {
+                upstream_ref: "refs/remotes/origin/main".to_string(),
+            }
+        ))
+        .unwrap(),
+        serde_json::json!({"kind": "NoFastForward", "upstreamRef": "refs/remotes/origin/main"})
+    );
 }
 
 /// base: a.txt="base\n"; `feature` adds b.txt, changes a.txt, adds c.txt; the checked-out

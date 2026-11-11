@@ -219,6 +219,18 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             "undo(RefsAndIndex, Unstage a.txt) lock hold",
         ),
         (
+            cmd!(StagePaths {
+                paths: vec![s("a.txt"), s("b.txt"), s("c.txt")]
+            }),
+            "undo(RefsAndIndex, Stage 3 files) lock hold",
+        ),
+        (
+            cmd!(UnstagePaths {
+                paths: vec![s("a.txt")]
+            }),
+            "undo(RefsAndIndex, Unstage a.txt) lock hold",
+        ),
+        (
             cmd!(StageHunk {
                 path: s("a.txt"),
                 old_start: 1,
@@ -355,6 +367,12 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
                 pattern: s("*.log")
             }),
             "undo(Full, Ignore *.log) lock hold",
+        ),
+        (
+            cmd!(IgnorePaths {
+                patterns: vec![s("*.log"), s("/out/")]
+            }),
+            "undo(Full, Ignore 2 patterns) lock hold",
         ),
         (
             cmd!(CreateRootFile {

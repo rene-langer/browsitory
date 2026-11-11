@@ -146,6 +146,10 @@ where
             }
             Command::StageFile { path, reply } => status::stage_file(&self.repo, path, reply),
             Command::UnstageFile { path, reply } => status::unstage_file(&self.repo, path, reply),
+            Command::StagePaths { paths, reply } => status::stage_paths(&self.repo, paths, reply),
+            Command::UnstagePaths { paths, reply } => {
+                status::unstage_paths(&self.repo, paths, reply)
+            }
             Command::StageHunk {
                 path,
                 old_start,
@@ -248,6 +252,9 @@ where
             }
             Command::IgnorePath { pattern, reply } => {
                 status::ignore_path(&self.repo, pattern, reply)
+            }
+            Command::IgnorePaths { patterns, reply } => {
+                status::ignore_paths(&self.repo, patterns, reply)
             }
             Command::CreateRootFile { name, reply } => {
                 tools::create_root_file(&self.repo, name, reply)

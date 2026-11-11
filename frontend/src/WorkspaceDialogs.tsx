@@ -305,14 +305,15 @@ export function WorkspaceDialogs({
         // Here, not in `BranchTree`, for the same reason as `RemoteDialogs` below (#636).
         <PendingPullPrompt
           upstreamRef={appState.state.pendingPull.upstreamRef}
+          noFastForward={appState.state.pendingPull.noFastForward === true}
           branchName={appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null}
           operationDisabled={repositoryOperationDisabled}
           operationDisabledReason={operationDisabledReason}
           getPullStrategy={appState.getPullStrategy}
           setPullStrategy={appState.setPullStrategy}
-          onMerge={(upstreamRef) => {
+          onMerge={(upstreamRef, fastForward) => {
             appState.clearPendingPull();
-            void appState.mergePull(upstreamRef);
+            void appState.mergePull(upstreamRef, fastForward);
           }}
           onRebase={(upstreamRef) => {
             appState.clearPendingPull();

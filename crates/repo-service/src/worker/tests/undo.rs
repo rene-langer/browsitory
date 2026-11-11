@@ -268,3 +268,145 @@ fn history_survives_a_worker_restart_and_is_capped() {
     }
     assert_eq!(undone, 50);
 }
+
+fn staged_paths(dir: &std::path::Path) -> Vec<String> {
+    let repo = Repository::open(dir).unwrap();
+    let mut paths: Vec<String> = git_core::status::status(&repo)
+        .unwrap()
+        .into_iter()
+        .filter(|entry| entry.staged)
+        .map(|entry| entry.path)
+        .collect();
+    paths.sort();
+    paths
+}
+
+#[test]
+fn staging_several_files_is_one_undo_step() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "seed.txt", "s\n");
+    commit_all(&repo, "initial");
+    for name in ["a.txt", "b.txt", "c.txt"] {
+        write_file(dir.path(), name, "new\n");
+    }
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+
+    handle
+        .stage_paths(vec!["a.txt".into(), "b.txt".into(), "c.txt".into()])
+        .unwrap();
+    assert_eq!(staged_paths(dir.path()), ["a.txt", "b.txt", "c.txt"]);
+    assert_eq!(
+        handle.get_undo_state().unwrap(),
+        UndoState {
+            undo: Some("Stage 3 files".into()),
+            redo: None
+        }
+    );
+
+    assert_eq!(
+        handle.undo().unwrap(),
+        UndoOutcome::Done {
+            label: "Stage 3 files".into()
+        }
+    );
+    assert!(staged_paths(dir.path()).is_empty());
+    assert_eq!(handle.get_undo_state().unwrap().undo, None);
+}
+
+#[test]
+fn unstaging_several_files_is_one_undo_step() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "seed.txt", "s\n");
+    commit_all(&repo, "initial");
+    write_file(dir.path(), "a.txt", "new\n");
+    write_file(dir.path(), "b.txt", "new\n");
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    handle
+        .stage_paths(vec!["a.txt".into(), "b.txt".into()])
+        .unwrap();
+
+    handle
+        .unstage_paths(vec!["a.txt".into(), "b.txt".into()])
+        .unwrap();
+    assert!(staged_paths(dir.path()).is_empty());
+    assert_eq!(
+        handle.get_undo_state().unwrap().undo.as_deref(),
+        Some("Unstage 2 files")
+    );
+
+    handle.undo().unwrap();
+    assert_eq!(staged_paths(dir.path()), ["a.txt", "b.txt"]);
+    assert_eq!(
+        handle.get_undo_state().unwrap().undo.as_deref(),
+        Some("Stage 2 files")
+    );
+}
+
+#[test]
+fn ignoring_several_patterns_is_one_undo_step() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "seed.txt", "s\n");
+    commit_all(&repo, "initial");
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+
+    handle
+        .ignore_paths(vec!["a.log".into(), "/out/".into()])
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join(".gitignore")).unwrap(),
+        "a.log\n/out/\n"
+    );
+    assert_eq!(
+        handle.get_undo_state().unwrap().undo.as_deref(),
+        Some("Ignore 2 patterns")
+    );
+
+    handle.undo().unwrap();
+    assert!(!dir.path().join(".gitignore").exists());
+    assert_eq!(handle.get_undo_state().unwrap().undo, None);
+}
+
+#[test]
+fn a_multi_path_command_of_one_path_is_labelled_like_the_single_one() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "seed.txt", "s\n");
+    commit_all(&repo, "initial");
+    write_file(dir.path(), "a.txt", "new\n");
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+
+    handle.stage_paths(vec!["a.txt".into()]).unwrap();
+    assert_eq!(
+        handle.get_undo_state().unwrap().undo.as_deref(),
+        Some("Stage a.txt")
+    );
+    handle.unstage_paths(vec!["a.txt".into()]).unwrap();
+    assert_eq!(
+        handle.get_undo_state().unwrap().undo.as_deref(),
+        Some("Unstage a.txt")
+    );
+    handle.ignore_paths(vec!["a.txt".into()]).unwrap();
+    assert_eq!(
+        handle.get_undo_state().unwrap().undo.as_deref(),
+        Some("Ignore a.txt")
+    );
+}
+
+#[test]
+fn a_failed_multi_path_stage_records_nothing() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "seed.txt", "s\n");
+    commit_all(&repo, "initial");
+    write_file(dir.path(), "a.txt", "new\n");
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+
+    assert!(handle
+        .stage_paths(vec!["a.txt".into(), "../escape.txt".into()])
+        .is_err());
+    assert!(staged_paths(dir.path()).is_empty());
+    assert_eq!(handle.get_undo_state().unwrap().undo, None);
+}
