@@ -77,7 +77,10 @@ fn stage_paths_puts_the_index_back_when_a_later_path_fails() {
 
     assert!(result.is_err(), "{result:?}");
     assert!(staged(&repo).is_empty());
-    assert_eq!(std::fs::read(repo.path().join("index")).unwrap(), index_before);
+    assert_eq!(
+        std::fs::read(repo.path().join("index")).unwrap(),
+        index_before
+    );
     // The repository's own index object was put back too, not only the file.
     let mut index = repo.index().unwrap();
     index.write().unwrap();
@@ -122,7 +125,12 @@ fn ignore_paths_appends_each_new_pattern_once() {
 
     ignore_paths(
         &repo,
-        &["*.log".into(), "target".into(), "/out/".into(), "*.log".into()],
+        &[
+            "*.log".into(),
+            "target".into(),
+            "/out/".into(),
+            "*.log".into(),
+        ],
     )
     .unwrap();
 
@@ -156,4 +164,18 @@ fn ignore_paths_of_nothing_creates_no_gitignore() {
     ignore_paths(&repo, &[]).unwrap();
 
     assert!(!dir.path().join(".gitignore").exists());
+}
+
+#[test]
+fn stage_paths_leaves_no_index_file_when_there_was_none_and_a_path_fails() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a\n");
+    write_file(dir.path(), "folder/inner.txt", "i\n");
+    assert!(!repo.path().join("index").exists());
+
+    let result = stage_paths(&repo, &["a.txt".into(), "folder".into()]);
+
+    assert!(result.is_err(), "{result:?}");
+    assert!(!repo.path().join("index").exists());
+    assert!(staged(&repo).is_empty());
 }

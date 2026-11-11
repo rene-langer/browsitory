@@ -46,6 +46,8 @@ use commands::{
 use commands::{
     get_pull_strategy, get_switch_conflicts, set_identity, set_pull_strategy, stash_and_switch,
 };
+// Several paths as one undo step (#528).
+use commands::{ignore_paths, stage_paths, unstage_paths};
 // The repository tab names (#625).
 use commands::{list_repo_aliases, set_repo_alias};
 // The picker's recent repositories: remove one, and which folders are gone (#690).

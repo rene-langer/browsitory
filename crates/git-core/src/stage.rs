@@ -457,7 +457,9 @@ pub fn stage_paths(repo: &git2::Repository, paths: &[String]) -> Result<(), Stag
 
 /// Unstages every one of `paths` as [`unstage_file`] does, all or nothing (#528).
 pub fn unstage_paths(repo: &git2::Repository, paths: &[String]) -> Result<(), StageError> {
-    with_index_kept_on_error(repo, || paths.iter().try_for_each(|p| unstage_file(repo, p)))
+    with_index_kept_on_error(repo, || {
+        paths.iter().try_for_each(|p| unstage_file(repo, p))
+    })
 }
 
 /// Runs `change`; when it fails, writes back the index file as it was before and re-reads the
@@ -471,9 +473,7 @@ fn with_index_kept_on_error(
     let saved = match index.path() {
         Some(path) => match std::fs::read(path) {
             Ok(bytes) => Some((path.to_path_buf(), Some(bytes))),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                Some((path.to_path_buf(), None))
-            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some((path.to_path_buf(), None)),
             Err(e) => return Err(e.into()),
         },
         None => None,

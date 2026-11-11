@@ -223,8 +223,7 @@ pub(super) fn unstage_paths(
     paths: Vec<String>,
     reply: Sender<Result<(), ErrorDto>>,
 ) {
-    let _ =
-        reply.send(git_core::stage::unstage_paths(repo, &paths).map_err(ErrorDto::from_error));
+    let _ = reply.send(git_core::stage::unstage_paths(repo, &paths).map_err(ErrorDto::from_error));
 }
 
 pub(super) fn stage_hunk(
@@ -782,7 +781,10 @@ impl WorkerHandle {
 
     /// Adds `patterns` to `.gitignore` in one write, one undo step (#528).
     pub fn ignore_paths(&self, patterns: Vec<String>) -> Result<(), ErrorDto> {
-        self.request(|tx| Command::IgnorePaths { patterns, reply: tx })
+        self.request(|tx| Command::IgnorePaths {
+            patterns,
+            reply: tx,
+        })
     }
 
     /// Commits the index, running the commit hooks (`pre-commit` and `commit-msg` skipped with

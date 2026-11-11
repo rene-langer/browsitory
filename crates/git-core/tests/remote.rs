@@ -2870,7 +2870,10 @@ fn mergeoptions_override_merge_ff() {
         ("merge.ff", "false"),
         ("branch.main.mergeoptions", "--ff-only"),
     ]);
-    assert_no_fast_forward(&[("merge.ff", "true"), ("branch.main.mergeoptions", "--no-ff")]);
+    assert_no_fast_forward(&[
+        ("merge.ff", "true"),
+        ("branch.main.mergeoptions", "--no-ff"),
+    ]);
 }
 
 #[test]
