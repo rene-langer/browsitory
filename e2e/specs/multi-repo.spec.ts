@@ -26,7 +26,7 @@ describe("Browsitory multi-repo tabs", () => {
     await secondTab.waitForExist();
     expect(await secondTab.getAttribute("aria-selected")).toBe("true");
 
-    const secondRepoCommit = await $("li*=e2e: second repo base commit");
+    const secondRepoCommit = await $('[data-active-repo="true"]').$("li*=e2e: second repo base commit");
     await secondRepoCommit.waitForExist();
 
     // Switch back to the first tab and confirm the second repo's commit isn't visible there —
@@ -37,11 +37,14 @@ describe("Browsitory multi-repo tabs", () => {
       async () => (await firstTab.getAttribute("aria-selected")) === "true",
       { timeoutMsg: "expected switching back to focus the first tab" },
     );
-    // `isExisting()`, the strict check: `App.tsx` mounts only the active tab's `RepoWorkspace`
-    // (inactive tabs are unmounted, not hidden with `display: none` — PERF-001), so once the
-    // first tab is active again the second repo's workspace is gone from the DOM entirely. Any
-    // match here can only mean the second repo's commit leaked into the first tab's workspace.
-    const secondRepoCommitFromFirstTab = await $("li*=e2e: second repo base commit");
+    // The second tab's workspace stays mounted, hidden (#642), so look in the shown workspace:
+    // any match there can only mean the second repo's commit leaked into the first tab's view.
+    const firstPanelId = await firstTab.getAttribute("aria-controls");
+    await browser.waitUntil(
+      async () => (await $('[data-active-repo="true"]').getAttribute("id")) === firstPanelId,
+      { timeoutMsg: "expected the first tab's workspace to be the shown one" },
+    );
+    const secondRepoCommitFromFirstTab = await $('[data-active-repo="true"]').$("li*=e2e: second repo base commit");
     expect(await secondRepoCommitFromFirstTab.isExisting()).toBe(false);
 
     // #613: a change made in the inactive second repo shows its tab's "uncommitted changes"

@@ -44,7 +44,8 @@ describe("Browsitory clone", () => {
     const tab = await $(`[role="tab"]*=${NAME}`);
     await tab.waitForExist({ timeout: CLONE_TIMEOUT });
     expect(fs.existsSync(path.join(PARENT, NAME, ".git"))).toBe(true);
-    const seedCommit = await $("li*=e2e: add submodule");
+    // The first tab stays mounted in the background (#642): look in the shown workspace only.
+    const seedCommit = await $('[data-active-repo="true"]').$("li*=e2e: add submodule");
     await seedCommit.waitForExist({ timeout: SLOW_UI_TIMEOUT });
   });
 });
