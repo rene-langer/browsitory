@@ -52,6 +52,7 @@ describe("Browsitory reflog recovery", () => {
     const dialog = await $(`aria/Restore ${branchRef}`);
     await dialog.waitForExist();
     await expect(dialog).toHaveText(expect.stringContaining(firstCommitId));
+    console.log(`[probe] before Restore reflog entry: ${await pageDiagnostics("dialog[open] button", false)}`);
     await (await dialog.$("button=Restore reflog entry")).click();
 
     // BranchTree has no separate switcher control any more — the current branch is just the row

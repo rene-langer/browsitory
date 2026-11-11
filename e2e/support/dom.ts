@@ -102,7 +102,7 @@ export async function clickInPage(
             return partial ? actual.includes(wanted) : actual === wanted;
           });
           if (!target) return false;
-          (target as HTMLElement).click();
+          if (click) (target as HTMLElement).click();
           return true;
         },
         selector,
@@ -117,9 +117,9 @@ export async function clickInPage(
  * What the page shows, for a failure message: the alerts' text, the sidebar sections and the
  * page's text (truncated). Never throws.
  */
-export async function pageDiagnostics(probe?: string): Promise<string> {
+export async function pageDiagnostics(probe?: string, scriptClick = true): Promise<string> {
   try {
-    return await browser.execute((probeSelector: string | null) => {
+    return await browser.execute((probeSelector: string | null, click: boolean) => {
       const describe = (el: Element | null) =>
         el === null ? null : `${el.tagName.toLowerCase()}.${(el.getAttribute("class") ?? "").replace(/ /g, ".")} "${(el.textContent ?? "").slice(0, 60)}"`;
       let hit: unknown = null;
@@ -140,7 +140,7 @@ export async function pageDiagnostics(probe?: string): Promise<string> {
             window: [window.innerHeight, window.outerHeight, screen.height, window.devicePixelRatio],
           };
           // Does a script click do what the WebDriver click didn't?
-          (target as HTMLElement).click();
+          if (click) (target as HTMLElement).click();
         } else hit = "probe not found";
       }
       const box = (el: Element | null) => {
@@ -185,7 +185,7 @@ export async function pageDiagnostics(probe?: string): Promise<string> {
         null,
         1,
       );
-    }, probe ?? null).then(async (first) => {
+    }, probe ?? null, scriptClick).then(async (first) => {
       await new Promise((resolve) => setTimeout(resolve, 1500));
       const after = await browser.execute((probeSelector: string | null) => {
         const target = probeSelector === null ? null : document.querySelector(probeSelector);
