@@ -97,7 +97,8 @@ describe("Browsitory merge with conflict resolution", () => {
     const block = await $("section[aria-label='Conflict 1 of 1']");
     await block.$("pre*=line two").waitForExist();
     const result = await block.$("textarea");
-    await expect(result).toHaveValue("feature two\n");
+    // Not `toHaveValue`: it trims the expected text but not the field's value.
+    expect(await result.getValue()).toBe("feature two\n");
     await result.setValue("feature two, edited\n");
     const saveResolution = await $("button=Save resolution");
     await browser.execute((el) => (el as HTMLElement).click(), saveResolution);
