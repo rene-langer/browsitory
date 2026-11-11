@@ -10,6 +10,7 @@ import type {
   OpenRepoEntry,
   PatchContent,
   RepoClient,
+  RepoWatch,
   TransferProgress,
 } from "./RepoClient";
 import { createRepoClient } from "./createRepoClient";
@@ -147,6 +148,24 @@ export const tauriRepoClient: RepoClient = {
       else stop = unlisten;
     });
     void hookListenersReady.catch(() => {});
+    return () => {
+      if (disposed) return;
+      disposed = true;
+      stop?.();
+    };
+  },
+  // The repository watchers' reports (#756). Nothing waits for this listener: a report missed
+  // while it registers is covered by the check `useExternalChanges` makes on showing a tab.
+  subscribeRepoWatch: (listener: (event: RepoWatch) => void) => {
+    let disposed = false;
+    let stop: (() => void) | null = null;
+    listen<RepoWatch>("repo-watch", ({ payload }) => listener(payload)).then(
+      (unlisten) => {
+        if (disposed) unlisten();
+        else stop = unlisten;
+      },
+      (error: unknown) => void logFrontendError("Listening for repository changes failed", error),
+    );
     return () => {
       if (disposed) return;
       disposed = true;

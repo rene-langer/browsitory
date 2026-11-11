@@ -175,6 +175,14 @@ fn snapshots() -> Vec<(String, String)> {
     s.add("HookProgress", fixtures::hook_events(), |event| {
         hook_progress_dto(fixtures::HOOK_REPO_PATH, event)
     });
+    s.add("RepoWatch", fixtures::watch_events(), |event| {
+        repo_service::wire::repo_watch_dto(fixtures::HOOK_REPO_PATH, event)
+    });
+    // The Tauri event they are all emitted as.
+    s.0.push((
+        "RepoWatchEvent/all".to_string(),
+        wire(&super::watch::REPO_WATCH_EVENT),
+    ));
     // The Tauri event they are all emitted as.
     s.0.push((
         "HookProgressEvent/all".to_string(),

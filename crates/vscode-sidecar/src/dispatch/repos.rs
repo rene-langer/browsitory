@@ -23,6 +23,7 @@ pub(super) fn open_repo(params: OpenRepoParams, repos: &Repos) -> Result<Value, 
 }
 
 pub(super) fn close_repo(params: RepoPathParams, repos: &Repos) -> Result<Value, ErrorDto> {
+    super::stop_watching(&params.repo_path);
     // Drops the worker only when no other spelling of the repository is still open.
     repos.close(&params.repo_path);
     Ok(Value::Null)

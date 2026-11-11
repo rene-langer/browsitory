@@ -7,6 +7,7 @@ pub mod base64;
 pub mod clone;
 pub mod credentials;
 pub mod pull_requests;
+pub mod watch;
 pub mod wire;
 pub mod worker;
 
