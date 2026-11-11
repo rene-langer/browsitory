@@ -60,7 +60,7 @@ button {
     opacity var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
-button:hover:not(:disabled) {
+button:hover:not(:disabled):not([aria-disabled="true"]) {
   background: var(--color-control-hover);
 }
 
@@ -73,7 +73,9 @@ button:focus-visible {
   outline-offset: 1px;
 }
 
-button:disabled {
+/* `aria-disabled` (#664): a control that stays focusable so its visible reason can be read. */
+button:disabled,
+button[aria-disabled="true"] {
   opacity: 0.4;
   cursor: not-allowed;
 }
@@ -160,7 +162,8 @@ kbd {
     background: Highlight;
   }
 
-  button:disabled {
+  button:disabled,
+  button[aria-disabled="true"] {
     color: GrayText;
     opacity: 1;
   }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useId } from "react";
 import { Copy } from "lucide-react";
 import type { RemoteInfo } from "../ipc/RepoClient";
 import { remoteNameProblem } from "../lib/refName";
@@ -28,6 +28,8 @@ export function EditRemoteDialog({
   /** Why repository operations are blocked now, or `null`. */
   blockedReason?: string | null;
 }) {
+  // The visible reason the submit button is disabled is its description (#664).
+  const reasonId = useId();
   const [name, setName] = useState(remote.name);
   const [fetchUrl, setFetchUrl] = useState(remote.fetchUrl);
   const [pushUrl, setPushUrl] = useState(remote.pushUrl ?? "");
@@ -98,8 +100,8 @@ export function EditRemoteDialog({
             <Copy size={12} aria-hidden="true" />
           </button>
         )}
-        {blockedReason !== null && <p className={formStyles.blocked}>{blockedReason}</p>}
-        <button type="submit" disabled={nameProblem !== null || blockedReason !== null} title={blockedReason ?? undefined}>
+        {blockedReason !== null && <p id={reasonId} className={formStyles.blocked}>{blockedReason}</p>}
+        <button type="submit" disabled={nameProblem !== null || blockedReason !== null} title={blockedReason ?? undefined} aria-describedby={blockedReason !== null ? reasonId : undefined}>
           Save remote
         </button>
         <button type="button" onClick={onClose}>

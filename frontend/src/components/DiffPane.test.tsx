@@ -563,8 +563,11 @@ describe("DiffPane", () => {
 
         expect(onDiscardFile).toHaveBeenCalledWith("src/a.ts");
         expect(onDiscardRequestChange).toHaveBeenCalledWith(null);
-        // The first file is current from the start (#639).
-        expect(onCurrentFileChange).toHaveBeenCalledWith("src/a.ts");
+        // The first file is current from the start (#639): the conflict, which heads Changes
+        // (#665) and can't be discarded; then the one clicked.
+        expect(onCurrentFileChange).toHaveBeenLastCalledWith(null);
+        fireEvent.click(screen.getByText("src/a.ts"));
+        expect(onCurrentFileChange).toHaveBeenLastCalledWith("src/a.ts");
       });
 
       it("clears a file request whose path disappears, and does not reopen when it returns", () => {
@@ -2641,7 +2644,8 @@ describe("DiffPane multi-select (#449)", () => {
   it("Shift+arrows extend, Ctrl/Cmd+A selects the group and Escape keeps only the current file", () => {
     renderUncommitted(client(), files);
     const list = screen.getByRole("listbox", { name: "Unstaged changes" });
-    // a.txt, the first file, is current from the start (#639).
+    // d.txt, the conflict, heads Changes (#665); start from a.txt, the file after it.
+    fireEvent.click(header("a.txt"));
     fireEvent.keyDown(list, { key: "ArrowDown", shiftKey: true });
     fireEvent.keyDown(list, { key: "ArrowDown", shiftKey: true });
 
@@ -2728,7 +2732,7 @@ describe("DiffPane multi-select (#449)", () => {
     const onOpenStashDialog = vi.fn();
     const { unmount } = renderUncommitted(client(), files, { onOpenStashDialog });
     fireEvent.click(header("a.txt"));
-    fireEvent.click(header("d.txt"), { shiftKey: true });
+    fireEvent.click(header("c.txt"), { shiftKey: true });
 
     fireEvent.click(within(selectionBar()).getByRole("button", { name: "Stash 3 files…" }));
     expect(onOpenStashDialog).toHaveBeenCalledWith(["a.txt", "b.txt", "c.txt"]);
@@ -2791,8 +2795,9 @@ describe("DiffPane multi-select (#449)", () => {
     fireEvent.click(header("c.txt"));
     await waitFor(() => expect(onSelectionChange).toHaveBeenLastCalledWith(null));
 
+    // The conflict d.txt heads Changes (#665): the range from c.txt up to it holds a, b and c.
     fireEvent.click(header("d.txt"), { shiftKey: true });
-    fireEvent.click(header("b.txt"), { ctrlKey: true });
+    fireEvent.click(header("a.txt"), { ctrlKey: true });
 
     await waitFor(() => expect(onSelectionChange).toHaveBeenLastCalledWith({ staged: false, paths: ["b.txt", "c.txt"] }));
   });

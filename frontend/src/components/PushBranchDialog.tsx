@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useId } from "react";
 import type { RemoteInfo } from "../ipc/RepoClient";
 import { branchNameProblem } from "../lib/refName";
 import { Field } from "./primitives/Field";
@@ -47,6 +47,8 @@ export function PushBranchDialog({
   /** Why repository operations are blocked now, or `null`. */
   blockedReason?: string | null;
 }) {
+  // The visible reason the submit button is disabled is its description (#664).
+  const reasonId = useId();
   const [remoteName, setRemoteName] = useState(() => defaultRemote(remotes, branchUpstream));
   const [remoteBranch, setRemoteBranch] = useState(localBranch);
   // Publishing a branch without an upstream is the common case; one that already tracks
@@ -91,9 +93,9 @@ export function PushBranchDialog({
           <input type="checkbox" checked={setUpstream} onChange={(event) => setSetUpstream(event.target.checked)} />
           Set as upstream
         </label>
-        {blockedReason !== null && <p className={formStyles.blocked}>{blockedReason}</p>}
+        {blockedReason !== null && <p id={reasonId} className={formStyles.blocked}>{blockedReason}</p>}
         <div className={styles.actions}>
-          <button type="submit" disabled={blocked} title={blockedReason ?? undefined}>
+          <button type="submit" disabled={blocked} title={blockedReason ?? undefined} aria-describedby={blockedReason !== null ? reasonId : undefined}>
             Push
           </button>
           <button type="button" onClick={onCancel}>

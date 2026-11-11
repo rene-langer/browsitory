@@ -89,7 +89,7 @@ describe("App", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Loading");
   });
 
-  it("shows a failed open-repos restore in the reserved error slot instead of shifting the layout", async () => {
+  it("shows a failed open-repos restore in the error slot above the workspace, with Copy details (#663)", async () => {
     const client = fakeClient({
       listOpenRepos: async () => {
         throw new Error("config.toml is unreadable");
@@ -99,10 +99,10 @@ describe("App", () => {
     render(<App client={client} />);
 
     const banner = await screen.findByText("Error: config.toml is unreadable");
-    // The reserved-space slot (`.errorLayer`, shared with the other App-level banners) floats
-    // the banner over the workspace instead of pushing it down (FB-004) — asserting the class
-    // instead of computed layout, since jsdom doesn't run layout.
+    // The slot (`.errorLayer`, shared with the other App-level banners) sits in the flow, so it
+    // never covers the toolbar (#663) — asserting the class, since jsdom doesn't run layout.
     expect(banner.closest(`.${styles.errorLayer}`)).not.toBeNull();
+    expect(within(screen.getByRole("alert")).getByRole("button", { name: "Copy details" })).toBeInTheDocument();
   });
 
   it("renders a single Notifications region with a repository open", async () => {
@@ -605,7 +605,7 @@ describe("App", () => {
     const closeA = () => tabA.parentElement!.querySelector<HTMLButtonElement>("button:not([role='tab'])")!;
 
     const stash = await screen.findByRole("button", { name: "Stash" });
-    await waitFor(() => expect(stash).toBeEnabled());
+    await waitFor(() => expect(stash).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(stash);
     await waitFor(() => expect(closeA()).toBeDisabled());
 
@@ -1190,7 +1190,7 @@ describe("App", () => {
     render(<App client={client} />);
 
     const push = await screen.findByRole("button", { name: "Push" });
-    await waitFor(() => expect(push).toBeEnabled());
+    await waitFor(() => expect(push).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(push);
     const dialog = await screen.findByRole("dialog", { name: "Push main" });
     expect(within(dialog).getByLabelText("Set as upstream")).toBeChecked();
@@ -1232,7 +1232,7 @@ describe("App", () => {
     render(<App client={client} />);
 
     const push = await screen.findByRole("button", { name: "Push" });
-    await waitFor(() => expect(push).toBeEnabled());
+    await waitFor(() => expect(push).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(push);
 
     const activity = await screen.findByRole("group", { name: "Pushing main to origin/main" });
@@ -1240,8 +1240,8 @@ describe("App", () => {
     act(() => emit(event("Receiving", 3, 4)));
     expect(within(activity).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "75");
     // Repository actions wait, and say what for; browsing (the sidebar toggle) stays available.
-    expect(push).toBeDisabled();
-    expect(push).toHaveAttribute("title", "Pushing main to origin/main. Wait for it to finish, or cancel it.");
+    expect(push).toHaveAttribute("aria-disabled", "true");
+    expect(push).toHaveAccessibleDescription("Pushing main to origin/main. Wait for it to finish, or cancel it.");
     expect(screen.getByRole("button", { name: "Sidebar" })).toBeEnabled();
 
     fireEvent.click(within(activity).getByRole("button", { name: "Cancel" }));
@@ -1283,7 +1283,7 @@ describe("App", () => {
     render(<App client={client} />);
 
     const fetch = await screen.findByRole("button", { name: "Fetch" });
-    await waitFor(() => expect(fetch).toBeEnabled());
+    await waitFor(() => expect(fetch).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(fetch);
 
     await screen.findByText("Fetched from origin. main is 3 commits behind origin/main.");
@@ -1969,8 +1969,11 @@ describe("App", () => {
         fireEvent.keyDown(window, { key: "k", ctrlKey: true });
         fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), { target: { value: "c1" } });
         const results = await screen.findByRole("listbox", { name: "Command results" });
+        // Listed as unavailable, with the reason, never runnable (#644).
         for (const name of ["Cherry-pick c1", "Revert c1", "Checkout c1 (detached)", "Reset to c1…"]) {
-          expect(within(results).queryByRole("option", { name })).toBeNull();
+          const option = within(results).getByRole("option", { name });
+          expect(option).toHaveAttribute("aria-disabled", "true");
+          expect(option).toHaveAccessibleDescription("A rebase started in a terminal is in progress.");
         }
       } finally {
         Element.prototype.scrollIntoView = original;
@@ -2321,7 +2324,7 @@ describe("App", () => {
       render(<App client={stashClient({ saveStash })} />);
 
       const stash = await screen.findByRole("button", { name: "Stash" });
-      await waitFor(() => expect(stash).toBeEnabled());
+      await waitFor(() => expect(stash).not.toHaveAttribute("aria-disabled"));
       fireEvent.click(stash);
 
       await waitFor(() =>
@@ -2802,7 +2805,9 @@ describe("App external tools", () => {
 
     it("shows a plain error's message alone", async () => {
       const alert = await stageAndFail(vi.fn().mockRejectedValue(new Error("boom")));
-      expect(alert.textContent).toBe("boom");
+      // The message with no hint; then the banner's own buttons (#663).
+      expect(alert.querySelector("span")?.textContent).toBe("boom");
+      expect(within(alert).getByRole("button", { name: "Copy details" })).toBeInTheDocument();
     });
 
     it("drops the hint when the next failure has none", async () => {
@@ -2815,6 +2820,11 @@ describe("App external tools", () => {
       fireEvent.click(screen.getByRole("button", { name: "Stage a.txt" }));
       await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("boom"));
       expect(screen.getByRole("alert")).not.toHaveTextContent(PERMISSION_HINT);
+      // The replaced error is kept under the new one until the banner is dismissed (#663).
+      expect(within(screen.getByRole("alert")).getByText("1 earlier error")).toBeInTheDocument();
+      expect(within(screen.getByRole("alert")).getByText("Permission denied")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Dismiss error" }));
+      expect(screen.queryByRole("alert")).toBeNull();
     });
   });
 

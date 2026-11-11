@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useId } from "react";
 import type { GraphCommit } from "../ipc/RepoClient";
 import { FormDialog } from "./primitives/FormDialog";
 import { Toolbar } from "./primitives/Toolbar";
@@ -33,6 +33,8 @@ export function ParentPickerDialog({
   /** Why repository operations are blocked now, or `null`. */
   blockedReason?: string | null;
 }) {
+  // The visible reason the submit button is disabled is its description (#664).
+  const reasonId = useId();
   const [mainline, setMainline] = useState(1);
   return (
     <FormDialog ariaLabel="Choose parent" onCancel={onCancel} returnFocusTo={returnFocusTo}>
@@ -70,9 +72,9 @@ export function ParentPickerDialog({
           })}
         </fieldset>
         <p className={styles.hint}>Parent 1 is usually the branch that was merged into.</p>
-        {blockedReason !== null && <p className={formStyles.blocked}>{blockedReason}</p>}
+        {blockedReason !== null && <p id={reasonId} className={formStyles.blocked}>{blockedReason}</p>}
         <Toolbar>
-          <button type="submit" disabled={blockedReason !== null} title={blockedReason ?? undefined}>
+          <button type="submit" disabled={blockedReason !== null} title={blockedReason ?? undefined} aria-describedby={blockedReason !== null ? reasonId : undefined}>
             {action}
           </button>
           <button type="button" onClick={onCancel}>

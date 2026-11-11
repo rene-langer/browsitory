@@ -51,6 +51,9 @@ function DiffPaneContent({
   initialCommitDraft,
   discardRequest,
   onDiscardRequestChange,
+  conflictRequest = false,
+  onConflictRequestHandled,
+  statusLoaded = true,
   fileHistoryFocus,
   stashes = [],
   selectionBusyReason = null,
@@ -84,6 +87,11 @@ function DiffPaneContent({
   // small wrapper.
   discardRequest: DiscardRequest | null;
   onDiscardRequestChange: (request: DiscardRequest | null) => void;
+  /** "Go to conflict" (#665), passed through to `UncommittedDiffPane`. */
+  conflictRequest?: boolean;
+  onConflictRequestHandled?: () => void;
+  /** The first status read is in: an empty status is a clean tree, not one still loading. */
+  statusLoaded?: boolean;
   // Passed straight through to `CommitBox` — see its `initialDraft`.
   initialCommitDraft?: CommitDraft;
   // Loaded history, used for the selected commit's header (author, date, parents).
@@ -122,6 +130,9 @@ function DiffPaneContent({
         initialCommitDraft={initialCommitDraft}
         discardRequest={discardRequest}
         onDiscardRequestChange={onDiscardRequestChange}
+        conflictRequest={conflictRequest}
+        onConflictRequestHandled={onConflictRequestHandled}
+        statusLoaded={statusLoaded}
         selectionBusyReason={selectionBusyReason}
         discardBlockedReason={discardBlockedReason}
         commits={commits}

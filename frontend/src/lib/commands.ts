@@ -129,6 +129,11 @@ export interface PickerItem {
 export interface Command extends PickerItem {
   /** Set by the family builder that makes the command. */
   group: CommandGroup;
+  /**
+   * Why the command can't run now (#644, #664): set only on the unavailable commands
+   * `buildPaletteCommands` adds, which a search lists greyed out with this reason.
+   */
+  disabledReason?: string;
   /** Set for a picker ("Go to commit…"): choosing the command lists these items instead of
    *  running `run`. */
   picker?: CommandPicker;
@@ -275,12 +280,21 @@ function family(group: CommandGroup) {
      */
     offer(
       id: string,
-      action: Pick<PaletteAction, "paletteLabel" | "enabled">,
+      action: Pick<PaletteAction, "paletteLabel" | "enabled"> & { reason?: string },
       keywords: string[],
       run: () => void,
       inGroup: CommandGroup = group,
     ) {
-      if (action.enabled) commands.push({ id, label: action.paletteLabel, keywords, run, group: inGroup });
+      // A disabled action is kept with its reason; `buildCommands` leaves it out and
+      // `buildPaletteCommands` lists it as unavailable (#644).
+      commands.push({
+        id,
+        label: action.paletteLabel,
+        keywords,
+        run,
+        group: inGroup,
+        ...(action.enabled ? {} : { disabledReason: action.reason ?? UNAVAILABLE_REASON }),
+      });
     },
   };
 }
@@ -289,10 +303,48 @@ function selectedFiles(n: number): string {
   return `${n} selected ${n === 1 ? "file" : "files"}`;
 }
 
+/** What an unavailable command says when its action gives no reason of its own. */
+const UNAVAILABLE_REASON = "Not available right now.";
+
 /** The palette's commands for the current state, each family's from its own builder. */
 export function buildCommands(context: CommandContext): Command[] {
+  return buildAllCommands(context, operationBlockers(context.appState.state)).filter(
+    (command) => command.disabledReason === undefined,
+  );
+}
+
+/**
+ * `buildCommands` plus the commands that can't run now (#644), each with its `disabledReason`:
+ * actions their rule disables, and the commands left out while an operation blocks the
+ * repository (`operationBlockers`), with the blocker's reason. The palette lists them only for a
+ * typed query, after the runnable matches, so a search for "Push" says why there is none.
+ */
+export function buildPaletteCommands(context: CommandContext): Command[] {
+  const blockers = operationBlockers(context.appState.state);
+  const commands = buildAllCommands(context, blockers);
+  const available = commands.filter((command) => command.disabledReason === undefined);
+  const availableIds = new Set(available.map((command) => command.id));
+  const unavailable = new Map<string, Command>();
+  const addUnavailable = (command: Command, reason: string) => {
+    if (!availableIds.has(command.id) && !unavailable.has(command.id)) {
+      unavailable.set(command.id, { ...command, disabledReason: reason });
+    }
+  };
+  for (const command of commands) {
+    if (command.disabledReason !== undefined) addUnavailable(command, command.disabledReason);
+  }
+  if (blockers.blocked) {
+    // The same families as if nothing blocked: what the real list lacks, the blocker keeps out.
+    const blockedReason = blockers.reason ?? UNAVAILABLE_REASON;
+    for (const command of buildAllCommands(context, { blocked: false, reason: null })) {
+      addUnavailable(command, blockedReason);
+    }
+  }
+  return [...available, ...unavailable.values()];
+}
+
+function buildAllCommands(context: CommandContext, blockers: OperationBlockers): Command[] {
   const { state } = context.appState;
-  const blockers = operationBlockers(state);
   const visibility = context.sidebar?.panelVisibility;
   const ctx: FamilyContext = {
     ...context,
@@ -924,7 +976,7 @@ function stashCommands({ appState, state, diff, sidebar, panelVisible }: FamilyC
 function worktreeCommands({ appState, state, blockers, tabs, sidebar, panelVisible }: FamilyContext): Command[] {
   const { commands, offer } = family("General");
   const prune = pruneWorktreesAction(blockers);
-  offer("prune-worktrees", { paletteLabel: prune.label, enabled: prune.enabled }, ["worktree", "prune"], () =>
+  offer("prune-worktrees", { paletteLabel: prune.label, enabled: prune.enabled, reason: prune.reason }, ["worktree", "prune"], () =>
     void appState.pruneWorktrees(),
   );
   if (!panelVisible("worktree")) return commands;

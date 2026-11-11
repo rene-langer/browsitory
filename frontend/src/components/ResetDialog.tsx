@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useId } from "react";
 import type { ResetMode } from "../ipc/RepoClient";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { FormDialog } from "./primitives/FormDialog";
@@ -34,6 +34,8 @@ export function ResetDialog({
   /** Why repository operations are blocked now, or `null`. */
   blockedReason?: string | null;
 }) {
+  // The visible reason the submit button is disabled is its description (#664).
+  const reasonId = useId();
   const [mode, setMode] = useState<ResetMode>("mixed");
   const [confirmingHard, setConfirmingHard] = useState(false);
 
@@ -89,9 +91,9 @@ export function ResetDialog({
             </label>
           ))}
         </fieldset>
-        {blockedReason !== null && <p className={formStyles.blocked}>{blockedReason}</p>}
+        {blockedReason !== null && <p id={reasonId} className={formStyles.blocked}>{blockedReason}</p>}
         <Toolbar>
-          <button type="submit" disabled={blockedReason !== null} title={blockedReason ?? undefined}>
+          <button type="submit" disabled={blockedReason !== null} title={blockedReason ?? undefined} aria-describedby={blockedReason !== null ? reasonId : undefined}>
             Reset
           </button>
           <button type="button" onClick={onCancel}>

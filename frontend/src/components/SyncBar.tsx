@@ -3,6 +3,7 @@ import { autoFetchLabel } from "../lib/autoFetch";
 import { formatRelativeDate } from "../lib/formatDate";
 import type { PullStrategy, RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { upstreamPushBranch } from "../lib/pushTarget";
+import { ReasonButton } from "./primitives/ReasonButton";
 import { SplitButton } from "./primitives/SplitButton";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./SyncBar.module.css";
@@ -77,30 +78,33 @@ export function SyncBar({
   autoFetchMinutes?: number;
 }) {
   const fetchRemote = upstream?.remoteName ?? remotes[0]?.name ?? null;
-  const busyTitle = operationDisabled ? (operationDisabledReason ?? undefined) : undefined;
-  const fetchTitle = busyTitle ?? (fetchRemote === null ? "No remote configured." : `Fetch from ${fetchRemote}`);
-  const upstreamTitle = (verb: string) =>
-    busyTitle ?? (upstream === null ? "No upstream set for the current branch." : `${verb} ${upstream.remoteName}/${upstream.remoteBranch}`);
+  // Why each action can't run, shown next to it on hover and focus (#664), else `null`.
+  const busy = operationDisabled ? (operationDisabledReason ?? "Another operation is in progress.") : null;
   const detached = detachedAt !== null;
-  const detachedTitle = "Check out a branch to push or pull.";
+  const detachedReason = "Check out a branch to push or pull.";
+  const noUpstream = "No upstream set for the current branch.";
   const showCounts = !detached && upstream !== null && upstream.ahead != null && upstream.behind != null;
-  const fetchDisabled = operationDisabled || fetchRemote === null;
-  const pullDisabled = operationDisabled || detached || upstream === null || pullPending;
-  const pullTitle = detached
-    ? detachedTitle
-    : pullPending && !operationDisabled
-      ? "Choose how to finish the diverged pull first."
-      : upstreamTitle("Pull from");
+  const fetchReason = busy ?? (fetchRemote === null ? "No remote configured." : null);
+  const fetchTitle = fetchRemote === null ? undefined : `Fetch from ${fetchRemote}`;
+  const pullReason =
+    busy ??
+    (detached
+      ? detachedReason
+      : upstream === null
+        ? noUpstream
+        : pullPending
+          ? "Choose how to finish the diverged pull first."
+          : null);
+  const pullTitle = upstream === null ? undefined : `Pull from ${upstream.remoteName}/${upstream.remoteBranch}`;
   const canPublish = !detached && upstream === null && remotes.length > 0;
   const pushBranch = upstream === null ? null : upstreamPushBranch(upstream);
-  const pushTitle = detached
-    ? detachedTitle
-    : upstream !== null
-      ? (busyTitle ??
-        (pushBranch === null
-          ? `Choose where to push ${upstream.localBranch} on ${upstream.remoteName}…`
-          : `Push to ${upstream.remoteName}/${pushBranch}`))
-      : (busyTitle ?? (canPublish ? "Push this branch to a remote and set its upstream…" : "No remote configured."));
+  const pushReason = busy ?? (detached ? detachedReason : upstream === null && !canPublish ? "No remote configured." : null);
+  const pushTitle =
+    upstream !== null
+      ? pushBranch === null
+        ? `Choose where to push ${upstream.localBranch} on ${upstream.remoteName}…`
+        : `Push to ${upstream.remoteName}/${pushBranch}`
+      : "Push this branch to a remote and set its upstream…";
 
   return (
     <div className={styles.bar} role={ariaLabel === undefined ? undefined : "group"} aria-label={ariaLabel}>
@@ -108,9 +112,8 @@ export function SyncBar({
       <Toolbar aria-label="Sync">
         <SplitButton
           label="Fetch"
-          disabled={fetchDisabled}
+          reason={fetchReason}
           title={fetchTitle}
-          menuTitle={busyTitle}
           onClick={() => fetchRemote !== null && void onFetch(fetchRemote)}
           menuLabel="More fetch actions"
           chevronClassName={styles.split}
@@ -125,15 +128,15 @@ export function SyncBar({
           ]}
         />
         {pullStrategy === undefined ? (
-          <button type="button" disabled={pullDisabled} title={pullTitle} onClick={() => void onPull()}>
+          <ReasonButton reason={pullReason} title={pullTitle} onClick={() => void onPull()}>
             Pull
-          </button>
+          </ReasonButton>
         ) : (
           // The Pull menu (#652): how a diverged pull combines the branches, remembered for the
           // repository; picking one also pulls. Without a choice, git config decides or the pull asks.
           <SplitButton
             label="Pull"
-            disabled={pullDisabled}
+            reason={pullReason}
             title={pullTitle}
             onClick={() => void onPull()}
             menuLabel="Pull options"
@@ -145,14 +148,13 @@ export function SyncBar({
             }))}
           />
         )}
-        <button
-          type="button"
-          disabled={operationDisabled || detached || (upstream === null && !canPublish)}
+        <ReasonButton
+          reason={pushReason}
           title={pushTitle}
           onClick={() => (upstream !== null ? void onPush(upstream.remoteName) : onPublish())}
         >
           Push
-        </button>
+        </ReasonButton>
       </Toolbar>
       {detached && <span>HEAD detached at {detachedAt}</span>}
       {showCounts && (
@@ -174,8 +176,8 @@ export function SyncBar({
         <SplitButton
           label="Stash"
           onClick={stash.onStash}
-          disabled={stash.reason !== null}
-          title={stash.reason ?? "Stash all changes"}
+          reason={stash.reason}
+          title="Stash all changes"
           menuLabel="More stash options"
           chevronClassName={styles.split}
           items={[

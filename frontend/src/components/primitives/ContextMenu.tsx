@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Check } from "lucide-react";
 import { isMenuKey } from "../../lib/menuKeys";
 import styles from "./ContextMenu.module.css";
@@ -8,7 +8,10 @@ export interface ContextMenuItem {
   onSelect: () => void;
   disabled?: boolean;
   destructive?: boolean;
-  /** Rendered as the item button's `title` — e.g. explaining why it's disabled (issue #31/UX-003). */
+  /**
+   * Rendered as the item button's `title`. On a disabled item it is why (issue #31/UX-003), and
+   * shows as visible text under the label, the item's description (#664).
+   */
   title?: string;
   /** When set, the item is a checkbox (`menuitemcheckbox` + `aria-checked`) with a check mark. */
   checked?: boolean;
@@ -52,6 +55,7 @@ export function ContextMenu({
   isTrigger?: (button: Element) => boolean;
 }) {
   const menuRef = useRef<HTMLUListElement>(null);
+  const reasonIdPrefix = useId();
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   // The trigger: the element focused when the menu mounts, captured by the mount effect below
@@ -275,39 +279,50 @@ export function ContextMenu({
         event.stopPropagation();
       }}
     >
-      {items.map((item, index) => [
-        index > 0 && items[index - 1].group !== item.group && (
-          <li key={`separator:${item.label}`} role="separator" className={styles.separator} />
-        ),
-        <li key={item.label} role="none">
-          <button
-            ref={(element) => {
-              itemRefs.current[index] = element;
-            }}
-            type="button"
-            role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"}
-            aria-checked={item.checked}
-            aria-keyshortcuts={item.ariaKeyShortcuts}
-            className={styles.item}
-            disabled={item.disabled}
-            title={item.title}
-            tabIndex={index === focusedIndex ? 0 : -1}
-            data-destructive={item.destructive === true ? "true" : undefined}
-            onFocus={() => setFocusedIndex(index)}
-            onClick={() => activate(index)}
-          >
-            {item.checked !== undefined && (
-              <Check size={12} aria-hidden="true" className={item.checked ? styles.check : styles.checkHidden} />
+      {items.map((item, index) => {
+        // A disabled item's `title` is why; it also shows under the label, as its description.
+        const reason = item.disabled === true && item.title !== undefined ? item.title : undefined;
+        const reasonId = `${reasonIdPrefix}-reason-${index}`;
+        return [
+          index > 0 && items[index - 1].group !== item.group && (
+            <li key={`separator:${item.label}`} role="separator" className={styles.separator} />
+          ),
+          <li key={item.label} role="none">
+            <button
+              ref={(element) => {
+                itemRefs.current[index] = element;
+              }}
+              type="button"
+              role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+              aria-checked={item.checked}
+              aria-keyshortcuts={item.ariaKeyShortcuts}
+              className={styles.item}
+              disabled={item.disabled}
+              title={item.title}
+              aria-describedby={reason === undefined ? undefined : reasonId}
+              tabIndex={index === focusedIndex ? 0 : -1}
+              data-destructive={item.destructive === true ? "true" : undefined}
+              onFocus={() => setFocusedIndex(index)}
+              onClick={() => activate(index)}
+            >
+              {item.checked !== undefined && (
+                <Check size={12} aria-hidden="true" className={item.checked ? styles.check : styles.checkHidden} />
+              )}
+              {item.label}
+              {item.shortcut !== undefined && (
+                <kbd className={styles.shortcut} aria-hidden="true">
+                  {item.shortcut}
+                </kbd>
+              )}
+            </button>
+            {reason !== undefined && (
+              <span id={reasonId} className={styles.reason}>
+                {reason}
+              </span>
             )}
-            {item.label}
-            {item.shortcut !== undefined && (
-              <kbd className={styles.shortcut} aria-hidden="true">
-                {item.shortcut}
-              </kbd>
-            )}
-          </button>
-        </li>,
-      ])}
+          </li>,
+        ];
+      })}
     </ul>
   );
 }

@@ -40,8 +40,8 @@ describe("Browsitory VSCode extension undo", () => {
       await waitUntil(() => git("log", "-1", "--format=%s") === summary, "commit did not land");
 
       // The label can show while a mutation is still pending, and a click on the then disabled
-      // button does nothing: wait until it is enabled too.
-      const undoButton = `button[aria-label="Undo Commit “${summary}”"]:not(:disabled)`;
+      // (`aria-disabled`, #664) button does nothing: wait until it is enabled too.
+      const undoButton = `button[aria-label="Undo Commit “${summary}”"]:not([aria-disabled="true"])`;
       try {
         await webview.waitForSelector(undoButton, 15000);
       } catch (error) {

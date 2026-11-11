@@ -1740,7 +1740,8 @@ describe("CommitGraph — copy items (#614)", () => {
     const groups: string[][] = [[]];
     for (const child of screen.getByRole("menu").children) {
       if (child.getAttribute("role") === "separator") groups.push([]);
-      else groups[groups.length - 1].push(child.textContent ?? "");
+      // The item's label, not a disabled item's reason under it (#664).
+      else groups[groups.length - 1].push(child.querySelector('[role^="menuitem"]')?.textContent ?? "");
     }
     expect(groups[0][0]).toBe("Branch from here");
     expect(groups.find((group) => group.includes("Rebase onto here"))).not.toContain("Branch from here");

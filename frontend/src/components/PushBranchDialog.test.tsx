@@ -106,6 +106,7 @@ describe("PushBranchDialog", () => {
     const push = screen.getByRole("button", { name: "Push" });
     expect(push).toBeDisabled();
     expect(push).toHaveAttribute("title", "A transfer is in progress.");
+    expect(push).toHaveAccessibleDescription("A transfer is in progress.");
     expect(screen.getByText("A transfer is in progress.")).toBeInTheDocument();
     fireEvent.submit(push.closest("form")!);
     expect(onPush).not.toHaveBeenCalled();

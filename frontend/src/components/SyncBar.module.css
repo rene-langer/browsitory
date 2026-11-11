@@ -19,7 +19,7 @@
   color: var(--color-text-muted);
 }
 
-.bar button:hover:not(:disabled) {
+.bar button:hover:not(:disabled):not([aria-disabled="true"]) {
   background: var(--color-control);
   color: var(--color-text);
 }

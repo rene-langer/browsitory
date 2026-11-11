@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { RebaseInfo, TerminalRebase, TerminalSequence } from "../ipc/RepoClient";
 import {
+  mergeContext,
+  mergeSource,
   abortToast,
   busyReason,
   conflictReason,
@@ -276,5 +278,30 @@ describe("stashBlockReason (#495)", () => {
         headInfo: { ...headInfo, terminalRebase: { kind: "Am", branch: "", onto: "", currentStep: 0, totalSteps: 0 } },
       }),
     ).toBe("A git am started in a terminal is in progress.");
+  });
+});
+
+describe("mergeSource and mergeContext (#665)", () => {
+  it.each([
+    ["Merge branch 'feature/x'", "feature/x"],
+    ["Merge branch 'feature/x' into main\n", "feature/x"],
+    ["Merge remote-tracking branch 'origin/main'", "origin/main"],
+    ["Merge tag 'v1.0'", "v1.0"],
+    ["Merge commit 'abc1234'", "abc1234"],
+  ])("reads %j", (message, source) => {
+    expect(mergeSource(message)).toBe(source);
+  });
+
+  it("names nothing for an edited message, an octopus merge or none", () => {
+    expect(mergeSource("My own words")).toBeNull();
+    expect(mergeSource("Merge branches 'a' and 'b'")).toBeNull();
+    expect(mergeSource(null)).toBeNull();
+  });
+
+  it("says what is known of source and target", () => {
+    expect(mergeContext("Merge branch 'x'", "main")).toBe("x into main");
+    expect(mergeContext("Merge branch 'x'", null)).toBe("x");
+    expect(mergeContext("edited", "main")).toBe("into main");
+    expect(mergeContext("edited", null)).toBeNull();
   });
 });

@@ -74,6 +74,8 @@ export function ListRow({
   onMouseLeave,
   className,
   "data-commit-id": dataCommitId,
+  disabled,
+  describedBy,
   children,
 }: {
   id?: string;
@@ -87,6 +89,10 @@ export function ListRow({
   className?: string;
   // Lets the command palette find a commit row to open its context menu.
   "data-commit-id"?: string;
+  /** `aria-disabled`: shown, and reachable, but its action can't run (the palette's, #644). */
+  disabled?: boolean;
+  /** `aria-describedby`, e.g. the visible reason a disabled row can't run. */
+  describedBy?: string;
   children: ReactNode;
 } & MenuProps) {
   const interactive = onClick !== undefined;
@@ -126,6 +132,8 @@ export function ListRow({
       role={standalone ? "button" : containerOwnsSelection ? "option" : undefined}
       tabIndex={standalone ? 0 : undefined}
       aria-selected={selected}
+      aria-disabled={disabled === true ? true : undefined}
+      aria-describedby={describedBy}
       aria-keyshortcuts={onOpenMenu !== undefined && standalone ? "Shift+F10 ContextMenu" : undefined}
       onClick={onClick}
       onDoubleClick={onDoubleClick}

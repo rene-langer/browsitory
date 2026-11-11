@@ -55,6 +55,8 @@ export function WorkspaceMain({
   externalTools,
   discardRequest,
   onDiscardRequestChange: setDiscardRequest,
+  conflictRequest,
+  onConflictRequestHandled,
   initialCommitDraft,
   discardBlockedReason: discardDropBlockedReason,
   focusCommitMessage,
@@ -89,6 +91,9 @@ export function WorkspaceMain({
   externalTools: ExternalToolsApi;
   discardRequest: DiscardRequest | null;
   onDiscardRequestChange: (request: DiscardRequest | null) => void;
+  /** "Go to conflict" (#665): show the first conflicted file, then call the handler. */
+  conflictRequest: boolean;
+  onConflictRequestHandled: () => void;
   initialCommitDraft: CommitDraft | undefined;
   // Why discarding can't run now (`busyReason`, #521), else `null`.
   discardBlockedReason: string | null;
@@ -260,6 +265,9 @@ export function WorkspaceMain({
             refreshGeneration={appState.state.refreshGeneration}
             discardRequest={discardRequest}
             onDiscardRequestChange={setDiscardRequest}
+            conflictRequest={conflictRequest}
+            onConflictRequestHandled={onConflictRequestHandled}
+            statusLoaded={appState.state.loaded}
             initialCommitDraft={initialCommitDraft}
             discardBlockedReason={discardDropBlockedReason}
             selectionBusyReason={appState.state.pending ? "Another action is in progress." : null}

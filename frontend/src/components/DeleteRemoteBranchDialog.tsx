@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useId } from "react";
 import type { RemoteInfo } from "../ipc/RepoClient";
 import { Field } from "./primitives/Field";
 import { FormDialog } from "./primitives/FormDialog";
@@ -31,6 +31,8 @@ export function DeleteRemoteBranchDialog({
   /** Why repository operations are blocked now, or `null`. */
   blockedReason?: string | null;
 }) {
+  // The visible reason the submit button is disabled is its description (#664).
+  const reasonId = useId();
   const preset = initialRemote !== null && initialBranch !== null;
   const [remoteName, setRemoteName] = useState(initialRemote ?? remotes[0]?.name ?? "");
   const [branchName, setBranchName] = useState(initialBranch ?? "");
@@ -114,13 +116,14 @@ export function DeleteRemoteBranchDialog({
             Delete {remoteName}/{branchName} on the remote? This can&apos;t be undone.
           </p>
         )}
-        {blockedReason !== null && <p className={formStyles.blocked}>{blockedReason}</p>}
+        {blockedReason !== null && <p id={reasonId} className={formStyles.blocked}>{blockedReason}</p>}
         <div className={styles.actions}>
           <button
             type="button"
             className={confirmStyles.confirmButton}
             disabled={branchName === "" || remoteName === "" || blockedReason !== null}
             title={blockedReason ?? undefined}
+            aria-describedby={blockedReason !== null ? reasonId : undefined}
             onClick={() => {
               if (blockedReason === null) onDelete(remoteName, branchName);
             }}

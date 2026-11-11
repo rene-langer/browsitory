@@ -66,14 +66,14 @@ describe("the diverged-pull prompt (#636)", () => {
     localStorage.setItem("sidebar-branches", "closed");
     await renderApp(divergedClient());
     const pull = within(toolbar()).getByRole("button", { name: "Pull" });
-    await waitFor(() => expect(pull).toBeEnabled());
+    await waitFor(() => expect(pull).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(pull);
     const dialog = await screen.findByRole("dialog", { name: "Pull has diverged" });
     expect(dialog).toHaveTextContent("origin/main");
-    expect(pull).toBeDisabled();
+    expect(pull).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Pull has diverged" })).toBeNull());
-    expect(pull).toBeEnabled();
+    expect(pull).not.toHaveAttribute("aria-disabled");
   });
 
   it("is not inside the hidden sidebar in a narrow window", async () => {
@@ -81,7 +81,7 @@ describe("the diverged-pull prompt (#636)", () => {
     await renderApp(divergedClient());
     await waitFor(() => expect(sidebarPane()).toHaveAttribute("hidden"));
     const pull = within(toolbar()).getByRole("button", { name: "Pull" });
-    await waitFor(() => expect(pull).toBeEnabled());
+    await waitFor(() => expect(pull).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(pull);
     const dialog = await screen.findByRole("dialog", { name: "Pull has diverged" });
     // `showModal()` inside a hidden ancestor is an invisible modal that makes the page inert.
@@ -144,7 +144,7 @@ describe("the repository toolbar (#637)", () => {
     for (const name of ["Fetch", "Pull", "Push", "Refresh"]) expect(within(bar).getByRole("button", { name })).toBeInTheDocument();
     expect(within(bar).getByRole("button", { name: "Nothing to undo" })).toBeInTheDocument();
     const stash = within(bar).getByRole("button", { name: "Stash" });
-    await waitFor(() => expect(stash).toBeEnabled());
+    await waitFor(() => expect(stash).not.toHaveAttribute("aria-disabled"));
     expect(within(sidebarPane()).queryByRole("button", { name: "Pull" })).toBeNull();
     const dock = await screen.findByRole("group", { name: "Commit actions" });
     expect(within(dock).queryByRole("button", { name: "Stash" })).toBeNull();
@@ -169,7 +169,7 @@ describe("Apply patch… in the toolbar (#649)", () => {
     const applyPatch = vi.fn(async () => {});
     await renderApp(layoutClient({ openPatchFile, previewPatch, applyPatch }));
     const button = within(toolbar()).getByRole("button", { name: "Apply patch…" });
-    await waitFor(() => expect(button).toBeEnabled());
+    await waitFor(() => expect(button).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(button);
     const dialog = await screen.findByRole("dialog", { name: "Apply patch" });
     expect(previewPatch).toHaveBeenCalledWith("/repos/a", content);

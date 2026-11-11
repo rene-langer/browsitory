@@ -1,7 +1,7 @@
 import { expect } from "@wdio/globals";
-import { waitUntilGoneInPage } from "../support/dom";
+import { clickInPage, waitUntilGoneInPage } from "../support/dom";
 import { ForgeFixtureClient } from "../support/forgeFixtureServer";
-import { ADD_REMOTE_NAME_INPUT, expandSidebarSection } from "../support/sidebar";
+import { ADD_REMOTE_NAME_INPUT, expandSidebarSection, sidebarSectionToggle } from "../support/sidebar";
 
 // Canned provider responses, matching the exact JSON shapes
 // `crates/repo-service/src/pull_requests.rs`'s GitHub/Bitbucket adapters parse (see that module's
@@ -75,6 +75,21 @@ async function addRemote(name: string, url: string) {
   });
 }
 
+/**
+ * Opens "Pull requests". Its header sits at the bottom edge of the window, where WebKitWebDriver's
+ * own click stopped arriving (#751): the click runs in the page instead (`clickInPage`).
+ */
+async function expandPullRequests() {
+  const toggle = sidebarSectionToggle("Pull requests");
+  await $(toggle).waitForExist();
+  if ((await $(toggle).getAttribute("aria-expanded")) !== "true") {
+    await clickInPage(toggle);
+    await browser.waitUntil(async () => (await $(toggle).getAttribute("aria-expanded")) === "true", {
+      timeoutMsg: "expected Pull requests to open",
+    });
+  }
+}
+
 describe("Browsitory pull requests", () => {
   const server = ForgeFixtureClient.fromEnv();
 
@@ -91,7 +106,7 @@ describe("Browsitory pull requests", () => {
     // unified Branches tree, not their own "Remotes" section); "Pull requests" holds the
     // per-remote sections asserted on below. Both default closed.
     await expandSidebarSection("Branches");
-    await expandSidebarSection("Pull requests");
+    await expandPullRequests();
 
     await addRemote("gh-origin", "https://github.com/acme/widget.git");
     await addRemote("bb-origin", "https://bitbucket.org/acme/widget.git");
@@ -124,7 +139,7 @@ describe("Browsitory pull requests", () => {
     // "Pull requests" was already opened by the previous `it()` in this file (its open state
     // persists in localStorage across `beforeTest`'s page refresh), but expand it again here too
     // — idempotent, and keeps this test self-sufficient if run in isolation.
-    await expandSidebarSection("Pull requests");
+    await expandPullRequests();
 
     const section = await $("section[aria-label='GitHub: acme/widget (gh-origin)']");
     await (await section.$("aria/Account")).setValue("rene");
@@ -180,7 +195,7 @@ describe("Browsitory pull requests", () => {
 
   it("warns about app passwords and lists/creates a Bitbucket pull request using the saved token", async () => {
     // See the GitHub test above: idempotent re-expand, self-sufficient if run in isolation.
-    await expandSidebarSection("Pull requests");
+    await expandPullRequests();
 
     const section = await $("section[aria-label='Bitbucket: acme/widget (bb-origin)']");
     await expect(section).toHaveText(expect.stringContaining("repository or workspace access token (not an app password)"));

@@ -183,7 +183,7 @@ describe("Browsitory remote transfer", () => {
       await browser.waitUntil(() => challenge.requests() > 0, {
         timeoutMsg: "expected Fetch to reach the loopback HTTPS credential challenge",
       });
-      const alert = await $("p[role='alert']");
+      const alert = await $("[role='alert']");
       await alert.waitForExist();
       await expect(alert).toHaveText(expect.stringMatching(/Save an HTTPS token for this remote before retrying\.|operating-system credential store is unavailable/));
       expect(await alert.getText()).not.toContain(challenge.url);
@@ -206,7 +206,10 @@ describe("Browsitory remote transfer", () => {
 
     // The repository toolbar's Pull (#637): the sidebar no longer has one of its own.
     const pullButton = await $("div[aria-label='Repository']").$("button=Pull");
-    await pullButton.waitForEnabled();
+    // A busy Pull is `aria-disabled` with its reason (#664), not `disabled`.
+    await browser.waitUntil(async () => (await pullButton.getAttribute("aria-disabled")) !== "true", {
+      timeoutMsg: "expected Pull to become available",
+    });
     await pullButton.click();
 
     const remoteHead = git(REMOTE_SOURCE_PATH, "rev-parse", "refs/heads/main");

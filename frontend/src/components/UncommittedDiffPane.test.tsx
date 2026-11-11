@@ -1,12 +1,13 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useState } from "react";
-import { DEFAULT_DIFF_SETTINGS, type DiffHunk, type RepoClient, type StatusEntry } from "../ipc/RepoClient";
+import { DEFAULT_DIFF_SETTINGS, type DiffHunk, type HeadInfo, type RepoClient, type StatusEntry } from "../ipc/RepoClient";
 import { DiffSettingsContext } from "../state/useDiffSettings";
 import { WorkspaceActionsContext, type WorkspaceActions } from "../state/useWorkspaceActions";
 import { testWorkspaceActions } from "../test/workspaceActions";
 import { fakeRepoClient } from "../test/fakeRepoClient";
 import { DiffPane, type DiscardRequest } from "./DiffPane";
+import { NO_HEAD_INFO } from "./diffPaneShared";
 
 const REPO = "/repo";
 
@@ -28,11 +29,17 @@ function Pane({
   status,
   actions = {},
   expandUntracked = true,
+  conflictRequest = false,
+  onConflictRequestHandled,
+  headInfo,
 }: {
   client: RepoClient;
   status: StatusEntry[];
   actions?: Partial<WorkspaceActions>;
   expandUntracked?: boolean;
+  conflictRequest?: boolean;
+  onConflictRequestHandled?: () => void;
+  headInfo?: HeadInfo;
 }) {
   const [discardRequest, setDiscardRequest] = useState<DiscardRequest | null>(null);
   return (
@@ -49,6 +56,9 @@ function Pane({
           rebaseProgress={null}
           discardRequest={discardRequest}
           onDiscardRequestChange={setDiscardRequest}
+          conflictRequest={conflictRequest}
+          onConflictRequestHandled={onConflictRequestHandled}
+          headInfo={headInfo}
         />
       </WorkspaceActionsContext.Provider>
     </DiffSettingsContext.Provider>
@@ -204,5 +214,42 @@ describe("working-tree view (#639)", () => {
 
     fireEvent.click(screen.getByRole("option", { name: /a\.txt/ }));
     expect(await within(viewer()).findByText("unstaged a.txt")).toBeInTheDocument();
+  });
+});
+
+describe("empty states and conflicts (#665)", () => {
+  it("says the working tree is clean when nothing changed", () => {
+    render(<Pane client={fakeRepoClient({}, "empty")} status={[]} headInfo={{ ...NO_HEAD_INFO, headId: "abc" }} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Working tree clean");
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("explains the first commit in a repository without commits", () => {
+    render(<Pane client={fakeRepoClient({}, "empty")} status={[]} headInfo={NO_HEAD_INFO} />);
+    expect(screen.getByRole("status")).toHaveTextContent("No commits yet");
+    expect(screen.getByRole("status")).toHaveTextContent("commit to make the first commit");
+  });
+
+  it("lists conflicts first in Changes, in a group of their own", () => {
+    const withConflicts = [entry("a.txt", false), entry("z.txt", false, "Conflicted"), entry("c.txt", true, "New")];
+    render(<Pane client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")} status={withConflicts} />);
+    const unstaged = screen.getByRole("listbox", { name: "Unstaged changes" });
+    const conflicts = within(unstaged).getByRole("group", { name: /^Conflicts \(1\)/ });
+    expect(within(conflicts).getAllByRole("option")).toHaveLength(1);
+    expect(within(conflicts).getByRole("option", { name: /^z\.txt/ })).toBeInTheDocument();
+    const others = within(unstaged).getByRole("group", { name: "Other changes" });
+    expect(within(others).getByRole("option", { name: /^a\.txt/ })).toBeInTheDocument();
+    // Keyboard order follows the display: the conflict first.
+    expect(within(unstaged).getAllByRole("option")[0]).toHaveAccessibleName(/^z\.txt/);
+  });
+
+  it("Go to conflict makes the first conflict the current file, then hands the request back", async () => {
+    const onConflictRequestHandled = vi.fn();
+    const withConflicts = [entry("a.txt", false), entry("z.txt", false, "Conflicted")];
+    const client = fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty");
+    const { rerender } = render(<Pane client={client} status={withConflicts} />);
+    rerender(<Pane client={client} status={withConflicts} conflictRequest onConflictRequestHandled={onConflictRequestHandled} />);
+    await waitFor(() => expect(onConflictRequestHandled).toHaveBeenCalledOnce());
+    expect(screen.getByRole("option", { name: /^z\.txt/ })).toHaveAttribute("aria-selected", "true");
   });
 });

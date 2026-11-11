@@ -401,12 +401,12 @@ function AppContent({
       </header>
       {openRepos.restoreError !== null && (
         <div className={styles.errorLayer}>
-          <InlineError message={openRepos.restoreError} onDismiss={openRepos.dismissRestoreError} />
+          <InlineError message={openRepos.restoreError} copyDetails onDismiss={openRepos.dismissRestoreError} />
         </div>
       )}
       {tabToolError !== null && (
         <div className={styles.errorLayer}>
-          <InlineError message={tabToolError} onDismiss={() => setTabToolError(null)} />
+          <InlineError message={tabToolError} copyDetails onDismiss={() => setTabToolError(null)} />
         </div>
       )}
       {preferencesOpen && (
@@ -427,6 +427,7 @@ function AppContent({
             <InlineError
               message={transportError}
               hint="Browsitory lost its connection to the backend. Restart the app if this keeps happening."
+              copyDetails
               onDismiss={() => setTransportError(null)}
             />
           )}
@@ -435,6 +436,7 @@ function AppContent({
               message={openError.message}
               hint={openError.path !== "" ? "Check that the folder exists and is a Git repository." : undefined}
               onRetry={openError.path !== "" ? () => void openRepoTab(openError.path) : undefined}
+              copyDetails
               onDismiss={() => setOpenError(null)}
             />
           )}

@@ -8,6 +8,10 @@ letter (**M** modified, **A** added, **U** untracked, **D** deleted, **R** renam
 changed, **C** conflicted; hover it for the word), the path, a **⋯** menu and a stage or unstage
 button. The two buttons are always there, dimmed until you point at the row or select it.
 
+When nothing has changed, the pane says **Working tree clean** instead. In a new repository
+without commits it says **No commits yet**: add files to the repository folder, stage them and
+commit to make the first commit.
+
 Below the list, one diff viewer shows the current file: the first one when you open the view, or
 the one you click. Its header names the file and has **Blame** (who last changed each line) and
 **History**. When the current file leaves its group, for example because you staged it, the file

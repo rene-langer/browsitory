@@ -449,4 +449,66 @@ describe("OperationStatusStrip", () => {
       expect(screen.queryByText(/started in a terminal/)).toBeNull();
     });
   });
+
+  describe("context and next steps (#665)", () => {
+    it("names what a merge merges into which branch, with Go to conflict", () => {
+      const onGoToConflict = vi.fn();
+      render(
+        <OperationStatusStrip
+          merging
+          operation="Merge"
+          mergeMessage={"Merge branch 'feature/x'\n\n# Conflicts:\n#\ta.txt\n"}
+          currentBranch="main"
+          rebaseProgress={null}
+          conflictCount={2}
+          onGoToConflict={onGoToConflict}
+          onAbortMerge={noop}
+          onAbortRebase={noop}
+        />,
+      );
+      expect(screen.getByText("Merging feature/x into main")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Go to conflict" }));
+      expect(onGoToConflict).toHaveBeenCalledOnce();
+    });
+
+    it("says where a cherry-pick lands, and offers Go to conflict only while there are conflicts", () => {
+      render(
+        <OperationStatusStrip
+          merging
+          operation="CherryPick"
+          currentBranch="main"
+          rebaseProgress={null}
+          conflictCount={0}
+          onGoToConflict={noop}
+          onAbortMerge={noop}
+          onAbortRebase={noop}
+        />,
+      );
+      expect(screen.getByText("Cherry-picking onto main")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Go to conflict" })).toBeNull();
+    });
+
+    it("offers Continue next to Abort rebase, unavailable with the reason while conflicts remain", () => {
+      const onContinueRebase = vi.fn();
+      const props = {
+        merging: false,
+        operation: null,
+        rebaseProgress: { currentStep: 1, totalSteps: 2 },
+        onContinueRebase,
+        onAbortMerge: noop,
+        onAbortRebase: noop,
+      };
+      const { rerender } = render(<OperationStatusStrip {...props} conflictCount={1} />);
+      const blocked = screen.getByRole("button", { name: "Continue" });
+      expect(blocked).toHaveAttribute("aria-disabled", "true");
+      expect(blocked).toHaveAccessibleDescription("Resolve 1 conflict to continue");
+      fireEvent.click(blocked);
+      expect(onContinueRebase).not.toHaveBeenCalled();
+
+      rerender(<OperationStatusStrip {...props} conflictCount={0} />);
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+      expect(onContinueRebase).toHaveBeenCalledOnce();
+      expect(screen.getByRole("button", { name: "Abort rebase" })).toBeInTheDocument();
+    });
+  });
 });

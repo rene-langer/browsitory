@@ -1,3 +1,4 @@
+import { ReasonButton } from "./primitives/ReasonButton";
 import type { ComponentProps } from "react";
 import { FileDiff, GitBranch, PanelLeft, RefreshCw } from "lucide-react";
 import type { UpstreamInfo } from "../ipc/RepoClient";
@@ -65,16 +66,15 @@ export function RepoToolbar({
       }
       trailing={
         <>
-          <button
-            type="button"
+          <ReasonButton
             className={styles.iconButton}
             aria-label="Apply patch…"
-            title={applyPatch.disabledReason ?? "Apply a patch file to the working tree"}
-            disabled={applyPatch.disabledReason !== null}
+            title="Apply a patch file to the working tree"
+            reason={applyPatch.disabledReason}
             onClick={applyPatch.onApplyPatch}
           >
             <FileDiff size={14} aria-hidden="true" />
-          </button>
+          </ReasonButton>
           <UndoRedoButtons {...undo} />
           <button type="button" className={styles.iconButton} aria-label="Refresh" title="Refresh" onClick={onRefresh}>
             <RefreshCw size={14} aria-hidden="true" />

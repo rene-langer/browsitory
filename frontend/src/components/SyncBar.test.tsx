@@ -64,16 +64,16 @@ describe("SyncBar", () => {
     fireEvent.click(screen.getByRole("button", { name: /Fetch/ }));
 
     expect(props.onFetch).toHaveBeenCalledWith("origin");
-    expect(screen.getByRole("button", { name: /Pull/ })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /Push/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Pull/ })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: /Push/ })).not.toHaveAttribute("aria-disabled");
   });
 
   it("disables everything with no remotes", () => {
     renderBar({ remotes: [], upstream: null });
 
-    expect(screen.getByRole("button", { name: /Fetch/ })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /Push/ })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /Push/ })).toHaveAttribute("title", "No remote configured.");
+    expect(screen.getByRole("button", { name: /Fetch/ })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: /Push/ })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: /Push/ })).toHaveAccessibleDescription("No remote configured.");
   });
 
   it("opens fetch actions: Fetch all remotes and the Prune checkbox", () => {
@@ -108,24 +108,24 @@ describe("SyncBar", () => {
 
   it("disables Pull's menu with Pull", () => {
     renderBar({ upstream: null, pullStrategy: { current: null, onPullWith: vi.fn() } });
-    expect(screen.getByRole("button", { name: "Pull" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Pull options" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Pull" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "Pull options" })).toHaveAttribute("aria-disabled", "true");
   });
 
   it("disables fetch actions exactly when Fetch is disabled", () => {
     renderBar({ remotes: [], upstream: null });
-    expect(screen.getByRole("button", { name: "More fetch actions" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "More fetch actions" })).toHaveAttribute("aria-disabled", "true");
   });
 
   it("disables fetch actions while another operation runs", () => {
     renderBar({ operationDisabled: true, operationDisabledReason: "Busy." });
-    expect(screen.getByRole("button", { name: "More fetch actions" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "More fetch actions" })).toHaveAttribute("aria-disabled", "true");
   });
 
   it("publishes through the push dialog when the branch has no upstream", () => {
     const props = renderBar({ upstream: null });
     const push = screen.getByRole("button", { name: "Push" });
-    expect(push).toBeEnabled();
+    expect(push).not.toHaveAttribute("aria-disabled");
     expect(push).toHaveAttribute("title", "Push this branch to a remote and set its upstream…");
     fireEvent.click(push);
     expect(props.onPublish).toHaveBeenCalled();
@@ -147,23 +147,37 @@ describe("SyncBar", () => {
 
   it("keeps Push disabled without upstream on a detached HEAD", () => {
     renderBar({ upstream: null, detachedAt: "abc1234" });
-    expect(screen.getByRole("button", { name: "Push" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Push" })).toHaveAttribute("aria-disabled", "true");
   });
 
-  it("disables all actions while another operation runs, with the reason as a tooltip", () => {
-    renderBar({ operationDisabled: true, operationDisabledReason: "A transfer is in progress." });
+  it("disables all actions while another operation runs, with the reason as their description (#664)", () => {
+    const props = renderBar({ operationDisabled: true, operationDisabledReason: "A transfer is in progress." });
 
-    const fetch = screen.getByRole("button", { name: /Fetch/ });
-    expect(fetch).toBeDisabled();
-    expect(fetch).toHaveAttribute("title", "A transfer is in progress.");
+    for (const name of ["Fetch", "Pull", "Push"]) {
+      const button = screen.getByRole("button", { name });
+      expect(button).toHaveAttribute("aria-disabled", "true");
+      expect(button).not.toHaveAttribute("title");
+      expect(button).toHaveAccessibleDescription("A transfer is in progress.");
+      // Still focusable, so the reason can be read; a click does nothing.
+      button.focus();
+      expect(button).toHaveFocus();
+      fireEvent.click(button);
+    }
+    expect(screen.getAllByRole("tooltip", { hidden: true }).map((tip) => tip.textContent)).toContain(
+      "A transfer is in progress.",
+    );
+    expect(props.onFetch).not.toHaveBeenCalled();
+    expect(props.onPull).not.toHaveBeenCalled();
+    expect(props.onPush).not.toHaveBeenCalled();
+    expect(props.onPublish).not.toHaveBeenCalled();
   });
 
   it("shows a detached HEAD and disables push and pull", () => {
     renderBar({ detachedAt: "abc1234" });
 
     expect(screen.getByText("HEAD detached at abc1234")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Push/ })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /Pull/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Push/ })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: /Pull/ })).toHaveAttribute("aria-disabled", "true");
   });
 });
 
@@ -209,8 +223,8 @@ describe("SyncBar leading slot", () => {
   it("disables Pull while a diverged pull waits for an answer (#636)", () => {
     renderBar({ pullPending: true });
     const pull = screen.getByRole("button", { name: "Pull" });
-    expect(pull).toBeDisabled();
-    expect(pull).toHaveAttribute("title", "Choose how to finish the diverged pull first.");
+    expect(pull).toHaveAttribute("aria-disabled", "true");
+    expect(pull).toHaveAccessibleDescription("Choose how to finish the diverged pull first.");
   });
 
   it("stashes all, or opens the stash dialog, and follows the stash rule (#637)", () => {
@@ -226,8 +240,8 @@ describe("SyncBar leading slot", () => {
   it("disables Stash and its menu with the reason", () => {
     renderBar({ stash: { reason: "A rebase is in progress.", onStash: vi.fn(), onStashWithOptions: vi.fn() } });
     const stash = screen.getByRole("button", { name: "Stash" });
-    expect(stash).toBeDisabled();
-    expect(stash).toHaveAttribute("title", "A rebase is in progress.");
-    expect(screen.getByRole("button", { name: "More stash options" })).toBeDisabled();
+    expect(stash).toHaveAttribute("aria-disabled", "true");
+    expect(stash).toHaveAccessibleDescription("A rebase is in progress.");
+    expect(screen.getByRole("button", { name: "More stash options" })).toHaveAttribute("aria-disabled", "true");
   });
 });

@@ -10,6 +10,7 @@ import {
   bisectLabel,
   conflictReason,
   leftoverLabel,
+  mergeContext,
   leftoverText,
   rebaseInterruption,
   sequenceLabel,
@@ -19,6 +20,7 @@ import {
   terminalSequenceLabel,
   terminalSequenceText,
 } from "../lib/operationStatus";
+import { ReasonButton } from "./primitives/ReasonButton";
 import styles from "./OperationStatusStrip.module.css";
 
 /**
@@ -55,6 +57,10 @@ export function OperationStatusStrip({
   onContinueSequence,
   onAbortSequence,
   onAbortTerminalSequence,
+  mergeMessage = null,
+  currentBranch = null,
+  onGoToConflict,
+  onContinueRebase,
 }: {
   merging: boolean;
   operation: OperationKind | null;
@@ -78,14 +84,29 @@ export function OperationStatusStrip({
   onContinueSequence?: () => void;
   onAbortSequence?: () => void;
   onAbortTerminalSequence?: () => void;
+  /** git's `MERGE_MSG`, for what a merge merges (#665). */
+  mergeMessage?: string | null;
+  /** The checked-out branch, for "into main" / "onto main" (#665). */
+  currentBranch?: string | null;
+  /** Shows the first conflicted file (#665); offered while there are conflicts. */
+  onGoToConflict?: () => void;
+  /** Continues a rebase paused here (#665), once its conflicts are resolved. */
+  onContinueRebase?: () => void;
 }) {
   const reason = conflictReason(conflictCount);
+  const goToConflict =
+    onGoToConflict !== undefined && conflictCount > 0 ? (
+      <button type="button" onClick={onGoToConflict}>
+        Go to conflict
+      </button>
+    ) : null;
   if (sequence !== null) {
     return (
       <div role="status" aria-label="Operation status" className={styles.strip}>
         <strong>{sequenceLabel(sequence)}</strong>
         <span>{reason ?? "No conflicts remaining"}</span>
         <span className={styles.spacer} />
+        {goToConflict}
         <button
           type="button"
           disabled={pending || conflictCount > 0}
@@ -137,6 +158,7 @@ export function OperationStatusStrip({
             : terminalSequenceText(terminalSequence.kind)}
         </span>
         <span className={styles.spacer} />
+        {terminalSequence.pausedOnConflict && goToConflict}
         <button type="button" disabled={pending} onClick={onAbortTerminalSequence}>
           Abort {noun}
         </button>
@@ -160,6 +182,13 @@ export function OperationStatusStrip({
   const terminalStep = terminalSequence !== null && (operation === "CherryPick" || operation === "Revert");
   // The operation's changes are already in HEAD; only git's state files are left (#240).
   const leftover = operationLeftover && operation !== null && rebaseProgress === null && !terminalStep;
+  // What and where (#665): "Merging feature/x into main", "Cherry-picking onto main".
+  const context =
+    operation === "CherryPick" || operation === "Revert"
+      ? currentBranch === null
+        ? null
+        : `onto ${currentBranch}`
+      : mergeContext(mergeMessage, currentBranch);
   const label =
     rebaseProgress !== null
       ? `Rebasing, step ${rebaseProgress.currentStep} of ${rebaseProgress.totalSteps}`
@@ -167,12 +196,25 @@ export function OperationStatusStrip({
         ? terminalSequenceLabel({ ...terminalSequence, pausedOnConflict: true })
         : leftover
           ? leftoverLabel(operation)
-          : mergeLabel;
+          : context === null
+            ? mergeLabel
+            : `${mergeLabel} ${context}`;
   return (
     <div role="status" aria-label="Operation status" className={styles.strip}>
       <strong>{label}</strong>
       <span>{leftover ? leftoverText(operation) : (reason ?? "No conflicts remaining")}</span>
       <span className={styles.spacer} />
+      {!leftover && goToConflict}
+      {rebaseProgress !== null && onContinueRebase !== undefined && (
+        // Continue next to Abort (#665), as the sequence's and the rebase panel's "Continue
+        // rebase": once no conflict is left.
+        <ReasonButton
+          reason={pending ? "Another action is in progress." : (reason ?? null)}
+          onClick={onContinueRebase}
+        >
+          Continue
+        </ReasonButton>
+      )}
       <button
         type="button"
         onClick={rebaseProgress !== null ? onAbortRebase : terminalStep ? onAbortTerminalSequence : onAbortMerge}
