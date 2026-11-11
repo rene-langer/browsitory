@@ -33,6 +33,7 @@ mod tag;
 mod tools;
 mod tree;
 mod undo;
+mod watch;
 #[cfg(test)]
 mod wire_snapshots;
 mod worktree;
@@ -89,6 +90,7 @@ pub use tools::{
 };
 pub use tree::{get_commit_tree, get_file_at_commit, restore_file_version, save_file_version};
 pub use undo::{get_undo_state, redo_last, undo_last};
+pub use watch::{unwatch_repo, watch_repo, WatchState};
 pub use worktree::{create_worktree, list_worktrees, prune_worktrees, remove_worktree};
 
 /// The Tauri event a transfer event is emitted as, and its payload.
@@ -172,7 +174,12 @@ pub async fn open_repo(path: String, state: State<'_, AppState>) -> Result<(), E
 }
 
 #[tauri::command]
-pub async fn close_repo(repo_path: String, state: State<'_, AppState>) -> Result<(), ErrorDto> {
+pub async fn close_repo(
+    repo_path: String,
+    state: State<'_, AppState>,
+    watch: State<'_, WatchState>,
+) -> Result<(), ErrorDto> {
+    watch.unwatch(&repo_path);
     forget_repo(&state, &repo_path);
     Ok(())
 }

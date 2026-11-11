@@ -179,7 +179,9 @@
   "unstage_file",
   "unstage_hunk",
   "unstage_lines",
+  "unwatch_repo",
   "update_remote_urls",
   "update_submodule",
-  "update_workspace"
+  "update_workspace",
+  "watch_repo"
 ]

@@ -1,4 +1,4 @@
-import type { HookProgress, HostRequest, OpenRepoEntry, RepoClient, TransferProgress } from "./RepoClient";
+import type { HookProgress, HostRequest, OpenRepoEntry, RepoClient, RepoWatch, TransferProgress } from "./RepoClient";
 import { createRepoClient } from "./createRepoClient";
 import { RepoError, toRepoError } from "./RepoClient";
 import { __resetHostVisibilityForTests, publishHostVisibility } from "./hostVisibility";
@@ -93,6 +93,7 @@ const pending = new Map<
 const transferProgressListeners = new Set<(progress: TransferProgress) => void>();
 const hookProgressListeners = new Set<(event: HookProgress) => void>();
 const hostRequestListeners = new Set<(request: HostRequest) => void>();
+const repoWatchListeners = new Set<(event: RepoWatch) => void>();
 let focusTracked = false;
 
 function handleMessage(event: MessageEvent) {
@@ -117,6 +118,12 @@ function handleMessage(event: MessageEvent) {
   if (message.method === "hookProgress") {
     const hookEvent = message.params as HookProgress;
     for (const listener of hookProgressListeners) listener(hookEvent);
+    return;
+  }
+  if (message.method === "repoWatch") {
+    // A repository watcher's report (#756), relayed from the sidecar.
+    const watchEvent = message.params as RepoWatch;
+    for (const listener of repoWatchListeners) listener(watchEvent);
     return;
   }
   if (message.method === "hostRequest") {
@@ -206,6 +213,7 @@ export function __resetVscodeRepoClientForTests() {
   pending.clear();
   transferProgressListeners.clear();
   hookProgressListeners.clear();
+  repoWatchListeners.clear();
   __resetTransportStatusForTests();
   __resetHostVisibilityForTests();
 }
@@ -234,6 +242,13 @@ export const vscodeRepoClient: RepoClient = {
     hookProgressListeners.add(listener);
     return () => {
       hookProgressListeners.delete(listener);
+    };
+  },
+  subscribeRepoWatch: (listener: (event: RepoWatch) => void) => {
+    ensureInitialized();
+    repoWatchListeners.add(listener);
+    return () => {
+      repoWatchListeners.delete(listener);
     };
   },
   subscribeHostRequests: (listener: (request: HostRequest) => void) => {

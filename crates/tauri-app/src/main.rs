@@ -3,6 +3,8 @@
 mod commands;
 mod identifier_migration;
 
+use tauri::Manager;
+
 use commands::{
     abort_merge, abort_rebase, abort_sequence, add_remote, amend_commit, apply_commit_change,
     apply_patch, apply_stash, background_fetch, cancel_clone, cancel_search, cancel_transfer,
@@ -54,6 +56,8 @@ use commands::{create_root_file, get_root_files};
 use commands::{get_graph_collapse_merges, get_merged_commits, set_graph_collapse_merges};
 // Read a patch file dropped on the window (#649).
 use commands::read_patch_file;
+// Watch the shown repositories for changes made outside the app (#756).
+use commands::{unwatch_repo, watch_repo, WatchState};
 
 /// Declares the desktop app's Tauri commands once: `invoke_handler` registers them, and
 /// `COMMAND_NAMES` lists the same names for the transport parity check (#306), which compares it
@@ -75,6 +79,8 @@ commands![
     cancel_clone,
     init_repo,
     close_repo,
+    watch_repo,
+    unwatch_repo,
     get_status,
     get_change_stamp,
     get_commit_graph,
@@ -290,6 +296,7 @@ fn main() {
         .manage(CloneState::default())
         .setup(|app| {
             identifier_migration::log_report(app.handle());
+            app.manage(WatchState::new(app.handle().clone()));
             Ok(())
         })
         .invoke_handler(invoke_handler())

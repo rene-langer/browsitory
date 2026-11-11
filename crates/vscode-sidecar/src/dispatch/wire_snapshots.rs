@@ -174,6 +174,9 @@ fn snapshots() -> Vec<(String, String)> {
     s.add("HookProgress", fixtures::hook_events(), |event| {
         hook_progress_dto(fixtures::HOOK_REPO_PATH, event)
     });
+    s.add("RepoWatch", fixtures::watch_events(), |event| {
+        repo_service::wire::repo_watch_dto(fixtures::HOOK_REPO_PATH, event)
+    });
     s.add("BranchInfo", fixtures::branches(), BranchInfoDto::from);
     s.add("WorktreeInfo", fixtures::worktrees(), WorktreeInfoDto::from);
     s.add(
@@ -356,6 +359,7 @@ const DESKTOP_ONLY: &[&str] = &[
     // Tauri event names; the sidecar's notification methods are pinned by the relay tests below.
     "TransferProgressEvent",
     "HookProgressEvent",
+    "RepoWatchEvent",
     "CloneOutcome",
     "CloneErrorPayload",
     "MergeToolOutcome",
@@ -475,6 +479,23 @@ fn the_progress_relay_writes_the_snapshot_bytes() {
         assert_eq!(
             *line,
             format!(r#"{{"jsonrpc":"2.0","method":"transferProgress","params":{params}}}"#),
+            "{name}"
+        );
+    }
+}
+
+/// Same for `write_repo_watch` and the watcher events.
+#[test]
+fn the_watch_notifications_carry_the_snapshot_bytes() {
+    let snapshots: BTreeMap<String, String> = snapshots().into_iter().collect();
+    for (name, event) in fixtures::watch_events() {
+        let out = Mutex::new(Vec::new());
+        super::watch::write_repo_watch(&out, fixtures::HOOK_REPO_PATH, event);
+        let line = String::from_utf8(out.into_inner().unwrap()).unwrap();
+        let params = &snapshots[&format!("RepoWatch/{name}")];
+        assert_eq!(
+            line,
+            format!("{{\"jsonrpc\":\"2.0\",\"method\":\"repoWatch\",\"params\":{params}}}\n"),
             "{name}"
         );
     }

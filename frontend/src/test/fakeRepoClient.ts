@@ -38,6 +38,9 @@ export const EMPTY_RESULTS: Partial<RepoClient> = {
   getGraphBranchSelection: async () => null,
   // No `getChangeStamp`: without a stamp every refresh reads everything (#685), which tests that
   // change what the fake returns between refreshes rely on; checks for changes then stay quiet.
+  // Not watched: the tests that don't care see today's polling.
+  watchRepo: async () => false,
+  unwatchRepo: async () => {},
   getGraphRemoteBranchSelection: async () => null,
   getGraphCollapseMerges: async () => false,
   setGraphCollapseMerges: async () => {},
@@ -68,6 +71,7 @@ export const EMPTY_RESULTS: Partial<RepoClient> = {
   listTags: async () => [],
   subscribeTransferProgress: () => () => {},
   subscribeHookProgress: () => () => {},
+  subscribeRepoWatch: () => () => {},
   subscribeFileDrops: () => () => {},
   subscribeHostRequests: () => () => {},
   getMergeMessage: async () => null,
@@ -122,7 +126,7 @@ export const EMPTY_RESULTS: Partial<RepoClient> = {
 };
 
 // The `RepoClient` methods that return synchronously; every other method returns a promise.
-const SYNC_METHODS = new Set<string>(["subscribeTransferProgress", "subscribeHookProgress", "subscribeFileDrops", "subscribeHostRequests"]);
+const SYNC_METHODS = new Set<string>(["subscribeTransferProgress", "subscribeHookProgress", "subscribeRepoWatch", "subscribeFileDrops", "subscribeHostRequests"]);
 
 // Names other code probes on any object (promise resolution, serializers, matchers, React, the
 // test runner's pretty-printer). The fake must not answer them with a method stub: `await` on a
