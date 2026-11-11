@@ -239,3 +239,32 @@ fn hooks_that_accept_leave_one_applied_outcome_and_one_undo_step() {
         Some("Apply patch as commits".to_string())
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn cancel_transfer_stops_a_running_pre_applypatch_and_puts_the_series_back() {
+    let (dir, repo) = init_repo();
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let (base, patch) = series_on_base(dir.path(), &repo, &handle);
+    install_hook(&repo, "pre-applypatch", "sleep 30");
+    let (events_tx, events_rx) = mpsc::channel();
+    let canceller = handle.clone();
+    let cancel_thread = std::thread::spawn(move || {
+        if let Ok(HookEvent::Started { operation_id, .. }) = events_rx.recv() {
+            canceller.cancel_transfer(&operation_id);
+        }
+    });
+    let started = std::time::Instant::now();
+
+    let result = handle.apply_patch_reported(patch, PatchApply::Commits, events_tx);
+
+    cancel_thread.join().unwrap();
+    assert_eq!(
+        result.unwrap_err(),
+        crate::wire::ErrorDto::from("The pre-applypatch hook was cancelled.")
+    );
+    // Generous bound: only proves the hook's `sleep 30` was not waited out.
+    assert!(started.elapsed() < Duration::from_secs(25));
+    assert_eq!(head(&repo), base);
+}
