@@ -1,6 +1,6 @@
 import type { BranchInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { menuItem } from "../lib/actions/action";
-import { branchActions, remoteBranchActions } from "../lib/actions/branchActions";
+import { branchActions, rebaseOntoAction, remoteBranchActions } from "../lib/actions/branchActions";
 import { addRemoteAction, remoteActions } from "../lib/actions/remoteActions";
 import type { OperationBlockers } from "../lib/operationStatus";
 import type { CopyToClipboard } from "../state/useCopyToClipboard";
@@ -49,6 +49,11 @@ export function compareLabel(branches: BranchInfo[]): string {
   return branches.some((branch) => branch.isCurrent) ? "Compare with current branch" : "Compare with HEAD";
 }
 
+/** The current branch's name, `null` on a detached HEAD. */
+function currentBranchName(branches: BranchInfo[]): string | null {
+  return branches.find((branch) => branch.isCurrent)?.name ?? null;
+}
+
 /** The menu of a local branch row. */
 export function localBranchMenuItems({
   branch,
@@ -59,6 +64,7 @@ export function localBranchMenuItems({
   onSwitchBranch,
   onStartRename,
   onMergeBranch,
+  onRebaseOnto,
   onCompareBranch,
   onPushCurrentBranch,
   onOpenSetUpstream,
@@ -75,6 +81,8 @@ export function localBranchMenuItems({
   onSwitchBranch: (name: string) => void;
   onStartRename: (name: string) => void;
   onMergeBranch: (name: string) => void;
+  /** Opens the rebase planner onto `onto`, a full ref name (#619). */
+  onRebaseOnto: (onto: string) => void;
   onCompareBranch?: (refName: string, label: string) => void;
   onPushCurrentBranch: (remoteName: string) => Promise<void>;
   onOpenSetUpstream: () => void;
@@ -96,6 +104,8 @@ export function localBranchMenuItems({
   // Grouped (#645): the branch itself, merging, the remote, viewing and copying, then Delete.
   if (!branch.isCurrent) {
     items.push({ ...menuItem(actions.merge, () => onMergeBranch(branch.name)), group: "merge" });
+    const rebase = rebaseOntoAction(blockers, currentBranchName(branches), { kind: "local", name: branch.name });
+    if (rebase !== null) items.push({ ...menuItem(rebase, () => onRebaseOnto(rebase.onto)), group: "merge" });
     if (onCompareBranch !== undefined) {
       items.push({
         label: compareLabel(branches),
@@ -170,6 +180,7 @@ export function remoteBranchMenuItems({
   blockers,
   onCheckout,
   onSetUpstream,
+  onRebaseOnto,
   onCompareBranch,
   onIsolateGraphBranch,
   onCopy,
@@ -181,15 +192,19 @@ export function remoteBranchMenuItems({
   blockers: OperationBlockers;
   onCheckout: () => void;
   onSetUpstream: (remoteName: string, remoteBranch: string) => Promise<void>;
+  /** Opens the rebase planner onto `onto`, a full ref name (#619). */
+  onRebaseOnto: (onto: string) => void;
   onCompareBranch?: (refName: string, label: string) => void;
   onIsolateGraphBranch: (kind: "local" | "remote", name: string) => void;
   onCopy: CopyToClipboard;
   onOpenDeleteRemoteBranch: (remoteName: string, branchName: string) => void;
 }): ContextMenuItem[] {
   const actions = remoteBranchActions(blockers, remoteName, branchName);
+  const rebase = rebaseOntoAction(blockers, currentBranchName(branches), { kind: "remote", remoteName, branchName });
   return [
     { ...menuItem(actions.checkout, onCheckout), group: "branch" },
     { ...menuItem(actions.setAsUpstream, () => void onSetUpstream(remoteName, branchName)), group: "branch" },
+    ...(rebase !== null ? [{ ...menuItem(rebase, () => onRebaseOnto(rebase.onto)), group: "merge" }] : []),
     ...(onCompareBranch !== undefined
       ? [
           {

@@ -17,6 +17,7 @@ import {
 import { useAppearanceSettingsContext } from "../state/useAppearanceSettings";
 import { useCommitMessageSettingsContext } from "../state/useCommitMessageSettings";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
+import { useFileListLayout, writeFileListLayout } from "../lib/fileListLayoutPreference";
 import { useExternalToolSettings } from "../state/useExternalToolSettings";
 import { useFetchSettingsContext } from "../state/useFetchSettings";
 import { useUpdateSettingsContext } from "../state/useUpdateSettings";
@@ -291,10 +292,12 @@ const DIFF_ALGORITHM_LABEL: Record<DiffAlgorithm, string> = {
 
 /**
  * "Diff": wrapping long lines (#444; the diff toolbar's "Wrap lines" sets the same value, #640),
- * the diff algorithm every diff uses (#469), and whether untracked files load at once (#623).
+ * the diff algorithm every diff uses (#469), whether untracked files load at once (#623), and the
+ * working tree's file list layout (#729, a per-machine preference, not a diff setting).
  */
 export function DiffSection() {
   const { settings, update, error, dismissError } = useDiffSettingsContext();
+  const fileListLayout = useFileListLayout();
   return (
     <PreferencesSection title="Diff">
       <Field label="Word wrap">
@@ -346,6 +349,18 @@ export function DiffSection() {
       <p className={styles.hint}>
         Off, an untracked file's contents load only when you ask for them in its diff. Changes to
         tracked files always load at once.
+      </p>
+      <label className={styles.checkbox}>
+        <input
+          type="checkbox"
+          checked={fileListLayout === "tree"}
+          onChange={(event) => writeFileListLayout(event.target.checked ? "tree" : "flat")}
+        />
+        Show changed files as a tree
+      </label>
+      <p className={styles.hint}>
+        Groups the working tree&apos;s changed files by folder. The Flat and Tree buttons above the
+        file list switch it too. Kept on this computer.
       </p>
       {error !== null && (
         <p role="alert" className={styles.problem}>

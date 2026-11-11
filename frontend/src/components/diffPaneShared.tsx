@@ -35,11 +35,15 @@ export interface StashActions {
 
 /** What the discard confirm dialogs are currently asking about; null when none is open. */
 // `untracked`: the Changes heading's "Delete untracked…" (#622), every untracked file.
+/**
+ * An open discard confirmation. "all" and "untracked" carry `paths` when the path filter hides
+ * files (#729): they then act on those shown files only, and the dialog lists them.
+ */
 export type DiscardRequest =
   | { kind: "file"; path: string }
-  | { kind: "all" }
+  | { kind: "all"; paths?: string[] }
   | { kind: "files"; paths: string[] }
-  | { kind: "untracked" };
+  | { kind: "untracked"; paths?: string[] };
 
 /** The multi-file selection DiffPane reports to the command palette (two or more files). */
 export interface ReportedFileSelection {
