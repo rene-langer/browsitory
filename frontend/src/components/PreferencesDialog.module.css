@@ -3,25 +3,106 @@
   font-size: var(--text-md, 1rem);
 }
 
-.sections {
+/* A fixed size (#784): switching or filtering groups never resizes the dialog; only the group
+   pane scrolls. `[open]` keeps the browser's `display: none` for a closed dialog. */
+dialog.dialog[open] {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  width: 90vw;
+  max-width: 760px;
+  height: min(600px, 85vh);
 }
 
-.section {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: var(--space-3);
+.body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 12rem minmax(0, 1fr);
+  gap: var(--space-4);
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-height: 0;
+}
+
+.filter {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.matchCount {
   margin: 0;
+  min-height: 1.4em;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.tablist {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.tab {
+  text-align: start;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+}
+
+.tab:hover {
+  background: var(--color-hover-bg);
+}
+
+.tab[aria-selected="true"] {
+  background: var(--color-selected-bg);
+  color: var(--color-selected-text);
+  box-shadow: inset 2px 0 0 var(--color-selected-marker);
+}
+
+.panes {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: var(--space-1);
+}
+
+/* Narrow window: the list above the group, its tabs in rows. */
+@media (max-width: 600px) {
+  .body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: var(--space-2);
+  }
+
+  .tablist {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}
+
+/* The shown group's settings; its legend is the group's heading. */
+.section {
+  border: none;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
 }
 
 .legend {
-  padding: 0 var(--space-1);
+  padding: 0;
+  margin-bottom: var(--space-3);
   font-weight: 600;
+  font-size: var(--text-md, 1rem);
 }
 
 .form {

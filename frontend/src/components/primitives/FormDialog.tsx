@@ -15,9 +15,12 @@ export function FormDialog({
   ariaLabel,
   onCancel,
   returnFocusTo,
+  className,
   children,
 }: {
   ariaLabel: string;
+  /** Added to the dialog's own class, e.g. for a dialog that needs another size. */
+  className?: string;
   onCancel: () => void;
   /** Focused on close instead of the element focused when the dialog opened. */
   returnFocusTo?: HTMLElement | null;
@@ -44,7 +47,7 @@ export function FormDialog({
   return (
     <dialog
       ref={dialogRef}
-      className={styles.dialog}
+      className={className === undefined ? styles.dialog : `${styles.dialog} ${className}`}
       aria-label={ariaLabel}
       onCancel={(event) => {
         event.preventDefault();
