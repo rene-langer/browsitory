@@ -1,9 +1,10 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { GraphCommit } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
 import type { CommitSearchResultsState } from "../state/useCommitSearch";
 import { searchStatusText } from "../lib/searchStatus";
+import { layoutInPane, ROW } from "../test/virtualLayout";
 import { CommitSearchResults } from "./CommitSearchResults";
 
 function c(id: string): GraphCommit {
@@ -100,4 +101,68 @@ it("renders branch, remote and tag badges on result rows", () => {
   expect(screen.getByText("main")).toBeInTheDocument();
   expect(screen.getByText("origin/main")).toBeInTheDocument();
   expect(screen.getByTitle("Tag v1.0")).toHaveTextContent("v1.0");
+});
+
+// #775: only the rows in view render, as in the commit graph (#685).
+describe("CommitSearchResults — windowed rows", () => {
+  const many = Array.from({ length: 1000 }, (_, n) => c(`id${n}`));
+
+  function renderInPane() {
+    const layout = layoutInPane();
+    const props = {
+      results: { ...base, commits: many },
+      selectedRow: "uncommitted" as SelectedRow,
+      onSelectRow: vi.fn(),
+      onClose: vi.fn(),
+      onLoadMore: vi.fn(),
+      onRetry: vi.fn(),
+      onRequestSearch: vi.fn(),
+    };
+    const utils = render(<CommitSearchResults {...props} />, { container: layout.pane });
+    return { ...utils, ...layout, props };
+  }
+
+  it("renders the rows in view plus a margin, and pads for the rest", () => {
+    const { restore } = renderInPane();
+    try {
+      const list = screen.getByRole("listbox", { name: "Search results" });
+      const rendered = within(list).getAllByRole("option");
+      // Rows 0–9 are in view, 20 more below them.
+      expect(rendered).toHaveLength(30);
+      expect(rendered[0]).toHaveTextContent("commit id0");
+      expect(rendered[1]).toHaveAttribute("aria-posinset", "2");
+      expect(rendered[1]).toHaveAttribute("aria-setsize", "1000");
+      expect(list.style.paddingTop).toBe("0px");
+      expect(list.style.paddingBottom).toBe(`${(1000 - 30) * ROW}px`);
+    } finally {
+      restore();
+    }
+  });
+
+  it("renders the rows of the scrolled-to part", () => {
+    const { scrollTo, restore } = renderInPane();
+    try {
+      scrollTo(ROW * 500);
+      const list = screen.getByRole("listbox", { name: "Search results" });
+      const rendered = within(list).getAllByRole("option");
+      expect(rendered[0]).toHaveAttribute("data-row-index", "480");
+      expect(rendered[0]).toHaveTextContent("commit id480");
+      expect(rendered.at(-1)).toHaveAttribute("data-row-index", "529");
+      expect(list.style.paddingTop).toBe(`${480 * ROW}px`);
+    } finally {
+      restore();
+    }
+  });
+
+  it("scrolls a row selected far down the list into view", () => {
+    const { pane, rerender, props, restore } = renderInPane();
+    try {
+      rerender(<CommitSearchResults {...props} selectedRow={{ commitId: "id700" }} />);
+      // Row 700 ends at the pane's bottom edge.
+      expect(pane.scrollTop).toBe(701 * ROW - 260);
+      expect(screen.getByText(/commit id700$/).closest("li")).toHaveAttribute("aria-selected", "true");
+    } finally {
+      restore();
+    }
+  });
 });

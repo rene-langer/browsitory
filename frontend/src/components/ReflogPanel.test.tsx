@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ReflogEntry } from "../ipc/RepoClient";
+import { formatShortDate } from "../lib/formatDate";
+import { layoutInPane, ROW } from "../test/virtualLayout";
 import { ReflogPanel } from "./ReflogPanel";
 
 const entry: ReflogEntry = {
@@ -102,5 +104,114 @@ describe("ReflogPanel", () => {
     expect(screen.getByText(`Old ID: ${olderEntry.oldId}`)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: `Restore refs/heads/main to ${entry.newId}` })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: `Restore refs/heads/main to ${olderEntry.newId}` })).toBeInTheDocument();
+  });
+});
+
+// #775: two fixed lines per entry, so the list can be windowed like the Stashes rows.
+describe("ReflogPanel — rows", () => {
+  it("shows the message, then the short IDs, committer and date, with the full details as a tooltip", () => {
+    renderPanel();
+
+    const row = screen.getByText(entry.message).closest("li")!;
+    expect(
+      within(row).getByText(`1111111 → 2222222 · Ada Lovelace · ${formatShortDate(entry.timestamp)}`),
+    ).toBeInTheDocument();
+    const details = within(row).getByTitle(/^Old ID: /);
+    expect(details).toHaveAttribute(
+      "title",
+      [
+        `Old ID: ${entry.oldId}`,
+        `New ID: ${entry.newId}`,
+        "Ada Lovelace <ada@example.com>",
+        new Date(entry.timestamp * 1000).toLocaleString(),
+        entry.message,
+        entry.summary,
+      ].join("\n"),
+    );
+    expect(within(row).getByRole("button", { name: `Restore refs/heads/main to ${entry.newId}` })).toHaveTextContent(
+      "Restore refs/heads/main",
+    );
+  });
+
+  it("leaves the summary out of the tooltip when the entry has none", () => {
+    renderPanel({ entries: [{ ...entry, summary: null }] });
+
+    expect(screen.getByTitle(/^Old ID: /).getAttribute("title")).toBe(
+      [
+        `Old ID: ${entry.oldId}`,
+        `New ID: ${entry.newId}`,
+        "Ada Lovelace <ada@example.com>",
+        new Date(entry.timestamp * 1000).toLocaleString(),
+        entry.message,
+      ].join("\n"),
+    );
+  });
+});
+
+// #775: only the rows in view render, as in the commit graph (#685).
+describe("ReflogPanel — windowed rows", () => {
+  const many: ReflogEntry[] = Array.from({ length: 1000 }, (_, n) => ({
+    ...entry,
+    newId: `${n}`.padStart(40, "a"),
+    message: `commit: step ${n}`,
+  }));
+
+  function renderInPane() {
+    localStorage.removeItem("sidebar-reflog");
+    const layout = layoutInPane();
+    const onRestore = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ReflogPanel
+        references={["HEAD", "refs/heads/main"]}
+        selectedReference="refs/heads/main"
+        entries={many}
+        onSelectReference={vi.fn().mockResolvedValue(undefined)}
+        onRestore={onRestore}
+        operationDisabled={false}
+      />,
+      { container: layout.pane },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Reflog" }));
+    const rows = () => [...layout.pane.querySelectorAll<HTMLElement>("ul > li")];
+    return { ...layout, rows, onRestore };
+  }
+
+  it("renders the rows in view plus a margin, and pads for the rest", () => {
+    const { rows, restore } = renderInPane();
+    try {
+      const rendered = rows();
+      // Rows 0–9 are in view, 20 more below them.
+      expect(rendered).toHaveLength(30);
+      expect(rendered[0]).toHaveTextContent("commit: step 0");
+      expect(rendered[1]).toHaveAttribute("aria-posinset", "2");
+      expect(rendered[1]).toHaveAttribute("aria-setsize", "1000");
+      const list = rendered[0].parentElement!;
+      expect(list.style.paddingTop).toBe("0px");
+      expect(list.style.paddingBottom).toBe(`${(1000 - 30) * ROW}px`);
+    } finally {
+      restore();
+    }
+  });
+
+  it("restores an entry from the scrolled-to part", () => {
+    const { rows, scrollTo, onRestore, restore } = renderInPane();
+    try {
+      scrollTo(ROW * 500);
+      const rendered = rows();
+      expect(rendered[0]).toHaveAttribute("data-row-index", "480");
+      expect(rendered[0]).toHaveTextContent("commit: step 480");
+      expect(rendered.at(-1)).toHaveAttribute("data-row-index", "529");
+      expect(rendered[0].parentElement!.style.paddingTop).toBe(`${480 * ROW}px`);
+
+      fireEvent.click(screen.getByRole("button", { name: `Restore refs/heads/main to ${many[505].newId}` }));
+      fireEvent.click(
+        within(screen.getByRole("dialog", { name: "Restore refs/heads/main" })).getByRole("button", {
+          name: "Restore reflog entry",
+        }),
+      );
+      expect(onRestore).toHaveBeenCalledWith("refs/heads/main", many[505].newId);
+    } finally {
+      restore();
+    }
   });
 });

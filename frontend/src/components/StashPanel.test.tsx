@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { StashEntry } from "../ipc/RepoClient";
 import { StashPanel } from "./StashPanel";
 import { describedByText } from "../test/describedBy";
+import { layoutInPane, ROW } from "../test/virtualLayout";
 import { formatAbsoluteDate, formatRelativeDate } from "../lib/formatDate";
 
 // Branch, age and file count (#657); the tests below that need others set their own.
@@ -492,5 +493,69 @@ describe("StashPanel pop and restore staged changes", () => {
       expect(item).toHaveAttribute("title", "Unstage or commit staged changes first.");
     }
     expect(screen.getByRole("menuitem", { name: "Drop…" })).toBeEnabled();
+  });
+});
+
+// #775: only the rows in view render, as in the commit graph (#685).
+describe("StashPanel — windowed rows", () => {
+  const many: StashEntry[] = Array.from({ length: 1000 }, (_, n) => ({
+    index: n,
+    message: `WIP on main: many${n}fix edit`,
+    commitId: `many${n}`,
+    ...META,
+  }));
+
+  function renderInPane() {
+    localStorage.removeItem("sidebar-stashes");
+    const layout = layoutInPane();
+    const utils = render(panel({ stashes: many }), { container: layout.pane });
+    fireEvent.click(screen.getByRole("button", { name: "Stashes" }));
+    const rows = () => [...layout.pane.querySelectorAll<HTMLElement>("ul > li")];
+    return { ...utils, ...layout, rows };
+  }
+
+  it("renders the rows in view plus a margin, and pads for the rest", () => {
+    const { rows, restore } = renderInPane();
+    try {
+      const rendered = rows();
+      // Rows 0–9 are in view, 20 more below them.
+      expect(rendered).toHaveLength(30);
+      expect(rendered[0]).toHaveTextContent("many0fix");
+      expect(rendered[1]).toHaveAttribute("data-row-index", "1");
+      const list = rendered[0].parentElement!;
+      expect(list.style.paddingTop).toBe("0px");
+      expect(list.style.paddingBottom).toBe(`${(1000 - 30) * ROW}px`);
+    } finally {
+      restore();
+    }
+  });
+
+  it("renders the rows of the scrolled-to part", () => {
+    const { rows, scrollTo, restore } = renderInPane();
+    try {
+      scrollTo(ROW * 500);
+      const rendered = rows();
+      expect(rendered[0]).toHaveAttribute("data-row-index", "480");
+      expect(rendered[0]).toHaveTextContent("many480fix");
+      expect(rendered.at(-1)).toHaveAttribute("data-row-index", "529");
+      expect(rendered[0].parentElement!.style.paddingTop).toBe(`${480 * ROW}px`);
+    } finally {
+      restore();
+    }
+  });
+
+  it("moves focus to the '…' now in that place when a stash far down the list disappears", () => {
+    const { rerender, scrollTo, restore } = renderInPane();
+    try {
+      scrollTo(ROW * 500);
+      openMenu(/many510fix/);
+      expect(screen.getByRole("menuitem", { name: "Apply" })).toHaveFocus();
+
+      rerender(panel({ stashes: renumber(many.filter((stash) => stash.commitId !== "many510")) }));
+
+      expect(actionsFor("many511fix")).toHaveFocus();
+    } finally {
+      restore();
+    }
   });
 });
