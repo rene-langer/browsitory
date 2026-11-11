@@ -5,7 +5,6 @@ import { isMenuKey, rectAnchor } from "../lib/menuKeys";
 import { useCopyToClipboard } from "../state/useCopyToClipboard";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
-import formStyles from "./primitives/FormDialog.module.css";
 import { ContextMenu } from "./primitives/ContextMenu";
 import { ListRow } from "./primitives/ListRow";
 import { ReasonButton } from "./primitives/ReasonButton";
@@ -239,8 +238,6 @@ export function TagPanel({
                   aria-label="Remote"
                   value={remoteName}
                   onChange={(event) => setRemoteName(event.target.value)}
-                  disabled={pushDisabled}
-                  title={disabledTitle}
                 >
                   {remotes.map((remote) => <option key={remote.name} value={remote.name}>{remote.name}</option>)}
                 </select>
@@ -289,13 +286,12 @@ export function TagPanel({
           message={
             <>
               <p>Delete local tag {deleteConfirmation}?</p>
-              {/* #521: the repository can become busy while the confirmation is open. */}
-              {disabledTitle !== undefined && <p className={formStyles.blocked}>{disabledTitle}</p>}
             </>
           }
           confirmLabel="Delete tag"
           confirmDisabled={pushDisabled}
-          confirmTitle={disabledTitle}
+          // #521: the repository can become busy while the confirmation is open.
+          confirmReason={disabledTitle ?? null}
           onConfirm={() => {
             if (pushDisabled) return;
             void onDelete(deleteConfirmation).then(() => setDeleteConfirmation(null));

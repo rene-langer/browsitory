@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderTree } from "../test/branchTreeProps";
+import { describedByText } from "../test/describedBy";
 
 const oneRemote = [{ name: "origin", fetchUrl: "git@github.com:user/repo.git", pushUrl: null, authMode: null, authUsername: null }];
 
@@ -18,6 +19,14 @@ describe("AddRemoteForm (in BranchTree)", () => {
     expect(screen.getByText("Remote names can't contain spaces.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add remote" })).toBeDisabled();
     expect(onAddRemote).not.toHaveBeenCalled();
+  });
+
+  it("says why Add remote can't run while the repository is busy (#748)", () => {
+    renderTree({ addRemoteDraftOpen: true, operationDisabled: true, operationDisabledReason: "A merge is in progress." });
+    fireEvent.change(screen.getByTestId("add-remote-fetch-url"), { target: { value: "git@github.com:user/repo.git" } });
+    const add = screen.getByRole("button", { name: "Add remote" });
+    expect(add).toBeDisabled();
+    expect(describedByText(add)).toBe("A merge is in progress.");
   });
 
   it("Add remote refuses an invalid name derived from the URL with the same message", async () => {

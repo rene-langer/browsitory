@@ -2,7 +2,7 @@ import { CommitDock } from "./CommitDock";
 import { UncommittedFileRow } from "./UncommittedFileRow";
 import { UncommittedFileViewer } from "./UncommittedFileViewer";
 import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
-import { NO_HEAD_INFO, withBlockedReason, type DiscardRequest, type SelectionActionKind } from "./diffPaneShared";
+import { NO_HEAD_INFO, type DiscardRequest, type SelectionActionKind } from "./diffPaneShared";
 import { stashBlockReason } from "../lib/operationStatus";
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import type { GraphCommit, HeadInfo, HunkOptions, RepoClient, StatusEntry } from "../ipc/RepoClient";
@@ -766,10 +766,9 @@ export function UncommittedDiffPane({
       {discardRequest?.kind === "all" && discardableEntries.length > 0 && (
         <ConfirmDialog
           ariaLabel="Discard all changes"
-          message={withBlockedReason(discardAllConfirmMessage(discardableEntries, true), discardBlockedReason)}
+          message={discardAllConfirmMessage(discardableEntries, true)}
           confirmLabel="Discard all"
-          confirmDisabled={discardBlockedReason !== null}
-          confirmTitle={discardBlockedReason ?? undefined}
+          confirmReason={discardBlockedReason}
           onConfirm={() => {
             if (discardBlockedReason !== null) return;
             setDiscardRequest(null);
@@ -781,7 +780,7 @@ export function UncommittedDiffPane({
       {discardRequest?.kind === "untracked" && untrackedCount > 0 && (
         <ConfirmDialog
           ariaLabel="Delete untracked files"
-          message={withBlockedReason(
+          message={
             <>
               <p>{deleteUntrackedConfirmMessage(deletableUntrackedPaths)}</p>
               <ul aria-label="Untracked files to delete">
@@ -792,12 +791,10 @@ export function UncommittedDiffPane({
                   <li>and {untrackedCount - DELETE_UNTRACKED_PREVIEW} more</li>
                 )}
               </ul>
-            </>,
-            discardBlockedReason,
-          )}
+            </>
+          }
           confirmLabel={`Delete ${untrackedCount} ${untrackedCount === 1 ? "file" : "files"}`}
-          confirmDisabled={discardBlockedReason !== null}
-          confirmTitle={discardBlockedReason ?? undefined}
+          confirmReason={discardBlockedReason}
           onConfirm={() => {
             if (discardBlockedReason !== null) return;
             setDiscardRequest(null);
@@ -809,10 +806,9 @@ export function UncommittedDiffPane({
       {discardRequest?.kind === "files" && discardFilesEntries.length > 0 && (
         <ConfirmDialog
           ariaLabel="Discard selected changes"
-          message={withBlockedReason(discardAllConfirmMessage(discardFilesEntries), discardFilesBlockedReason)}
+          message={discardAllConfirmMessage(discardFilesEntries)}
           confirmLabel={`Discard ${discardFilesEntries.length} ${discardFilesEntries.length === 1 ? "file" : "files"}`}
-          confirmDisabled={discardFilesBlockedReason !== null}
-          confirmTitle={discardFilesBlockedReason ?? undefined}
+          confirmReason={discardFilesBlockedReason}
           onConfirm={() => {
             if (discardFilesBlockedReason !== null) return;
             setDiscardRequest(null);
@@ -825,10 +821,9 @@ export function UncommittedDiffPane({
       {discardFileEntry !== undefined && (
         <ConfirmDialog
           ariaLabel="Discard changes"
-          message={withBlockedReason(discardConfirmMessage(discardFileEntry), discardBlockedReason)}
+          message={discardConfirmMessage(discardFileEntry)}
           confirmLabel={isUntracked(discardFileEntry) ? "Delete file" : "Discard changes"}
-          confirmDisabled={discardBlockedReason !== null}
-          confirmTitle={discardBlockedReason ?? undefined}
+          confirmReason={discardBlockedReason}
           onConfirm={() => {
             if (discardBlockedReason !== null) return;
             setDiscardRequest(null);

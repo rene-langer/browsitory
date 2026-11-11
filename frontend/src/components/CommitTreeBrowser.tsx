@@ -15,6 +15,7 @@ import { FolderHistoryButton } from "./FolderHistoryButton";
 import { LineHistoryButton } from "./LineHistoryButton";
 import { ReadOnlyFileSection } from "./ReadOnlyFileSection";
 import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
+import { ReasonButton } from "./primitives/ReasonButton";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { InlineError } from "./primitives/InlineError";
 
@@ -452,16 +453,16 @@ export function CommitFileView({
           <button type="button" disabled={submodule} onClick={saveAs}>
             Save as…
           </button>
-          {onRestoreFileVersion !== undefined && (
-            <button
-              type="button"
-              disabled={submodule || restoreBlockedReason !== null}
-              title={restoreBlockedReason ?? undefined}
-              onClick={() => setConfirmRestore(true)}
-            >
-              Restore…
-            </button>
-          )}
+          {onRestoreFileVersion !== undefined &&
+            (submodule ? (
+              <button type="button" disabled>
+                Restore…
+              </button>
+            ) : (
+              <ReasonButton reason={restoreBlockedReason ?? null} onClick={() => setConfirmRestore(true)}>
+                Restore…
+              </ReasonButton>
+            ))}
         </span>
       </div>
       {saveNote !== null && (
@@ -479,13 +480,11 @@ export function CommitFileView({
                 Replace {path} in the working tree with its version from {short(commitId)}? Undo brings back
                 the current file.
               </p>
-              {/* #514: the repository can become busy while the confirmation is open. */}
-              {restoreBlockedReason !== null && <p>{restoreBlockedReason}</p>}
             </>
           }
           confirmLabel="Restore"
-          confirmDisabled={restoreBlockedReason !== null}
-          confirmTitle={restoreBlockedReason ?? undefined}
+          // #514: the repository can become busy while the confirmation is open.
+          confirmReason={restoreBlockedReason}
           onConfirm={() => {
             if (restoreBlockedReason !== null) return;
             setConfirmRestore(false);

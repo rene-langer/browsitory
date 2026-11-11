@@ -165,13 +165,12 @@ export function WorkspaceDialogs({
                 Overwrites {forcePushConfirm.remoteName}/{forcePushTargetBranch(forcePushConfirm.remoteName)} with
                 your local branch.
               </p>
-              {/* #514: the repository can become busy while the confirmation is open. */}
-              {operationDisabledReason !== null && <p>{operationDisabledReason}</p>}
             </>
           }
           confirmLabel="Force push"
           confirmDisabled={repositoryOperationDisabled}
-          confirmTitle={operationDisabledReason ?? undefined}
+          // #514: the repository can become busy while the confirmation is open.
+          confirmReason={operationDisabledReason}
           onConfirm={() => {
             if (repositoryOperationDisabled) return;
             void appState.forcePushCurrentBranch(forcePushConfirm.remoteName);

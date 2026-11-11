@@ -46,12 +46,10 @@ export function ResetDialog({
         message={
           <>
             <p>Discards all uncommitted changes. Undo can bring them back.</p>
-            {blockedReason !== null && <p className={formStyles.blocked}>{blockedReason}</p>}
           </>
         }
         confirmLabel="Reset hard"
-        confirmDisabled={blockedReason !== null}
-        confirmTitle={blockedReason ?? undefined}
+        confirmReason={blockedReason}
         onConfirm={() => {
           if (blockedReason === null) onReset("hard");
         }}

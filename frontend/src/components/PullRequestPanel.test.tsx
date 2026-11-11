@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { describe, expect, it, vi } from "vitest";
 import type { ForgeRepository, PullRequest } from "../ipc/RepoClient";
 import { PullRequestPanel } from "./PullRequestPanel";
+import { describedByText } from "../test/describedBy";
 
 const githubRepo: ForgeRepository = {
   provider: "GitHub",
@@ -383,7 +384,10 @@ describe("PullRequestPanel", () => {
     expect(screen.getByRole("button", { name: "Create pull request" })).toHaveAttribute(
       "title",
       "A merge is in progress.",
-    );
+    );    // #748: and as the buttons' description, in visible text.
+    for (const name of ["Save token", "Forget token", "Create pull request"]) {
+      expect(describedByText(screen.getByRole("button", { name }))).toBe("A merge is in progress.");
+    }
   });
 
   it("shows an icon and the total open pull-request count on the outer Pull requests header", () => {

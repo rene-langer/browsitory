@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { describedByText } from "../../test/describedBy";
 
 describe("ConfirmDialog", () => {
   it("renders as an accessible dialog with the given message and button labels", () => {
@@ -133,6 +134,36 @@ describe("ConfirmDialog", () => {
     );
 
     expect(screen.getByRole("button", { name: "Remove" })).toBeDisabled();
+  });
+
+  it("shows confirmReason as visible text tied to the disabled confirm button (#748)", () => {
+    const onConfirm = vi.fn();
+    render(
+      <ConfirmDialog
+        ariaLabel="Remove thing"
+        message="Remove thing?"
+        confirmLabel="Remove"
+        confirmReason="A merge is in progress."
+        onConfirm={onConfirm}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Remove thing" });
+    expect(dialog).toHaveTextContent("A merge is in progress.");
+    const confirm = screen.getByRole("button", { name: "Remove" });
+    expect(confirm).toBeDisabled();
+    expect(describedByText(confirm)).toBe("A merge is in progress.");
+    fireEvent.click(confirm);
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("enables the confirm button when confirmReason is null", () => {
+    render(
+      <ConfirmDialog ariaLabel="Remove thing" message="Remove thing?" confirmLabel="Remove" confirmReason={null} onConfirm={vi.fn()} onCancel={vi.fn()} />,
+    );
+    expect(screen.getByRole("button", { name: "Remove" })).toBeEnabled();
+    expect(describedByText(screen.getByRole("button", { name: "Remove" }))).toBe("");
   });
 
   it("opens the dialog (via showModal when available, else the open attribute)", () => {

@@ -1,8 +1,9 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import type { RemoteAuthMode, RemoteInfo } from "../ipc/RepoClient";
 import { FormDialog } from "./primitives/FormDialog";
-import formStyles from "./primitives/FormDialog.module.css";
 import styles from "./BranchTree.module.css";
+import { BlockedReason } from "./primitives/BlockedReason";
+import { describedBy } from "../lib/ariaDescribedBy";
 
 /**
  * Choose how a remote authenticates (HTTPS token or SSH agent) and save or forget its HTTPS
@@ -34,6 +35,9 @@ export function RemoteCredentialsDialog({
   const remoteName = remote.name;
   const blocked = blockedReason !== null;
   const blockedTitle = blockedReason ?? undefined;
+  // The visible reason is the buttons' description (#748).
+  const reasonId = useId();
+  const reasonRef = describedBy(reasonId, blockedReason);
 
   return (
     <FormDialog ariaLabel={`Credentials for ${remoteName}`} onCancel={onClose}>
@@ -79,14 +83,15 @@ export function RemoteCredentialsDialog({
               Access token
               <input ref={accessTokenRef} type="password" autoComplete="off" />
             </label>
-            {blocked && <p className={formStyles.blocked}>{blockedReason}</p>}
-            <button type="submit" disabled={blocked} title={blockedTitle}>
+            <BlockedReason id={reasonId} reason={blockedReason} />
+            <button type="submit" disabled={blocked} title={blockedTitle} aria-describedby={reasonRef}>
               Save HTTPS credential
             </button>
             <button
               type="button"
               disabled={blocked}
               title={blockedTitle}
+              aria-describedby={reasonRef}
               onClick={() => {
                 if (!blocked) void onForgetHttpsCredential(remoteName);
               }}
@@ -100,8 +105,8 @@ export function RemoteCredentialsDialog({
               Uses your system's SSH agent to authenticate — make sure one is running (for example via{" "}
               <code>ssh-add</code>) before fetching or pushing.
             </p>
-            {blocked && <p className={formStyles.blocked}>{blockedReason}</p>}
-            <button type="submit" disabled={blocked} title={blockedTitle}>
+            <BlockedReason id={reasonId} reason={blockedReason} />
+            <button type="submit" disabled={blocked} title={blockedTitle} aria-describedby={reasonRef}>
               Use SSH agent
             </button>
           </>

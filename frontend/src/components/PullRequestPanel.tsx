@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { ExternalLink, GitMerge, GitPullRequest, GitPullRequestClosed } from "lucide-react";
 import type {
   CreatePullRequest,
@@ -11,6 +11,8 @@ import { AccordionSection } from "./primitives/AccordionSection";
 import { ListRow } from "./primitives/ListRow";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./PullRequestPanel.module.css";
+import { BlockedReason } from "./primitives/BlockedReason";
+import { describedBy } from "../lib/ariaDescribedBy";
 
 // Providers report state as free-form strings ("open"/"closed" from GitHub, "OPEN"/"MERGED"/…
 // from Bitbucket, lowercased by the backend — see `crates/repo-service/src/pull_requests.rs`), so
@@ -66,6 +68,10 @@ function ForgeRepositorySection({
   branches,
 }: ForgeRepositorySectionProps) {
   const tokenRef = useRef<HTMLInputElement>(null);
+  // Why the forms' buttons can't run, in visible text they name as their description (#748).
+  const tokenReasonId = useId();
+  const createReasonId = useId();
+  const busyReason = operationDisabled ? operationDisabledReason : null;
   const [account, setAccount] = useState("");
   const [listing, setListing] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -190,18 +196,21 @@ function ForgeRepositorySection({
             Requires a Bitbucket repository or workspace access token (not an app password).
           </p>
         )}
+        <BlockedReason id={tokenReasonId} reason={busyReason} />
         <Toolbar>
           <button
             type="submit"
             disabled={operationDisabled}
-            title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
+            title={busyReason ?? undefined}
+            aria-describedby={describedBy(tokenReasonId, busyReason)}
           >
             Save token
           </button>
           <button
             type="button"
             disabled={operationDisabled}
-            title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
+            title={busyReason ?? undefined}
+            aria-describedby={describedBy(tokenReasonId, busyReason)}
             onClick={() => void forgetToken()}
           >
             Forget token
@@ -274,11 +283,13 @@ function ForgeRepositorySection({
             onChange={(event) => setTargetBranch(event.target.value)}
           />
         </label>
+        <BlockedReason id={createReasonId} reason={busyReason} />
         <Toolbar>
           <button
             type="submit"
             disabled={operationDisabled || creating}
-            title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
+            title={busyReason ?? undefined}
+            aria-describedby={describedBy(createReasonId, busyReason)}
           >
             Create pull request
           </button>

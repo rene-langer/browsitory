@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { RemoteInfo } from "../ipc/RepoClient";
 import { tagNameProblem } from "../lib/refName";
 import { refNameClash, takenNameMessage } from "../lib/takenNames";
@@ -6,6 +6,8 @@ import { Field } from "./primitives/Field";
 import { FormDialog } from "./primitives/FormDialog";
 import { InlineError } from "./primitives/InlineError";
 import styles from "./PushBranchDialog.module.css";
+import { BlockedReason } from "./primitives/BlockedReason";
+import { describedBy } from "../lib/ariaDescribedBy";
 
 /** `origin` if it exists, else the first remote, else "". */
 function defaultRemote(remotes: RemoteInfo[]): string {
@@ -44,6 +46,8 @@ export function CreateTagDialog({
   onCreate: (name: string, message: string | null, pushTo: string | null) => Promise<string | null>;
   onCancel: () => void;
 }) {
+  const reasonId = useId();
+  const busyReason = disabled ? disabledReason : null;
   const [name, setName] = useState("");
   const [kind, setKind] = useState<"lightweight" | "annotated">("lightweight");
   const [message, setMessage] = useState("");
@@ -138,8 +142,14 @@ export function CreateTagDialog({
           </>
         )}
         {error !== null && <InlineError message={error} onDismiss={() => setError(null)} />}
+        <BlockedReason id={reasonId} reason={busyReason} />
         <div className={styles.actions}>
-          <button type="submit" disabled={blocked} title={disabled ? (disabledReason ?? undefined) : undefined}>
+          <button
+            type="submit"
+            disabled={blocked}
+            title={busyReason ?? undefined}
+            aria-describedby={describedBy(reasonId, busyReason)}
+          >
             {pushTo === null ? "Create tag" : `Create and push to ${pushTo}`}
           </button>
           <button type="button" onClick={onCancel}>

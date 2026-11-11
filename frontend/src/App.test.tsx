@@ -3363,6 +3363,14 @@ describe("App release notes on a new version", () => {
     await waitFor(() => expect(setLastSeenVersion).toHaveBeenCalledWith("0.5.0"));
   });
 
+  it("opens Clone repository as one modal dialog, not one nested in another (#761)", async () => {
+    const { container } = render(<App client={fakeClient({ supportsCloneAndInit: true })} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Clone…" }));
+    await screen.findByRole("textbox", { name: "Repository URL" });
+    expect(container.ownerDocument.querySelectorAll('dialog[aria-label="Clone repository"]')).toHaveLength(1);
+    expect(container.ownerDocument.querySelectorAll("dialog dialog")).toHaveLength(0);
+  });
+
   it("in VSCode, the picker's Clone… and New repository… run VSCode's Git commands (#680)", async () => {
     const runHostGitCommand = vi.fn(async () => {});
     render(<App toolHost="vscode" client={fakeClient({ supportsHostGitCommands: true, runHostGitCommand })} />);
@@ -3621,6 +3629,59 @@ describe("commit flow (#651)", () => {
     await waitFor(() => expect(undo).toHaveBeenCalledWith("/repos/a"));
   });
 
+
+  it("offers Push and Undo together when the branch can be pushed (#733)", async () => {
+    const pushCurrentBranch = vi.fn(async () => "push-1");
+    const undo = vi.fn(async () => ({ kind: "Done" as const, label: "Commit" }));
+    render(
+      <App
+        client={flowClient({
+          listRemotes: async () => [origin],
+          getCurrentUpstream: async () => ({ localBranch: "main", remoteName: "origin", remoteBranch: "main", ahead: 0, behind: 0, pushBranch: "main" }),
+          getUndoState: async () => ({ undo: "Commit", redo: null }),
+          pushCurrentBranch,
+          undo,
+        })}
+      />,
+    );
+    const { button } = await typeAndFind();
+    fireEvent.click(button);
+
+    await notifications().findByText("Committed abcdef1 to main");
+    expect(notifications().getByRole("button", { name: "Push" })).toBeInTheDocument();
+    fireEvent.click(notifications().getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(undo).toHaveBeenCalledWith("/repos/a"));
+    expect(pushCurrentBranch).not.toHaveBeenCalled();
+  });
+
+  it("the toast's Push does not push another branch checked out since the commit (#735)", async () => {
+    let current = "main";
+    const pushCurrentBranch = vi.fn(async () => "push-1");
+    const branch = (name: string) => ({ name, isCurrent: current === name, upstream: `origin/${name}`, ahead: 0, behind: 0 });
+    render(
+      <App
+        client={flowClient({
+          listRemotes: async () => [origin],
+          listBranches: async () => [branch("main"), branch("feature")],
+          getCurrentUpstream: async () => ({ localBranch: current, remoteName: "origin", remoteBranch: current, ahead: 0, behind: 0, pushBranch: current }),
+          pushCurrentBranch,
+        })}
+      />,
+    );
+    const { button } = await typeAndFind();
+    fireEvent.click(button);
+    await notifications().findByText("Committed abcdef1 to main");
+
+    // Another branch is checked out before the toast's Push is clicked.
+    current = "feature";
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await screen.findByRole("button", { name: "Commit 2 files to feature" });
+
+    fireEvent.click(notifications().getByRole("button", { name: "Push" }));
+    expect(await notifications().findByText("Not pushed: main is no longer the current branch.")).toBeInTheDocument();
+    expect(pushCurrentBranch).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: /^Push / })).toBeNull();
+  });
 
   it("commits and pushes from the commit button's menu", async () => {
     const commit = vi.fn(async () => ({ kind: "Committed" as const, commitId: COMMIT_ID }));

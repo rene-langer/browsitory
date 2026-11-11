@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import type {
   RebaseAction,
   RebasePlanCommit,
@@ -10,7 +10,8 @@ import { Panel } from "./primitives/Panel";
 import { Toolbar } from "./primitives/Toolbar";
 import type { PresetAction } from "../lib/rebaseSelection";
 import styles from "./RebasePlanner.module.css";
-import formStyles from "./primitives/FormDialog.module.css";
+import { BlockedReason } from "./primitives/BlockedReason";
+import { describedBy } from "../lib/ariaDescribedBy";
 
 type ActionKind = RebaseAction["kind"];
 
@@ -173,6 +174,7 @@ export function RebasePlanner({
   // `presetMissing`).
   presetActions?: ReadonlyMap<string, PresetAction>;
 }) {
+  const reasonId = useId();
   const [rows, setRows] = useState<Row[]>([]);
   // True when a preset commit isn't in `commitsSince(onto)`, e.g. the selection includes a
   // commit from another branch. Starting would silently ignore part of the selection.
@@ -424,9 +426,14 @@ export function RebasePlanner({
           they can&apos;t be part of this rebase.
         </p>
       )}
-      {blockedReason !== null && <p className={formStyles.blocked}>{blockedReason}</p>}
+      <BlockedReason id={reasonId} reason={blockedReason} />
       <Toolbar>
-        <button onClick={start} disabled={startDisabled} title={blockedReason ?? undefined}>
+        <button
+          onClick={start}
+          disabled={startDisabled}
+          title={blockedReason ?? undefined}
+          aria-describedby={describedBy(reasonId, blockedReason)}
+        >
           Start rebase
         </button>
         <button onClick={onCancel}>Cancel</button>

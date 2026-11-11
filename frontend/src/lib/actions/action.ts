@@ -19,6 +19,14 @@ export interface PaletteAction extends MenuAction {
   paletteLabel: string;
 }
 
+/** What an unavailable action says when it gives no reason of its own. */
+export const UNAVAILABLE_REASON = "Not available right now.";
+
+/** Why `action` can't run, for a `ReasonButton` (#748); `null` while it is enabled. */
+export function disabledReason(action: Pick<MenuAction, "enabled" | "reason">): string | null {
+  return action.enabled ? null : (action.reason ?? UNAVAILABLE_REASON);
+}
+
 /**
  * Enabled unless `blockers` (e.g. `operationBlockers`) block it or `refusal` (why this target
  * can't take the action) says otherwise; the busy reason wins.

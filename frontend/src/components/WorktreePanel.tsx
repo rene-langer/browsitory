@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { FolderGit2, GitFork } from "lucide-react";
 import type { BranchInfo, WorktreeInfo } from "../ipc/RepoClient";
 import { AccordionSection } from "./primitives/AccordionSection";
@@ -6,8 +6,11 @@ import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
 import { Toolbar } from "./primitives/Toolbar";
+import { BlockedReason } from "./primitives/BlockedReason";
+import { describedBy } from "../lib/ariaDescribedBy";
+import { ReasonButton } from "./primitives/ReasonButton";
+import { disabledReason } from "../lib/actions/action";
 import styles from "./WorktreePanel.module.css";
-import formStyles from "./primitives/FormDialog.module.css";
 import { pruneWorktreesAction, worktreeActions } from "../lib/actions/worktreeActions";
 import type { OperationBlockers } from "../lib/operationStatus";
 
@@ -51,6 +54,8 @@ export function WorktreePanel({
   // The rows' and Prune's availability and labels, shared with the palette (#509).
   const blockers: OperationBlockers = { blocked: operationDisabled, reason: operationDisabledReason };
   const prune = pruneWorktreesAction(blockers);
+  const createReasonId = useId();
+  const createReason = operationDisabled ? operationDisabledReason : null;
   const busyReason = operationDisabled ? operationDisabledReason : null;
 
   const createWorktree = async (event: React.FormEvent) => {
@@ -127,11 +132,13 @@ export function WorktreePanel({
         {createError !== null && (
           <InlineError message={createError} onDismiss={() => setCreateError(null)} />
         )}
+        <BlockedReason id={createReasonId} reason={createReason} />
         <Toolbar>
           <button
             type="submit"
             disabled={operationDisabled}
-            title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
+            title={createReason ?? undefined}
+            aria-describedby={describedBy(createReasonId, createReason)}
           >
             Create worktree
           </button>
@@ -155,22 +162,12 @@ export function WorktreePanel({
               {worktree.isLocked && <span>Locked</span>}
               {worktree.isPrunable && <span>Prunable</span>}
               <Toolbar>
-                <button
-                  type="button"
-                  disabled={!actions.open.enabled}
-                  title={actions.open.reason}
-                  onClick={() => void onOpenWorktree(worktree.path)}
-                >
+                <ReasonButton reason={disabledReason(actions.open)} onClick={() => void onOpenWorktree(worktree.path)}>
                   {actions.open.label}
-                </button>
-                <button
-                  type="button"
-                  disabled={!actions.remove.enabled}
-                  title={actions.remove.reason}
-                  onClick={() => removeWorktree(worktree)}
-                >
+                </ReasonButton>
+                <ReasonButton reason={disabledReason(actions.remove)} onClick={() => removeWorktree(worktree)}>
                   {actions.remove.label}
-                </button>
+                </ReasonButton>
               </Toolbar>
             </ListRow>
             );
@@ -178,9 +175,9 @@ export function WorktreePanel({
         </ul>
       )}
       <Toolbar>
-        <button type="button" disabled={!prune.enabled} title={prune.reason} onClick={() => void onPruneWorktrees()}>
+        <ReasonButton reason={disabledReason(prune)} onClick={() => void onPruneWorktrees()}>
           {prune.label}
-        </button>
+        </ReasonButton>
       </Toolbar>
       {removeConfirmation !== null && (
         <ConfirmDialog
@@ -188,13 +185,12 @@ export function WorktreePanel({
           message={
             <>
               <p>Remove worktree at {removeConfirmation.path}?</p>
-              {/* #561: the repository can become busy while the confirmation is open. */}
-              {busyReason !== null && <p className={formStyles.blocked}>{busyReason}</p>}
             </>
           }
           confirmLabel="Remove worktree"
           confirmDisabled={operationDisabled}
-          confirmTitle={busyReason ?? undefined}
+          // #561: the repository can become busy while the confirmation is open.
+          confirmReason={busyReason}
           onConfirm={() => {
             if (operationDisabled) return;
             void onRemoveWorktree(removeConfirmation.name).then(() => setRemoveConfirmation(null));

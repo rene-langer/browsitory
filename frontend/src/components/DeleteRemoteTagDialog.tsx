@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { RemoteInfo } from "../ipc/RepoClient";
 import { Field } from "./primitives/Field";
 import { FormDialog } from "./primitives/FormDialog";
 import confirmStyles from "./primitives/ConfirmDialog.module.css";
 import styles from "./PushBranchDialog.module.css";
+import { BlockedReason } from "./primitives/BlockedReason";
+import { describedBy } from "../lib/ariaDescribedBy";
 
 /**
  * "Delete from remote…" for a tag (Tags panel, tag badge menu): picks the remote when there are
@@ -25,6 +27,8 @@ export function DeleteRemoteTagDialog({
   onDelete: (remoteName: string, deleteLocal: boolean) => void;
   onCancel: () => void;
 }) {
+  const reasonId = useId();
+  const busyReason = disabled ? disabledReason : null;
   const [remoteName, setRemoteName] = useState(() =>
     remotes.some((remote) => remote.name === "origin") ? "origin" : (remotes[0]?.name ?? ""),
   );
@@ -59,12 +63,14 @@ export function DeleteRemoteTagDialog({
           <input type="checkbox" checked={deleteLocal} onChange={(event) => setDeleteLocal(event.target.checked)} />
           Also delete the local tag
         </label>
+        <BlockedReason id={reasonId} reason={busyReason} />
         <div className={styles.actions}>
           <button
             type="button"
             className={confirmStyles.confirmButton}
             disabled={disabled || remoteName === ""}
-            title={disabled ? (disabledReason ?? undefined) : undefined}
+            title={busyReason ?? undefined}
+            aria-describedby={describedBy(reasonId, busyReason)}
             onClick={() => onDelete(remoteName, deleteLocal)}
           >
             Delete from remote

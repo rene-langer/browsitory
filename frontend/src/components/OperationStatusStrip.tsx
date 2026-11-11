@@ -23,6 +23,8 @@ import {
 import { ReasonButton } from "./primitives/ReasonButton";
 import styles from "./OperationStatusStrip.module.css";
 
+const BUSY_REASON = "Another action is in progress.";
+
 /**
  * Persistent strip shown for the whole time a merge, cherry-pick, revert or rebase is in progress, so the mode that
  * constrains every other action is never invisible (AUD-2026-09-20-FB-002). A multi-commit
@@ -94,6 +96,8 @@ export function OperationStatusStrip({
   onContinueRebase?: () => void;
 }) {
   const reason = conflictReason(conflictCount);
+  // Why a strip button can't run while another action is pending (#748): visible, not a title.
+  const pendingReason = pending ? BUSY_REASON : null;
   const goToConflict =
     onGoToConflict !== undefined && conflictCount > 0 ? (
       <button type="button" onClick={onGoToConflict}>
@@ -107,17 +111,12 @@ export function OperationStatusStrip({
         <span>{reason ?? "No conflicts remaining"}</span>
         <span className={styles.spacer} />
         {goToConflict}
-        <button
-          type="button"
-          disabled={pending || conflictCount > 0}
-          title={reason}
-          onClick={onContinueSequence}
-        >
+        <ReasonButton reason={pendingReason ?? reason ?? null} onClick={onContinueSequence}>
           Continue
-        </button>
-        <button type="button" disabled={pending} onClick={onAbortSequence}>
+        </ReasonButton>
+        <ReasonButton reason={pendingReason} onClick={onAbortSequence}>
           Abort {sequenceNoun(sequence.kind)}
-        </button>
+        </ReasonButton>
       </div>
     );
   }
@@ -128,14 +127,9 @@ export function OperationStatusStrip({
         <strong>Rebase of {rebase.branch} interrupted</strong>
         <span>{interruption}</span>
         <span className={styles.spacer} />
-        <button
-          type="button"
-          disabled={pending}
-          title="Stops the rebase. HEAD stays where it is."
-          onClick={onAbortRebase}
-        >
+        <ReasonButton reason={pendingReason} title="Stops the rebase. HEAD stays where it is." onClick={onAbortRebase}>
           Abort rebase
-        </button>
+        </ReasonButton>
       </div>
     );
   }
@@ -159,9 +153,9 @@ export function OperationStatusStrip({
         </span>
         <span className={styles.spacer} />
         {terminalSequence.pausedOnConflict && goToConflict}
-        <button type="button" disabled={pending} onClick={onAbortTerminalSequence}>
+        <ReasonButton reason={pendingReason} onClick={onAbortTerminalSequence}>
           Abort {noun}
-        </button>
+        </ReasonButton>
       </div>
     );
   }
@@ -209,7 +203,7 @@ export function OperationStatusStrip({
         // Continue next to Abort (#665), as the sequence's and the rebase panel's "Continue
         // rebase": once no conflict is left.
         <ReasonButton
-          reason={pending ? "Another action is in progress." : (reason ?? null)}
+          reason={pendingReason ?? reason ?? null}
           onClick={onContinueRebase}
         >
           Continue

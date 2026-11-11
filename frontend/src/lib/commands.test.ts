@@ -29,6 +29,7 @@ import type { OpenRepo } from "../state/useOpenRepos";
 import type { SidebarPanelId } from "../state/useSidebarPanelVisibility";
 import type { RootFileName } from "../ipc/RepoClient";
 import { rootFileItems } from "./rootFiles";
+import { describedByText } from "../test/describedBy";
 
 function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseAppStateResult {
   return {
@@ -2356,12 +2357,13 @@ describe("agree with the branch, remote, stash and worktree menus (#509)", () =>
         ["Remove /repo-wt1", "remove-worktree:wt1"],
         ["Prune worktrees", "prune-worktrees"],
       ]) {
+        // ReasonButtons (#748): aria-disabled, the reason in visible text as their description.
         const button = screen.getByRole("button", { name: label });
-        expect({ label, offered: ids.includes(id) }).toEqual({ label, offered: !button.hasAttribute("disabled") });
-        if (button.hasAttribute("disabled") && label !== "Remove /repo") expect(button).toHaveAttribute("title", blockers.reason);
+        const unavailable = button.getAttribute("aria-disabled") === "true";
+        expect({ label, offered: ids.includes(id) }).toEqual({ label, offered: !unavailable });
+        if (unavailable && label !== "Remove /repo") expect(describedByText(button)).toBe(blockers.reason);
       }
-      expect(screen.getByRole("button", { name: "Remove /repo" })).toHaveAttribute(
-        "title",
+      expect(describedByText(screen.getByRole("button", { name: "Remove /repo" }))).toBe(
         blockers.reason ?? "The main worktree can't be removed.",
       );
     } finally {
