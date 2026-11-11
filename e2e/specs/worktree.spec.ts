@@ -10,7 +10,7 @@ const WORKTREE_NAME = "feature-tree";
 const WORKTREE_BRANCH = "feature/e2e-worktree";
 // BranchTree splits a "/"-containing branch name into nested folders, so the leaf row's own
 // text is only the last segment — see the identical note in branch-management.spec.ts.
-const WORKTREE_BRANCH_LEAF = WORKTREE_BRANCH.split("/").pop();
+const WORKTREE_BRANCH_LEAF = WORKTREE_BRANCH.split("/").pop() ?? WORKTREE_BRANCH;
 const WORKTREE_PATH = path.join(os.tmpdir(), `browsitory-e2e-${Date.now()}`);
 
 // Opening a worktree opens it as its own tab (`WorktreePanel`'s `onOpenWorktree` routes through
