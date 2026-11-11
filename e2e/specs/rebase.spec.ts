@@ -71,6 +71,80 @@ describe("Browsitory interactive rebase", () => {
     void baseBranch;
   });
 
+  // #744: a row dragged by its handle lands below the row it is dropped on. The pointer events
+  // are dispatched in the page at the rows' real positions, so the drop target is found by the
+  // app's own hit test against the real layout.
+  it("reorders the planner's rows by dragging one by its handle", async () => {
+    await browser.refresh();
+    const commitEntry = await $("li*=e2e: rebase onto-point commit");
+    await commitEntry.waitForExist();
+    // A synthetic `contextmenu`, as in the next test (a real right-click upsets the driver).
+    await browser.execute((el) => {
+      el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }));
+    }, commitEntry);
+    await clickInPage("button", "Rebase onto here", { contains: true });
+    await waitUntilInPage("[data-drop-scope='rebase-plan-row']", "e2e: rebase commit c (squash target)", {
+      contains: true,
+    });
+
+    const planOrder = () =>
+      browser.execute(() =>
+        Array.from(document.querySelectorAll("[data-drop-scope='rebase-plan-row']")).map((row) =>
+          (row.textContent ?? "").replace(/\s+/g, " ").trim(),
+        ),
+      );
+    const before = await planOrder();
+    expect(before.findIndex((text) => text.includes("rebase commit a"))).toBeLessThan(
+      before.findIndex((text) => text.includes("rebase commit c")),
+    );
+
+    await browser.execute(() => {
+      const rowWith = (text: string) =>
+        Array.from(document.querySelectorAll<HTMLElement>("[data-drop-scope='rebase-plan-row']")).find((row) =>
+          (row.textContent ?? "").includes(text),
+        );
+      const source = rowWith("rebase commit a")?.querySelector<HTMLElement>("[title='Drag to move']");
+      const target = rowWith("rebase commit c (squash target)");
+      if (source === undefined || source === null || target === undefined) throw new Error("plan rows not found");
+      source.scrollIntoView({ block: "center" });
+      target.scrollIntoView({ block: "nearest" });
+      const from = source.getBoundingClientRect();
+      const to = target.getBoundingClientRect();
+      const fire = (element: EventTarget, type: string, x: number, y: number) =>
+        element.dispatchEvent(
+          new PointerEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            clientX: x,
+            clientY: y,
+            button: 0,
+            pointerId: 1,
+            isPrimary: true,
+          }),
+        );
+      const startX = from.left + from.width / 2;
+      const startY = from.top + from.height / 2;
+      // The lower quarter of the target row: "after" it.
+      const endX = to.left + to.width / 2;
+      const endY = to.bottom - to.height / 4;
+      fire(source, "pointerdown", startX, startY);
+      fire(document, "pointermove", startX, startY + 10);
+      fire(document, "pointermove", endX, endY);
+      fire(document, "pointerup", endX, endY);
+    });
+
+    await browser.waitUntil(
+      async () => {
+        const order = await planOrder();
+        return order.findIndex((text) => text.includes("rebase commit a")) === order.length - 1;
+      },
+      { timeoutMsg: "the dragged row did not land after the last row" },
+    );
+    await waitUntilInPage("[role='status']", "Moved", { contains: true });
+    await clickInPage("button", "Cancel");
+    await waitUntilGoneInPage("[data-drop-scope='rebase-plan-row']");
+  });
+
   it("opens the planner, drops a commit, squashes another with a custom message, and finishes", async () => {
     // Prior specs (running before this one in file order) leave the app's in-memory commit
     // list stale relative to what `before()` above just committed via direct `git` calls —

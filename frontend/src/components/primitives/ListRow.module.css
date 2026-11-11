@@ -28,3 +28,22 @@
   color: var(--color-selected-text);
   box-shadow: inset 2px 0 0 var(--color-selected-marker);
 }
+
+/* A drag (#744): the row being dragged fades, and a line or tint on the row under the pointer
+   shows where the drop lands (before it, after it, or on it). */
+.row[data-dragging="true"] {
+  opacity: 0.5;
+}
+
+.row[data-drop-position="before"] {
+  box-shadow: inset 0 2px 0 var(--color-accent);
+}
+
+.row[data-drop-position="after"] {
+  box-shadow: inset 0 -2px 0 var(--color-accent);
+}
+
+.row[data-drop-position="on"] {
+  background: var(--color-accent-tint);
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}

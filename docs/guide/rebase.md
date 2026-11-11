@@ -18,7 +18,9 @@ rebase onto any commit instead, right-click it in the graph and choose **Rebase 
 
 **The planner.** It lists the commits oldest first, in the order the rebase replays them. Each
 row has an action (Pick, Reword, Edit, Squash, Fixup, Drop) and **Move up**/**Move down**;
-Alt+Up and Alt+Down move the row you are in. **Reword** fills a message field with the commit's
+Alt+Up and Alt+Down move the row you are in. You can also drag a row by its handle (⠿ at its
+left) and drop it on another row: a line above or below that row shows where it will go, and
+Escape cancels the drag. **Reword** fills a message field with the commit's
 whole message, body included, for you to edit. With Squash or Fixup the group's first commit
 gets a combined message field, filled with the whole messages of that commit and of each Squash
 row, bodies included, one after another; a Fixup row's message is left out. Edit it as you like:

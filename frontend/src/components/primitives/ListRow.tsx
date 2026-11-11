@@ -78,6 +78,8 @@ export function ListRow({
   setSize,
   disabled,
   describedBy,
+  dropTarget,
+  dragging,
   children,
 }: {
   id?: string;
@@ -103,6 +105,13 @@ export function ListRow({
   disabled?: boolean;
   /** `aria-describedby`, e.g. the visible reason a disabled row can't run. */
   describedBy?: string;
+  /**
+   * Makes the row a drop target of a `usePointerDrag` drag (#744): `dropTargetProps(scope, key)`,
+   * plus `data-drop-position` while a drag hovers it and says where the drop would land.
+   */
+  dropTarget?: { scope: string; key: string; position?: "before" | "after" | "on" };
+  /** `data-dragging`: this row is the one being dragged, for its styling. */
+  dragging?: boolean;
   children: ReactNode;
 } & MenuProps) {
   const interactive = onClick !== undefined;
@@ -137,6 +146,10 @@ export function ListRow({
       id={id}
       data-commit-id={dataCommitId}
       data-row-index={rowIndex}
+      data-drop-scope={dropTarget?.scope}
+      data-drop-key={dropTarget?.key}
+      data-drop-position={dropTarget?.position}
+      data-dragging={dragging === true ? true : undefined}
       // Not supported on role="button" (#775): a standalone row keeps only its index.
       aria-posinset={rowIndex === undefined || standalone ? undefined : rowIndex + 1}
       aria-setsize={standalone ? undefined : setSize}
