@@ -242,6 +242,9 @@ jobs:
       # The removed-assertions job's report (#310); files only, no network.
       - name: report-removed-assertions.py unit tests
         run: python3 scripts/test_report_removed_assertions.py
+      # The mutants job's comment and summary (#798); files only, no network.
+      - name: report-mutants.py unit tests
+        run: python3 scripts/test_report_mutants.py
       # Never fails (#458): when frontend/pnpm-lock.yaml (e.g. a Renovate Tauri group PR) locks
       # another @tauri-apps/cli than the script's tool list was copied from, this adds a warning
       # annotation and a job summary line, so the PR shows that the list needs updating. See
