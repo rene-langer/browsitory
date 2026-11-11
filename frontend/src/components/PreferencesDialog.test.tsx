@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { COMMIT_MESSAGE_COLUMNS, type RepoClient } from "../ipc/RepoClient";
 import { CommitMessageSettingsProvider } from "../state/CommitMessageSettingsProvider";
 import { __resetAutoFetchForTests, readAutoFetchOverride } from "../lib/autoFetch";
@@ -313,6 +313,24 @@ describe("DiffSection", () => {
       }),
     );
     expect(expand).not.toBeChecked();
+  });
+});
+
+// #729: the working tree's flat | tree choice, also on the file list's own toggle.
+describe("DiffSection — changed files as a tree", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("shows the per-machine file list layout, flat by default, and saves a change", () => {
+    render(
+      <PreferencesDialog onClose={vi.fn()} groups={[{ id: "diff", label: "Diff", content: <DiffSection /> }]} />,
+    );
+    const tree = within(screen.getByRole("group", { name: "Diff" })).getByRole("checkbox", {
+      name: "Show changed files as a tree",
+    });
+    expect(tree).not.toBeChecked();
+    fireEvent.click(tree);
+    expect(tree).toBeChecked();
+    expect(localStorage.getItem("working-tree-file-layout")).toBe("tree");
   });
 });
 

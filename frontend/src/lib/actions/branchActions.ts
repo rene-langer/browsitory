@@ -58,6 +58,36 @@ export function branchActions(context: BranchActionContext, branch: BranchInfo):
   };
 }
 
+/** A branch to rebase the current branch onto (#619). */
+export type RebaseTarget =
+  | { kind: "local"; name: string }
+  | { kind: "remote"; remoteName: string; branchName: string };
+
+/**
+ * "Rebase current branch onto <name>…" (#619), in the local and remote-tracking branch menus and,
+ * for local branches, the palette. `onto` is the branch's full ref name, so a branch named like a
+ * commit id or a tag can't be misread. Absent (`null`) without a current branch (a detached HEAD):
+ * there is no branch to rebase. Refused on the current branch itself, and under the one busy rule,
+ * like Merge.
+ */
+export function rebaseOntoAction(
+  blockers: OperationBlockers,
+  currentBranch: string | null,
+  target: RebaseTarget,
+): (PaletteAction & { onto: string }) | null {
+  if (currentBranch === null) return null;
+  const isLocal = target.kind === "local";
+  const name = isLocal ? target.name : `${target.remoteName}/${target.branchName}`;
+  const onto = isLocal ? `refs/heads/${target.name}` : `refs/remotes/${target.remoteName}/${target.branchName}`;
+  const label = `Rebase current branch onto ${name}…`;
+  return {
+    label,
+    paletteLabel: label,
+    onto,
+    ...gate(blockers, isLocal && target.name === currentBranch ? CURRENT_BRANCH : undefined),
+  };
+}
+
 export interface RemoteBranchActions {
   /** Switches to the same-named local branch, or creates it tracking this one. */
   checkout: MenuAction;

@@ -35,8 +35,11 @@ export function UncommittedFileRow({
   stashDisabledReason,
   editorLine,
   rowRef,
+  name,
 }: {
   entry: StatusEntry;
+  /** In the tree layout (#729), the file's name in its folder: shown instead of the whole path. */
+  name?: string;
   /** The file the viewer shows; single-file keys act on it. */
   isCurrent: boolean;
   /** Part of the selection (`aria-selected`); the current file always is. */
@@ -134,10 +137,20 @@ export function UncommittedFileRow({
         </span>
         {/* The kind is spelled out for assistive tech (and the E2E specs, which find a row by
             "path (Kind)"); on screen the letter shows it. */}
-        <span className={styles.path}>
-          {entry.path}
-          <span className={styles.srOnly}> ({entry.kind})</span>
-        </span>
+        {name === undefined ? (
+          <span className={styles.path}>
+            {entry.path}
+            <span className={styles.srOnly}> ({entry.kind})</span>
+          </span>
+        ) : (
+          // In a folder the name is enough on screen; assistive tech still hears the whole path.
+          <span className={styles.path}>
+            <span aria-hidden="true">{name}</span>
+            <span className={styles.srOnly}>
+              {entry.path} ({entry.kind})
+            </span>
+          </span>
+        )}
         <div className={styles.rowActions}>
           {hasFileActions && (
             <button

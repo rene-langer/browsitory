@@ -8,6 +8,14 @@ Untracked files are fine. Conflicts, once they happen, are resolved inline in th
 diff pane; a paused rebase shows its progress and lets you continue or
 abort.
 
+**Onto a branch.** Right-click a local or remote branch in **Branches** and choose **Rebase
+current branch onto ⟨branch⟩…**, or type "rebase onto" in the command palette (local branches).
+The planner opens with that branch as the base, and its title names it ("Rebase onto main"); it
+lists the current branch's commits that the other branch doesn't have. The item isn't there on
+the current branch itself or on a detached HEAD, and while a merge, rebase or cherry-pick is in
+progress it is disabled and says why. **Undo** names the branch too ("Rebase onto main"). To
+rebase onto any commit instead, right-click it in the graph and choose **Rebase onto here**.
+
 **The planner.** It lists the commits oldest first, in the order the rebase replays them. Each
 row has an action (Pick, Reword, Edit, Squash, Fixup, Drop) and **Move up**/**Move down**;
 Alt+Up and Alt+Down move the row you are in. **Reword** fills a message field with the commit's

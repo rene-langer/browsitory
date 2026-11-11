@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { branchActions, remoteBranchActions } from "./branchActions";
+import { branchActions, rebaseOntoAction, remoteBranchActions } from "./branchActions";
 
 const free = { blocked: false, reason: null };
 const busy = { blocked: true, reason: "A merge is in progress." };
@@ -45,5 +45,53 @@ describe("remoteBranchActions", () => {
     for (const action of Object.values(remoteBranchActions(busy, "origin", "topic"))) {
       expect(action).toMatchObject({ enabled: false, reason: busy.reason });
     }
+  });
+});
+
+// #619: "Rebase current branch onto <name>…" in the branch menus and the palette.
+describe("rebaseOntoAction", () => {
+  it("rebases onto another local branch by its full ref name", () => {
+    expect(rebaseOntoAction(free, "main", { kind: "local", name: "feature" })).toEqual({
+      label: "Rebase current branch onto feature…",
+      paletteLabel: "Rebase current branch onto feature…",
+      onto: "refs/heads/feature",
+      enabled: true,
+      reason: undefined,
+    });
+  });
+
+  it("rebases onto a remote-tracking branch by its full ref name", () => {
+    expect(rebaseOntoAction(free, "main", { kind: "remote", remoteName: "origin", branchName: "feat/x" })).toMatchObject({
+      label: "Rebase current branch onto origin/feat/x…",
+      onto: "refs/remotes/origin/feat/x",
+      enabled: true,
+    });
+  });
+
+  it("refuses the current branch, saying why", () => {
+    expect(rebaseOntoAction(free, "main", { kind: "local", name: "main" })).toMatchObject({
+      enabled: false,
+      reason: "Already the current branch.",
+    });
+  });
+
+  it("is absent without a current branch (detached HEAD)", () => {
+    expect(rebaseOntoAction(free, null, { kind: "local", name: "feature" })).toBeNull();
+    expect(rebaseOntoAction(free, null, { kind: "remote", remoteName: "origin", branchName: "main" })).toBeNull();
+  });
+
+  it("is disabled with the busy reason during a merge, rebase or pick", () => {
+    expect(rebaseOntoAction(busy, "main", { kind: "local", name: "feature" })).toMatchObject({
+      enabled: false,
+      reason: busy.reason,
+    });
+    expect(rebaseOntoAction(busy, "main", { kind: "local", name: "main" })).toMatchObject({
+      enabled: false,
+      reason: busy.reason,
+    });
+    expect(rebaseOntoAction(busy, "main", { kind: "remote", remoteName: "origin", branchName: "main" })).toMatchObject({
+      enabled: false,
+      reason: busy.reason,
+    });
   });
 });

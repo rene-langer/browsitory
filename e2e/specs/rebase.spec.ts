@@ -4,6 +4,7 @@ import path from "node:path";
 import { expect } from "@wdio/globals";
 import { clickInPage, setValueInPage, waitUntilGoneInPage, waitUntilInPage } from "../support/dom";
 import { git } from "../support/git";
+import { expandSidebarSection, sidebarBranchRow } from "../support/sidebar";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 
@@ -369,5 +370,41 @@ describe("Browsitory interactive rebase", () => {
     await waitUntilGoneInPage("li", "e2e: multi 3 (drop)", { contains: true });
     await expect($("li*=e2e: multi 2 (keep)")).toBeExisting();
     await expect($("li*=e2e: multi 4 (keep)")).toBeExisting();
+  });
+  // #619: "Rebase current branch onto <name>…" in the branch menu opens the planner on that
+  // branch, named in its title, and the rebase lands the branch's commits on top of it.
+  it("rebases the current branch onto another branch from the branch menu", async () => {
+    assertCleanTrackedTree();
+    const baseBranch = git(E2E_REPO_PATH, "rev-parse", "--abbrev-ref", "HEAD");
+    git(E2E_REPO_PATH, "checkout", "-b", "e2e-rebase-onto-target");
+    writeConflictCommit("rebase-onto-target.txt", "target\n", "e2e: rebase-onto target commit");
+    git(E2E_REPO_PATH, "checkout", baseBranch);
+    writeConflictCommit("rebase-onto-mine.txt", "mine\n", "e2e: rebase-onto my commit");
+
+    await browser.refresh();
+    await expandSidebarSection("Branches");
+    const branchRow = await $(sidebarBranchRow("e2e-rebase-onto-target"));
+    await branchRow.waitForExist();
+    await browser.execute((el) => {
+      el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }));
+    }, branchRow);
+
+    const rebaseItem = await $("button=Rebase current branch onto e2e-rebase-onto-target…");
+    await rebaseItem.waitForExist();
+    await rebaseItem.click();
+
+    await $("h2=Rebase onto e2e-rebase-onto-target").waitForExist();
+    const row = await $("//li[contains(., 'e2e: rebase-onto my commit')]//select[starts-with(@aria-label, 'Action for ')]");
+    await row.waitForExist();
+    const startButton = await $("button=Start rebase");
+    await startButton.waitForEnabled();
+    await startButton.click();
+    await waitUntilGoneInPage("button", "Start rebase");
+
+    await browser.waitUntil(
+      () => git(E2E_REPO_PATH, "rev-parse", "HEAD~1") === git(E2E_REPO_PATH, "rev-parse", "e2e-rebase-onto-target"),
+      { timeoutMsg: "the current branch was not rebased onto e2e-rebase-onto-target" },
+    );
+    expect(git(E2E_REPO_PATH, "log", "-1", "--format=%s")).toBe("e2e: rebase-onto my commit");
   });
 });
