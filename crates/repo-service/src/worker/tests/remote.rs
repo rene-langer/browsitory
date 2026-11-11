@@ -546,16 +546,18 @@ fn tags_and_branch_push_round_trip_through_the_worker() {
     assert_eq!(
         tags[0].target_id,
         handle
-            .get_commit_graph(1, git_core::graph::GraphSelection::default())
-            .unwrap()[0]
+            .get_commit_graph(1, git_core::graph::GraphSelection::default(), None)
+            .unwrap()
+            .commits[0]
             .id
     );
     assert_eq!(
         tags[0].commit_id.as_deref(),
         Some(
             handle
-                .get_commit_graph(1, git_core::graph::GraphSelection::default())
-                .unwrap()[0]
+                .get_commit_graph(1, git_core::graph::GraphSelection::default(), None)
+                .unwrap()
+                .commits[0]
                 .id
                 .as_str()
         )

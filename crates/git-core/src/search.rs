@@ -1,14 +1,14 @@
 //! Commit search: a small query language parsed once (`parse_query`) into a boolean expression
 //! over per-commit terms, and a paged, cancellable revwalk over it (`search_commits`).
 
-use git2::{DiffLineType, DiffOptions, ErrorCode, ObjectType, Oid, Repository, Sort};
+use git2::{DiffLineType, DiffOptions, ErrorCode, Oid, Repository, Sort};
 use std::cell::OnceCell;
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
-use crate::graph::{GraphCommit, GraphSelection, RefDecorations};
+use crate::graph::{walk_fingerprint, GraphCommit, GraphSelection, RefDecorations};
 use crate::history::HistoryError;
 use crate::line_history::{line_history_ids, LineRange};
 
@@ -601,7 +601,7 @@ pub fn search_commits(
 ) -> Result<SearchPage, SearchError> {
     let starts = start_points(repo, query, selection)?;
     let first_parent = query.branch().is_none() && selection.isolates_one_branch();
-    let fingerprint = fingerprint(&starts, first_parent)?;
+    let fingerprint = walk_fingerprint(&starts, first_parent)?;
     let started = Instant::now();
     let offset = match cursor {
         None => 0,
@@ -704,25 +704,6 @@ fn start_points(
         .and_then(|r| r.peel_to_commit().ok())
         .ok_or_else(|| invalid(format!("No branch named \"{name}\".")))?;
     Ok(vec![commit.id()])
-}
-
-/// First 16 hex chars of the blob hash of the sorted, comma-joined start oids.
-/// Identifies a walk: its start oids and whether it follows first parents only, so a cursor from
-/// one walk never resumes the other (one selected branch and two branches at the same commit
-/// share their start oids but not their walk). Start oids and first-parent mode determine the
-/// walk, so a remote branch added to or dropped from the selection (#385) changes the
-/// fingerprint exactly when it changes the walk.
-fn fingerprint(starts: &[Oid], first_parent: bool) -> Result<String, git2::Error> {
-    let mut joined = starts
-        .iter()
-        .map(|o| o.to_string())
-        .collect::<Vec<_>>()
-        .join(",");
-    if first_parent {
-        joined.push_str(";first-parent");
-    }
-    let hash = Oid::hash_object(ObjectType::Blob, joined.as_bytes())?;
-    Ok(hash.to_string()[..16].to_string())
 }
 
 /// A search term ready for matching: lowercased once.

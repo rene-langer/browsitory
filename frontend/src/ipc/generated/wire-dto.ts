@@ -120,6 +120,16 @@ export type GraphCommit = { id: string, shortId: string, summary: string, author
  */
 mergedCount?: number, };
 
+export type GraphPage = { commits: Array<GraphCommit>, 
+/**
+ * `null` once the walk is done.
+ */
+nextCursor: string | null, 
+/**
+ * The cursor belonged to another walk: no commits, load the graph from the start.
+ */
+stale: boolean, };
+
 export type GraphSelection = { 
 /**
  * Local branch names: `null` walks every local branch, `[]` none of them.

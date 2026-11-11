@@ -28,6 +28,7 @@ export function CommitSearchBar({
   onToggleLineStats,
   collapseMerges,
   onToggleCollapseMerges,
+  onStepMatch,
 }: {
   query: string;
   onQueryChange: (text: string) => void;
@@ -47,6 +48,8 @@ export function CommitSearchBar({
   /** "Collapse merges" (#617): the toggle shows with `onToggleCollapseMerges`. */
   collapseMerges?: boolean;
   onToggleCollapseMerges?: () => void;
+  /** While a search is open (#687): Enter / F3 the next match, Shift+Enter / Shift+F3 the previous. */
+  onStepMatch?: (direction: -1 | 1) => void;
 }) {
   const [helpOpen, setHelpOpen] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -122,6 +125,11 @@ export function CommitSearchBar({
       setActive(0);
       return;
     }
+    if ((event.key === "Enter" || event.key === "F3") && onStepMatch !== undefined && query.trim() !== "") {
+      event.preventDefault();
+      onStepMatch(event.shiftKey ? -1 : 1);
+      return;
+    }
     if (event.key === "Escape") {
       event.preventDefault();
       if (helpOpen) setHelpOpen(false);
@@ -151,6 +159,7 @@ export function CommitSearchBar({
         aria-activedescendant={recentOpen && activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined}
         aria-invalid={error !== null}
         aria-describedby={error !== null ? errorId : undefined}
+        aria-keyshortcuts={onStepMatch === undefined ? undefined : "Enter Shift+Enter F3 Shift+F3"}
         onChange={(event) => {
           setDismissed(false);
           setActive(-1);

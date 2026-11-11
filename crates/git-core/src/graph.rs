@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use git2::{BranchType, Oid, ReferenceType, Repository, Sort};
+use git2::{BranchType, ObjectType, Oid, ReferenceType, Repository, Sort};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -202,29 +202,75 @@ impl GraphSelection {
 }
 
 /// The commits of `selection`, children before parents (`TOPOLOGICAL | TIME`), at most
-/// `limit`. With "Collapse merges" or exactly one selected branch the walk follows first
-/// parents only (see [`GraphSelection::walks_first_parent`]): a merge commit still lists all
-/// its `parent_ids`, so its other parents are usually not in the result, and it carries its
-/// [`GraphCommit::merged_count`].
+/// `limit`: the first page of [`graph_page`].
 pub fn graph_log(
     repo: &Repository,
     limit: usize,
     selection: &GraphSelection,
 ) -> Result<Vec<GraphCommit>, GraphError> {
+    Ok(graph_page(repo, selection, None, limit)?.commits)
+}
+
+/// One page of the graph (#685).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphPage {
+    pub commits: Vec<GraphCommit>,
+    /// Resumes right after the last commit of this page; `None` once the walk is done.
+    pub next_cursor: Option<String>,
+    /// The cursor came from another walk (a start point moved, or the selection or "Collapse
+    /// merges" changed): `commits` is empty, and the caller loads the graph from the start.
+    pub stale: bool,
+}
+
+/// The commits of `selection`, children before parents (`TOPOLOGICAL | TIME`), at most `limit`,
+/// from `cursor` on (`None`: from the first commit). With "Collapse merges" or exactly one
+/// selected branch the walk follows first parents only (see
+/// [`GraphSelection::walks_first_parent`]): a merge commit still lists all its `parent_ids`, so
+/// its other parents are usually not in the result, and it carries its
+/// [`GraphCommit::merged_count`].
+///
+/// The cursor is `<offset>:<fingerprint>`, as commit search's (#685): resuming walks again and
+/// skips `offset` commits, so only the page's own rows are built and sent. A cursor whose
+/// fingerprint isn't this walk's, or that doesn't parse, answers [`GraphPage::stale`].
+pub fn graph_page(
+    repo: &Repository,
+    selection: &GraphSelection,
+    cursor: Option<&str>,
+    limit: usize,
+) -> Result<GraphPage, GraphError> {
+    let starts = selection.start_oids(repo)?;
+    let first_parent = selection.walks_first_parent();
+    let fingerprint = walk_fingerprint(&starts, first_parent)?;
+    let offset = match cursor {
+        None => 0,
+        Some(cursor) => match parse_cursor(cursor, &fingerprint) {
+            Some(offset) => offset,
+            None => {
+                return Ok(GraphPage {
+                    commits: Vec::new(),
+                    next_cursor: None,
+                    stale: true,
+                })
+            }
+        },
+    };
     let decorations = RefDecorations::load(repo)?;
 
     let mut revwalk = repo.revwalk()?;
     revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
-    if selection.walks_first_parent() {
+    if first_parent {
         revwalk.simplify_first_parent()?;
     }
-    for oid in selection.start_oids(repo)? {
-        revwalk.push(oid)?;
+    for oid in &starts {
+        revwalk.push(*oid)?;
     }
 
-    let first_parent = selection.walks_first_parent();
+    let mut walk = revwalk.skip(offset).peekable();
     let mut commits = Vec::new();
-    for oid_result in revwalk.take(limit) {
+    while commits.len() < limit {
+        let Some(oid_result) = walk.next() else {
+            break;
+        };
         let commit = repo.find_commit(oid_result?)?;
         let mut row = decorations.graph_commit(&commit);
         if first_parent && commit.parent_count() > 1 {
@@ -232,7 +278,43 @@ pub fn graph_log(
         }
         commits.push(row);
     }
-    Ok(commits)
+    let next_cursor = walk
+        .peek()
+        .is_some()
+        .then(|| format!("{}:{fingerprint}", offset + commits.len()));
+    Ok(GraphPage {
+        commits,
+        next_cursor,
+        stale: false,
+    })
+}
+
+/// The offset of `cursor` when it belongs to the walk `fingerprint` names.
+fn parse_cursor(cursor: &str, fingerprint: &str) -> Option<usize> {
+    let (offset, print) = cursor.rsplit_once(':')?;
+    if print != fingerprint {
+        return None;
+    }
+    offset.parse().ok()
+}
+
+/// First 16 hex chars of the blob hash of the sorted, comma-joined start oids.
+/// Identifies a walk: its start oids and whether it follows first parents only, so a cursor from
+/// one walk never resumes the other (one selected branch and two branches at the same commit
+/// share their start oids but not their walk). Start oids and first-parent mode determine the
+/// walk, so a remote branch added to or dropped from the selection (#385) changes the
+/// fingerprint exactly when it changes the walk. Graph and search cursors both use it.
+pub(crate) fn walk_fingerprint(starts: &[Oid], first_parent: bool) -> Result<String, git2::Error> {
+    let mut joined = starts
+        .iter()
+        .map(|o| o.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    if first_parent {
+        joined.push_str(";first-parent");
+    }
+    let hash = Oid::hash_object(ObjectType::Blob, joined.as_bytes())?;
+    Ok(hash.to_string()[..16].to_string())
 }
 
 /// The commits a merge brought in, children before parents (`TOPOLOGICAL | TIME`), at most

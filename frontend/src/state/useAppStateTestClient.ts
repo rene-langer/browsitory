@@ -1,6 +1,6 @@
 import type { RemoteInfo, RepoClient, UpstreamInfo } from "../ipc/RepoClient";
 import type { TransferProgress } from "../ipc/RepoClient";
-import { fakeRepoClient } from "../test/fakeRepoClient";
+import { fakeRepoClient, graphPage } from "../test/fakeRepoClient";
 
 export function unimplemented(): never {
   throw new Error("not implemented in this fake");
@@ -21,7 +21,7 @@ export function transferClient(overrides: Partial<RepoClient> = {}): RepoClient 
   return fakeRepoClient(
     {
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
       listRemotes: async () => [remote],

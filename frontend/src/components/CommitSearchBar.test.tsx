@@ -221,3 +221,24 @@ it("toggles Collapse merges (#617)", () => {
   props.rerender({ collapseMerges: true });
   expect(toggle).toHaveAttribute("aria-pressed", "true");
 });
+
+// #687: with a search open, Enter / F3 go to the next match, with Shift to the previous one.
+describe("match keys", () => {
+  it("steps through the matches from the field", () => {
+    const onStepMatch = vi.fn();
+    renderBar({ query: "fix", onStepMatch });
+    const field = screen.getByRole("combobox", { name: "Search commits" });
+    fireEvent.keyDown(field, { key: "Enter" });
+    fireEvent.keyDown(field, { key: "Enter", shiftKey: true });
+    fireEvent.keyDown(field, { key: "F3" });
+    fireEvent.keyDown(field, { key: "F3", shiftKey: true });
+    expect(onStepMatch.mock.calls).toEqual([[1], [-1], [1], [-1]]);
+  });
+
+  it("does nothing on Enter in an empty field", () => {
+    const onStepMatch = vi.fn();
+    renderBar({ query: "", onStepMatch });
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Search commits" }), { key: "Enter" });
+    expect(onStepMatch).not.toHaveBeenCalled();
+  });
+});

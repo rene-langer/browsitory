@@ -1,7 +1,8 @@
 import { act, renderHook } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { RepoError, type GraphCommit, type RepoClient, type StatusEntry, type TagInfo } from "../ipc/RepoClient";
 import { useAppState } from "./useAppState";
+import { graphPage } from "../test/fakeRepoClient";
 import { TEST_REPO_PATH, remote, upstream, transferClient } from "./useAppStateTestClient";
 
 describe("useAppState", () => {
@@ -176,7 +177,7 @@ describe("useAppState", () => {
       getGraphBranchSelection: async () => ["main"],
       getCommitGraph: async (_repoPath, _limit, selection) => {
         receivedSelection = selection.local;
-        return [];
+        return graphPage([]);
       },
     });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
@@ -187,43 +188,8 @@ describe("useAppState", () => {
     expect(result.current.state.graphSelection.local).toEqual(["main"]);
   });
 
-  it("loadMoreHistory refetches the graph with a larger limit", async () => {
-    const limits: number[] = [];
-    const client = transferClient({
-      getCommitGraph: async (_repoPath, limit) => {
-        limits.push(limit);
-        return [];
-      },
-    });
-    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
-
-    await act(() => result.current.refresh());
-    await act(() => result.current.loadMoreHistory());
-
-    expect(limits).toEqual([300, 600]);
-    expect(result.current.state.graphLimit).toBe(600);
-  });
-
-  it("loadHistoryThrough grows the limit in whole pages to reach a graph row (#441)", async () => {
-    const limits: number[] = [];
-    const client = transferClient({
-      getCommitGraph: async (_repoPath, limit) => {
-        limits.push(limit);
-        return [];
-      },
-    });
-    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
-
-    await act(() => result.current.refresh());
-    await act(() => result.current.loadHistoryThrough(700));
-    // Already loaded far enough: reloads (the graph may be stale) without shrinking the limit.
-    await act(() => result.current.loadHistoryThrough(5));
-
-    expect(limits).toEqual([300, 900, 900]);
-    expect(result.current.state.graphLimit).toBe(900);
-  });
-
-  it("reports more history only when the graph filled its limit", async () => {
+  // #685: a page of history appends from the last page's cursor; the refresh reads nothing else.
+  describe("paging", () => {
     const commitFor = (n: number) => ({
       id: `id${n}`,
       shortId: `id${n}`,
@@ -235,17 +201,145 @@ describe("useAppState", () => {
       branchRefs: [],
       remoteBranchRefs: [],
     });
-    const full = Array.from({ length: 300 }, (_, n) => commitFor(n));
-    const client = transferClient({ getCommitGraph: async (_repoPath, limit) => full.slice(0, limit) });
-    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    const history = Array.from({ length: 1000 }, (_, n) => commitFor(n));
+    // A backend that pages `history` with `<offset>` cursors.
+    function pagingClient(overrides: Partial<RepoClient> = {}) {
+      const calls: { limit: number; cursor: string | null }[] = [];
+      const getStatus = vi.fn(async () => []);
+      const client = transferClient({
+        getStatus,
+        getCommitGraph: async (_repoPath, limit, _selection, cursor) => {
+          calls.push({ limit, cursor });
+          const start = cursor === null ? 0 : Number(cursor);
+          const end = Math.min(start + limit, history.length);
+          return graphPage(history.slice(start, end), end < history.length ? String(end) : null);
+        },
+        ...overrides,
+      });
+      return { client, calls, getStatus };
+    }
 
-    await act(() => result.current.refresh());
-    expect(result.current.state.hasMoreHistory).toBe(true);
+    it("loadMoreHistory appends the next page from the cursor without another refresh", async () => {
+      const { client, calls, getStatus } = pagingClient();
+      const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
 
-    const short = transferClient({ getCommitGraph: async () => full.slice(0, 10) });
-    const { result: shortResult } = renderHook(() => useAppState(short, TEST_REPO_PATH));
-    await act(() => shortResult.current.refresh());
-    expect(shortResult.current.state.hasMoreHistory).toBe(false);
+      await act(() => result.current.refresh());
+      expect(result.current.state.hasMoreHistory).toBe(true);
+      await act(() => result.current.loadMoreHistory());
+
+      expect(calls).toEqual([
+        { limit: 300, cursor: null },
+        { limit: 300, cursor: "300" },
+      ]);
+      expect(getStatus).toHaveBeenCalledTimes(1);
+      expect(result.current.state.commits.map((c) => c.id)).toEqual(history.slice(0, 600).map((c) => c.id));
+      expect(result.current.state.graphLimit).toBe(600);
+      expect(result.current.state.loadingMoreHistory).toBe(false);
+    });
+
+    it("joins a second loadMoreHistory while one is on its way", async () => {
+      const { client, calls } = pagingClient();
+      const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+      await act(() => result.current.refresh());
+
+      await act(async () => {
+        const first = result.current.loadMoreHistory();
+        const second = result.current.loadMoreHistory();
+        expect(second).toBe(first);
+        await first;
+      });
+      expect(calls).toHaveLength(2);
+    });
+
+    it("reports no more history once the last page has no cursor", async () => {
+      const { client } = pagingClient();
+      const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+      await act(() => result.current.refresh());
+      await act(() => result.current.loadMoreHistory());
+      await act(() => result.current.loadMoreHistory());
+      await act(() => result.current.loadMoreHistory());
+
+      expect(result.current.state.commits).toHaveLength(1000);
+      expect(result.current.state.hasMoreHistory).toBe(false);
+      // Nothing left: no request.
+      await act(() => result.current.loadMoreHistory());
+      expect(result.current.state.commits).toHaveLength(1000);
+    });
+
+    it("reads the history again from the start when the cursor is stale", async () => {
+      let stale = false;
+      const { client, calls } = pagingClient();
+      const paged = client.getCommitGraph;
+      client.getCommitGraph = async (repoPath, limit, selection, cursor) => {
+        if (stale && cursor !== null) {
+          await paged(repoPath, limit, selection, cursor);
+          return { commits: [], nextCursor: null, stale: true };
+        }
+        return paged(repoPath, limit, selection, cursor);
+      };
+      const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+      await act(() => result.current.refresh());
+      stale = true;
+      await act(() => result.current.loadMoreHistory());
+
+      expect(calls.at(-1)).toEqual({ limit: 600, cursor: null });
+      expect(result.current.state.commits).toHaveLength(600);
+      expect(result.current.state.loadingMoreHistory).toBe(false);
+    });
+
+    it("a refresh after more history reads as many rows as are loaded", async () => {
+      let refs = "r1";
+      const { client, calls } = pagingClient({
+        getChangeStamp: async () => ({ refs, workTree: "w" }),
+      });
+      const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+      await act(() => result.current.refresh());
+      await act(() => result.current.loadMoreHistory());
+      // Same refs: the loaded rows stay.
+      await act(() => result.current.refresh());
+      expect(calls).toHaveLength(2);
+      refs = "r2";
+      await act(() => result.current.refresh());
+      expect(calls.at(-1)).toEqual({ limit: 600, cursor: null });
+    });
+
+    it("loadHistoryThrough loads whole pages up to a graph row (#441)", async () => {
+      const { client, calls } = pagingClient();
+      const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+      await act(() => result.current.refresh());
+      await act(() => result.current.loadHistoryThrough(700));
+      // Already loaded far enough: nothing to read.
+      await act(() => result.current.loadHistoryThrough(5));
+
+      expect(calls).toEqual([
+        { limit: 300, cursor: null },
+        { limit: 600, cursor: "300" },
+      ]);
+      expect(result.current.state.graphLimit).toBe(900);
+      expect(result.current.state.commits).toHaveLength(900);
+    });
+
+    it("keeps an expanded merge's commits below it when a page is appended (#617)", async () => {
+      const merge = { ...commitFor(0), id: "merge", parentIds: ["id1", "side"], mergedCount: 1 };
+      const side = { ...commitFor(5000), id: "side" };
+      const rows = [merge, ...history.slice(1)];
+      const client = transferClient({
+        getCommitGraph: async (_repoPath, limit, _selection, cursor) => {
+          const start = cursor === null ? 0 : Number(cursor);
+          const end = Math.min(start + limit, rows.length);
+          return graphPage(rows.slice(start, end), end < rows.length ? String(end) : null);
+        },
+        getMergedCommits: async () => [side],
+      });
+      const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+      await act(() => result.current.refresh());
+      await act(() => result.current.expandMerge("merge"));
+      await act(() => result.current.loadMoreHistory());
+
+      expect(result.current.state.commits.slice(0, 3).map((c) => c.id)).toEqual(["merge", "side", "id1"]);
+      expect(result.current.state.commits).toHaveLength(601);
+    });
   });
 
   it("setGraphBranchSelection persists the selection and refreshes the graph with it", async () => {
@@ -258,7 +352,7 @@ describe("useAppState", () => {
       getGraphBranchSelection: async () => saved ?? null,
       getCommitGraph: async (_repoPath, _limit, selection) => {
         selectionForGraph = selection.local;
-        return [];
+        return graphPage([]);
       },
     });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
@@ -293,7 +387,7 @@ describe("useAppState", () => {
       setGraphRemoteBranchSelection: async () => {},
       getCommitGraph: async (_repoPath, _limit, selection) => {
         selectedBranchesSeen.push(selection.local);
-        return [];
+        return graphPage([]);
       },
     });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
@@ -317,7 +411,7 @@ describe("useAppState", () => {
       },
       getCommitGraph: async (_repoPath, _limit, selection) => {
         remoteSeen.push(selection.remote);
-        return [];
+        return graphPage([]);
       },
     });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
@@ -346,7 +440,7 @@ describe("useAppState", () => {
         },
         getCommitGraph: async (_repoPath, _limit, selection) => {
           graphCalls.push([selection.local, selection.remote]);
-          return [];
+          return graphPage([]);
         },
       });
       return { client, writes, graphCalls };
@@ -414,7 +508,7 @@ describe("useAppState", () => {
         },
         getCommitGraph: async (_repoPath, _limit, selection) => {
           graphCalls.push([selection.local, selection.remote]);
-          return [];
+          return graphPage([]);
         },
       });
       return { client, writes, graphCalls };
@@ -463,7 +557,7 @@ describe("useAppState", () => {
     };
     const client: RepoClient = transferClient({
       getStatus: async () => [entry],
-      getCommitGraph: async () => [graphCommit],
+      getCommitGraph: async () => graphPage([graphCommit]),
     });
 
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));

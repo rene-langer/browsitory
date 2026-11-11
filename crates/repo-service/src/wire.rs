@@ -647,6 +647,29 @@ impl From<git_core::line_history::LineHistory> for LineHistoryDto {
     }
 }
 
+/// One page of the commit graph (#685).
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "GraphPage"))]
+#[serde(rename_all = "camelCase")]
+pub struct GraphPageDto {
+    pub commits: Vec<GraphCommitDto>,
+    /// `null` once the walk is done.
+    pub next_cursor: Option<String>,
+    /// The cursor belonged to another walk: no commits, load the graph from the start.
+    pub stale: bool,
+}
+
+impl From<git_core::graph::GraphPage> for GraphPageDto {
+    fn from(p: git_core::graph::GraphPage) -> Self {
+        GraphPageDto {
+            commits: p.commits.into_iter().map(GraphCommitDto::from).collect(),
+            next_cursor: p.next_cursor,
+            stale: p.stale,
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[cfg_attr(any(test, feature = "ts"), ts(rename = "SearchPage"))]
@@ -3138,6 +3161,7 @@ mod ts_bindings {
             LineHistoryEntryDto,
             LineHistoryDto,
             SearchPageDto,
+            GraphPageDto,
             ChangedFileDto,
             CompareRangeDto,
             CommitLocationDto,

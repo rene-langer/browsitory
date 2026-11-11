@@ -15,7 +15,7 @@ use repo_service::wire::{
     ChangedFileDto, CommitLocationDto, CommitMessageSettingsDto, CommitOutcomeDto,
     CommitSignatureDto, CompareRangeDto, ConflictSegmentDto, DiffHunkDto, DiffSettingsDto,
     ExternalToolSettingsDto, FetchSettingsDto, FileContentDto, FileHistoryEntryDto, FileSidesDto,
-    ForgeRepositoryDto, GitToolsDto, GraphCommitDto, HeadInfoDto, LineHistoryDto,
+    ForgeRepositoryDto, GitToolsDto, GraphCommitDto, GraphPageDto, HeadInfoDto, LineHistoryDto,
     MarkResolvedOutcomeDto, MergeOptionsDto, MergeOutcomeDto, OpenRepoEntryDto, PickOutcomeDto,
     PullOutcomeDto, PullRequestDto, PullRequestListDto, PullStrategyDto, RebaseAbortDto,
     RebaseInfoDto, RebasePlanCommitDto, RebaseStepResultDto, ReflogEntryDto, RemoteInfoDto,
@@ -80,6 +80,7 @@ fn snapshots() -> Vec<(String, String)> {
         LineHistoryDto::from,
     );
     s.add("SearchPage", fixtures::search_pages(), SearchPageDto::from);
+    s.add("GraphPage", fixtures::graph_pages(), GraphPageDto::from);
     s.add(
         "ChangedFile",
         fixtures::changed_files(),

@@ -21,8 +21,9 @@ type Loosen<T, K extends keyof T> = Flat<Omit<T, K> & Partial<Pick<T, K>>>;
 // Deliberate differences, each written out below:
 // - `BranchInfo`, `GraphCommit`, `RemoteInfo`, `UpstreamInfo`: both backends always send these
 //   fields; `RepoClient.ts` keeps them optional so older test fixtures stay valid (`Loosen`).
-//   `FileHistoryEntry`, `LineHistoryEntry` and `SearchPage` hold a `GraphCommit`, so they are compared with the
-//   hand-written one in its place (`GraphCommit` itself is compared on its own line).
+//   `FileHistoryEntry`, `LineHistoryEntry`, `SearchPage` and `GraphPage` hold a `GraphCommit`, so
+//   they are compared with the hand-written one in its place (`GraphCommit` itself is compared on
+//   its own line).
 // - `MergeToolOutcome` (desktop only): `"HandedOff"` comes from the VSCode extension host, never
 //   from Tauri.
 // - `listOpenRepos`: the sidecar answers `OpenRepos`, compared with the method's return type.
@@ -125,6 +126,7 @@ export type DtoContract = [
   Expect<Equal<Hand.ResetMode, Wire.ResetMode>>,
   Expect<Equal<Hand.RepoAlias, Wire.RepoAlias>>,
   Expect<Equal<Hand.SearchPage, Flat<Omit<Wire.SearchPage, "commits"> & { commits: Hand.GraphCommit[] }>>>,
+  Expect<Equal<Hand.GraphPage, Flat<Omit<Wire.GraphPage, "commits"> & { commits: Hand.GraphCommit[] }>>>,
   Expect<Equal<Hand.SequenceAbort, Wire.SequenceAbort>>,
   Expect<Equal<Hand.SequenceKind, Wire.SequenceKind>>,
   Expect<Equal<Hand.SequenceOutcome, Wire.SequenceOutcome>>,

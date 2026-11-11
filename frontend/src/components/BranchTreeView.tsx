@@ -4,7 +4,7 @@ import type { BranchInfo, RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { branchActions, remoteBranchActions } from "../lib/actions/branchActions";
 import { buildBranchTree, type BranchTreeNode } from "../lib/branchTree";
 import { coversEveryBranch } from "../lib/graphSelection";
-import { branchSwatchColor } from "../lib/laneColors";
+import { type BranchLaneColors, NO_BRANCH_LANE_COLORS } from "../lib/laneColors";
 import { isMenuKey, menuAnchor, rectAnchor } from "../lib/menuKeys";
 import type { OperationBlockers } from "../lib/operationStatus";
 import { loadPersistedOpen, persistOpen } from "../lib/persistedOpenState";
@@ -35,6 +35,28 @@ export type BranchRename = {
   onKeyDown: (event: KeyboardEvent<HTMLInputElement>, oldName: string) => void;
 };
 
+/**
+ * A branch swatch's colour, look and title (#673): the colour of the lane its tip sits on in the
+ * graph. A tip that isn't a loaded row has no lane: a neutral swatch, dashed while the branch is
+ * shown, with the reason in its title.
+ */
+function swatchLook(color: string | undefined, shown: boolean): { className: string; style: CSSProperties; title: string } {
+  if (color !== undefined) {
+    return {
+      className: styles.swatch,
+      style: { "--swatch": color } as CSSProperties,
+      title: shown ? "Shown in the graph, in this colour" : "Hidden from the graph",
+    };
+  }
+  return {
+    className: `${styles.swatch} ${styles.swatchNoLane}`,
+    style: { "--swatch": "var(--color-text-muted)" } as CSSProperties,
+    title: shown
+      ? "Its latest commit isn't in the loaded history: older than the loaded commits, or inside a collapsed merge"
+      : "Hidden from the graph",
+  };
+}
+
 /** What every row of the tree needs, passed down the nested folders unchanged. */
 type RowContext = {
   branches: BranchInfo[];
@@ -44,6 +66,7 @@ type RowContext = {
   graphBranchSelection: string[] | null;
   graphRemoteBranchSelection: string[] | null;
   remoteBranchesInGraph: string[];
+  branchColors: BranchLaneColors;
   selectedRow: string | null;
   rename: BranchRename;
   rowMenu: RowContextMenu | null;
@@ -127,10 +150,9 @@ function LocalBranchRow({ branch, label, ctx }: { branch: BranchInfo; label: str
       <div className={styles.rowInner}>
         <button
           type="button"
-          className={styles.swatch}
+          {...swatchLook(ctx.branchColors.local.get(branch.name), shownInGraph)}
           aria-label={`Show ${branch.name} in graph`}
           aria-pressed={shownInGraph}
-          style={{ "--swatch": branchSwatchColor(branch.name) } as CSSProperties}
           onClick={(event) => {
             event.stopPropagation();
             ctx.onToggleGraphBranch(branch.name);
@@ -244,6 +266,7 @@ function RemoteBranchRow({
 }) {
   const { rowMenu } = ctx;
   const rowKey = `remote:${remoteName}:${branchName}`;
+  const remoteShown = (ctx.graphRemoteBranchSelection ?? ctx.remoteBranchesInGraph).includes(`${remoteName}/${branchName}`);
   return (
     <ListRow
       className={ctx.selectedRow === rowKey ? `${styles.treeRow} ${styles.selectedRow}` : styles.treeRow}
@@ -263,12 +286,9 @@ function RemoteBranchRow({
       <div className={styles.rowInner}>
         <button
           type="button"
-          className={styles.swatch}
+          {...swatchLook(ctx.branchColors.remote.get(`${remoteName}/${branchName}`), remoteShown)}
           aria-label={`Show ${remoteName}/${branchName} in graph`}
-          aria-pressed={(ctx.graphRemoteBranchSelection ?? ctx.remoteBranchesInGraph).includes(
-            `${remoteName}/${branchName}`,
-          )}
-          style={{ "--swatch": branchSwatchColor(`${remoteName}/${branchName}`) } as CSSProperties}
+          aria-pressed={remoteShown}
           onClick={(event) => {
             event.stopPropagation();
             ctx.onToggleGraphRemoteBranch(`${remoteName}/${branchName}`);
@@ -325,6 +345,7 @@ export function BranchTreeView({
   graphRemoteBranchSelection,
   onSetGraphRemoteBranchSelection,
   remoteBranchesInGraph,
+  branchColors = NO_BRANCH_LANE_COLORS,
   remoteCache,
   remoteHeaders,
   rename,
@@ -346,6 +367,8 @@ export function BranchTreeView({
   onSetGraphRemoteBranchSelection: (selectedBranches: string[]) => void;
   /** The null-selection fallback for the remote swatches; see `BranchTree`'s prop of that name. */
   remoteBranchesInGraph: string[];
+  /** Each branch tip's lane colour in the graph, for the swatches (#673). */
+  branchColors?: BranchLaneColors;
   remoteCache: RemoteBranchCache;
   /** Each remote folder's header button by remote name, for `BranchTree`'s reveal request (#494). */
   remoteHeaders?: RefObject<Map<string, HTMLButtonElement>>;
@@ -403,6 +426,7 @@ export function BranchTreeView({
     graphBranchSelection,
     graphRemoteBranchSelection,
     remoteBranchesInGraph,
+    branchColors,
     selectedRow,
     rename,
     rowMenu,

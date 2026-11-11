@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { RepoClient } from "../ipc/RepoClient";
 import { useAppState } from "./useAppState";
 import { TEST_REPO_PATH, transferClient } from "./useAppStateTestClient";
+import { graphPage } from "../test/fakeRepoClient";
 
 // `checkForChanges` (#650): a refresh only when the stamp differs from the one the last refresh
 // read.
@@ -168,7 +169,7 @@ describe("useAppState refresh scope", () => {
     const stamp = { refs: "r1", workTree: "w1" };
     const reads = {
       getStatus: vi.fn(async () => []),
-      getCommitGraph: vi.fn(async () => []),
+      getCommitGraph: vi.fn(async () => graphPage([])),
       listBranches: vi.fn(async () => []),
       listTags: vi.fn(async () => []),
       getRemoteUpstreams: vi.fn(async () => []),
@@ -213,26 +214,22 @@ describe("useAppState refresh scope", () => {
     expect(historyReads(reads)).toEqual([2, 2, 2, 2]);
   });
 
-  it("reads the history again for more history, a new selection and the Refresh command", async () => {
+  it("reads the history again for a new selection and the Refresh command", async () => {
     let local: string[] | null = null;
     const { client, reads } = scopedClient({ getGraphBranchSelection: async () => local });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     await act(async () => {
       await result.current.refresh();
     });
-    await act(async () => {
-      await result.current.loadMoreHistory();
-    });
-    expect(reads.getCommitGraph).toHaveBeenCalledTimes(2);
     local = ["main"];
     await act(async () => {
       await result.current.refresh();
     });
-    expect(reads.getCommitGraph).toHaveBeenCalledTimes(3);
+    expect(reads.getCommitGraph).toHaveBeenCalledTimes(2);
     await act(async () => {
       await result.current.refresh({ full: true });
     });
-    expect(historyReads(reads)).toEqual([4, 4, 4, 4]);
+    expect(historyReads(reads)).toEqual([3, 3, 3, 3]);
   });
 
   it("reads everything after a failed refresh and without a stamp", async () => {

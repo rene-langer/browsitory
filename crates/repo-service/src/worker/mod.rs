@@ -113,10 +113,12 @@ pub(crate) enum Command {
     GetChangeStamp {
         reply: Sender<Result<git_core::change_stamp::ChangeStamp, ErrorDto>>,
     },
+    /// One page of the graph (#685): `cursor` `None` starts at the first commit.
     GetCommitGraph {
         limit: usize,
         selection: GraphSelection,
-        reply: Sender<Result<Vec<GraphCommit>, ErrorDto>>,
+        cursor: Option<String>,
+        reply: Sender<Result<git_core::graph::GraphPage, ErrorDto>>,
     },
     LocateCommit {
         revision: String,

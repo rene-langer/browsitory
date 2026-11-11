@@ -11,7 +11,7 @@ import { RefBadges } from "./RefBadges";
 import graphStyles from "./CommitGraph.module.css";
 import styles from "./CommitSearchResults.module.css";
 
-/** The commit graph's place while a search is open: flat rows of matching commits. */
+/** The search's "List" view (#687): flat rows of the matching commits in the graph's place. */
 export function CommitSearchResults({
   results,
   selectedRow,
@@ -21,6 +21,7 @@ export function CommitSearchResults({
   onRetry,
   onRequestSearch,
   listRef,
+  onStepMatch,
 }: {
   results: CommitSearchResultsState;
   selectedRow: SelectedRow;
@@ -32,6 +33,8 @@ export function CommitSearchResults({
   /** Ctrl/Cmd+F in the list: focus the search field. */
   onRequestSearch: () => void;
   listRef?: RefObject<HTMLUListElement | null>;
+  /** F3 / Shift+F3: the next / previous match (#687). */
+  onStepMatch?: (direction: -1 | 1) => void;
 }) {
   const selectedId = typeof selectedRow === "object" ? selectedRow.commitId : null;
   const selectedIndex = results.commits.findIndex((c) => c.id === selectedId);
@@ -54,6 +57,11 @@ export function CommitSearchResults({
     if (event.key === "Escape") {
       event.preventDefault();
       onClose();
+      return;
+    }
+    if (event.key === "F3" && onStepMatch !== undefined) {
+      event.preventDefault();
+      onStepMatch(event.shiftKey ? -1 : 1);
       return;
     }
     const step =

@@ -6,6 +6,7 @@ import { baseBranches, renderTree, treeProps } from "../test/branchTreeProps";
 import { BranchTreeWithDialogs } from "../test/BranchTreeWithDialogs";
 import type { RemoteDialogs } from "./RemoteDialogs";
 import { describedByText } from "../test/describedBy";
+import styles from "./BranchTree.module.css";
 
 // The tree, its menus, inline rename and the remote dialogs. The forms, the upstream dialog and
 // the lazy remote branch lists have their own test files, like their components (#492).
@@ -159,6 +160,18 @@ describe("BranchTree — local branches", () => {
     expect(describedByText(confirm)).toBe("A transfer is in progress.");
     fireEvent.click(confirm);
     expect(props.onDeleteBranch).not.toHaveBeenCalledWith("feat/foo", true);
+  });
+
+  // #673: the swatch takes the colour of the branch tip's lane in the graph.
+  it("colours a swatch like its branch's lane, and a branch without a loaded tip neutral", () => {
+    renderTree({ branchColors: { local: new Map([["main", "var(--color-lane-2)"]]), remote: new Map() } });
+    const main = screen.getByRole("button", { name: "Show main in graph" });
+    expect(main.style.getPropertyValue("--swatch")).toBe("var(--color-lane-2)");
+    expect(main).not.toHaveClass(styles.swatchNoLane);
+    const feature = screen.getByRole("button", { name: "Show feat/foo in graph" });
+    expect(feature).toHaveClass(styles.swatchNoLane);
+    expect(feature.style.getPropertyValue("--swatch")).toBe("var(--color-text-muted)");
+    expect(feature).toHaveAttribute("title", expect.stringContaining("isn't in the loaded history"));
   });
 
   it("with no saved graph selection, every branch's graph swatch is pressed (shown) by default", () => {

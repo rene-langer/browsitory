@@ -1,4 +1,4 @@
-import type { RepoClient } from "../ipc/RepoClient";
+import type { GraphCommit, GraphPage, RepoClient } from "../ipc/RepoClient";
 
 /**
  * What a fake answers for a method the test didn't override:
@@ -160,4 +160,9 @@ export function fakeRepoClient(overrides: Partial<RepoClient> = {}, fallback: Fa
       return stubs.get(key);
     },
   }) as RepoClient;
+}
+
+/** A `getCommitGraph` answer (#685): `commits`, then `nextCursor` (`null`: the walk is done). */
+export function graphPage(commits: GraphCommit[], nextCursor: string | null = null): GraphPage {
+  return { commits, nextCursor, stale: false };
 }

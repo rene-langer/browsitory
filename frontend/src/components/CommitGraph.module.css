@@ -46,6 +46,24 @@
   flex-shrink: 0;
 }
 
+/* A branch other than the checked-out one, on a graph row: neutral, its lane colour as a stripe
+   (#673), so only the current branch keeps the accent fill. */
+.otherBranchBadge {
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: var(--color-control);
+  color: var(--color-text);
+  flex-shrink: 0;
+}
+
+/* The row's lane colour (#673), the colour of the branch's swatch in the sidebar. */
+.laneBadge {
+  box-shadow: inset 3px 0 0 var(--lane);
+  padding-left: 8px;
+}
+
 /* A detached HEAD's commit (#467): the accent colour filled, so it reads as "you are here". */
 .headBadge {
   font-size: var(--text-xs);
@@ -146,6 +164,7 @@ li.uncommittedRow[aria-selected="true"] {
 }
 
 .loadMore {
+  margin: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -163,4 +182,18 @@ li.uncommittedRow[aria-selected="true"] {
   padding: var(--space-2) var(--space-3);
   font-size: var(--text-sm);
   color: var(--color-text-muted);
+}
+
+/* An open search (#687): the rows that don't match step back, lines included; a selected row
+   stays readable. The matches keep full strength and a bolder summary. */
+li.searchDimmed {
+  opacity: 0.4;
+}
+
+li.searchDimmed[aria-selected="true"] {
+  opacity: 0.75;
+}
+
+li.searchMatch .commitSummary {
+  font-weight: 600;
 }

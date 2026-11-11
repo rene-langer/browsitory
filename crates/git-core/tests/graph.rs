@@ -722,3 +722,98 @@ fn merged_commits_list_unrelated_commits_newest_first() {
 
     assert_eq!(summaries(&merged), ["newest", "middle", "oldest"]);
 }
+
+/// Five commits on `main`, one second apart, so the walk order is fixed.
+fn linear_history(repo: &git2::Repository, count: i64) -> Vec<git2::Oid> {
+    let mut ids: Vec<git2::Oid> = Vec::new();
+    for i in 0..count {
+        let parents: Vec<git2::Oid> = ids.last().copied().into_iter().collect();
+        ids.push(commit_at(repo, &parents, &format!("c{i}"), 1_000 + i));
+    }
+    repo.reference("refs/heads/main", *ids.last().unwrap(), true, "test")
+        .unwrap();
+    repo.set_head("refs/heads/main").unwrap();
+    ids
+}
+
+// #685: pages resume where the last one ended, without gaps or duplicates.
+#[test]
+fn graph_pages_concatenate_to_the_whole_graph() {
+    let (_dir, repo) = init_repo();
+    linear_history(&repo, 5);
+    let selection = GraphSelection::default();
+    let whole = git_core::graph::graph_log(&repo, 10, &selection).unwrap();
+
+    let first = git_core::graph::graph_page(&repo, &selection, None, 2).unwrap();
+    assert_eq!(first.commits.len(), 2);
+    assert!(!first.stale);
+    let cursor = first.next_cursor.clone().expect("more to come");
+    assert!(cursor.starts_with("2:"), "{cursor}");
+    let second = git_core::graph::graph_page(&repo, &selection, Some(&cursor), 2).unwrap();
+    let third =
+        git_core::graph::graph_page(&repo, &selection, second.next_cursor.as_deref(), 2).unwrap();
+    assert_eq!(third.commits.len(), 1);
+    assert_eq!(third.next_cursor, None);
+
+    let paged: Vec<_> = [first.commits, second.commits, third.commits].concat();
+    assert_eq!(paged, whole);
+}
+
+#[test]
+fn a_page_that_ends_with_the_walk_has_no_cursor() {
+    let (_dir, repo) = init_repo();
+    linear_history(&repo, 2);
+    let page = git_core::graph::graph_page(&repo, &GraphSelection::default(), None, 2).unwrap();
+    assert_eq!(page.commits.len(), 2);
+    assert_eq!(page.next_cursor, None);
+}
+
+#[test]
+fn a_cursor_from_before_a_moved_branch_is_stale() {
+    let (_dir, repo) = init_repo();
+    let ids = linear_history(&repo, 3);
+    let selection = GraphSelection::default();
+    let first = git_core::graph::graph_page(&repo, &selection, None, 1).unwrap();
+    let cursor = first.next_cursor.unwrap();
+
+    let newer = commit_at(&repo, &[ids[2]], "c3", 2_000);
+    repo.reference("refs/heads/main", newer, true, "test")
+        .unwrap();
+    let page = git_core::graph::graph_page(&repo, &selection, Some(&cursor), 1).unwrap();
+    assert!(page.stale);
+    assert!(page.commits.is_empty());
+    assert_eq!(page.next_cursor, None);
+}
+
+#[test]
+fn a_cursor_of_another_walk_or_garbage_is_stale() {
+    let (_dir, repo) = init_repo();
+    linear_history(&repo, 3);
+    let all = GraphSelection::default();
+    let cursor = git_core::graph::graph_page(&repo, &all, None, 1)
+        .unwrap()
+        .next_cursor
+        .unwrap();
+    let collapsed = GraphSelection {
+        first_parent: true,
+        ..GraphSelection::default()
+    };
+    assert!(
+        git_core::graph::graph_page(&repo, &collapsed, Some(&cursor), 1)
+            .unwrap()
+            .stale
+    );
+    for garbage in ["", "x", "1", "x:y", &cursor.replace("1:", "one:")] {
+        assert!(
+            git_core::graph::graph_page(&repo, &all, Some(garbage), 1)
+                .unwrap()
+                .stale,
+            "{garbage}"
+        );
+    }
+    assert!(
+        !git_core::graph::graph_page(&repo, &all, Some(&cursor), 1)
+            .unwrap()
+            .stale
+    );
+}

@@ -2,6 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { GraphCommit, GraphSelection } from "../ipc/RepoClient";
 import { useAppState } from "./useAppState";
+import { graphPage } from "../test/fakeRepoClient";
 import { TEST_REPO_PATH, transferClient } from "./useAppStateTestClient";
 
 function commit(id: string, parentIds: string[], extra: Partial<GraphCommit> = {}): GraphCommit {
@@ -35,7 +36,7 @@ function collapsingClient(initial: boolean) {
     },
     getCommitGraph: async (_repoPath, _limit, selection) => {
       selections.push(selection);
-      return selection.firstParent === true ? rows : [{ ...merge, mergedCount: undefined }, ...side, rows[1]];
+      return graphPage(selection.firstParent === true ? rows : [{ ...merge, mergedCount: undefined }, ...side, rows[1]]);
     },
     getMergedCommits,
   });

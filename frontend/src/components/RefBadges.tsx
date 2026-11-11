@@ -1,4 +1,4 @@
-import type { MouseEvent } from "react";
+import type { CSSProperties, MouseEvent } from "react";
 import { Tag } from "lucide-react";
 import type { GraphCommit } from "../ipc/RepoClient";
 import graphStyles from "./CommitGraph.module.css";
@@ -8,6 +8,8 @@ export function RefBadges({
   commit,
   shownRemoteBranches = null,
   detachedHead = false,
+  laneColor,
+  currentBranch = null,
   onTagContextMenu,
 }: {
   commit: GraphCommit;
@@ -15,6 +17,13 @@ export function RefBadges({
   detachedHead?: boolean;
   /** `null`/omitted shows every remote badge; otherwise only the listed `<remote>/<branch>`es. */
   shownRemoteBranches?: ReadonlySet<string> | null;
+  /**
+   * The colour of the row's lane in the graph (#673): branch badges carry it as a stripe, the
+   * colour of that branch's swatch in the sidebar. Omitted outside the graph.
+   */
+  laneColor?: string;
+  /** The checked-out branch: its badge keeps the accent fill. */
+  currentBranch?: string | null;
   /** When set, right-clicking a tag opens its menu instead of the row's. */
   onTagContextMenu?: (tag: string, event: MouseEvent<HTMLSpanElement>) => void;
 }) {
@@ -22,6 +31,8 @@ export function RefBadges({
     shownRemoteBranches === null
       ? commit.remoteBranchRefs
       : commit.remoteBranchRefs.filter((ref) => shownRemoteBranches.has(ref));
+  const laneStyle = laneColor === undefined ? undefined : ({ "--lane": laneColor } as CSSProperties);
+  const laneClass = laneColor === undefined ? "" : ` ${graphStyles.laneBadge}`;
   return (
     <>
       {detachedHead && (
@@ -30,12 +41,16 @@ export function RefBadges({
         </span>
       )}
       {commit.branchRefs.map((ref) => (
-        <span key={`branch:${ref}`} className={graphStyles.branchBadge}>
+        <span
+          key={`branch:${ref}`}
+          className={`${ref === currentBranch || laneColor === undefined ? graphStyles.branchBadge : graphStyles.otherBranchBadge}${laneClass}`}
+          style={laneStyle}
+        >
           {ref}
         </span>
       ))}
       {remoteRefs.map((ref) => (
-        <span key={`remote:${ref}`} className={graphStyles.remoteBranchBadge}>
+        <span key={`remote:${ref}`} className={`${graphStyles.remoteBranchBadge}${laneClass}`} style={laneStyle}>
           {ref}
         </span>
       ))}

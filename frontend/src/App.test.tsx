@@ -1,13 +1,17 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import styles from "./App.module.css";
 import { RepoError, type CommitOutcome, type HostRequest, type HookProgress, type OperationKind, type RepoClient, type RootFileName, type SequenceOutcome, type TerminalSequence } from "./ipc/RepoClient";
 import { credentialRemediation } from "./lib/errorMessages";
 import { publishTransportStatus } from "./ipc/transportStatus";
 import type { ReleaseNotesEntry } from "./components/ReleaseNotesModal";
-import { fakeRepoClient } from "./test/fakeRepoClient";
+import { fakeRepoClient, graphPage } from "./test/fakeRepoClient";
 import { STALE_UNDO_MESSAGE } from "./state/useUndoRedoActions";
+import { writeSearchView } from "./lib/searchViewPreference";
+
+// A test that switches a search to its List view (#687) leaves the default for the next.
+afterEach(() => writeSearchView("graph"));
 import { useContext, useEffect } from "react";
 import { UpdateCheckContext, type UpdateCheck } from "./state/updateCheck";
 
@@ -137,7 +141,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
     });
@@ -154,7 +158,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
       cancelTransfer,
@@ -205,7 +209,7 @@ describe("App", () => {
       // for them (they throw), which is fine for tests that never mount a RepoWorkspace but
       // this one does.
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
     });
@@ -243,7 +247,7 @@ describe("App", () => {
       closeRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
     });
@@ -276,7 +280,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus,
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
     });
@@ -293,7 +297,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
       openExternalUrl,
@@ -322,7 +326,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
       listRemotes: async () => [{ name: "origin", fetchUrl: "https://example.com/r.git", pushUrl: null, authMode: null, authUsername: null }],
@@ -355,7 +359,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
       openExternalUrl,
@@ -445,7 +449,7 @@ describe("App", () => {
         openRepo: async () => {},
         persistOpenRepos: async () => {},
         getStatus: async () => [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }],
-        getCommitGraph: async () => [],
+        getCommitGraph: async () => graphPage([]),
         listBranches: async () => [],
         listStashes: async () => [],
         getDiffSettings: async () => ({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false, expandUntracked: true }),
@@ -528,7 +532,7 @@ describe("App", () => {
       closeRepo: vi.fn().mockResolvedValue(undefined),
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
     });
@@ -557,7 +561,7 @@ describe("App", () => {
       persistOpenRepos: async () => {},
       // RepoWorkspace's mount-time refresh() fans out to these for whichever tab actually mounts.
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
     });
@@ -585,7 +589,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
     });
@@ -617,7 +621,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [{ path: "x.txt", oldPath: null, staged: false, kind: "Modified" }],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
       // Never settles: the stash stays in flight, so repo a stays busy for as long as its
@@ -650,7 +654,7 @@ describe("App", () => {
   });
 
   it("keeps a tab's view when switching away and back, without reading it again (#642)", async () => {
-    const getCommitGraph = vi.fn(async (_path: string, _limit: number, _selection: unknown) => []);
+    const getCommitGraph = vi.fn(async (_path: string, _limit: number, _selection: unknown) => graphPage([]));
     const client = fakeClient({
       listOpenRepos: async () => ({
         entries: [
@@ -669,9 +673,9 @@ describe("App", () => {
 
     const { container } = render(<App client={client} />);
     await screen.findByRole("tab", { name: "a" });
-    await waitFor(() => expect(getCommitGraph).toHaveBeenCalledWith("/repos/a", expect.anything(), expect.anything()));
+    await waitFor(() => expect(getCommitGraph).toHaveBeenCalledWith("/repos/a", expect.anything(), expect.anything(), null));
     fireEvent.click(screen.getByRole("tab", { name: "b" }));
-    await waitFor(() => expect(getCommitGraph).toHaveBeenCalledWith("/repos/b", expect.anything(), expect.anything()));
+    await waitFor(() => expect(getCommitGraph).toHaveBeenCalledWith("/repos/b", expect.anything(), expect.anything(), null));
     const workspaceA = container.querySelector('[data-active-repo="false"]');
     expect(workspaceA).not.toBeNull();
 
@@ -695,7 +699,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [{ path: "x.txt", oldPath: null, staged: false, kind: "Modified" }],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
       // The paused rebase is stored on disk (`rebase.json`), so closing this tab no longer loses
@@ -729,7 +733,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
     });
@@ -753,7 +757,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
     });
@@ -779,7 +783,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
     });
@@ -833,7 +837,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" }],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
       commit,
@@ -883,7 +887,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" }],
-      getCommitGraph: async () => [graphCommit("head111", "Tip of main", ["base222"]), graphCommit("base222", "Base", [])],
+      getCommitGraph: async () => graphPage([graphCommit("head111", "Tip of main", ["base222"]), graphCommit("base222", "Base", [])]),
       getHeadInfo: async () => ({
         headId: "head111",
         detachedAt: null,
@@ -947,7 +951,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" }],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
       getMergeMessage: async () => "f two",
@@ -995,7 +999,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" }],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
       listRecentAuthors: async () => [
@@ -1052,7 +1056,7 @@ describe("App", () => {
       stageFile: async () => {
         staged = true;
       },
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
       listRecentAuthors: async () => [{ name: "Ada", email: "ada@x.org" }],
@@ -1091,7 +1095,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async (repoPath: string) => (repoPath === "/repos/a" ? [{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" as const }] : []),
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
       commit,
@@ -1125,7 +1129,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" }],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
       commit,
@@ -1159,7 +1163,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" }],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
       getHeadInfo: async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: ["pre-commit"], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
@@ -1195,7 +1199,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
       listRecentAuthors: async () => [
@@ -1249,7 +1253,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [{ name: "main", isCurrent: true, upstream: null, ahead: null, behind: null }],
       listStashes: async () => [],
       listRemotes: async () => [{ name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null, prune: false }],
@@ -1283,7 +1287,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [{ name: "main", isCurrent: true, upstream: null, ahead: null, behind: null }],
       listStashes: async () => [],
       listRemotes: async () => [{ name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null, prune: false }],
@@ -1332,7 +1336,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [{ name: "main", isCurrent: true, upstream: null, ahead: null, behind: null }],
       listStashes: async () => [],
       listRemotes: async () => [{ name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null, prune: false }],
@@ -1371,7 +1375,7 @@ describe("App", () => {
         await gate;
         return [];
       },
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [{ name: "main", isCurrent: true }],
       listStashes: async () => [],
     });
@@ -1392,7 +1396,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [
         { name: "main", isCurrent: true },
         { name: "topic", isCurrent: false },
@@ -1425,7 +1429,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => [
+      getCommitGraph: async () => graphPage([
         {
           id: "c1",
           shortId: "c1",
@@ -1438,7 +1442,7 @@ describe("App", () => {
           remoteBranchRefs: [],
           tags: ["v1"],
         },
-      ],
+      ]),
       listBranches: async () => [{ name: "main", isCurrent: true }],
       listStashes: async () => [],
       listTags: async () => [
@@ -1472,7 +1476,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [{ name: "main", isCurrent: true }],
       listStashes: async () => [],
       listWorktrees: async () => [
@@ -1505,7 +1509,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [{ name: "main", isCurrent: true }],
       listStashes: async () => [],
       listRemotes: async () => [{ name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null }],
@@ -1537,7 +1541,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [{ name: "main", isCurrent: true }],
       listStashes: async () => [],
       listRemotes: async () => [{ name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null }],
@@ -1565,7 +1569,7 @@ describe("App", () => {
         openRepo: async () => {},
         persistOpenRepos: async () => {},
         getStatus: async () => [],
-        getCommitGraph: async () => [],
+        getCommitGraph: async () => graphPage([]),
         listBranches: async () => [
           { name: "main", isCurrent: true },
           { name: "feature", isCurrent: false },
@@ -1627,7 +1631,7 @@ describe("App", () => {
         openRepo: async () => {},
         persistOpenRepos: async () => {},
         getStatus: async () => [],
-        getCommitGraph: async () => graph,
+        getCommitGraph: async () => graphPage(graph),
         listBranches: async () => [{ name: "main", isCurrent: true }],
         listStashes: async () => [],
         getGraphBranchSelection: async () => null,
@@ -1646,7 +1650,9 @@ describe("App", () => {
     }
 
     // Ctrl+F on the graph, then a query whose results replace the graph (#507's "row not rendered").
+    // The search's List view (#687): the results replace the graph.
     async function showSearchResults() {
+      act(() => writeSearchView("list"));
       const graphList = await screen.findByRole("listbox", { name: "Commit history" });
       graphList.focus();
       fireEvent.keyDown(graphList, { key: "f", ctrlKey: true });
@@ -1723,7 +1729,7 @@ describe("App", () => {
         render(
           <App
             client={pickClient({
-              getCommitGraph: async () => [merge, ...graph],
+              getCommitGraph: async () => graphPage([merge, ...graph]),
               cherryPick,
               searchCommits,
               cancelSearch: async () => {},
@@ -1875,7 +1881,7 @@ describe("App", () => {
       render(
         <App
           client={pickClient({
-            getCommitGraph: async () => [merge, ...graph],
+            getCommitGraph: async () => graphPage([merge, ...graph]),
             getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
             cherryPick,
           })}
@@ -1928,7 +1934,7 @@ describe("App", () => {
     // #146: a dialog opened from the commit menu returns focus to the commit list.
     it("the menu's Reset and parent picker return focus to the commit list on Cancel (#146)", async () => {
       const merge = { ...graph[1], id: "m3", shortId: "m3", summary: "merge one", timestamp: 3, parentIds: ["c2", "c1"], branchRefs: [] };
-      render(<App client={pickClient({ getCommitGraph: async () => [merge, ...graph] })} />);
+      render(<App client={pickClient({ getCommitGraph: async () => graphPage([merge, ...graph]) })} />);
       const list = await screen.findByRole("listbox", { name: "Commit history" });
       for (const [summary, item, dialogName] of [
         [/c1 one/, "Reset main to here…", "Reset branch"],
@@ -2191,7 +2197,7 @@ describe("App", () => {
           <App
             client={pickClient({
               getStatus: async () => [{ path: "f", oldPath: null, staged: true, kind: "Modified" }],
-              getCommitGraph: async () => [],
+              getCommitGraph: async () => graphPage([]),
               getMergeMessage: async () => "A",
               getHeadInfo: async () => headWith(terminal({ pausedOnConflict: true, commitsToRemove: 1 }), "CherryPick"),
               abortSequence,
@@ -2306,7 +2312,7 @@ describe("App", () => {
         persistOpenRepos: async () => {},
         getStatus: async () => [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }],
         getWorkingDiff: async () => [],
-        getCommitGraph: async () => [],
+        getCommitGraph: async () => graphPage([]),
         listBranches: async () => [{ name: "main", isCurrent: true }],
         listStashes: async () => [],
         ...overrides,
@@ -2447,7 +2453,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
       getFileHistory,
@@ -2467,7 +2473,7 @@ describe("App", () => {
     expect(await screen.findByRole("listbox", { name: "Commit history" })).toBeInTheDocument();
   });
 
-  it("searches from the graph with Ctrl+F, replaces the graph with results, and × restores it", async () => {
+  it("searches from the graph with Ctrl+F, highlights the match in the graph, lists it, and × closes the search", async () => {
     const hit = {
       id: "s1",
       shortId: "s1",
@@ -2486,7 +2492,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([hit]),
       listBranches: async () => [],
       listStashes: async () => [],
       getGraphBranchSelection: async () => ["main"],
@@ -2505,13 +2511,23 @@ describe("App", () => {
     await waitFor(() => expect(input).toHaveFocus());
 
     fireEvent.change(input, { target: { value: "author:searchy" } });
-    const results = await screen.findByRole("listbox", { name: "Search results" }, { timeout: 2000 });
+    // #687: the graph stays, the match is selected in it and counted.
+    const matchBar = await screen.findByRole("toolbar", { name: "Search matches" }, { timeout: 2000 });
     await waitFor(() => expect(searchCommits).toHaveBeenCalledWith("/repos/a", "author:searchy", { local: ["main"], remote: [] }, null));
+    await waitFor(() => expect(within(matchBar).getByRole("status")).toHaveTextContent("1 of 1"));
+    const history = screen.getByRole("listbox", { name: "Commit history" });
+    expect(within(history).getByRole("option", { selected: true })).toHaveTextContent("search hit");
+
+    // List: the matches alone, in the graph's place.
+    fireEvent.click(within(matchBar).getByRole("button", { name: "List" }));
+    const results = await screen.findByRole("listbox", { name: "Search results" });
     expect(screen.queryByRole("listbox", { name: "Commit history" })).toBeNull();
-    expect(await within(results).findByRole("option", { selected: true })).toHaveTextContent("search hit");
+    expect(within(results).getByRole("option", { selected: true })).toHaveTextContent("search hit");
+    fireEvent.click(within(matchBar).getByRole("button", { name: "List" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Close search" }));
     expect(await screen.findByRole("listbox", { name: "Commit history" })).toBeInTheDocument();
+    expect(screen.queryByRole("toolbar", { name: "Search matches" })).toBeNull();
     expect(screen.getByRole("combobox", { name: "Search commits" })).toHaveValue("");
   });
 
@@ -2525,7 +2541,7 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => [newer, older],
+      getCommitGraph: async () => graphPage([newer, older]),
       listBranches: async () => [],
       listStashes: async () => [],
       getGraphBranchSelection: async () => null,
@@ -2561,7 +2577,7 @@ describe("App", () => {
         openRepo: async () => {},
         persistOpenRepos: async () => {},
         getStatus: async () => [],
-        getCommitGraph: async () => [newer, older],
+        getCommitGraph: async () => graphPage([newer, older]),
         listBranches: async () => [],
         listStashes: async () => [stash],
         getStashFiles: async () => ({ tracked: [], untracked: [], untrackedCommitId: null }),
@@ -2616,7 +2632,7 @@ describe("App", () => {
         openRepo: async () => {},
         persistOpenRepos: async () => {},
         getStatus: async () => [],
-        getCommitGraph: async () => [],
+        getCommitGraph: async () => graphPage([]),
         listBranches: async () => [],
         listStashes: async () => [],
         ...overrides,
@@ -2792,7 +2808,7 @@ describe("App external tools", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
       ...overrides,
@@ -2837,7 +2853,7 @@ describe("App external tools", () => {
           openRepo: async () => {},
           persistOpenRepos: async () => {},
           getStatus,
-          getCommitGraph: async () => [],
+          getCommitGraph: async () => graphPage([]),
           listBranches: async () => [],
           listStashes: async () => [],
           stageFile,
@@ -2876,7 +2892,7 @@ describe("App external tools", () => {
             openRepo: async () => {},
             persistOpenRepos: async () => {},
             getStatus: async () => [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" as const }],
-            getCommitGraph: async () => [],
+            getCommitGraph: async () => graphPage([]),
             listBranches: async () => [],
             listStashes: async () => [],
             stageFile,
@@ -3456,7 +3472,7 @@ describe("App back and forward through the selected commits (#618)", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => graph,
+      getCommitGraph: async () => graphPage(graph),
       listBranches: async () => [{ name: "main", isCurrent: true }],
       listStashes: async () => [],
       getGraphBranchSelection: async () => null,
@@ -3557,7 +3573,7 @@ describe("commit flow (#651)", () => {
         { path: "a.txt", oldPath: null, staged: true, kind: "Modified" },
         { path: "b.txt", oldPath: null, staged: true, kind: "New" },
       ],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listBranches: async () => [{ name: "main", isCurrent: true, upstream: null, ahead: null, behind: null }],
       listStashes: async () => [],
       getHeadInfo: async () => headInfo(COMMIT_ID),

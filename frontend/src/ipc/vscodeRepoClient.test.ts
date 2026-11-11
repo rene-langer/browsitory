@@ -1438,15 +1438,16 @@ describe("vscodeRepoClient", () => {
   });
 
   it("wires getCommitGraph with the local and the remote selection", async () => {
-    const promise = vscodeRepoClient.getCommitGraph("/repo", 50, { local: null, remote: ["origin/feature"] });
+    const promise = vscodeRepoClient.getCommitGraph("/repo", 50, { local: null, remote: ["origin/feature"] }, null);
     expect(postMessage).toHaveBeenCalledWith({
       jsonrpc: "2.0",
       id: 1,
       method: "get_commit_graph",
-      params: { repoPath: "/repo", limit: 50, selection: { local: null, remote: ["origin/feature"] } },
+      params: { repoPath: "/repo", limit: 50, selection: { local: null, remote: ["origin/feature"] }, cursor: null },
     });
-    respond(1, []);
-    await expect(promise).resolves.toEqual([]);
+    const page = { commits: [], nextCursor: null, stale: false };
+    respond(1, page);
+    await expect(promise).resolves.toEqual(page);
   });
 
   it("wires searchCommits and cancelSearch", async () => {
