@@ -21,7 +21,7 @@ function setup(overrides: Partial<Record<string, unknown>> = {}, ok = true) {
     savePatchFile: vi.fn(async () => "/home/me/x.patch"),
     openPatchFile: vi.fn(async () => CONTENT),
     readPatchFile: vi.fn(async () => CONTENT),
-    applyPatch: vi.fn(async () => {}),
+    applyPatch: vi.fn(async () => ({ kind: "Applied" as const })),
     previewPatch: vi.fn(async () => PREVIEW),
     ...overrides,
   };
