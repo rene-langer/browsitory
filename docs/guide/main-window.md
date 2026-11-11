@@ -10,7 +10,7 @@ window has three columns:
 
 **Repository toolbar.** From the left:
 
-- the sidebar button (**Ctrl+Alt+B**, **⌘⌥B** on macOS) hides or shows the sidebar;
+- the sidebar button (**Ctrl+Alt+B**, **⌥⌘B** on macOS) hides or shows the sidebar;
 - the current branch and the remote branch it tracks ("main → origin/main"). Click it to
   switch branch: type to filter the list, which starts with the branches you used last, then
   the other local branches, then the remote branches that have no local branch yet
@@ -63,6 +63,12 @@ Drag the dividers between the columns to resize them. Double-click a divider to 
 sidebar, and again to bring it back at its width. With a divider focused, the arrow keys resize
 too. The sidebar and the commit graph keep their width when you resize the window; only the
 diff pane grows or shrinks.
+
+**From the keyboard.** **F6** moves the focus from pane to pane (the repository toolbar, the
+sidebar, the commit graph, the diff pane) and **Shift+F6** back, returning to where the focus
+last was in each. The toolbar's **Refresh**, **Fetch**, **Pull** and **Push** have shortcuts
+too (F5, Shift+F5, Ctrl+Shift+L, Ctrl+Shift+K; see
+[Keyboard shortcuts](command-palette.md#keyboard-shortcuts)), which their tooltips show.
 
 **Narrow windows.** When the window (or, in VSCode, the editor group) is narrower than 900
 pixels, or too narrow for all three columns, the sidebar hides by itself and comes back once

@@ -7,7 +7,8 @@ import { addRemoteAction, remoteActions } from "./actions/remoteActions";
 import { stashActions, stashBlockers } from "./actions/stashActions";
 import { pruneWorktreesAction, worktreeActions } from "./actions/worktreeActions";
 import { busyReason, operationBlockers, stashBlockReason, type OperationBlockers } from "./operationStatus";
-import { stageModifiedPaths, untrackedPaths } from "./stagePaths";
+import { stageAllPaths, stageModifiedPaths, untrackedPaths } from "./stagePaths";
+import type { ShortcutId } from "./keybindings";
 import type { AppState, UseAppStateResult } from "../state/useAppState";
 import type { OpenRepo } from "../state/useOpenRepos";
 import { matchItem } from "./fuzzyMatch";
@@ -137,6 +138,11 @@ export interface Command extends PickerItem {
   /** Set for a picker ("Go to commit…"): choosing the command lists these items instead of
    *  running `run`. */
   picker?: CommandPicker;
+  /**
+   * The global shortcut that runs this command (#646): the palette shows its keys, and
+   * `useWorkspaceShortcuts` runs the command when they are pressed. Set by `buildAllCommands`.
+   */
+  shortcut?: ShortcutId;
 }
 
 /** A second step of the palette: the items to choose from for the typed query (#441). */
@@ -220,6 +226,8 @@ export interface CommitCommands {
 export interface CommandContext {
   appState: UseAppStateResult;
   onShowShortcuts?: () => void;
+  /** Shows the working tree and focuses the commit message (#646). */
+  onFocusCommitMessage?: () => void;
   app?: AppCommands;
   tabs?: TabCommands;
   sidebar?: SidebarCommands;
@@ -353,7 +361,7 @@ function buildAllCommands(context: CommandContext, blockers: OperationBlockers):
     blocked: blockers.blocked,
     panelVisible: (panel) => visibility?.[panel] ?? true,
   };
-  return [
+  return withShortcuts(state, [
     ...appCommands(ctx),
     ...undoCommands(ctx),
     ...workingTreeCommands(ctx),
@@ -368,11 +376,40 @@ function buildAllCommands(context: CommandContext, blockers: OperationBlockers):
     ...diffCommands(ctx),
     ...goToCommands(ctx),
     ...repositoryCommands(ctx),
-  ];
+  ]);
+}
+
+/**
+ * Marks the commands the global shortcuts run (#646). Fetch and Push are the toolbar's: Fetch
+ * from the upstream's remote (else the first remote), Push to the upstream, or the Push dialog
+ * for a branch without one.
+ */
+function withShortcuts(state: AppState, commands: Command[]): Command[] {
+  const fetchRemote = state.upstream?.remoteName ?? state.remotes[0]?.name;
+  const ids = new Map<string, ShortcutId>([
+    ["show-shortcuts", "show-shortcuts"],
+    ["refresh", "refresh"],
+    ["pull", "pull"],
+    [state.upstream !== null ? `push-branch:${state.upstream.remoteName}` : "push-branch-to", "push"],
+    ["stage-all-files", "stage-all"],
+    ["focus-commit-message", "focus-commit-message"],
+    ["undo", "undo"],
+    ["redo", "redo"],
+    ["toggle-sidebar", "toggle-sidebar"],
+    ["close-tab", "close-tab"],
+    ["reopen-closed-tab", "reopen-closed-tab"],
+    ["go-back", "go-back"],
+    ["go-forward", "go-forward"],
+  ]);
+  if (fetchRemote !== undefined) ids.set(`fetch-remote:${fetchRemote}`, "fetch");
+  return commands.map((command) => {
+    const shortcut = ids.get(command.id);
+    return shortcut === undefined ? command : { ...command, shortcut };
+  });
 }
 
 /** App-wide commands: help, dialogs and the commit search. */
-function appCommands({ onShowShortcuts, app, search, appState, state }: FamilyContext): Command[] {
+function appCommands({ onShowShortcuts, onFocusCommitMessage, app, search, appState, state }: FamilyContext): Command[] {
   const { commands, add } = family("General");
   if (onShowShortcuts !== undefined) {
     add({
@@ -438,6 +475,18 @@ function appCommands({ onShowShortcuts, app, search, appState, state }: FamilyCo
       keywords: ["search", "find", "filter", "author", "grep", "log"],
       run: search.onSearchCommits,
     });
+  }
+  // Only moves the focus, so offered while an operation runs.
+  if (onFocusCommitMessage !== undefined) {
+    add(
+      {
+        id: "focus-commit-message",
+        label: "Go to commit message",
+        keywords: ["commit", "message", "write", "focus", "working tree", "uncommitted"],
+        run: onFocusCommitMessage,
+      },
+      "Go to",
+    );
   }
   // The graph's "Collapse merges" toggle (#617); a view setting, so never blocked.
   add({
@@ -1134,6 +1183,17 @@ function diffCommands({ appState, state, diff, tools }: FamilyContext): Command[
             run: () => void appState.stageAllFiles(paths),
           },
     );
+  }
+  // The Changes heading's "Stage all" (#646): every change but conflicts, untracked files
+  // included, in one undo step.
+  const allPaths = stageAllPaths(state.status);
+  if (allPaths.length > 0 && !state.pending) {
+    add({
+      id: "stage-all-files",
+      label: "Stage all changes",
+      keywords: ["stage", "add", "all", "changes", "untracked"],
+      run: () => void appState.stageAllFiles(allPaths),
+    });
   }
   // The Changes heading's "Stage modified" (#621): tracked files' changes only, no untracked
   // files and no conflicts; one undo step, like "Stage all".

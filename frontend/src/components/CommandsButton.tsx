@@ -1,4 +1,4 @@
-import { isApplePlatform } from "../lib/navigationKeys";
+import { ariaKeyShortcuts, shortcutLabel } from "../lib/keybindings";
 import { requestWorkspace } from "../lib/workspaceRequests";
 import styles from "./CommandsButton.module.css";
 
@@ -7,16 +7,15 @@ import styles from "./CommandsButton.module.css";
  * as its shortcut (see `useWorkspaceShortcuts`), which it shows.
  */
 export function CommandsButton() {
-  const apple = isApplePlatform();
   return (
     <button
       type="button"
       className={styles.button}
       title="Open the command palette"
-      aria-keyshortcuts={apple ? "Meta+K" : "Control+K"}
+      aria-keyshortcuts={ariaKeyShortcuts("palette")}
       onClick={() => requestWorkspace("palette")}
     >
-      Commands <kbd>{apple ? "⌘K" : "Ctrl+K"}</kbd>
+      Commands <kbd>{shortcutLabel("palette")}</kbd>
     </button>
   );
 }

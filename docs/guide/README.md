@@ -11,7 +11,7 @@ it. Open several repositories as tabs, and save groups of them as workspaces.
 1. [Install Browsitory](install.md): the desktop app, or the VSCode extension.
 2. [Open, clone or create a repository](opening-repositories.md).
 3. Get to know [the main window](main-window.md).
-4. Press **Ctrl+K** (**Cmd+K** on macOS), or click **Commands** in the header, for the
+4. Press **Ctrl+K** (**⌘K** on macOS), or click **Commands** in the header, for the
    [command palette](command-palette.md), and **?** for the keyboard shortcuts. The header's
    **Help** menu has this guide and the shortcuts too.
 

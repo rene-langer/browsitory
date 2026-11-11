@@ -130,6 +130,8 @@ export function WorkspaceMain({
       minWidth={280}
       maxWidth={800}
       label="History and diff width"
+      leftRegion="History"
+      rightRegion="Diff"
       left={
         <>
         {goTo.notice !== null && <GoToNotice notice={goTo.notice} onDismiss={goTo.dismissNotice} />}

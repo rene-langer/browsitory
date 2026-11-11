@@ -58,7 +58,7 @@ loaded children, `]` takes the one drawn on the same lane, or lists them when no
 Each tab remembers the commits you select (by clicking, with the keys, a parent or child link,
 Go to, a search result or a file's history), so you can go back to where you were. Moving
 through the list with the arrow keys counts as one step. Go back and forward with the **←** and
-**→** buttons left of the undo buttons, Alt+Left and Alt+Right (Cmd+[ and Cmd+] on macOS), your
+**→** buttons left of the undo buttons, Alt+← and Alt+→ (⌘[ and ⌘] on macOS), your
 mouse's back and forward buttons, or **Back to previous commit** and **Forward to next commit**
 in the command palette. A commit that is no longer in the list, for example after a rebase
 rewrote it or when its branch is now hidden, is skipped. The keys do nothing in a text field,

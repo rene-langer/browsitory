@@ -103,6 +103,42 @@ describe("command palette", () => {
     await browser.keys(["Escape"]);
   });
 
+  it("shows a command's shortcut, and F6 moves between the panes (#646, #670)", async () => {
+    await waitForAppReady();
+    const input = await openPalette();
+    await input.setValue("refresh");
+    // `textContent` via `browser.execute`: see the note on `getText()` and native <dialog>s above.
+    await browser.waitUntil(
+      async () =>
+        (await browser.execute(() => {
+          const row = Array.from(document.querySelectorAll("dialog li")).find((li) => li.textContent?.startsWith("Refresh"));
+          return row?.querySelector("kbd")?.textContent ?? "";
+        })) === "F5",
+      { timeoutMsg: "expected Refresh to show its F5 shortcut in the palette" },
+    );
+    await browser.keys(["Escape"]);
+    await input.waitForDisplayed({ reverse: true });
+
+    // The panes in order (the sidebar may be hidden in a narrow window), then where each F6 lands.
+    const panes = await browser.execute(() =>
+      Array.from(document.querySelectorAll('[data-active-repo="true"] [data-pane]'))
+        .filter((pane) => pane.closest("[hidden]") === null)
+        .map((pane) => pane.getAttribute("aria-label")),
+    );
+    expect(panes).toEqual(expect.arrayContaining(["Repository", "History", "Diff"]));
+    const visited: (string | null)[] = [];
+    for (let press = 0; press < panes.length; press++) {
+      await browser.keys(["F6"]);
+      visited.push(
+        await browser.execute(() => document.activeElement?.closest("[data-pane]")?.getAttribute("aria-label") ?? null),
+      );
+    }
+    // Every pane once, in order, wherever the focus started.
+    const start = panes.indexOf(visited[0]);
+    expect(start).not.toBe(-1);
+    expect(visited).toEqual(panes.map((_, index) => panes[(start + index) % panes.length]));
+  });
+
   it("closes on Escape without running anything", async () => {
     await waitForAppReady();
     const input = await openPalette();

@@ -1,107 +1,130 @@
-export interface ShortcutGroup {
-  title: string;
-  shortcuts: { keys: string; description: string }[];
+import { GLOBAL_SHORTCUTS, formatChords, shortcutLabel, type GlobalShortcut, type KeyChord } from "./keybindings";
+import { isApplePlatform } from "./platform";
+
+/** One row of the shortcut sheet: its keys and what they do, written for the platform (#683). */
+export interface ShortcutEntry {
+  keys: string;
+  description: string;
 }
 
-/** Every keyboard shortcut the app implements, for the help sheet. Keep in sync with the handlers. */
-export const SHORTCUT_GROUPS: ShortcutGroup[] = [
-  {
-    title: "Global",
-    shortcuts: [
-      { keys: "Ctrl/Cmd+K", description: "Open the command palette" },
-      { keys: "Ctrl/Cmd+Alt+B", description: "Show or hide the sidebar (where the host doesn't claim it)" },
-      { keys: "Ctrl/Cmd+Z", description: "Undo the last Git operation" },
-      { keys: "Ctrl/Cmd+Shift+Z / Ctrl+Y", description: "Redo" },
-      { keys: "Ctrl/Cmd+W", description: "Close the active tab (where the host doesn't claim it)" },
-      { keys: "Ctrl/Cmd+Shift+T", description: "Reopen the last closed tab (where the host doesn't claim it)" },
-      {
-        keys: "Alt+Left / Alt+Right (Cmd+[ / Cmd+] on macOS)",
-        description: "Back / forward through the selected commits (where the host doesn't claim them)",
-      },
-      { keys: "Mouse back / forward buttons", description: "Back / forward through the selected commits" },
-      { keys: "?", description: "Show keyboard shortcuts" },
-    ],
-  },
-  {
-    title: "Repository tabs",
-    shortcuts: [
-      { keys: "Left / Right", description: "Switch to the previous / next tab" },
-      { keys: "Home / End", description: "Switch to the first / last tab" },
-      { keys: "Delete", description: "Close the focused tab (Fn+Delete on a Mac laptop)" },
-      { keys: "F2", description: "Rename the focused tab" },
-    ],
-  },
-  {
-    title: "Commit history",
-    shortcuts: [
-      { keys: "Down / j", description: "Select next commit" },
-      { keys: "Up / k", description: "Select previous commit" },
-      { keys: "Shift+Down / Shift+Up", description: "Extend the selection" },
-      { keys: "Home / End", description: "Jump to first / last commit" },
-      { keys: "PageUp / PageDown", description: "Move by a page" },
-      { keys: "[ / ]", description: "Go to the parent / child commit" },
-      { keys: "Shift+[", description: "Choose one of a merge commit's parents" },
-      { keys: "Right / Left", description: "Expand / collapse a collapsed merge (Left on its commits: go to the merge)" },
-      { keys: "Enter / Menu / Shift+F10", description: "Open the commit context menu" },
-      { keys: "Ctrl/Cmd+F", description: "Search commits" },
-    ],
-  },
-  {
-    title: "Command palette",
-    shortcuts: [
-      { keys: "Up / Down", description: "Move the highlight" },
-      { keys: "PageUp / PageDown", description: "Move the highlight by a page" },
-      { keys: "Ctrl+Home / Ctrl+End", description: "First / last command (Home / End before you type)" },
-      { keys: "Enter", description: "Run the highlighted command" },
-      { keys: "Backspace", description: "Back from a list such as Go to branch… (with nothing typed)" },
-    ],
-  },
-  {
-    title: "Context menus",
-    shortcuts: [
-      { keys: "Menu / Shift+F10", description: "Open the focused item's menu" },
-      { keys: "Up / Down", description: "Move between menu items" },
-      { keys: "Home / End", description: "First / last menu item" },
-      { keys: "A letter", description: "Jump to the next item starting with it" },
-      { keys: "Enter / Space", description: "Run the focused menu item" },
-      { keys: "Esc", description: "Close the menu and return to where it opened" },
-      { keys: "Tab", description: "Close the menu and move on" },
-    ],
-  },
-  {
-    title: "Changed files",
-    shortcuts: [
-      { keys: "Down / j", description: "Select next file (on into the other group at the end)" },
-      { keys: "Up / k", description: "Select previous file (on into the other group at the start)" },
-      { keys: "Shift+Down / Shift+Up", description: "Extend the selection" },
-      { keys: "Ctrl/Cmd+A", description: "Select every file in the list" },
-      { keys: "Esc", description: "Keep only the current file selected" },
-      { keys: "s", description: "Stage or unstage the selected files" },
-      { keys: "Enter", description: "Move into the selected file's diff" },
-      { keys: "Menu / Shift+F10", description: "Open the selected file's menu" },
-    ],
-  },
-  {
-    title: "Diff",
-    shortcuts: [
-      { keys: "↑ / ↓", description: "Move line cursor" },
-      { keys: "Shift+↑ / Shift+↓", description: "Extend line selection" },
-      { keys: "s", description: "Stage or unstage the selected lines or hunk" },
-      { keys: "d", description: "Discard the selected lines or hunk (Undo brings them back)" },
-      { keys: "[ / ]", description: "Previous / next hunk" },
-      { keys: "j / k", description: "Next / previous changed file (working tree)" },
-    ],
-  },
-  {
-    title: "Commit message",
-    shortcuts: [{ keys: "Ctrl/Cmd+Enter", description: "Commit" }],
-  },
-  {
-    title: "Layout",
-    shortcuts: [
-      { keys: "Left / Right (on a divider)", description: "Resize a pane" },
-      { keys: "Double-click a divider", description: "Collapse or expand the sidebar" },
-      { keys: "Esc", description: "Close a dialog or menu" },
-    ],
-  },
-];
+export interface ShortcutGroup {
+  title: string;
+  shortcuts: ShortcutEntry[];
+}
+
+const k = (key: string, modifiers: Omit<KeyChord, "key"> = {}): KeyChord => ({ key, ...modifiers });
+const UP = k("ArrowUp");
+const DOWN = k("ArrowDown");
+const LEFT = k("ArrowLeft");
+const RIGHT = k("ArrowRight");
+const SHIFT_UP = k("ArrowUp", { shift: true });
+const SHIFT_DOWN = k("ArrowDown", { shift: true });
+const MENU_KEYS = [k("ContextMenu"), k("F10", { shift: true })];
+
+function globalEntry(shortcut: GlobalShortcut, apple: boolean): ShortcutEntry {
+  const description = shortcut.hostMayClaim ? `${shortcut.description} (where the host doesn't claim it)` : shortcut.description;
+  return { keys: shortcutLabel(shortcut.id, apple), description };
+}
+
+/**
+ * Every keyboard shortcut the app implements, for the help sheet, written for the platform. The
+ * global ones come from `GLOBAL_SHORTCUTS`; keep the others in sync with their handlers.
+ */
+export function shortcutGroups(apple: boolean = isApplePlatform()): ShortcutGroup[] {
+  // Chords, or words such as "A letter".
+  const row = (keys: readonly KeyChord[] | string, description: string): ShortcutEntry => ({
+    keys: typeof keys === "string" ? keys : formatChords(keys, apple),
+    description,
+  });
+  return [
+    {
+      title: "Global",
+      shortcuts: [
+        ...GLOBAL_SHORTCUTS.map((shortcut) => globalEntry(shortcut, apple)),
+        row("Mouse back / forward buttons", "Back / forward through the selected commits"),
+      ],
+    },
+    {
+      title: "Repository tabs",
+      shortcuts: [
+        row([LEFT, RIGHT], "Switch to the previous / next tab"),
+        row([k("Home"), k("End")], "Switch to the first / last tab"),
+        row([k("Delete")], apple ? "Close the focused tab (Fn+⌫ on a laptop)" : "Close the focused tab"),
+        row([k("F2")], "Rename the focused tab"),
+      ],
+    },
+    {
+      title: "Commit history",
+      shortcuts: [
+        row([DOWN, k("j")], "Select next commit"),
+        row([UP, k("k")], "Select previous commit"),
+        row([SHIFT_DOWN, SHIFT_UP], "Extend the selection"),
+        row([k("Home"), k("End")], "Jump to first / last commit"),
+        row([k("PageUp"), k("PageDown")], "Move by a page"),
+        row([k("["), k("]")], "Go to the parent / child commit"),
+        row([k("[", { shift: true })], "Choose one of a merge commit's parents"),
+        row([RIGHT, LEFT], "Expand / collapse a collapsed merge (← on its commits: go to the merge)"),
+        row([k("Enter"), ...MENU_KEYS], "Open the commit context menu"),
+        row([k("f", { mod: true })], "Search commits"),
+      ],
+    },
+    {
+      title: "Command palette",
+      shortcuts: [
+        row([UP, DOWN], "Move the highlight"),
+        row([k("PageUp"), k("PageDown")], "Move the highlight by a page"),
+        row([k("Home", { mod: true }), k("End", { mod: true })], "First / last command (Home / End before you type)"),
+        row([k("Enter")], "Run the highlighted command"),
+        row([k("Backspace")], "Back from a list such as Go to branch… (with nothing typed)"),
+      ],
+    },
+    {
+      title: "Context menus",
+      shortcuts: [
+        row(MENU_KEYS, "Open the focused item's menu"),
+        row([UP, DOWN], "Move between menu items"),
+        row([k("Home"), k("End")], "First / last menu item"),
+        row("A letter", "Jump to the next item starting with it"),
+        row([k("Enter"), k(" ")], "Run the focused menu item"),
+        row([k("Escape")], "Close the menu and return to where it opened"),
+        row([k("Tab")], "Close the menu and move on"),
+      ],
+    },
+    {
+      title: "Changed files",
+      shortcuts: [
+        row([DOWN, k("j")], "Select next file (on into the other group at the end)"),
+        row([UP, k("k")], "Select previous file (on into the other group at the start)"),
+        row([SHIFT_DOWN, SHIFT_UP], "Extend the selection"),
+        row([k("a", { mod: true })], "Select every file in the list"),
+        row([k("Escape")], "Keep only the current file selected"),
+        row([k("s")], "Stage or unstage the selected files"),
+        row([k("Enter")], "Move into the selected file's diff"),
+        row(MENU_KEYS, "Open the selected file's menu"),
+      ],
+    },
+    {
+      title: "Diff",
+      shortcuts: [
+        row([UP, DOWN], "Move line cursor"),
+        row([SHIFT_UP, SHIFT_DOWN], "Extend line selection"),
+        row([k("s")], "Stage or unstage the selected lines or hunk"),
+        row([k("d")], "Discard the selected lines or hunk (Undo brings them back)"),
+        row([k("["), k("]")], "Previous / next hunk"),
+        row([k("j"), k("k")], "Next / previous changed file (working tree)"),
+      ],
+    },
+    {
+      title: "Commit message",
+      shortcuts: [row([k("Enter", { mod: true })], "Commit")],
+    },
+    {
+      title: "Layout",
+      shortcuts: [
+        row([LEFT, RIGHT], "Resize a pane (on a divider)"),
+        row("Double-click a divider", "Collapse or expand the sidebar"),
+        row([k("Escape")], "Close a dialog or menu"),
+      ],
+    },
+  ];
+}

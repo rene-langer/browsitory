@@ -15,6 +15,7 @@ import { Field } from "./primitives/Field";
 import { SplitButton } from "./primitives/SplitButton";
 import { Toolbar } from "./primitives/Toolbar";
 import { HookStatus } from "./HookStatus";
+import { shortcutLabel } from "../lib/keybindings";
 import styles from "./CommitBox.module.css";
 
 /**
@@ -424,7 +425,7 @@ export function CommitBox({
           Summary {summaryLength}/{summaryLimit}
         </span>
         {canRestore && (
-          <button type="button" className={styles.historyButton} onClick={restoreReplaced} title="Undo the pick (Ctrl/Cmd+Z)">
+          <button type="button" className={styles.historyButton} onClick={restoreReplaced} title={`Undo the pick (${shortcutLabel("undo")})`}>
             Restore message
           </button>
         )}
