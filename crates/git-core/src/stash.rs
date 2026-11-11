@@ -440,68 +440,177 @@ fn save_path_limited_stash(
         .workdir()
         .ok_or_else(|| git2::Error::from_str("cannot stash in a bare repository"))?
         .to_path_buf();
-    let signature = repo.signature()?;
-    let head = repo.head()?;
-    let base = head.peel_to_commit()?;
-    let branch = if repo.head_detached()? {
-        "(no branch)".to_string()
-    } else {
-        head.shorthand().unwrap_or("(no branch)").to_string()
-    };
-    let short_id = base
-        .as_object()
-        .short_id()?
-        .as_str()
-        .unwrap_or_default()
-        .to_string();
-    let base_message = format!(
-        "{branch}: {short_id} {}",
-        base.summary().ok().flatten().unwrap_or_default()
-    );
+    let base = StashBase::of(repo)?;
 
     let paths = with_rename_partners(repo, &opts.paths, picked)?;
+    let mut selection = collect_paths(repo, &paths, opts.include_untracked)?;
+    check_selection(repo, opts, &workdir, &base.commit, &paths, &mut selection)?;
+    let Selection {
+        tracked, untracked, ..
+    } = selection;
+
+    let mut index = repo.index()?;
+    let base_tree = base.commit.tree()?;
+    let index_commit = build_index_commit(repo, &base, &base_tree, &index, &tracked)?;
+    let config = crate::undo::worktree_config(repo).map_err(undo_error)?;
+    let untracked_commit = build_untracked_commit(repo, &base, &workdir, &config, &untracked)?;
+    let worktree_tree = build_worktree_tree(repo, &workdir, &config, &base_tree, &tracked)?;
+    push_stash_ref(
+        repo,
+        &base,
+        message,
+        &index_commit,
+        untracked_commit.as_ref(),
+        &worktree_tree,
+    )?;
+
+    revert_paths(
+        repo,
+        &workdir,
+        opts.keep_index,
+        &mut index,
+        &base_tree,
+        &tracked,
+        &untracked,
+    )
+}
+
+/// What a path-limited stash's commits are made on: HEAD's commit, the signature, and the
+/// `<branch>: <short id> <summary>` their messages share.
+struct StashBase<'r> {
+    signature: git2::Signature<'static>,
+    commit: git2::Commit<'r>,
+    branch: String,
+    message: String,
+}
+
+impl<'r> StashBase<'r> {
+    fn of(repo: &'r Repository) -> Result<Self, StashError> {
+        let signature = repo.signature()?;
+        let head = repo.head()?;
+        let commit = head.peel_to_commit()?;
+        let branch = if repo.head_detached()? {
+            "(no branch)".to_string()
+        } else {
+            head.shorthand().unwrap_or("(no branch)").to_string()
+        };
+        let short_id = commit
+            .as_object()
+            .short_id()?
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        let message = format!(
+            "{branch}: {short_id} {}",
+            commit.summary().ok().flatten().unwrap_or_default()
+        );
+        Ok(StashBase {
+            signature,
+            commit,
+            branch,
+            message,
+        })
+    }
+
+    /// Commits `tree` with `parents` and the message `<prefix><base message>`, without
+    /// touching any reference.
+    fn commit(
+        &self,
+        repo: &'r Repository,
+        prefix: &str,
+        tree: &git2::Tree<'_>,
+        parents: &[&git2::Commit<'_>],
+    ) -> Result<git2::Commit<'r>, StashError> {
+        Ok(repo.find_commit(repo.commit(
+            None,
+            &self.signature,
+            &self.signature,
+            &format!("{prefix}{}\n", self.message),
+            tree,
+            parents,
+        )?)?)
+    }
+}
+
+/// The changed paths a path-limited stash takes, from status limited to the selected paths.
+struct Selection {
+    /// Staged or unstaged changes to tracked paths.
+    tracked: Vec<String>,
+    /// Untracked files (with `include_untracked`).
+    untracked: Vec<String>,
+    /// Paths removed from the index, ignored or not.
+    deleted: std::collections::HashSet<String>,
+}
+
+/// Status limited to `paths` (literal paths), split into tracked and untracked changes.
+fn collect_paths(
+    repo: &Repository,
+    paths: &[String],
+    include_untracked: bool,
+) -> Result<Selection, StashError> {
     let mut status_options = git2::StatusOptions::new();
     status_options
-        .include_untracked(opts.include_untracked)
+        .include_untracked(include_untracked)
         .recurse_untracked_dirs(true)
         .include_ignored(false)
         .exclude_submodules(true)
         .disable_pathspec_match(true);
-    for path in &paths {
+    for path in paths {
         status_options.pathspec(path.as_str());
     }
-    let mut tracked = Vec::new();
-    let mut untracked = Vec::new();
-    let mut deleted = std::collections::HashSet::new();
+    let mut selection = Selection {
+        tracked: Vec::new(),
+        untracked: Vec::new(),
+        deleted: std::collections::HashSet::new(),
+    };
     for entry in repo.statuses(Some(&mut status_options))?.iter() {
         let status = entry.status();
         let Ok(path) = entry.path() else { continue };
         if status.contains(git2::Status::INDEX_DELETED) {
             // Ignored or not: with untracked files left out, status can't tell.
-            deleted.insert(path.to_string());
+            selection.deleted.insert(path.to_string());
         }
         if status.contains(git2::Status::IGNORED) || path.ends_with('/') {
             continue;
         }
         if status == git2::Status::WT_NEW {
-            untracked.push(path.to_string());
+            selection.untracked.push(path.to_string());
         } else {
-            tracked.push(path.to_string());
+            selection.tracked.push(path.to_string());
         }
     }
+    Ok(selection)
+}
+
+/// Refuses a selection the stash couldn't take or revert safely, before anything is written.
+/// A folder that replaced a file and holds only untracked files is added to
+/// `selection.untracked` instead (#207).
+fn check_selection(
+    repo: &Repository,
+    opts: &StashOptions,
+    workdir: &std::path::Path,
+    base: &git2::Commit<'_>,
+    paths: &[String],
+    selection: &mut Selection,
+) -> Result<(), StashError> {
+    let Selection {
+        tracked,
+        untracked,
+        deleted,
+    } = selection;
     // First: the staged deletion `Old` of a case-only rename finds a file at `Old` (the new
     // `old` on a drive that folds names, or an ignored `Old` beside it), which the check below
     // would take for an ignored file removed from the index.
-    refuse_case_only_rename(repo, &base, &tracked)?;
+    refuse_case_only_rename(repo, base, tracked)?;
     // A selected file removed from the index and then ignored: refused by the same rule as
     // Stash all (#259).
     if !deleted.is_empty() {
         let scan = WorktreeScan::new(repo)?;
         for (status, raw) in &scan.entries {
-            if !deleted.contains(raw) || has_symlinked_ancestor(&workdir, raw) {
+            if !deleted.contains(raw) || has_symlinked_ancestor(workdir, raw) {
                 continue;
             }
-            if let Some(path) = scan.ignored_overwritten(Some(&workdir), *status, raw) {
+            if let Some(path) = scan.ignored_overwritten(Some(workdir), *status, raw) {
                 return Err(StashError::IgnoredOverwritten(path));
             }
         }
@@ -511,7 +620,7 @@ fn save_path_limited_stash(
     }
     // A tracked path that is now a real directory but not a tree in what the revert restores
     // would have its directory (and whatever the stash does not hold in it) replaced.
-    for path in &tracked {
+    for path in tracked.iter() {
         let full = workdir.join(path);
         if !std::fs::symlink_metadata(&full).is_ok_and(|meta| meta.is_dir()) {
             continue;
@@ -538,7 +647,7 @@ fn save_path_limited_stash(
         // deletion before the files (`apply_in_order`). git's `stash push -u -- d` records no
         // deletion, and its pop fails. A symbolic link or submodule stays refused.
         if opts.include_untracked && was == "a file" {
-            if let Some(files) = stashable_folder(repo, &workdir, path)? {
+            if let Some(files) = stashable_folder(repo, workdir, path)? {
                 for file in files {
                     if !untracked.contains(&file) {
                         untracked.push(file);
@@ -555,8 +664,8 @@ fn save_path_limited_stash(
     // The mirror case: `d/f` is tracked but `d` is now a file. The revert can't restore `d/f`
     // without deleting `d`; refuse before anything is recorded, unless `d` is stashed too (the
     // user picked `d`, or everything): then the revert removes it first, as git does (#186).
-    for path in &tracked {
-        if let Some(parent) = crate::worktree_guard::file_in_place_of_folder(&workdir, path)? {
+    for path in tracked.iter() {
+        if let Some(parent) = crate::worktree_guard::file_in_place_of_folder(workdir, path)? {
             if untracked.contains(&parent) {
                 continue;
             }
@@ -574,20 +683,27 @@ fn save_path_limited_stash(
     }
     // Reading or reverting `d/f` while `d` is a symlink would read and write *through* it,
     // possibly outside the repository. Refuse before anything is written, like git does.
-    for path in paths.iter().chain(&tracked).chain(&untracked) {
-        if has_symlinked_ancestor(&workdir, path) {
+    for path in paths.iter().chain(tracked.iter()).chain(untracked.iter()) {
+        if has_symlinked_ancestor(workdir, path) {
             return Err(StashError::BeyondSymlink(path.clone()));
         }
     }
+    Ok(())
+}
 
-    let mut index = repo.index()?;
-    let base_tree = base.tree()?;
-    // Index commit: HEAD's tree plus only the selected paths' index entries. (git stores the
-    // whole index; then "Restore staged changes" would also re-stage, and `git stash apply
-    // --index` would refuse over, files this stash never took.)
+/// The index commit: HEAD's tree plus only the selected paths' index entries. (git stores the
+/// whole index; then "Restore staged changes" would also re-stage, and `git stash apply
+/// --index` would refuse over, files this stash never took.)
+fn build_index_commit<'r>(
+    repo: &'r Repository,
+    base: &StashBase<'r>,
+    base_tree: &git2::Tree<'_>,
+    index: &git2::Index,
+    tracked: &[String],
+) -> Result<git2::Commit<'r>, StashError> {
     let mut staged_overlay = git2::Index::new()?;
-    staged_overlay.read_tree(&base_tree)?;
-    for path in &tracked {
+    staged_overlay.read_tree(base_tree)?;
+    for path in tracked {
         match index.get_path(std::path::Path::new(path), 0) {
             Some(entry) => staged_overlay.add(&entry)?,
             None => {
@@ -596,159 +712,200 @@ fn save_path_limited_stash(
         }
     }
     let index_tree = repo.find_tree(staged_overlay.write_tree_to(repo)?)?;
-    let index_commit = repo.find_commit(repo.commit(
-        None,
-        &signature,
-        &signature,
-        &format!("index on {base_message}\n"),
-        &index_tree,
-        &[&base],
-    )?)?;
+    base.commit(repo, "index on ", &index_tree, &[&base.commit])
+}
 
-    let config = crate::undo::worktree_config(repo).map_err(undo_error)?;
-    let untracked_commit = if untracked.is_empty() {
-        None
-    } else {
-        let mut overlay = git2::Index::new()?;
-        for path in &untracked {
-            if let Some((id, mode)) = worktree_blob(repo, &workdir, path, &config, None)? {
-                overlay.add(&crate::undo::index_entry(path, id, mode))?;
-            }
-        }
-        let tree = repo.find_tree(overlay.write_tree_to(repo)?)?;
-        Some(repo.find_commit(repo.commit(
-            None,
-            &signature,
-            &signature,
-            &format!("untracked files on {base_message}\n"),
-            &tree,
-            &[],
-        )?)?)
-    };
-
+/// The parentless untracked-files commit holding exactly `untracked`; `None` when there are
+/// none.
+fn build_untracked_commit<'r>(
+    repo: &'r Repository,
+    base: &StashBase<'r>,
+    workdir: &std::path::Path,
+    config: &crate::undo::WorktreeConfig,
+    untracked: &[String],
+) -> Result<Option<git2::Commit<'r>>, StashError> {
+    if untracked.is_empty() {
+        return Ok(None);
+    }
     let mut overlay = git2::Index::new()?;
-    overlay.read_tree(&base_tree)?;
-    for path in &tracked {
+    for path in untracked {
+        if let Some((id, mode)) = worktree_blob(repo, workdir, path, config, None)? {
+            overlay.add(&crate::undo::index_entry(path, id, mode))?;
+        }
+    }
+    let tree = repo.find_tree(overlay.write_tree_to(repo)?)?;
+    Ok(Some(base.commit(
+        repo,
+        "untracked files on ",
+        &tree,
+        &[],
+    )?))
+}
+
+/// The worktree commit's tree: HEAD's tree with the tracked paths' worktree contents (a path
+/// whose file is gone removed).
+fn build_worktree_tree<'r>(
+    repo: &'r Repository,
+    workdir: &std::path::Path,
+    config: &crate::undo::WorktreeConfig,
+    base_tree: &git2::Tree<'_>,
+    tracked: &[String],
+) -> Result<git2::Tree<'r>, StashError> {
+    let mut overlay = git2::Index::new()?;
+    overlay.read_tree(base_tree)?;
+    for path in tracked {
         let previous_mode = overlay
             .get_path(std::path::Path::new(path), 0)
             .map(|entry| entry.mode);
-        match worktree_blob(repo, &workdir, path, &config, previous_mode)? {
+        match worktree_blob(repo, workdir, path, config, previous_mode)? {
             Some((id, mode)) => overlay.add(&crate::undo::index_entry(path, id, mode))?,
             None => {
                 let _ = overlay.remove_path(std::path::Path::new(path));
             }
         }
     }
-    let worktree_tree = repo.find_tree(overlay.write_tree_to(repo)?)?;
+    Ok(repo.find_tree(overlay.write_tree_to(repo)?)?)
+}
+
+/// Commits the stash (parents HEAD, the index commit and the untracked commit, if any) and
+/// pushes it on `refs/stash` with git's reflog message.
+fn push_stash_ref(
+    repo: &Repository,
+    base: &StashBase<'_>,
+    message: Option<&str>,
+    index_commit: &git2::Commit<'_>,
+    untracked_commit: Option<&git2::Commit<'_>>,
+    worktree_tree: &git2::Tree<'_>,
+) -> Result<(), StashError> {
     let reflog_message = match message {
-        Some(message) => format!("On {branch}: {message}"),
-        None => format!("WIP on {base_message}"),
+        Some(message) => format!("On {}: {message}", base.branch),
+        None => format!("WIP on {}", base.message),
     };
-    let mut parents = vec![&base, &index_commit];
-    if let Some(commit) = &untracked_commit {
+    let mut parents = vec![&base.commit, index_commit];
+    if let Some(commit) = untracked_commit {
         parents.push(commit);
     }
     let stash_id = repo.commit(
         None,
-        &signature,
-        &signature,
+        &base.signature,
+        &base.signature,
         &format!("{reflog_message}\n"),
-        &worktree_tree,
+        worktree_tree,
         &parents,
     )?;
     // Without an existing log libgit2 would not write a reflog for `refs/stash` (it is not
     // under refs/heads), and the reflog *is* the stash list.
     repo.reference_ensure_log("refs/stash")?;
     repo.reference("refs/stash", stash_id, true, &reflog_message)?;
+    Ok(())
+}
 
-    // The stash is saved; now revert exactly the stashed paths. Every filesystem change below
-    // re-checks, at that moment, that no directory on the way is a symlink and skips the path if
-    // one is: removing or writing `d/f` with `d` a symlink would act on the link's target,
-    // possibly outside the repository. Skipping only leaves a change in place; it is in the
-    // stash either way.
-    //
+/// The stash is saved; now revert exactly the stashed paths. Every filesystem change below
+/// re-checks, at that moment, that no directory on the way is a symlink and skips the path if
+/// one is: removing or writing `d/f` with `d` a symlink would act on the link's target,
+/// possibly outside the repository. Skipping only leaves a change in place; it is in the
+/// stash either way.
+fn revert_paths(
+    repo: &Repository,
+    workdir: &std::path::Path,
+    keep_index: bool,
+    index: &mut git2::Index,
+    base_tree: &git2::Tree<'_>,
+    tracked: &[String],
+    untracked: &[String],
+) -> Result<(), StashError> {
     // 1. Untracked files first, while the directories they live in are still real: reverting a
     //    tracked path can turn a directory back into HEAD's symlink (a tracked symlink `l` that
     //    was replaced by a directory holding untracked `l/f`), after which `l/f` would resolve
     //    into the link's target.
-    for path in &untracked {
+    for path in untracked {
         // Removes the file and the folders the stash emptied, like git's clean -d; never a
         // symlink's target, never through one, and through held folders so a swap meanwhile
         // can't redirect it (#149).
-        crate::worktree_guard::remove_and_prune_beneath(&workdir, std::path::Path::new(path))?;
+        crate::worktree_guard::remove_and_prune_beneath(workdir, std::path::Path::new(path))?;
     }
     // 2. A tracked file replaced by a symlink (typechange) must be removed before its checkout:
     //    a forced checkout writes the file's content *through* the symlink, overwriting its
     //    target, which may be another file with unsaved edits or a file outside the repository.
     //    The symlink itself is in the stash.
     let mut checkout_paths = Vec::new();
-    for path in &tracked {
-        if has_symlinked_ancestor(&workdir, path) {
+    for path in tracked {
+        if has_symlinked_ancestor(workdir, path) {
             continue;
         }
         crate::worktree_guard::clear_hazards(
-            &workdir,
+            workdir,
             &[crate::worktree_guard::Hazard::Leaf(path.into())],
         )?;
         checkout_paths.push(path.as_str());
     }
     // 3. Tracked paths back to HEAD (or to the index with `keep_index`).
-    if !checkout_paths.is_empty() {
-        let mut checkout = git2::build::CheckoutBuilder::new();
-        checkout.force().disable_pathspec_match(true);
-        for path in &checkout_paths {
-            checkout.path(*path);
+    if checkout_paths.is_empty() {
+        return Ok(());
+    }
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.force().disable_pathspec_match(true);
+    for path in &checkout_paths {
+        checkout.path(*path);
+    }
+    crate::hardlink::on_checkout(repo, &mut checkout);
+    if keep_index {
+        index.read(true)?;
+        repo.checkout_index(Some(index), Some(&mut checkout))?;
+    } else {
+        repo.checkout_tree(base_tree.as_object(), Some(&mut checkout))?;
+        restore_head_entries(index, base_tree, &checkout_paths)?;
+    }
+    Ok(())
+}
+
+/// After reverting `paths` to HEAD: the checkout updates the index only for the files it writes,
+/// so a path removed from the index whose worktree file already matches HEAD (`git rm --cached
+/// f`, or the unedited `d/g` of `git rm -r --cached d`) would stay removed, and Pop would then
+/// refuse with `StagedChanges` (#248). Put HEAD's entry back for every reverted path. (Not
+/// `reset_default`: it takes pathspecs, so a name like `[ab]` would also unstage `a` and `b`.)
+/// Only files and links: HEAD may have a folder (or a submodule) at a reverted path whose index
+/// entry was a staged file.
+fn restore_head_entries(
+    index: &mut git2::Index,
+    base_tree: &git2::Tree<'_>,
+    paths: &[&str],
+) -> Result<(), StashError> {
+    index.read(true)?;
+    let mut changed = false;
+    for path in paths {
+        let Ok(entry) = base_tree.get_path(std::path::Path::new(path)) else {
+            continue;
+        };
+        let mode = entry.filemode() as u32;
+        if !matches!(mode, 0o100644 | 0o100755 | 0o120000) {
+            continue;
         }
-        crate::hardlink::on_checkout(repo, &mut checkout);
-        if opts.keep_index {
-            index.read(true)?;
-            repo.checkout_index(Some(&mut index), Some(&mut checkout))?;
-        } else {
-            repo.checkout_tree(base_tree.as_object(), Some(&mut checkout))?;
-            // The checkout updates the index only for the files it writes: a path removed from
-            // the index whose worktree file already matches HEAD (`git rm --cached f`, or the
-            // unedited `d/g` of `git rm -r --cached d`) would stay removed, and Pop would then
-            // refuse with `StagedChanges` (#248). Put HEAD's entry back for every reverted
-            // path. (Not `reset_default`: it takes pathspecs, so a name like `[ab]` would also
-            // unstage `a` and `b`.) Only files and links: HEAD may have a folder (or a
-            // submodule) at a reverted path whose index entry was a staged file.
-            index.read(true)?;
-            let mut changed = false;
-            for path in &checkout_paths {
-                let Ok(entry) = base_tree.get_path(std::path::Path::new(path)) else {
-                    continue;
-                };
-                let mode = entry.filemode() as u32;
-                if !matches!(mode, 0o100644 | 0o100755 | 0o120000) {
-                    continue;
-                }
-                let current = index.get_path(std::path::Path::new(path), 0);
-                if current
-                    .as_ref()
-                    .is_some_and(|current| current.id == entry.id() && current.mode == mode)
-                {
-                    continue;
-                }
-                let mut restored = crate::undo::index_entry(path, entry.id(), mode);
-                // Keep assume-unchanged and skip-worktree of an entry it replaces; drop
-                // intent-to-add (HEAD's blob is real content).
-                if let Some(current) = current {
-                    const ASSUME_VALID: u16 = 0x8000;
-                    const EXTENDED: u16 = 0x4000;
-                    const SKIP_WORKTREE: u16 = 1 << 14;
-                    restored.flags |= current.flags & ASSUME_VALID;
-                    restored.flags_extended = current.flags_extended & SKIP_WORKTREE;
-                    if restored.flags_extended != 0 {
-                        restored.flags |= EXTENDED;
-                    }
-                }
-                index.add(&restored)?;
-                changed = true;
-            }
-            if changed {
-                index.write()?;
+        let current = index.get_path(std::path::Path::new(path), 0);
+        if current
+            .as_ref()
+            .is_some_and(|current| current.id == entry.id() && current.mode == mode)
+        {
+            continue;
+        }
+        let mut restored = crate::undo::index_entry(path, entry.id(), mode);
+        // Keep assume-unchanged and skip-worktree of an entry it replaces; drop
+        // intent-to-add (HEAD's blob is real content).
+        if let Some(current) = current {
+            const ASSUME_VALID: u16 = 0x8000;
+            const EXTENDED: u16 = 0x4000;
+            const SKIP_WORKTREE: u16 = 1 << 14;
+            restored.flags |= current.flags & ASSUME_VALID;
+            restored.flags_extended = current.flags_extended & SKIP_WORKTREE;
+            if restored.flags_extended != 0 {
+                restored.flags |= EXTENDED;
             }
         }
+        index.add(&restored)?;
+        changed = true;
+    }
+    if changed {
+        index.write()?;
     }
     Ok(())
 }
