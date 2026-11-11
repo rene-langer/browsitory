@@ -1,6 +1,6 @@
 # Reads during a fetch, pull or push (#734): design
 
-Status: design for the owner's decision. No code yet. Part of 0.11.0 (#755).
+Status: decided 2026-11-11 (see "Decisions"). Part of 0.11.0 (#755).
 
 ## Problem
 
@@ -419,3 +419,19 @@ covers both.
 7. **E2E coverage.** (a) One Tauri flow (silent remote, open a commit); (b) none, relying on the
    repo-service and tauri-app tests. *Recommendation: (a): the gate change is only visible
    end-to-end.*
+
+## Decisions
+
+The owner took the recommendation on every question (2026-11-11):
+
+1. Option A: the worker serves read-lane commands while it waits for a transfer helper.
+2. A read may answer before an earlier write that is queued but not answered yet.
+3. Read lane: `PrepareDiffTool`, `SaveFileVersion` and `DetectForgeRepository` are in;
+   `PrepareMergeTool` and `ListPullRequests` stay on the main lane.
+4. Reads still wait during a pull's merge, `post-merge` and commit hooks; no follow-up for now.
+5. Tauri gets a separate per-repository read gate.
+6. Writes during a transfer are out of scope; no issue is filed.
+7. One Tauri E2E flow (a remote that never answers, then open a commit).
+
+Implementation: three PRs in order (repo-service read lane, tauri-app read gate and
+`ReadHandle`, the E2E flow); the last one closes #734.
