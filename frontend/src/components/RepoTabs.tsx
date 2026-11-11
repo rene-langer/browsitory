@@ -65,7 +65,9 @@ export function RepoTabs({
   if (openRepos.length === 0) return null;
 
   // Roving tabindex: only the selected tab (or the first, when none is) is a tab stop; arrow keys
-  // move between tabs and activate them (automatic activation, WAI-ARIA APG tabs pattern).
+  // move the focus between tabs, and Enter or Space (the tab is a button) shows the focused one
+  // (manual activation, WAI-ARIA APG tabs pattern, #642): stepping across tabs to reach one
+  // doesn't switch to every tab on the way.
   const tabStopPath = openRepos.some((repo) => repo.path === activePath) ? activePath : openRepos[0].path;
 
   const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, path: string, busy: boolean) => {
@@ -105,7 +107,6 @@ export function RepoTabs({
           ? tabs.length - 1
           : (current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
     tabs[next].focus();
-    tabs[next].click();
   };
 
   const renderTab = (repo: OpenRepo) => {

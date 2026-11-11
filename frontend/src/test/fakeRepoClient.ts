@@ -34,6 +34,7 @@ export const EMPTY_RESULTS: Partial<RepoClient> = {
   updateWorkspace: async () => {},
   deleteWorkspace: async () => {},
   getGraphBranchSelection: async () => null,
+  getChangeStamp: async () => "stamp",
   getGraphRemoteBranchSelection: async () => null,
   getGraphCollapseMerges: async () => false,
   setGraphCollapseMerges: async () => {},

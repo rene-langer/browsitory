@@ -13,6 +13,21 @@ fn get_status_reflects_an_untracked_file() {
 }
 
 #[test]
+fn the_change_stamp_follows_an_edit_made_outside_the_app() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "hello");
+    commit_all(&repo, "initial commit");
+
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let clean = handle.get_change_stamp().unwrap();
+    assert_eq!(handle.get_change_stamp().unwrap(), clean);
+
+    write_file(dir.path(), "file.txt", "hello, world");
+    assert_ne!(handle.get_change_stamp().unwrap(), clean);
+}
+
+#[test]
 fn spawn_fails_on_a_non_repository_path() {
     let dir = TempDir::new().unwrap();
 

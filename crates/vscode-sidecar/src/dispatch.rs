@@ -139,6 +139,7 @@ methods!(|params, repos, stdout| {
     "open_repo" => open_repo(OpenRepoParams, repos),
     "close_repo" => close_repo(RepoPathParams, repos),
     "get_status" => get_status(RepoPathParams, repos),
+    "get_change_stamp" => get_change_stamp(RepoPathParams, repos),
     "get_commit_graph" => get_commit_graph(GetCommitGraphParams, repos),
     "locate_commit" => locate_commit(LocateCommitParams, repos),
     "get_merged_commits" => get_merged_commits(GetMergedCommitsParams, repos),

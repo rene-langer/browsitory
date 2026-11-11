@@ -7,13 +7,13 @@ import type { OpenRepo } from "./useOpenRepos";
 export interface TabChangeMarkers {
   /** Open repositories known to have uncommitted changes (staged, unstaged or untracked). */
   changedPaths: ReadonlySet<string>;
-  /** The mounted (active) workspace's live status. */
+  /** A mounted workspace's live status (the shown tab, and tabs kept in the background, #642). */
   onLiveStatus: (repoPath: string, status: StatusEntry[]) => void;
 }
 
 /**
- * The tab strip's "uncommitted changes" marker (#613). Only the active tab's workspace is
- * mounted, so it reports its live status; every other tab is checked with `getStatus` when it
+ * The tab strip's "uncommitted changes" marker (#613). A mounted workspace reports its live
+ * status (the shown tab follows changes, #650); every other tab is checked with `getStatus` when it
  * first shows up, when the user leaves it, when the window becomes visible again and after a
  * fetch (an automatic fetch tick included). No polling of its own. A failed check keeps the
  * marker as it was, and nothing waits for a check.
@@ -64,7 +64,8 @@ export function useTabChangeMarkers(client: RepoClient, openRepos: OpenRepo[], a
     check(repos.map((repo) => repo.path).filter((path) => path !== active));
   }, [check]);
 
-  // Leaving a tab: its workspace unmounts, so its status is checked once more.
+  // Leaving a tab: its workspace stops checking for changes (or unmounts), so its status is
+  // checked once more.
   const previousActive = useRef(activePath);
   useEffect(() => {
     const left = previousActive.current;

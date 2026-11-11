@@ -28,11 +28,13 @@ window has three columns:
   bar and **Cancel**, or, when another action takes more than a moment, "Working…";
 - **Stash** (see [Stashes](stashes.md)), **Apply patch…** (see [Patches](patches.md#apply-a-patch-file)),
   **Undo** and **Redo** (see [Undo and redo](undo-redo.md)), and **Refresh**, which reloads the
-  repository's state;
+  repository's state (changes made outside Browsitory also show by themselves, see
+  [Changes made outside Browsitory](tabs.md#changes-made-outside-browsitory));
 - when the repository was last fetched.
 
-While a repository opens, or after you switch tabs, the graph and the Branches section show grey
-placeholder rows until the repository has been read.
+While a repository opens, or when you switch to a tab you haven't looked at for a while (see
+[Multiple repositories](tabs.md)), the graph and the Branches section show grey placeholder rows
+until the repository has been read.
 
 **When a button can't run.** A toolbar button that can't run now, such as **Push** while a
 merge is in progress, is dimmed; point at it or move the keyboard focus to it and a note under it

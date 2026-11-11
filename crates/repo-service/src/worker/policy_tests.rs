@@ -84,6 +84,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
     let mut rows = rows![
         (cmd!(Ping), "-"),
         (cmd!(GetStatus), "-"),
+        (cmd!(GetChangeStamp), "-"),
         (
             cmd!(GetCommitGraph {
                 limit: 1,

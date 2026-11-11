@@ -97,7 +97,7 @@ menu, for the full list of shortcuts. The most useful ones:
 | Shift+[ | Choose one of a merge commit's parents (in the commit list) |
 | →/← | Expand or collapse a merge with **Collapse merges** on (in the commit list) |
 | Alt+Left/Right (Cmd+[ / Cmd+] on macOS) | Back and forward through the selected commits (where the host doesn't use them) |
-| Left/Right, Home/End | Switch tabs, with a tab focused |
+| Left/Right, Home/End | Move between tabs, with a tab focused; Enter or Space switches |
 | Delete | Close the focused tab |
 | F2 | Rename the focused tab |
 | Menu key or Shift+F10 | Open the focused item's menu |

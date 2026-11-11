@@ -1066,6 +1066,13 @@ export interface RepoClient {
   deleteWorkspace(id: string): Promise<void>;
   getStatus(repoPath: string): Promise<StatusEntry[]>;
   /**
+   * A fingerprint of everything the app shows of the repository (#650): the work tree as
+   * `getStatus` sees it, the index, HEAD, references, stashes, configuration and an operation in
+   * progress; ignored files and git's own bookkeeping don't count. Equal stamps mean nothing
+   * changed in between. Only compare stamps of one session: the format isn't stable.
+   */
+  getChangeStamp(repoPath: string): Promise<string>;
+  /**
    * The commits of `selection.local` plus those of `selection.remote`. Exactly one branch in
    * total, or `selection.firstParent`, walks first parents only; its merge rows then carry
    * `mergedCount`. Missing branches are skipped.

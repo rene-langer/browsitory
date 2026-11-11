@@ -14,9 +14,14 @@ export const STALE_UNDO_MESSAGE =
 export function useUndoRedoActions(appState: UseAppStateResult, active: boolean, pushToast: PushToast) {
   const { undo: undoStep, redo: redoStep, refreshUndoState } = appState;
   const { pending, transfer } = appState.state;
-  // The toast stack is app-level and outlives this workspace (tab switch unmounts it), so a
-  // toast action checks it's still mounted and idle, read through refs at click time.
+  // The toast stack is app-level and outlives this workspace (a tab switch hides it, and later
+  // unmounts it, #642), so a toast action checks it's still mounted, shown and idle, read
+  // through refs at click time.
   const mounted = useRef(true);
+  const shown = useRef(active);
+  useEffect(() => {
+    shown.current = active;
+  }, [active]);
   const busy = useRef(false);
   useEffect(() => {
     mounted.current = true;
@@ -38,7 +43,7 @@ export function useUndoRedoActions(appState: UseAppStateResult, active: boolean,
           action: {
             label: kind === "undo" ? "Redo" : "Undo",
             run: () => {
-              if (mounted.current && !busy.current) run(other);
+              if (mounted.current && shown.current && !busy.current) run(other);
             },
           },
         });
@@ -84,7 +89,7 @@ export function useUndoRedoActions(appState: UseAppStateResult, active: boolean,
     return {
       label: "Undo",
       run: () => {
-        if (!mounted.current || busy.current) return;
+        if (!mounted.current || !shown.current || busy.current) return;
         if (offer.version !== undoVersion.current.count) {
           latest.current.pushToast(STALE_UNDO_MESSAGE, { tone: "info" });
           return;

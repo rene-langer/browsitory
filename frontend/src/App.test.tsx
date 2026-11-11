@@ -515,7 +515,7 @@ describe("App", () => {
     expect(client.closeRepo).toHaveBeenCalledWith("/repos/b");
   });
 
-  it("unmounts an inactive repo's workspace instead of hiding it with CSS (PERF-001)", async () => {
+  it("doesn't mount the workspace of a tab never shown (PERF-001)", async () => {
     const client = fakeClient({
       listOpenRepos: async () => ({
         entries: [
@@ -538,7 +538,7 @@ describe("App", () => {
     await screen.findByRole("tab", { name: "a" });
     expect(screen.getByRole("tab", { name: "b" })).toBeInTheDocument();
 
-    // Both tabs exist in the tab strip, but only the active repo's workspace (b) is mounted —
+    // Both tabs exist in the tab strip, but only the shown repo's workspace (b) is mounted —
     // the audit's own evidence for this finding was three open repos producing three copies of
     // section headings like "Branches" in the DOM; the fix renders exactly one.
     await waitFor(() => expect(screen.queryAllByText("Branches")).toHaveLength(1));
@@ -569,7 +569,7 @@ describe("App", () => {
     });
 
     fireEvent.click(screen.getByRole("tab", { name: "b" }));
-    // b's workspace replaced a's (PERF-001 unmounts inactive tabs), with its own empty draft.
+    // b's workspace is shown instead of a's, with its own empty draft.
     await waitFor(() => expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true"));
     expect(screen.getByRole("textbox", { name: "Commit message" })).toHaveValue("");
 
@@ -578,13 +578,11 @@ describe("App", () => {
     expect(screen.getByRole("textbox", { name: "Commit message" })).toHaveValue("wip: half-typed");
   });
 
-  it("re-enables a tab's close button once it is switched away from mid-operation", async () => {
+  it("keeps a background tab's close button disabled while its action runs, until it unloads (#642)", async () => {
+    const paths = ["a", "b", "c", "d", "e"];
     const client = fakeClient({
       listOpenRepos: async () => ({
-        entries: [
-          { path: "/repos/a", workspaceId: null },
-          { path: "/repos/b", workspaceId: null },
-        ],
+        entries: paths.map((name) => ({ path: `/repos/${name}`, workspaceId: null })),
         activePath: "/repos/a",
       }),
       openRepo: async () => {},
@@ -609,9 +607,51 @@ describe("App", () => {
     fireEvent.click(stash);
     await waitFor(() => expect(closeA()).toBeDisabled());
 
+    // Still mounted in the background, still stashing.
     fireEvent.click(screen.getByRole("tab", { name: "b" }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true"));
+    expect(closeA()).toBeDisabled();
 
+    // Four other tabs shown since: a's workspace unloads, and with it the busy report.
+    for (const name of ["c", "d", "e"]) {
+      fireEvent.click(screen.getByRole("tab", { name }));
+      await waitFor(() => expect(screen.getByRole("tab", { name })).toHaveAttribute("aria-selected", "true"));
+    }
     await waitFor(() => expect(closeA()).toBeEnabled());
+  });
+
+  it("keeps a tab's view when switching away and back, without reading it again (#642)", async () => {
+    const getCommitGraph = vi.fn(async (_path: string, _limit: number, _selection: unknown) => []);
+    const client = fakeClient({
+      listOpenRepos: async () => ({
+        entries: [
+          { path: "/repos/a", workspaceId: null },
+          { path: "/repos/b", workspaceId: null },
+        ],
+        activePath: "/repos/a",
+      }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph,
+      listBranches: async () => [],
+      listStashes: async () => [],
+    });
+
+    const { container } = render(<App client={client} />);
+    await screen.findByRole("tab", { name: "a" });
+    await waitFor(() => expect(getCommitGraph).toHaveBeenCalledWith("/repos/a", expect.anything(), expect.anything()));
+    fireEvent.click(screen.getByRole("tab", { name: "b" }));
+    await waitFor(() => expect(getCommitGraph).toHaveBeenCalledWith("/repos/b", expect.anything(), expect.anything()));
+    const workspaceA = container.querySelector('[data-active-repo="false"]');
+    expect(workspaceA).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: "a" }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "a" })).toHaveAttribute("aria-selected", "true"));
+    // The same workspace element is shown again; the unchanged stamp means no second read.
+    await waitFor(() => expect(workspaceA).toHaveAttribute("data-active-repo", "true"));
+    const readsOfA = () => getCommitGraph.mock.calls.filter(([path]) => path === "/repos/a").length;
+    expect(readsOfA()).toBe(1);
   });
 
   it("switching away from a tab mid-rebase does not keep its close button disabled", async () => {

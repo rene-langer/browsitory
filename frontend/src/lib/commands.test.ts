@@ -232,6 +232,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     undo: vi.fn(),
     redo: vi.fn(),
     refreshUndoState: vi.fn(),
+    checkForChanges: vi.fn(),
     dismissError: vi.fn(),
     setSkipHooks: vi.fn(),
     cancelHookRun: vi.fn(),

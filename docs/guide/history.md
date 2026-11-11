@@ -63,8 +63,9 @@ mouse's back and forward buttons, or **Back to previous commit** and **Forward t
 in the command palette. A commit that is no longer in the list, for example after a rebase
 rewrote it or when its branch is now hidden, is skipped. The keys do nothing in a text field,
 and where the host uses them for its own navigation (in VSCode on Windows, Alt+Left is its own
-Go Back), use the buttons or the palette. The list starts afresh when you
-switch to another tab and back, like the selection.
+Go Back), use the buttons or the palette. The list is kept when you switch
+to another tab and back, like the selection, unless the tab was unloaded meanwhile (see
+[Multiple repositories](tabs.md)).
 
 ![A commit from history with its diff](assets/commit-diff.png)
 
