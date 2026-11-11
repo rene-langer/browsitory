@@ -1,7 +1,7 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import * as vscode from "vscode";
+import { gitWith } from "../support/git";
 import { connectToWebview } from "../support/webviewPage";
 
 // Hooks over the sidecar transport (#123): `hookProgress` notifications, a `HookFailed` commit
@@ -10,7 +10,8 @@ describe("Browsitory VSCode extension git hooks", () => {
   let cwd = "";
   let hookPath = "";
 
-  const git = (...args: string[]) => execFileSync("git", args, { cwd }).toString().trim();
+  // `cwd` is set in `before`, so each call reads it then.
+  const git = (...args: string[]) => gitWith(cwd, args);
   const lastSummary = () => {
     try {
       return git("log", "-1", "--format=%s");

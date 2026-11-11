@@ -2409,7 +2409,10 @@ only `error`.
     whose text may already match something else.
   - Shared spec helpers (#500): specs run the git CLI only through `e2e/support/git.ts`
     (`git(cwd, ...args)` returns trimmed output and throws with git's stderr; `gitIn(repo)`
-    binds a repository; `gitWith` keeps output untrimmed or discards it). The child inherits
+    binds a repository; `gitWith` keeps output untrimmed or discards it). The VSCode specs
+    use the same runner (#524): it lives in `extension/e2e/src/support/git.ts` (Node built-ins
+    only, for the same `rootDir` reason as `fixtureRepo.ts` below), and `e2e/support/git.ts`
+    re-exports it next to its WebDriver waits. The child inherits
     the runner's environment, so the screenshot run's isolated HOME and git config reach it.
     `wdio.conf.ts` sets `waitforTimeout` to `UI_TIMEOUT` (`e2e/support/timeouts.ts`, 10 s), so
     a wait passes `timeout` only when it needs longer, as a named constant (`SLOW_UI_TIMEOUT`,
@@ -2460,6 +2463,15 @@ only `error`.
   artifact. Agents triage that comment (see `AGENTS.md`'s "Testing conventions"). To
   reproduce locally: `git diff origin/main...HEAD > pr.diff && cargo mutants --in-diff pr.diff
   --package git-core --package repo-service`. Frontend and extension code are not covered.
+- Removed assertions (`ci.yml`'s `removed-assertions` job, pull requests and dispatched runs
+  only, informational, #310): `scripts/report-removed-assertions.py` reads the PR's diff and
+  lists every assertion line it removes or rewrites in a test file (`assert*!` in `crates/`,
+  `expect(`/`assert` in `*.test.*` and `*.spec.*`, asserts in `scripts/test_*.py`; only a
+  multi-line assertion's first line). A changed assertion shows as removed and added. Like the
+  mutants report it posts one sticky comment (`<!-- removed-assertions -->`, created only when
+  something is found) and the run summary, and never fails. It covers what mutation testing
+  can't see: a test loosened in the same PR as the code. Agents answer it in the PR (see
+  `AGENTS.md`'s "Task workflow").
 
 ### Credential release acceptance
 

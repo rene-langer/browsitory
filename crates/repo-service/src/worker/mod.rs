@@ -993,6 +993,10 @@ impl PauseHook {
     fn pause_here(&self, _point: PausePoint) {
         match *self {}
     }
+
+    fn record_lock_wait(&self, _wait: std::time::Duration) {
+        match *self {}
+    }
 }
 
 #[cfg(test)]
@@ -1001,6 +1005,7 @@ struct PauseHook {
     armed: Arc<std::sync::atomic::AtomicBool>,
     reached: Sender<()>,
     go: std::sync::Mutex<mpsc::Receiver<()>>,
+    lock_waits: Arc<std::sync::Mutex<Vec<std::time::Duration>>>,
 }
 
 #[cfg(test)]
@@ -1009,17 +1014,20 @@ impl PauseHook {
         let armed = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (reached_tx, reached_rx) = mpsc::channel();
         let (go_tx, go_rx) = mpsc::channel();
+        let lock_waits = Arc::default();
         (
             Self {
                 point,
                 armed: Arc::clone(&armed),
                 reached: reached_tx,
                 go: std::sync::Mutex::new(go_rx),
+                lock_waits: Arc::clone(&lock_waits),
             },
             PauseControl {
                 armed,
                 reached: reached_rx,
                 go: go_tx,
+                lock_waits,
             },
         )
     }
@@ -1030,15 +1038,22 @@ impl PauseHook {
             let _ = self.go.lock().unwrap().recv();
         }
     }
+
+    /// Notes how long a locked command was to wait for the state lock (#736).
+    fn record_lock_wait(&self, wait: std::time::Duration) {
+        self.lock_waits.lock().unwrap().push(wait);
+    }
 }
 
 /// Drives a `PauseHook` from a test: `arm` before sending the command to pause, then
-/// `wait_reached` (the worker stopped at the hook's `PausePoint`) and `go`.
+/// `wait_reached` (the worker stopped at the hook's `PausePoint`) and `go`. `lock_waits` lists
+/// how long each locked command was to wait for the state lock, armed or not.
 #[cfg(test)]
 pub(crate) struct PauseControl {
     armed: Arc<std::sync::atomic::AtomicBool>,
     reached: mpsc::Receiver<()>,
     go: Sender<()>,
+    lock_waits: Arc<std::sync::Mutex<Vec<std::time::Duration>>>,
 }
 
 #[cfg(test)]
@@ -1055,6 +1070,11 @@ impl PauseControl {
 
     pub fn go(&self) {
         self.go.send(()).unwrap();
+    }
+
+    /// The wait each locked command chose so far, in order (#736).
+    pub fn lock_waits(&self) -> Vec<std::time::Duration> {
+        self.lock_waits.lock().unwrap().clone()
     }
 }
 

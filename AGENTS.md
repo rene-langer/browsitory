@@ -230,6 +230,25 @@ and `test-driven-development` skills. Those files are a record of past decisions
 truth: if one disagrees with the code, `AGENTS.md` or `docs/ARCHITECTURE.md`, the latter win.
 `.claude/skills/browsitory-conventions` lists the Browsitory rules generic skills don't cover.
 
+Tests and the code they test (#310), for every agent session, subagent or interactive: an agent
+that writes both tends to make its tests pass rather than find bugs, so:
+
+- Tests come first, in their own commit before the implementation commit. A plan specifies
+  them in advance, expected results included. The commit message or PR quotes the red run's
+  actual output (the command and its failure); a red run that couldn't start (a tool missing,
+  a build error) is not red.
+- Never make a test pass by weakening it: no changed expected value, removed or loosened
+  assertion, or skipped test. When the code (libgit2 or otherwise) behaves differently than a
+  planned test expects, stop and report it to whoever started you (the orchestrator, or the
+  owner in an interactive session); the owner decides whether the test or the plan changes.
+  Plans don't offer "if it does X instead, assert X".
+- A deliberate change to an existing test's expectations goes in its own commit, its message
+  starting with `Test change:`, and the PR body says why.
+- CI's `removed-assertions` job comments on a PR that removes or rewrites assertion lines in
+  test files (`scripts/report-removed-assertions.py`). It is informational, not a required
+  check: for each listed line, say in the PR whether it is a deliberate change or a moved test.
+  Review agents check the test-first commit order and this comment, as they do the mutants one.
+
 Findings outside the task: a bug, gap or other problem you notice while working on something
 else and don't fix in the same change must become a GitHub issue (`gh issue create`). Check for
 an existing issue first (`gh issue list --search ...`) and comment there instead of filing a

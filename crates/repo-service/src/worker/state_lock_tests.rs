@@ -436,50 +436,70 @@ fn after_a_timeout_a_locked_command_waits_briefly_for_the_lock() {
 
 /// `a.txt`…`h.txt` committed and edited, a worker on it, and the lock held by "the other
 /// window"; `a.txt` and `b.txt` already staged, so the first `LOCK_WAIT` and the first
-/// `CONTENDED_WAIT` are behind. Also how long staging six other files took before, with the
-/// lock free (and so recorded: an upper bound for the same work unrecorded).
-fn contended_worker() -> (TempDir, Worker, StateGuard, Duration) {
+/// `CONTENDED_WAIT` are behind.
+fn contended_worker() -> (TempDir, Worker, StateGuard) {
     let (dir, repo) = init_repo();
     let names = ["a", "b", "c", "d", "e", "f", "g", "h"];
-    let free = ["i", "j", "k", "l", "m", "n"];
-    for name in names.iter().chain(&free) {
+    for name in names {
         write_file(dir.path(), &format!("{name}.txt"), "x\n");
     }
     commit_all(&repo, "files");
-    for name in names.iter().chain(&free) {
+    for name in names {
         write_file(dir.path(), &format!("{name}.txt"), "edited\n");
     }
     let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
     let handle = worker.handle();
-    let start = Instant::now();
-    for name in free {
-        handle.stage_file(format!("{name}.txt")).unwrap();
-    }
-    let baseline = start.elapsed();
     let guard = hold(&repo);
     handle.stage_file("a.txt".into()).unwrap(); // LOCK_WAIT
     handle.stage_file("b.txt".into()).unwrap(); // CONTENDED_WAIT
-    (dir, worker, guard, baseline)
+    (dir, worker, guard)
 }
 
 /// #197: while the lock keeps being found busy, a run of locked commands waits about
 /// `CONTENDED_WAIT` once, not once per command, however long each takes (a slow runner).
+///
+/// #736: this compares the waits the worker chose, not elapsed time against a baseline: a
+/// loaded runner can make six real stagings slower than any bound. All commands are queued at
+/// once, so no gap on the test thread between two of them can close the burst window either.
 #[test]
 fn a_burst_of_locked_commands_waits_once_while_the_lock_stays_held() {
-    let (dir, worker, _guard, baseline) = contended_worker();
-    let handle = worker.handle();
-    let start = Instant::now();
-    for name in ["c", "d", "e", "f", "g", "h"] {
-        handle.stage_file(format!("{name}.txt")).unwrap();
+    let (dir, repo) = init_repo();
+    let names = ["a", "b", "c", "d", "e", "f", "g", "h"];
+    for name in names.iter().chain(&["n"]) {
+        write_file(dir.path(), &format!("{name}.txt"), "x\n");
     }
-    let elapsed = start.elapsed();
-    // Waiting once per command would take at least `6 * CONTENDED_WAIT` on top.
-    assert!(
-        elapsed < baseline + 2 * CONTENDED_WAIT,
-        "{elapsed:?} (baseline {baseline:?})"
-    );
-    let repo = Repository::open(dir.path()).unwrap();
-    for name in ["a", "b", "c", "d", "e", "f", "g", "h"] {
+    commit_all(&repo, "files");
+    for name in names.iter().chain(&["n"]) {
+        write_file(dir.path(), &format!("{name}.txt"), "edited\n");
+    }
+    // The pause is never armed: the worker only records the lock waits it chooses.
+    let (worker, pause) = Worker::spawn_with_pause_before_finish(dir.path().to_path_buf());
+    let handle = worker.handle();
+    handle.stage_file("n.txt".into()).unwrap(); // the lock is free: recorded
+    let _guard = hold(&repo);
+    let replies: Vec<_> = names
+        .iter()
+        .map(|name| {
+            let (reply, rx) = mpsc::channel();
+            handle
+                .tx
+                .send(super::Command::StageFile {
+                    path: format!("{name}.txt"),
+                    reply,
+                })
+                .unwrap();
+            rx
+        })
+        .collect();
+    for rx in replies {
+        rx.recv().unwrap().unwrap();
+    }
+    // `a.txt` waits `LOCK_WAIT` in vain, `b.txt` `CONTENDED_WAIT`; the rest each try once.
+    // Waiting once per command would show `CONTENDED_WAIT` six more times.
+    let mut expected = vec![LOCK_WAIT, LOCK_WAIT, CONTENDED_WAIT];
+    expected.extend([Duration::ZERO; 6]);
+    assert_eq!(pause.lock_waits(), expected);
+    for name in names {
         let status = repo.status_file(Path::new(&format!("{name}.txt"))).unwrap();
         assert!(status.contains(git2::Status::INDEX_MODIFIED), "{name}");
     }
@@ -493,7 +513,7 @@ fn a_burst_of_locked_commands_waits_once_while_the_lock_stays_held() {
 /// `CONTENDED_WAIT` for the lock before it refuses.
 #[test]
 fn inside_a_burst_a_refusing_command_still_waits() {
-    let (dir, worker, _guard, _) = contended_worker();
+    let (dir, worker, _guard) = contended_worker();
     let handle = worker.handle();
     handle.stage_file("c.txt".into()).unwrap(); // in the burst: tries once
     let start = Instant::now();
@@ -520,7 +540,7 @@ fn inside_a_burst_a_refusing_command_still_waits() {
 /// so a lone click still waits out a brief hold.
 #[test]
 fn after_a_quiet_moment_a_locked_command_waits_again() {
-    let (_dir, worker, _guard, _) = contended_worker();
+    let (_dir, worker, _guard) = contended_worker();
     let handle = worker.handle();
     handle.stage_file("c.txt".into()).unwrap(); // in the burst: tries once
     std::thread::sleep(CONTENDED_WAIT + Duration::from_millis(100));

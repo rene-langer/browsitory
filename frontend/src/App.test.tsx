@@ -2727,6 +2727,38 @@ describe("App", () => {
       expect(await within(notifications).findByText("Undid Commit “feat: x”")).toBeInTheDocument();
     });
 
+    // #769: the click lands right after the toast is on screen, before React's passive effects
+    // run (a test's `findBy*` resolves there too, through its MutationObserver). The Undo
+    // still undoes the commit instead of calling it stale or ignoring it as busy.
+    it("a commit toast's Undo works as soon as the toast is on screen (#769)", async () => {
+      const undo = vi.fn(async () => ({ kind: "Done" as const, label: "Commit “feat: x”" }));
+      const { client } = committingClient({ undo });
+      render(<App client={client} />);
+      let clicked = false;
+      const observer = new MutationObserver(() => {
+        const notifications = screen.queryByRole("status", { name: "Notifications" });
+        const button = notifications && within(notifications).queryByRole("button", { name: "Undo" });
+        if (clicked || !button) return;
+        clicked = true;
+        fireEvent.click(button);
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+      try {
+        const box = await screen.findByRole("textbox", { name: "Commit message" });
+        fireEvent.change(box, { target: { value: "feat: x" } });
+        const commitButton = await screen.findByRole("button", { name: /^Commit 1 file/ });
+        await waitFor(() => expect(commitButton).toBeEnabled());
+        fireEvent.click(commitButton);
+        await waitFor(() => expect(clicked).toBe(true));
+      } finally {
+        observer.disconnect();
+      }
+      const notifications = screen.getByRole("status", { name: "Notifications" });
+      expect(await within(notifications).findByText("Undid Commit “feat: x”")).toBeInTheDocument();
+      expect(undo).toHaveBeenCalledWith("/repos/a");
+      expect(within(notifications).queryByText(STALE_UNDO_MESSAGE)).toBeNull();
+    });
+
     it("a toast's Undo does nothing once a newer step was recorded, and says so (#662)", async () => {
       const undo = vi.fn(async () => ({ kind: "Done" as const, label: "Stage b.txt" }));
       const { client, setUndoState } = committingClient({ undo });

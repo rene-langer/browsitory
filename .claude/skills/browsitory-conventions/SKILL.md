@@ -36,6 +36,13 @@ win; fix this skill to match.
    treat one as current without checking the code. (`docs/tasks/` and `docs/TASK_TEMPLATE.md`
    are the retired Phase 1/6 process.)
 
+5. **Tests first, never weakened.** Tests go in their own commit before the code, with the
+   red run's real output quoted. Never change an expected value, drop or loosen an assertion,
+   or skip a test to get green; when the code behaves differently than a planned test expects,
+   stop and report to the orchestrator (or the owner), who decides. A deliberate test change is
+   its own `Test change:` commit, explained in the PR. CI's `removed-assertions` comment lists
+   removed or rewritten assertions; answer it in the PR. See AGENTS.md's "Task workflow".
+
 ## When in doubt
 
 Read `AGENTS.md` and `docs/ARCHITECTURE.md` directly — they're authoritative. This skill only
