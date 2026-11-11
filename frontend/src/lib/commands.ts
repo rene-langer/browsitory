@@ -615,7 +615,7 @@ function operationCommands({ appState, state }: FamilyContext): Command[] {
       run: () => void appState.abortMerge(),
     });
   }
-  add({ id: "refresh", label: "Refresh", keywords: ["refresh", "reload"], run: () => void appState.refresh() });
+  add({ id: "refresh", label: "Refresh", keywords: ["refresh", "reload"], run: () => void appState.refresh({ full: true }) });
   return commands;
 }
 

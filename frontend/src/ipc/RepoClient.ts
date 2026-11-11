@@ -369,6 +369,12 @@ export interface SequenceAbort {
 }
 /** Which side's whole file to keep: "Ours" = HEAD (stage 2), "Theirs" = the incoming commit. */
 export type ConflictSide = "Ours" | "Theirs";
+/** `getChangeStamp`'s two parts (#650, #685). */
+export interface ChangeStamp {
+  refs: string;
+  workTree: string;
+}
+
 export interface UndoState {
   undo: string | null;
   redo: string | null;
@@ -1095,9 +1101,12 @@ export interface RepoClient {
    * A fingerprint of everything the app shows of the repository (#650): the work tree as
    * `getStatus` sees it, the index, HEAD, references, stashes, configuration and an operation in
    * progress; ignored files and git's own bookkeeping don't count. Equal stamps mean nothing
-   * changed in between. Only compare stamps of one session: the format isn't stable.
+   * changed in between. Only compare stamps of one session: the format isn't stable. Two parts
+   * (#685): `refs` (HEAD, references, stashes, configuration, an operation in progress, linked
+   * worktrees) and `workTree` (the index and the work tree), so a refresh can tell whether the
+   * history, branches and tags need reading again.
    */
-  getChangeStamp(repoPath: string): Promise<string>;
+  getChangeStamp(repoPath: string): Promise<ChangeStamp>;
   /**
    * The commits of `selection.local` plus those of `selection.remote`. Exactly one branch in
    * total, or `selection.firstParent`, walks first parents only; its merge rows then carry

@@ -3587,3 +3587,25 @@ fn a_merge_finished_in_a_second_sidecar_is_one_undo_entry() {
     let repo = git2::Repository::open(dir.path()).unwrap();
     assert_eq!(repo.head().unwrap().target().unwrap(), main_tip);
 }
+
+/// `get_change_stamp` answers both parts (#685): editing a file changes `workTree` only.
+#[test]
+fn get_change_stamp_reports_its_two_parts() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "first commit");
+    drop(repo);
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+    let params = serde_json::json!({"repoPath": repo_path});
+
+    let clean = sidecar.call(2, "get_change_stamp", params.clone());
+    assert!(clean["result"]["refs"].is_string(), "{clean}");
+    assert!(clean["result"]["workTree"].is_string(), "{clean}");
+
+    write_file(dir.path(), "file.txt", "v2, longer");
+    let edited = sidecar.call(3, "get_change_stamp", params);
+    assert_eq!(edited["result"]["refs"], clean["result"]["refs"]);
+    assert_ne!(edited["result"]["workTree"], clean["result"]["workTree"]);
+}

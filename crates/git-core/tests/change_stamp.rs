@@ -7,9 +7,9 @@ use std::path::Path;
 
 use common::{commit_all, init_repo, write_file};
 use git2::{Repository, Signature};
-use git_core::change_stamp::change_stamp;
+use git_core::change_stamp::{change_stamp, ChangeStamp};
 
-fn stamp(repo: &Repository) -> String {
+fn stamp(repo: &Repository) -> ChangeStamp {
     change_stamp(repo).expect("stamp")
 }
 
@@ -273,4 +273,42 @@ fn a_bare_repository_has_a_stamp_that_follows_its_references() {
     repo.commit(Some("HEAD"), &signature, &signature, "first", &tree, &[])
         .unwrap();
     assert_ne!(stamp(&repo), before);
+}
+
+// #685: a refresh keeps the history it has while the `refs` part is unchanged.
+#[test]
+fn editing_and_staging_change_only_the_work_tree_part() {
+    let (dir, repo) = committed_repo();
+    let clean = stamp(&repo);
+    write_file(dir.path(), "a.txt", "one\ntwo\n");
+    let edited = stamp(&repo);
+    assert_eq!(edited.refs, clean.refs);
+    assert_ne!(edited.work_tree, clean.work_tree);
+    stage(&repo, "a.txt");
+    let staged = stamp(&repo);
+    assert_eq!(staged.refs, clean.refs);
+    assert_ne!(staged.work_tree, edited.work_tree);
+}
+
+#[test]
+fn a_new_branch_changes_only_the_refs_part() {
+    let (_dir, repo) = committed_repo();
+    let clean = stamp(&repo);
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("feature", &head, false).unwrap();
+    let branched = stamp(&repo);
+    assert_ne!(branched.refs, clean.refs);
+    assert_eq!(branched.work_tree, clean.work_tree);
+}
+
+#[test]
+fn committing_changes_both_parts() {
+    let (dir, repo) = committed_repo();
+    write_file(dir.path(), "a.txt", "one\ntwo\n");
+    stage(&repo, "a.txt");
+    let staged = stamp(&repo);
+    commit_all(&repo, "second");
+    let committed = stamp(&repo);
+    assert_ne!(committed.refs, staged.refs);
+    assert_ne!(committed.work_tree, staged.work_tree);
 }

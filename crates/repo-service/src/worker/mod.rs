@@ -111,7 +111,7 @@ pub(crate) enum Command {
     },
     /// `git_core::change_stamp` (#650): the frontend's check for changes made outside the app.
     GetChangeStamp {
-        reply: Sender<Result<String, ErrorDto>>,
+        reply: Sender<Result<git_core::change_stamp::ChangeStamp, ErrorDto>>,
     },
     GetCommitGraph {
         limit: usize,

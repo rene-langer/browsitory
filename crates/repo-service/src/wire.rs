@@ -1297,6 +1297,25 @@ impl From<git_core::pick::PickOutcome> for PickOutcomeDto {
     }
 }
 
+/// A repository's change stamp (#650) in its two parts (#685); see `git_core::change_stamp`.
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "ChangeStamp"))]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeStampDto {
+    pub refs: String,
+    pub work_tree: String,
+}
+
+impl From<git_core::change_stamp::ChangeStamp> for ChangeStampDto {
+    fn from(stamp: git_core::change_stamp::ChangeStamp) -> Self {
+        Self {
+            refs: stamp.refs,
+            work_tree: stamp.work_tree,
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[cfg_attr(any(test, feature = "ts"), ts(rename = "UndoState"))]
@@ -3110,6 +3129,7 @@ mod ts_bindings {
             HookProgressPhaseDto,
             PickOutcomeDto,
             UndoStateDto,
+            ChangeStampDto,
             SignatureStatusDto,
             SignatureFormatDto,
             CommitSignatureDto,

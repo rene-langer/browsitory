@@ -872,7 +872,7 @@ export function RepoWorkspace({
           disabledReason: repositoryOperationDisabled ? (operationDisabledReason ?? "Another action is running.") : null,
           onApplyPatch: () => void appState.applyPatchFile(),
         }}
-        onRefresh={() => void appState.refresh()}
+        onRefresh={() => void appState.refresh({ full: true })}
       />
       <SplitView
         storageKey="sidebar-width"

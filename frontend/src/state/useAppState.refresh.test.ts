@@ -567,24 +567,24 @@ describe("useAppState", () => {
     expect(result.current.state.undoState.undo).toBe("Commit “x”");
   });
 
-  it("drops an earlier refresh's results when a later refresh has already landed", async () => {
+  // #222: one refresh runs and one waits; calls made meanwhile share the waiting one, which reads
+  // after the running one ends.
+  it("coalesces refreshes called while one runs into one that reads afterwards", async () => {
     const staged: StatusEntry = { path: "a.txt", oldPath: null, kind: "New", staged: true };
     let status: StatusEntry[] = [];
-    let undo: string | null = null;
+    let statusReads = 0;
     let answerFirst: (() => void) | null = null;
-    let holdNextStatus = true;
     const client = transferClient({
       getStatus: async () => {
+        statusReads += 1;
         const snapshot = status;
-        if (holdNextStatus) {
-          holdNextStatus = false;
+        if (statusReads === 1) {
           await new Promise<void>((resolve) => {
             answerFirst = resolve;
           });
         }
         return snapshot;
       },
-      getUndoState: async () => ({ undo, redo: null }),
     });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
 
@@ -592,22 +592,29 @@ describe("useAppState", () => {
     act(() => {
       first = result.current.refresh();
     });
-    // Let the first refresh send its reads: they see the repository before the change.
     await act(async () => {
       while (answerFirst === null) await Promise.resolve();
     });
     status = [staged];
-    undo = "Stage a.txt";
-    await act(() => result.current.refresh());
-    expect(result.current.state.status).toEqual([staged]);
+    let second!: Promise<void>;
+    let third!: Promise<void>;
+    act(() => {
+      second = result.current.refresh();
+      third = result.current.refresh();
+    });
+    expect(second).toBe(third);
+    // The waiting refresh doesn't start while the first one runs.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(statusReads).toBe(1);
 
     await act(async () => {
       answerFirst?.();
-      await first;
+      await Promise.all([first, second, third]);
     });
+    expect(statusReads).toBe(2);
     expect(result.current.state.status).toEqual([staged]);
-    expect(result.current.state.undoState.undo).toBe("Stage a.txt");
-    // Superseded or not, every refresh still advances the generation.
     expect(result.current.state.refreshGeneration).toBe(2);
   });
 });

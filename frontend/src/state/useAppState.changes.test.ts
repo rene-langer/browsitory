@@ -8,7 +8,7 @@ import { TEST_REPO_PATH, transferClient } from "./useAppStateTestClient";
 // read.
 function stampedClient(overrides: Partial<RepoClient> = {}) {
   let stamp = "s1";
-  const getChangeStamp = vi.fn(async () => stamp);
+  const getChangeStamp = vi.fn(async () => ({ refs: stamp, workTree: stamp }));
   const getStatus = vi.fn(async () => []);
   const client = transferClient({ getChangeStamp, getStatus, ...overrides });
   return { client, getChangeStamp, getStatus, setStamp: (next: string) => (stamp = next) };
@@ -123,7 +123,7 @@ describe("useAppState checkForChanges", () => {
     const { client, getStatus } = stampedClient({
       getChangeStamp: async () => {
         if (fail) throw new Error("busy");
-        return "s1";
+        return { refs: "s1", workTree: "s1" };
       },
     });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
@@ -158,5 +158,143 @@ describe("useAppState checkForChanges", () => {
       await result.current.checkForChanges();
     });
     expect(getStatus).toHaveBeenCalledTimes(1);
+  });
+});
+
+// #685: the history reads (graph, branches, tags, upstreams) run only when the stamp's `refs`
+// part, the graph selection or the limit changed since they were read.
+describe("useAppState refresh scope", () => {
+  function scopedClient(overrides: Partial<RepoClient> = {}) {
+    const stamp = { refs: "r1", workTree: "w1" };
+    const reads = {
+      getStatus: vi.fn(async () => []),
+      getCommitGraph: vi.fn(async () => []),
+      listBranches: vi.fn(async () => []),
+      listTags: vi.fn(async () => []),
+      getRemoteUpstreams: vi.fn(async () => []),
+    };
+    const client = transferClient({ getChangeStamp: async () => ({ ...stamp }), ...reads, ...overrides });
+    return { client, stamp, reads };
+  }
+  const historyReads = (reads: ReturnType<typeof scopedClient>["reads"]) => [
+    reads.getCommitGraph.mock.calls.length,
+    reads.listBranches.mock.calls.length,
+    reads.listTags.mock.calls.length,
+    reads.getRemoteUpstreams.mock.calls.length,
+  ];
+
+  it("keeps the history when only the work tree part changed", async () => {
+    const { client, stamp, reads } = scopedClient();
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(historyReads(reads)).toEqual([1, 1, 1, 1]);
+
+    stamp.workTree = "w2";
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(reads.getStatus).toHaveBeenCalledTimes(2);
+    expect(historyReads(reads)).toEqual([1, 1, 1, 1]);
+    expect(result.current.state.refreshGeneration).toBe(2);
+  });
+
+  it("reads the history again when the refs part changed", async () => {
+    const { client, stamp, reads } = scopedClient();
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(async () => {
+      await result.current.refresh();
+    });
+    stamp.refs = "r2";
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(historyReads(reads)).toEqual([2, 2, 2, 2]);
+  });
+
+  it("reads the history again for more history, a new selection and the Refresh command", async () => {
+    let local: string[] | null = null;
+    const { client, reads } = scopedClient({ getGraphBranchSelection: async () => local });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(async () => {
+      await result.current.refresh();
+    });
+    await act(async () => {
+      await result.current.loadMoreHistory();
+    });
+    expect(reads.getCommitGraph).toHaveBeenCalledTimes(2);
+    local = ["main"];
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(reads.getCommitGraph).toHaveBeenCalledTimes(3);
+    await act(async () => {
+      await result.current.refresh({ full: true });
+    });
+    expect(historyReads(reads)).toEqual([4, 4, 4, 4]);
+  });
+
+  it("reads everything after a failed refresh and without a stamp", async () => {
+    let failTags = true;
+    let stampFails = false;
+    const { client, stamp, reads } = scopedClient({
+      listTags: vi.fn(async () => {
+        if (failTags) throw new Error("tags failed");
+        return [];
+      }),
+    });
+    const stamped = client.getChangeStamp;
+    client.getChangeStamp = async (path) => {
+      if (stampFails) throw new Error("busy");
+      return stamped(path);
+    };
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(result.current.state.error).not.toBeNull();
+    failTags = false;
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(reads.getCommitGraph).toHaveBeenCalledTimes(2);
+    stampFails = true;
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(reads.getCommitGraph).toHaveBeenCalledTimes(3);
+    expect(stamp.refs).toBe("r1");
+  });
+
+  it("joins a Refresh asked for while a refresh waits", async () => {
+    let answerFirst: (() => void) | null = null;
+    let statusReads = 0;
+    const { client, reads } = scopedClient({
+      getStatus: async () => {
+        statusReads += 1;
+        if (statusReads === 1) await new Promise<void>((resolve) => (answerFirst = resolve));
+        return [];
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    let first!: Promise<void>;
+    act(() => {
+      first = result.current.refresh();
+    });
+    await act(async () => {
+      while (answerFirst === null) await Promise.resolve();
+    });
+    let waiting!: Promise<void>;
+    act(() => {
+      void result.current.refresh();
+      waiting = result.current.refresh({ full: true });
+    });
+    await act(async () => {
+      answerFirst?.();
+      await Promise.all([first, waiting]);
+    });
+    expect(statusReads).toBe(2);
+    expect(reads.getCommitGraph).toHaveBeenCalledTimes(2);
   });
 });

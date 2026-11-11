@@ -211,6 +211,7 @@ PickOutcome/Conflicted {"kind":"Conflicted","files":["a.txt","b.txt"]}
 PickOutcome/HookFailed {"kind":"HookFailed","hook":"prepare-commit-msg","output":"no ticket\n"}
 UndoState/both {"undo":"Commit","redo":"Discard"}
 UndoState/none {"undo":null,"redo":null}
+ChangeStamp/parts {"refs":"0123456789abcdef","workTree":"fedcba9876543210"}
 CommitSignature/status-Unsigned {"status":"unsigned","format":null,"signer":null,"key":null,"detail":null}
 CommitSignature/status-Good {"status":"good","format":null,"signer":null,"key":null,"detail":null}
 CommitSignature/status-GoodUntrusted {"status":"goodUntrusted","format":null,"signer":null,"key":null,"detail":null}
