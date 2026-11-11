@@ -1312,6 +1312,97 @@ fn a_stashed_file_that_replaced_a_folder_keeps_an_ignored_file_or_a_local_edit_i
     }
 }
 
+/// HEAD has the files `d` and `a`; `d` was swapped for the folder holding the untracked `d/x`
+/// and `a` has a staged edit.
+fn swap_with_staged_edit() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "d", "f\n");
+    write_file(dir.path(), "a", "a\n");
+    commit_all(&repo, "base");
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    write_file(dir.path(), "d/x", "x\n");
+    write_file(dir.path(), "a", "staged\n");
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("a")).unwrap();
+    index.write().unwrap();
+    (dir, repo)
+}
+
+#[test]
+fn an_ordered_apply_restores_staged_changes_and_refuses_staged_ones_in_the_index() {
+    // The swap of `d` plus a staged edit to `a`. Pop with "Restore staged changes" restages
+    // `a` (the index tree's merge), as libgit2's apply does; without it `a` comes back
+    // unstaged. Something staged now refuses, as libgit2's apply does.
+    for restore_index in [true, false] {
+        let (dir, mut repo) = swap_with_staged_edit();
+        git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+        assert_eq!(read(dir.path(), "a"), "a\n");
+
+        let outcome = git_core::stash::pop_stash(&mut repo, 0, None, restore_index).unwrap();
+
+        assert_eq!(outcome, StashApplyOutcome::Applied);
+        assert_eq!(read(dir.path(), "a"), "staged\n");
+        assert_eq!(read(dir.path(), "d/x"), "x\n");
+        let status = git(dir.path(), &["status", "--porcelain", "-uall"]);
+        let expected = if restore_index {
+            "M  a\n D d\n?? d/x\n"
+        } else {
+            " M a\n D d\n?? d/x\n"
+        };
+        assert_eq!(String::from_utf8_lossy(&status.stdout), expected);
+    }
+
+    let (dir, mut repo) = folder_replaced_by_file();
+    write_file(dir.path(), "b", "b\n");
+    git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["d".into()])).unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("b")).unwrap();
+    index.write().unwrap();
+
+    let error = git_core::stash::apply_stash(&mut repo, 0, None, false).unwrap_err();
+
+    assert!(matches!(error, StashError::StagedChanges), "{error:?}");
+    assert_eq!(read(dir.path(), "d/f"), "f\n");
+}
+
+#[test]
+fn an_ordered_apply_refuses_staged_changes_that_conflict_with_head() {
+    // "Restore staged changes" with a staged edit HEAD changed since: `IndexConflict`, as
+    // `git stash apply --index` refuses; nothing is written.
+    let (dir, mut repo) = swap_with_staged_edit();
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+    write_file(dir.path(), "a", "committed\n");
+    commit_all(&repo, "change a");
+    let status_before = git_core::status::status(&repo).unwrap();
+
+    let error = git_core::stash::apply_stash(&mut repo, 0, None, true).unwrap_err();
+
+    assert!(matches!(error, StashError::IndexConflict), "{error:?}");
+    assert_eq!(git_core::status::status(&repo).unwrap(), status_before);
+    assert_eq!(read(dir.path(), "d"), "f\n");
+}
+
+#[test]
+fn a_stashed_untracked_file_over_a_folder_committed_later_is_refused_as_a_new_folder() {
+    // The stash didn't delete the folder `d`: it was committed after stashing the untracked
+    // file `d`. That is a folder in the way (`UntrackedOverFolder`), not the swap of #186.
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "a", "a\n");
+    commit_all(&repo, "base");
+    write_file(dir.path(), "d", "untracked\n");
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+    write_file(dir.path(), "d/f", "committed\n");
+    commit_all(&repo, "add d/f");
+
+    let error = git_core::stash::apply_stash(&mut repo, 0, None, false).unwrap_err();
+
+    assert!(
+        matches!(error, StashError::UntrackedOverFolder(ref path) if path == "d"),
+        "{error:?}"
+    );
+    assert_eq!(read(dir.path(), "d/f"), "committed\n");
+}
+
 #[test]
 fn a_stashed_file_that_replaced_a_folder_is_refused_when_head_changed_the_folder() {
     // HEAD edited `d/f` after the stash: the merge keeps it (a modify/delete conflict), so the
