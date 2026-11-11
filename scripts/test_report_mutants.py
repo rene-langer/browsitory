@@ -123,6 +123,11 @@ class ReportMutantsTests(unittest.TestCase):
         self.assertIn(SHA, text)
         self.assertNotIn(DIDNT_RUN, text)
 
+    def test_a_failed_diff_step_is_not_reported_as_nothing_to_mutate(self):
+        text = self.report(outcome="", status="", relevant="")
+        self.assertIn(DIDNT_RUN, text)
+        self.assertNotIn("nothing to mutate", text)
+
     def test_the_comment_has_the_marker_and_the_summary_does_not(self):
         self.results(caught=["a"])
         comment = self.report(outcome="success", status="0", comment=True)
