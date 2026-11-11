@@ -9,3 +9,5 @@
   button ignores (#790).
 - Internal: the history rewrite spec reports the history when its wait gives up, not when it
   started (#783).
+- Internal: WebDriver's own clicks reach the whole 1200×800 E2E window, its bottom edge
+  included; the bottom-edge failures seen on #749 no longer reproduce on main (#751).
