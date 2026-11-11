@@ -2925,3 +2925,21 @@ fn no_ff_still_refuses_a_dirty_worktree_first() {
         Err(RemoteError::DirtyWorktree)
     ));
 }
+
+#[test]
+fn an_unreadable_pull_ff_value_fails_the_pull_instead_of_fast_forwarding() {
+    // libgit2 can't return a value that isn't UTF-8: the pull says so and changes nothing,
+    // rather than guessing and fast-forwarding past a no-ff setting.
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit("remote change");
+    let head_before = fixture.local.head().unwrap().target();
+    let config_path = fixture.local.path().join("config");
+    let mut config = std::fs::read(&config_path).unwrap();
+    config.extend_from_slice(b"[pull]\n\tff = \xff\n");
+    std::fs::write(&config_path, config).unwrap();
+
+    let result = pull_after_fetch(&fixture.local, "origin", "main");
+
+    assert!(matches!(result, Err(RemoteError::Git(_))), "{result:?}");
+    assert_eq!(fixture.local.head().unwrap().target(), head_before);
+}

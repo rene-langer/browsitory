@@ -179,3 +179,19 @@ fn stage_paths_leaves_no_index_file_when_there_was_none_and_a_path_fails() {
     assert!(!repo.path().join("index").exists());
     assert!(staged(&repo).is_empty());
 }
+
+#[test]
+fn stage_paths_failing_before_any_index_write_reports_that_failure_alone() {
+    // Nothing wrote an index file: putting "no index file" back is no failure of its own.
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "folder/inner.txt", "i\n");
+    let single = git_core::stage::stage_file(&repo, "folder")
+        .unwrap_err()
+        .to_string();
+    assert!(!repo.path().join("index").exists());
+
+    let error = stage_paths(&repo, &["folder".into()]).unwrap_err();
+
+    assert_eq!(error.to_string(), single);
+    assert!(!repo.path().join("index").exists());
+}
