@@ -56,38 +56,12 @@ pub(crate) fn build(
     selected: &[u32],
     direction: Direction,
 ) -> Result<Vec<u8>, LinePatchError> {
-    let selected: BTreeSet<usize> = selected.iter().map(|&i| i as usize).collect();
-    if selected.is_empty() {
-        return Err(LinePatchError::Empty);
-    }
-    for &i in &selected {
-        let line = lines.get(i).ok_or(LinePatchError::OutOfRange)?;
-        if line.origin != '+' && line.origin != '-' {
-            return Err(LinePatchError::ContextSelected);
-        }
-    }
-
+    let selected = checked_selection(lines, selected)?;
     let body = match direction {
         Direction::Forward => forward_body(lines, &selected),
         Direction::Reverse => reverse_body(lines, &selected),
     };
-
-    // A line lacking its trailing newline must end its side: nothing on the same side may
-    // follow it (old side = ' ' and '-', new side = ' ' and '+'). libgit2's parser is also
-    // stricter than that for the new side: after a no-EOL ' ' or '+' line *nothing* may follow,
-    // while a no-EOL '-' line may only be followed by '+' lines (git's canonical order).
-    for (i, (origin, content)) in body.iter().enumerate() {
-        if content.ends_with(b"\n") {
-            continue;
-        }
-        let anything_disallowed_later = body[i + 1..].iter().any(|(o, _)| match origin {
-            '-' => *o != '+',
-            _ => true,
-        });
-        if anything_disallowed_later {
-            return Err(LinePatchError::NotApplicable);
-        }
-    }
+    check_missing_newlines(&body)?;
 
     let old_count = body.iter().filter(|(o, _)| *o != '+').count() as u32;
     let new_count = body.iter().filter(|(o, _)| *o != '-').count() as u32;
@@ -109,6 +83,62 @@ pub(crate) fn build(
     };
     let new_start = position + 1;
 
+    let mut out = file_header(file, direction, new_count);
+    out.extend_from_slice(
+        format!("@@ -{old_start},{old_count} +{new_start},{new_count} @@\n").as_bytes(),
+    );
+    for (origin, content) in body {
+        out.push(origin as u8);
+        out.extend_from_slice(content);
+        if !content.ends_with(b"\n") {
+            out.extend_from_slice(b"\n\\ No newline at end of file\n");
+        }
+    }
+    Ok(out)
+}
+
+/// The selected line indexes, checked to be non-empty and to name only `+` and `-` lines.
+fn checked_selection(
+    lines: &[PatchLine],
+    selected: &[u32],
+) -> Result<BTreeSet<usize>, LinePatchError> {
+    let selected: BTreeSet<usize> = selected.iter().map(|&i| i as usize).collect();
+    if selected.is_empty() {
+        return Err(LinePatchError::Empty);
+    }
+    for &i in &selected {
+        let line = lines.get(i).ok_or(LinePatchError::OutOfRange)?;
+        if line.origin != '+' && line.origin != '-' {
+            return Err(LinePatchError::ContextSelected);
+        }
+    }
+    Ok(selected)
+}
+
+/// A line lacking its trailing newline must end its side: nothing on the same side may follow
+/// it (old side = ' ' and '-', new side = ' ' and '+'). libgit2's parser is also stricter than
+/// that for the new side: after a no-EOL ' ' or '+' line *nothing* may follow, while a no-EOL
+/// '-' line may only be followed by '+' lines (git's canonical order).
+fn check_missing_newlines(body: &[(char, &[u8])]) -> Result<(), LinePatchError> {
+    for (i, (origin, content)) in body.iter().enumerate() {
+        if content.ends_with(b"\n") {
+            continue;
+        }
+        let anything_disallowed_later = body[i + 1..].iter().any(|(o, _)| match origin {
+            '-' => *o != '+',
+            _ => true,
+        });
+        if anything_disallowed_later {
+            return Err(LinePatchError::NotApplicable);
+        }
+    }
+    Ok(())
+}
+
+/// The patch's file header, from `diff --git` to `+++`: a created file, a deleted file (only
+/// when the postimage keeps no line, `new_count == 0`, and the caller allows it) or a changed
+/// one.
+fn file_header(file: &FileRef, direction: Direction, new_count: u32) -> Vec<u8> {
     // The patch's preimage is the forward old side (Forward) or the forward new side (Reverse).
     // When that side doesn't exist yet the patch creates the file.
     let (preimage_absent, postimage_absent) = match direction {
@@ -149,17 +179,7 @@ pub(crate) fn build(
     } else {
         out.extend_from_slice(format!("+++ b/{p}\n").as_bytes());
     }
-    out.extend_from_slice(
-        format!("@@ -{old_start},{old_count} +{new_start},{new_count} @@\n").as_bytes(),
-    );
-    for (origin, content) in body {
-        out.push(origin as u8);
-        out.extend_from_slice(content);
-        if !content.ends_with(b"\n") {
-            out.extend_from_slice(b"\n\\ No newline at end of file\n");
-        }
-    }
-    Ok(out)
+    out
 }
 
 /// Stage: selected `+` kept, unselected `+` dropped, selected `-` kept, unselected `-` → context.
