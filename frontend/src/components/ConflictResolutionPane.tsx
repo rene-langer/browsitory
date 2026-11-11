@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { errorKind, type ConflictSegment, type ConflictSide, type FileConflictChoice, type RepoClient } from "../ipc/RepoClient";
 import { conflictSideNames, type ConflictSideNames } from "../lib/conflictSides";
 import {
@@ -9,18 +9,46 @@ import {
   type BlockState,
   type ConflictBlock,
 } from "../lib/conflictMerge";
+import { useConflictTokens } from "../lib/conflictHighlight";
+import type { Token } from "../lib/highlight";
+import {
+  matchMergeEditorShortcut,
+  mergeEditorAriaKeyShortcuts,
+  mergeEditorShortcutLabel,
+  type MergeEditorShortcutId,
+} from "../lib/keybindings";
+import { languageForPath } from "../lib/languageForPath";
+import { logFailure } from "../lib/logger";
+import { useRegisterMergeEditor } from "../state/useCurrentMergeEditor";
+import { useDiffSettingsContext } from "../state/useDiffSettings";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { Panel } from "./primitives/Panel";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./ConflictResolutionPane.module.css";
 
-const CHOICES: { choice: BlockChoice; label: string; title: string }[] = [
-  { choice: "ours", label: "Accept ours", title: "Take our lines for this block." },
-  { choice: "theirs", label: "Accept theirs", title: "Take their lines for this block." },
-  { choice: "oursThenTheirs", label: "Ours then theirs", title: "Keep both: our lines first." },
-  { choice: "theirsThenOurs", label: "Theirs then ours", title: "Keep both: their lines first." },
-  { choice: "base", label: "Accept base", title: "Go back to the common ancestor's lines." },
+// Each choice's key (#764) is its shortcut's: 1 … 5 while the block has the focus.
+const CHOICES: { choice: BlockChoice; label: string; title: string; shortcut: MergeEditorShortcutId }[] = [
+  { choice: "ours", label: "Accept ours", title: "Take our lines for this block.", shortcut: "conflict-ours" },
+  { choice: "theirs", label: "Accept theirs", title: "Take their lines for this block.", shortcut: "conflict-theirs" },
+  {
+    choice: "oursThenTheirs",
+    label: "Ours then theirs",
+    title: "Keep both: our lines first.",
+    shortcut: "conflict-ours-then-theirs",
+  },
+  {
+    choice: "theirsThenOurs",
+    label: "Theirs then ours",
+    title: "Keep both: their lines first.",
+    shortcut: "conflict-theirs-then-ours",
+  },
+  { choice: "base", label: "Accept base", title: "Go back to the common ancestor's lines.", shortcut: "conflict-base" },
 ];
+
+/** A text field types the digits itself; the choices' keys leave it alone (#764). */
+function inTextField(target: EventTarget): boolean {
+  return target instanceof HTMLElement && target.closest("textarea, input, select, [contenteditable='true']") !== null;
+}
 
 const STATE_LABELS: Record<BlockChoice, string> = {
   ours: "Ours",
@@ -53,6 +81,33 @@ function lineCount(text: string): number {
 }
 
 const NO_NAMES: ConflictSideNames = { ours: null, theirs: null };
+
+function logHighlightError(error: unknown): void {
+  logFailure("Syntax highlighting failed", error);
+}
+
+/** `text` as it is, its lines coloured with `tokens` when given (#763). */
+function Code({ text, tokens }: { text: string; tokens: readonly Token[][] | undefined }) {
+  if (tokens === undefined) return <>{text}</>;
+  return (
+    <>
+      {text.split(/(?<=\n)/).map((line, i) => {
+        const lineTokens = tokens[i];
+        if (lineTokens === undefined) return <Fragment key={i}>{line}</Fragment>;
+        return (
+          <Fragment key={i}>
+            {lineTokens.map((token, j) => (
+              <span key={j} style={token.color !== undefined ? { color: token.color } : undefined}>
+                {token.content}
+              </span>
+            ))}
+            {/\r?\n$/.exec(line)?.[0] ?? ""}
+          </Fragment>
+        );
+      })}
+    </>
+  );
+}
 
 /** Whole-result editing (#720): the assembled file as one text, and that text as it started. */
 interface WholeEdit {
@@ -150,6 +205,47 @@ export function ConflictResolutionPane({
     };
   }, [repoPath, client]);
 
+  const setStateAt = (index: number, state: BlockState) => {
+    setStates((prev) => prev.map((s, i) => (i === index ? state : s)));
+  };
+
+  const conflictIndices = segments.flatMap((segment, index) => (segment.kind === "Conflict" ? [index] : []));
+
+  const goToConflict = (position: number) => {
+    setCurrentConflict(position);
+    const block = blockRefs.current[conflictIndices[position]];
+    block?.focus();
+    block?.scrollIntoView?.({ block: "nearest" });
+  };
+  const goToPrevious = () => {
+    if (currentConflict > 0) goToConflict(currentConflict - 1);
+  };
+  const goToNext = () => {
+    if (currentConflict < conflictIndices.length - 1) goToConflict(currentConflict + 1);
+  };
+
+  // The palette's merge editor commands (#764) act on the current conflict.
+  const blocksShown = loaded && error === null && wholeEdit === null && conflictIndices.length > 0;
+  useRegisterMergeEditor(
+    blocksShown
+      ? { path, canGoPrevious: currentConflict > 0, canGoNext: currentConflict < conflictIndices.length - 1 }
+      : null,
+    {
+      previous: goToPrevious,
+      next: goToNext,
+      choose: (choice) => {
+        if (conflictIndices.length === 0) return;
+        const position = currentConflict >= 0 ? currentConflict : 0;
+        setStateAt(conflictIndices[position], { kind: "chosen", choice });
+        goToConflict(position);
+      },
+    },
+  );
+
+  // The read-only parts are highlighted like the diff viewer (#763); the results stay plain.
+  const { settings } = useDiffSettingsContext();
+  const tokens = useConflictTokens(segments, languageForPath(path), settings.syntaxHighlight, logHighlightError);
+
   // "Ours" is stage 2 (HEAD); "theirs" stage 3, the commit being applied. During a rebase that
   // makes "ours" the branch being rebased onto, which is why the titles name what they replace.
   const header =
@@ -210,21 +306,9 @@ export function ConflictResolutionPane({
     );
   }
 
-  const setStateAt = (index: number, state: BlockState) => {
-    setStates((prev) => prev.map((s, i) => (i === index ? state : s)));
-  };
-
-  const conflictIndices = segments.flatMap((segment, index) => (segment.kind === "Conflict" ? [index] : []));
   const stateAt = (index: number): BlockState => states[index] ?? { kind: "unchosen" };
   const resolvedCount = conflictIndices.filter((index) => stateAt(index).kind !== "unchosen").length;
   const allResolved = resolvedCount === conflictIndices.length;
-
-  const goToConflict = (position: number) => {
-    setCurrentConflict(position);
-    const block = blockRefs.current[conflictIndices[position]];
-    block?.focus();
-    block?.scrollIntoView?.({ block: "nearest" });
-  };
 
   const startWholeEdit = () => {
     const text = assembleResult(segments, states);
@@ -293,20 +377,29 @@ export function ConflictResolutionPane({
     const head = index > 0 ? CONTEXT_LINES : 0;
     const tail = index < segments.length - 1 ? CONTEXT_LINES : 0;
     const hidden = lines.length - head - tail;
+    const cleanTokens = tokens?.ours[index];
     if (expanded.has(index) || hidden <= 2) {
       return (
         <pre key={index} className={styles.segment}>
-          {content}
+          <Code text={content} tokens={cleanTokens} />
         </pre>
       );
     }
     return (
       <div key={index}>
-        {head > 0 && <pre className={styles.segment}>{lines.slice(0, head).join("")}</pre>}
+        {head > 0 && (
+          <pre className={styles.segment}>
+            <Code text={lines.slice(0, head).join("")} tokens={cleanTokens?.slice(0, head)} />
+          </pre>
+        )}
         <button className={styles.expand} onClick={() => setExpanded((prev) => new Set(prev).add(index))}>
           Show {hidden} unchanged lines
         </button>
-        {tail > 0 && <pre className={styles.segment}>{lines.slice(lines.length - tail).join("")}</pre>}
+        {tail > 0 && (
+          <pre className={styles.segment}>
+            <Code text={lines.slice(lines.length - tail).join("")} tokens={cleanTokens?.slice(lines.length - tail)} />
+          </pre>
+        )}
       </div>
     );
   };
@@ -329,6 +422,21 @@ export function ConflictResolutionPane({
         aria-label={title}
         className={styles.block}
         onFocus={() => setCurrentConflict(position)}
+        onKeyDown={(event) => {
+          if (inTextField(event.target)) {
+            // Esc leaves the result field for its block, where the choices' keys work (#764).
+            if (event.key === "Escape" && event.target instanceof HTMLTextAreaElement) {
+              event.preventDefault();
+              event.stopPropagation();
+              event.currentTarget.focus();
+            }
+            return;
+          }
+          const option = CHOICES.find((candidate) => candidate.shortcut === matchMergeEditorShortcut(event)?.id);
+          if (option === undefined) return;
+          event.preventDefault();
+          setStateAt(index, { kind: "chosen", choice: option.choice });
+        }}
       >
         <h4 className={styles.blockTitle}>
           {title}
@@ -338,18 +446,22 @@ export function ConflictResolutionPane({
           <div className={`${styles.side} ${choice === "base" ? styles.chosen : ""}`}>
             <div className={styles.sideLabel}>Base</div>
             <pre className={`${styles.segment} ${segment.base === "" ? styles.placeholder : ""}`}>
-              {segment.base === "" ? "Empty: no common lines" : segment.base}
+              {segment.base === "" ? "Empty: no common lines" : <Code text={segment.base} tokens={tokens?.base[index]} />}
             </pre>
           </div>
         )}
         <div className={styles.sides}>
           <div className={`${styles.side} ${choice === "ours" || bothChosen ? styles.chosen : ""}`}>
             <div className={styles.sideLabel}>{sideLabel("Ours", names.ours)}</div>
-            <pre className={styles.segment}>{segment.ours}</pre>
+            <pre className={styles.segment}>
+              <Code text={segment.ours} tokens={tokens?.ours[index]} />
+            </pre>
           </div>
           <div className={`${styles.side} ${choice === "theirs" || bothChosen ? styles.chosen : ""}`}>
             <div className={styles.sideLabel}>{sideLabel("Theirs", names.theirs)}</div>
-            <pre className={styles.segment}>{segment.theirs}</pre>
+            <pre className={styles.segment}>
+              <Code text={segment.theirs} tokens={tokens?.theirs[index]} />
+            </pre>
           </div>
         </div>
         <Toolbar aria-label={`${title}: choice`}>
@@ -357,7 +469,8 @@ export function ConflictResolutionPane({
             <button
               key={option.choice}
               aria-pressed={choice === option.choice}
-              title={option.title}
+              aria-keyshortcuts={mergeEditorAriaKeyShortcuts(option.shortcut)}
+              title={`${option.title} (${mergeEditorShortcutLabel(option.shortcut)})`}
               onClick={() => setStateAt(index, { kind: "chosen", choice: option.choice })}
             >
               {option.label}
@@ -388,32 +501,50 @@ export function ConflictResolutionPane({
     );
   };
 
+  // F7 / Shift+F7 (#764) from anywhere in the blocks, the result fields too (they type no F7).
+  const onEditorKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const id = matchMergeEditorShortcut(event)?.id;
+    if (id !== "next-conflict" && id !== "previous-conflict") return;
+    event.preventDefault();
+    if (id === "next-conflict") goToNext();
+    else goToPrevious();
+  };
+
   return (
     <Panel title="Resolve conflict">
       {header}
-      {conflictIndices.length > 0 && (
-        <Toolbar aria-label="Conflicts">
-          <span role="status">
-            {resolvedCount} of {conflictIndices.length} resolved
-          </span>
-          <button disabled={currentConflict <= 0} onClick={() => goToConflict(currentConflict - 1)}>
-            Previous conflict
-          </button>
-          <button
-            disabled={currentConflict >= conflictIndices.length - 1}
-            onClick={() => goToConflict(currentConflict + 1)}
-          >
-            Next conflict
-          </button>
-          <button aria-pressed={showBase} onClick={() => setShowBase(!showBase)}>
-            Show base
-          </button>
-          <button onClick={startWholeEdit}>Edit whole result</button>
-        </Toolbar>
-      )}
-      {segments.map((segment, index) =>
-        segment.kind === "Clean" ? renderClean(segment.content, index) : renderBlock(segment, index),
-      )}
+      <div onKeyDown={onEditorKeyDown}>
+        {conflictIndices.length > 0 && (
+          <Toolbar aria-label="Conflicts">
+            <span role="status">
+              {resolvedCount} of {conflictIndices.length} resolved
+            </span>
+            <button
+              disabled={currentConflict <= 0}
+              aria-keyshortcuts={mergeEditorAriaKeyShortcuts("previous-conflict")}
+              title={`Previous conflict (${mergeEditorShortcutLabel("previous-conflict")})`}
+              onClick={goToPrevious}
+            >
+              Previous conflict
+            </button>
+            <button
+              disabled={currentConflict >= conflictIndices.length - 1}
+              aria-keyshortcuts={mergeEditorAriaKeyShortcuts("next-conflict")}
+              title={`Next conflict (${mergeEditorShortcutLabel("next-conflict")})`}
+              onClick={goToNext}
+            >
+              Next conflict
+            </button>
+            <button aria-pressed={showBase} onClick={() => setShowBase(!showBase)}>
+              Show base
+            </button>
+            <button onClick={startWholeEdit}>Edit whole result</button>
+          </Toolbar>
+        )}
+        {segments.map((segment, index) =>
+          segment.kind === "Clean" ? renderClean(segment.content, index) : renderBlock(segment, index),
+        )}
+      </div>
       {loaded && !allResolved && (
         <p className={styles.hint}>Choose or type a result for every conflict to save.</p>
       )}

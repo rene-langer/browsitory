@@ -4,7 +4,6 @@ import type { RemoteDialog } from "../state/workspaceDialog";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { EditRemoteDialog } from "./EditRemoteDialog";
 import { RemoteCredentialsDialog } from "./RemoteCredentialsDialog";
-import formStyles from "./primitives/FormDialog.module.css";
 
 /**
  * The remote folder menu's dialogs (Edit / Credentials / Remove), driven by `AppState.dialog` (kind
@@ -100,12 +99,11 @@ export function RemoteDialogs({
             ) : (
               <p>Remove remote {remote.name}?</p>
             )}
-            {blockedReason !== null && <p className={formStyles.blocked}>{blockedReason}</p>}
           </>
         }
         confirmLabel="Confirm remove"
         confirmDisabled={blocked}
-        confirmTitle={blockedReason ?? undefined}
+        confirmReason={blockedReason}
         onConfirm={() => {
           if (blocked) return;
           ownMutation.current = dialog;

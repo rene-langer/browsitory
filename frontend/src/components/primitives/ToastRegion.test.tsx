@@ -34,6 +34,34 @@ describe("ToastRegion", () => {
     expect(onDismiss).toHaveBeenCalledWith(1);
   });
 
+  it("renders two actions in order; each runs only itself and dismisses the toast (#733)", () => {
+    const push = vi.fn();
+    const undo = vi.fn();
+    const onDismiss = vi.fn();
+    render(
+      <ToastRegion
+        toasts={[
+          toast({
+            id: 3,
+            message: "Committed abcdef1 to main",
+            actions: [
+              { label: "Push", run: push },
+              { label: "Undo", run: undo },
+            ],
+          }),
+        ]}
+        onDismiss={onDismiss}
+        onPauseChange={vi.fn()}
+      />,
+    );
+    const buttons = screen.getAllByRole("button").map((button) => button.textContent || button.getAttribute("aria-label"));
+    expect(buttons).toEqual(["Push", "Undo", "Dismiss notification"]);
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(undo).toHaveBeenCalledOnce();
+    expect(push).not.toHaveBeenCalled();
+    expect(onDismiss).toHaveBeenCalledWith(3);
+  });
+
   it("marks each toast with its tone, and says so in words for warnings and errors", () => {
     render(
       <ToastRegion

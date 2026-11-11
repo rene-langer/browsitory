@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ResetDialog } from "./ResetDialog";
+import { describedByText } from "../test/describedBy";
 
 describe("ResetDialog", () => {
   it("defaults to mixed and resets with the chosen mode", () => {
@@ -44,6 +45,7 @@ describe("ResetDialog", () => {
     const reset = screen.getByRole("button", { name: "Reset" });
     expect(reset).toBeDisabled();
     expect(reset).toHaveAttribute("title", "A rebase started in a terminal is in progress.");
+    expect(describedByText(reset)).toBe("A rebase started in a terminal is in progress.");
     expect(screen.getByText("A rebase started in a terminal is in progress.")).toBeInTheDocument();
     fireEvent.submit(reset.closest("form")!);
     expect(onReset).not.toHaveBeenCalled();

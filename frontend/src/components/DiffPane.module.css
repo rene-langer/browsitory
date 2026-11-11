@@ -4,8 +4,11 @@
   padding: 0;
 }
 
+/* Title, badge and buttons never break inside: in a narrow pane whole buttons move to a second
+   line instead (#752). */
 .groupHeading {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   padding: var(--space-2) var(--space-3) var(--space-1);
@@ -19,6 +22,10 @@
 
 .groupHeading > span:first-child {
   flex: 1 1 auto;
+}
+
+.groupHeading > * {
+  white-space: nowrap;
 }
 
 .groupHeading button {

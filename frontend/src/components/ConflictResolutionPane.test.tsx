@@ -1,8 +1,12 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { RepoError, type ConflictSegment, type RepoClient } from "../ipc/RepoClient";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import { fakeRepoClient } from "../test/fakeRepoClient";
+import { DEFAULT_DIFF_SETTINGS } from "../ipc/generated/wire-constants";
+import { DiffSettingsContext } from "../state/useDiffSettings";
+import { MergeEditorContext, useMergeEditorRegistry, type MergeEditorRegistry } from "../state/useCurrentMergeEditor";
 
 const TEST_REPO_PATH = "/repo";
 
@@ -533,5 +537,182 @@ describe("ConflictResolutionPane merge editor (#720)", () => {
     const block = screen.getByRole("region", { name: "Conflict 1 of 1" });
     // The blocks keep their choices; only the whole-result edits are dropped.
     expect(within(block).getByRole("button", { name: "Accept ours" })).toHaveAttribute("aria-pressed", "true");
+  });
+});
+
+// #763: the read-only parts are highlighted like the diff viewer; the results stay plain fields.
+describe("ConflictResolutionPane syntax highlighting", () => {
+  const tsSegments: ConflictSegment[] = [
+    { kind: "Clean", content: "const one = 1;\n" },
+    { kind: "Conflict", ours: "const ours = 2;\n", base: "const base = 2;\n", theirs: "const theirs = 2;\n" },
+    { kind: "Clean", content: "const three = 3;\n" },
+  ];
+  const highlighted = (element: Element) => element.querySelector('[style*="--shiki-token"]') !== null;
+  const withSettings = (syntaxHighlight: boolean, children: ReactNode) => (
+    <DiffSettingsContext.Provider
+      value={{
+        settings: { ...DEFAULT_DIFF_SETTINGS, syntaxHighlight },
+        update: () => {},
+        error: null,
+        dismissError: () => {},
+      }}
+    >
+      {children}
+    </DiffSettingsContext.Provider>
+  );
+  const pane = (path: string) => (
+    <ConflictResolutionPane
+      repoPath={TEST_REPO_PATH}
+      client={fakeClient({ getConflictHunks: async () => tsSegments })}
+      path={path}
+      onResolve={vi.fn()}
+      onResolveAddDelete={vi.fn()}
+    />
+  );
+
+  it("highlights ours, theirs, base and the unchanged lines, keeping their text", async () => {
+    const { container } = render(withSettings(true, pane("src/a.ts")));
+    const block = await screen.findByRole("region", { name: "Conflict 1 of 1" });
+    fireEvent.click(screen.getByRole("button", { name: "Show base" }));
+    await waitFor(() => expect(highlighted(block)).toBe(true), { timeout: 15000 });
+    const parts = [...container.querySelectorAll("pre")];
+    expect(parts.map((part) => part.textContent)).toEqual([
+      "const one = 1;\n",
+      "const base = 2;\n",
+      "const ours = 2;\n",
+      "const theirs = 2;\n",
+      "const three = 3;\n",
+    ]);
+    for (const part of parts) expect(highlighted(part)).toBe(true);
+    // The editable result is a plain text field.
+    fireEvent.click(within(block).getByRole("button", { name: "Accept ours" }));
+    expect(within(block).getByLabelText("Result")).toHaveValue("const ours = 2;\n");
+  }, 20000);
+
+  it("leaves everything plain when syntax highlighting is off", async () => {
+    const { container } = render(withSettings(false, pane("src/a.ts")));
+    await screen.findByRole("region", { name: "Conflict 1 of 1" });
+    // Give a highlighter that would run a chance to finish.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(highlighted(container)).toBe(false);
+    expect(screen.getByText("const ours = 2;")).toBeInTheDocument();
+  });
+
+  it("leaves a file of an unknown language plain", async () => {
+    const { container } = render(withSettings(true, pane("notes.unknownext")));
+    await screen.findByRole("region", { name: "Conflict 1 of 1" });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(highlighted(container)).toBe(false);
+  });
+});
+
+// #764: keys for a block's choices and for moving between conflicts.
+describe("ConflictResolutionPane keyboard shortcuts", () => {
+  const twoConflicts: ConflictSegment[] = [
+    { kind: "Conflict", ours: "a ours\n", base: "a base\n", theirs: "a theirs\n" },
+    { kind: "Clean", content: "middle\n" },
+    { kind: "Conflict", ours: "b ours\n", base: "b base\n", theirs: "b theirs\n" },
+  ];
+  const renderPane = (children?: (pane: ReactNode) => ReactNode) => {
+    const pane = (
+      <ConflictResolutionPane
+        repoPath={TEST_REPO_PATH}
+        client={fakeClient({ getConflictHunks: async () => twoConflicts })}
+        path="shared.txt"
+        onResolve={vi.fn()}
+        onResolveAddDelete={vi.fn()}
+      />
+    );
+    render(<>{children === undefined ? pane : children(pane)}</>);
+  };
+
+  it("takes a block's choices with 1 … 5 while the block has the focus", async () => {
+    renderPane();
+    const block = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    const keys: [string, string, string][] = [
+      ["1", "Accept ours", "a ours\n"],
+      ["2", "Accept theirs", "a theirs\n"],
+      ["3", "Ours then theirs", "a ours\na theirs\n"],
+      ["4", "Theirs then ours", "a theirs\na ours\n"],
+      ["5", "Accept base", "a base\n"],
+    ];
+    for (const [key, name, result] of keys) {
+      const button = within(block).getByRole("button", { name });
+      expect(button).toHaveAttribute("aria-keyshortcuts", key);
+      button.focus();
+      fireEvent.keyDown(button, { key, code: `Digit${key}` });
+      expect(button).toHaveAttribute("aria-pressed", "true");
+      expect(within(block).getByLabelText("Result")).toHaveValue(result);
+    }
+    // The other block keeps its own choice.
+    expect(within(screen.getByRole("region", { name: "Conflict 2 of 2" })).getByLabelText("Result")).toHaveValue("");
+  });
+
+  it("leaves digits typed in the result field alone, and Esc goes back to the block", async () => {
+    renderPane();
+    const block = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    const result = within(block).getByLabelText("Result");
+    result.focus();
+    fireEvent.keyDown(result, { key: "2", code: "Digit2" });
+    expect(within(block).getByRole("button", { name: "Accept theirs" })).toHaveAttribute("aria-pressed", "false");
+    fireEvent.keyDown(result, { key: "Escape" });
+    expect(block).toHaveFocus();
+    fireEvent.keyDown(block, { key: "2", code: "Digit2" });
+    expect(within(block).getByRole("button", { name: "Accept theirs" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("ignores the digits with a modifier", async () => {
+    renderPane();
+    const block = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    block.focus();
+    fireEvent.keyDown(block, { key: "1", code: "Digit1", ctrlKey: true });
+    fireEvent.keyDown(block, { key: "1", code: "Digit1", altKey: true });
+    expect(within(block).getByRole("button", { name: "Accept ours" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("moves between conflicts with F7 and Shift+F7, also from a result field", async () => {
+    renderPane();
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    const second = screen.getByRole("region", { name: "Conflict 2 of 2" });
+    expect(screen.getByRole("button", { name: "Next conflict" })).toHaveAttribute("aria-keyshortcuts", "F7");
+    expect(screen.getByRole("button", { name: "Previous conflict" })).toHaveAttribute("aria-keyshortcuts", "Shift+F7");
+    const toolbarButton = screen.getByRole("button", { name: "Show base" });
+    toolbarButton.focus();
+    fireEvent.keyDown(toolbarButton, { key: "F7" });
+    expect(first).toHaveFocus();
+    fireEvent.keyDown(first, { key: "F7" });
+    expect(second).toHaveFocus();
+    // At the last conflict F7 stays put.
+    fireEvent.keyDown(second, { key: "F7" });
+    expect(second).toHaveFocus();
+    const result = within(second).getByLabelText("Result");
+    result.focus();
+    fireEvent.keyDown(result, { key: "F7", shiftKey: true });
+    expect(first).toHaveFocus();
+  });
+
+  it("registers with the tab's merge editor registry for the palette", async () => {
+    let registry: MergeEditorRegistry | null = null;
+    function Harness({ children }: { children: ReactNode }) {
+      const value = useMergeEditorRegistry();
+      registry = value;
+      return <MergeEditorContext.Provider value={value}>{children}</MergeEditorContext.Provider>;
+    }
+    renderPane((pane) => <Harness>{pane}</Harness>);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    await waitFor(() => expect(registry?.current).toMatchObject({ path: "shared.txt", canGoPrevious: false, canGoNext: true }));
+
+    // No conflict is current yet: a choice acts on the first one and focuses it.
+    act(() => registry!.current!.choose("theirs"));
+    expect(within(first).getByRole("button", { name: "Accept theirs" })).toHaveAttribute("aria-pressed", "true");
+    expect(first).toHaveFocus();
+    act(() => registry!.current!.next());
+    const second = screen.getByRole("region", { name: "Conflict 2 of 2" });
+    expect(second).toHaveFocus();
+    await waitFor(() => expect(registry?.current).toMatchObject({ canGoPrevious: true, canGoNext: false }));
+    act(() => registry!.current!.choose("base"));
+    expect(within(second).getByLabelText("Result")).toHaveValue("b base\n");
+    act(() => registry!.current!.previous());
+    expect(first).toHaveFocus();
   });
 });

@@ -5,6 +5,7 @@ import { BranchTree } from "./BranchTree";
 import { baseBranches, renderTree, treeProps } from "../test/branchTreeProps";
 import { BranchTreeWithDialogs } from "../test/BranchTreeWithDialogs";
 import type { RemoteDialogs } from "./RemoteDialogs";
+import { describedByText } from "../test/describedBy";
 
 // The tree, its menus, inline rename and the remote dialogs. The forms, the upstream dialog and
 // the lazy remote branch lists have their own test files, like their components (#492).
@@ -155,6 +156,7 @@ describe("BranchTree — local branches", () => {
     const confirm = within(dialog).getByRole("button", { name: "Force delete" });
     expect(confirm).toBeDisabled();
     expect(confirm).toHaveAttribute("title", "A transfer is in progress.");
+    expect(describedByText(confirm)).toBe("A transfer is in progress.");
     fireEvent.click(confirm);
     expect(props.onDeleteBranch).not.toHaveBeenCalledWith("feat/foo", true);
   });
@@ -1012,6 +1014,25 @@ describe("BranchTree — remote list states and upstream block", () => {
     const dialog = await screen.findByRole("dialog", { name: "Clear upstream confirmation", hidden: true });
     fireEvent.click(within(dialog).getByRole("button", { name: "Clear upstream", hidden: true }));
     expect(props.onClearUpstream).toHaveBeenCalledOnce();
+  });
+
+  it("says why Clear upstream can't run while the repository is busy, there and in its confirmation (#748)", async () => {
+    const { props, rerender } = renderTree({ upstream: up });
+    fireEvent.click(screen.getByRole("button", { name: "Clear upstream" }));
+    await screen.findByRole("dialog", { name: "Clear upstream confirmation", hidden: true });
+    rerender(<BranchTreeWithDialogs {...props} operationDisabled operationDisabledReason="A merge is in progress." />);
+    const dialog = screen.getByRole("dialog", { name: "Clear upstream confirmation", hidden: true });
+    const confirm = within(dialog).getByRole("button", { name: "Clear upstream", hidden: true });
+    expect(confirm).toBeDisabled();
+    expect(describedByText(confirm)).toBe("A merge is in progress.");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel", hidden: true }));
+
+    const button = screen.getByRole("button", { name: "Clear upstream" });
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(describedByText(button)).toBe("A merge is in progress.");
+    fireEvent.click(button);
+    expect(screen.queryByRole("dialog", { name: "Clear upstream confirmation", hidden: true })).toBeNull();
+    expect(props.onClearUpstream).not.toHaveBeenCalled();
   });
 });
 

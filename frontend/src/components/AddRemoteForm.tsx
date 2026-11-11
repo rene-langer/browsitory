@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { RemoteInfo } from "../ipc/RepoClient";
 import { remoteNameProblem } from "../lib/refName";
 import { InlineError } from "./primitives/InlineError";
 import styles from "./BranchTree.module.css";
+import { BlockedReason } from "./primitives/BlockedReason";
+import { describedBy } from "../lib/ariaDescribedBy";
 
 /** The name a new remote gets from its fetch URL: `origin` while there is none, else the URL's last segment. */
 function deriveRemoteName(fetchUrl: string, existingNames: string[]): string {
@@ -38,8 +40,10 @@ export function AddRemoteForm({
   const [nameTouched, setNameTouched] = useState(false);
   const [showPushUrl, setShowPushUrl] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+  const reasonId = useId();
 
   if (!open) return null;
+  const busyReason = operationDisabled ? operationDisabledReason : null;
 
   const newRemoteProblem = remoteNameProblem(newRemoteName.trim());
 
@@ -137,10 +141,12 @@ export function AddRemoteForm({
           </label>
         )}
       </details>
+      <BlockedReason id={reasonId} reason={busyReason} />
       <button
         type="submit"
         disabled={operationDisabled || newRemoteProblem !== null}
-        title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
+        title={busyReason ?? undefined}
+        aria-describedby={describedBy(reasonId, busyReason)}
       >
         Add remote
       </button>

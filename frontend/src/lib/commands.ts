@@ -1,6 +1,6 @@
 import { MAX_CONTEXT_LINES, type DiffSettings, type GraphCommit, type PullStrategy } from "../ipc/RepoClient";
 import { historyEditChecks, type HistoryEditCheck, type HistoryEditRequest } from "./historyEdits";
-import type { PaletteAction } from "./actions/action";
+import { UNAVAILABLE_REASON, type PaletteAction } from "./actions/action";
 import { branchActions } from "./actions/branchActions";
 import { commitActions } from "./actions/commitActions";
 import { addRemoteAction, remoteActions } from "./actions/remoteActions";
@@ -8,7 +8,8 @@ import { stashActions, stashBlockers, stashTitle } from "./actions/stashActions"
 import { pruneWorktreesAction, worktreeActions } from "./actions/worktreeActions";
 import { busyReason, operationBlockers, stashBlockReason, type OperationBlockers } from "./operationStatus";
 import { stageAllPaths, stageModifiedPaths, untrackedPaths } from "./stagePaths";
-import type { ShortcutId } from "./keybindings";
+import type { BlockChoice } from "./conflictMerge";
+import { mergeEditorShortcut, mergeEditorShortcutLabel, type MergeEditorShortcutId, type ShortcutId } from "./keybindings";
 import type { AppState, UseAppStateResult } from "../state/useAppState";
 import type { OpenRepo } from "../state/useOpenRepos";
 import { matchItem } from "./fuzzyMatch";
@@ -143,6 +144,11 @@ export interface Command extends PickerItem {
    * `useWorkspaceShortcuts` runs the command when they are pressed. Set by `buildAllCommands`.
    */
   shortcut?: ShortcutId;
+  /**
+   * Keys its pane binds while it has the focus (#764): shown like `shortcut`, but the palette and
+   * `useWorkspaceShortcuts` bind nothing for them.
+   */
+  keys?: string;
 }
 
 /** A second step of the palette: the items to choose from for the typed query (#441). */
@@ -187,6 +193,8 @@ export interface DiffCommands {
   selection?: { staged: boolean; paths: string[] } | null;
   /** Opens the discard confirm dialog for the selected unstaged files; never discards directly. */
   requestDiscardSelection?(): void;
+  /** The open merge editor (#764), what the palette can do in it; absent while none is shown. */
+  mergeEditor?: MergeEditorCommands | null;
   /**
    * The current diff's own toggles (#469): the diff last clicked or focused, or the working tree's
    * current file. Absent while no diff is shown.
@@ -198,6 +206,25 @@ export interface DiffCommands {
     toggleWholeFile(): void;
   } | null;
 }
+
+/** The merge editor's moves and choices (#764), for its current conflict. */
+export interface MergeEditorCommands {
+  path: string;
+  canGoPrevious: boolean;
+  canGoNext: boolean;
+  previous(): void;
+  next(): void;
+  /** Takes `choice` for the current conflict (the first, before one is current) and focuses it. */
+  choose(choice: BlockChoice): void;
+}
+
+const MERGE_EDITOR_CHOICES: [MergeEditorShortcutId, BlockChoice][] = [
+  ["conflict-ours", "ours"],
+  ["conflict-theirs", "theirs"],
+  ["conflict-ours-then-theirs", "oursThenTheirs"],
+  ["conflict-theirs-then-ours", "theirsThenOurs"],
+  ["conflict-base", "base"],
+];
 
 /**
  * The commit menu's Cherry-pick, Revert and Reset for the selected commit (#507): the same action
@@ -310,9 +337,6 @@ function family(group: CommandGroup) {
 function selectedFiles(n: number): string {
   return `${n} selected ${n === 1 ? "file" : "files"}`;
 }
-
-/** What an unavailable command says when its action gives no reason of its own. */
-const UNAVAILABLE_REASON = "Not available right now.";
 
 /** The palette's commands for the current state, each family's from its own builder. */
 export function buildCommands(context: CommandContext): Command[] {
@@ -1161,6 +1185,29 @@ function diffCommands({ appState, state, diff, tools }: FamilyContext): Command[
         label: `Toggle show whole file${of}`,
         keywords: ["diff", "whole", "file", "full", "context", ...fileKeywords],
         run: currentDiff.toggleWholeFile,
+      });
+    }
+  }
+  const mergeEditor = diff.mergeEditor ?? null;
+  if (mergeEditor !== null) {
+    const keywords = ["conflict", "merge", "resolve", mergeEditor.path];
+    const move = (id: MergeEditorShortcutId, run: () => void) =>
+      add({
+        id,
+        label: `${mergeEditorShortcut(id).description} (${mergeEditor.path})`,
+        keywords: [...keywords, "go", "jump"],
+        run,
+        keys: mergeEditorShortcutLabel(id),
+      });
+    if (mergeEditor.canGoPrevious) move("previous-conflict", mergeEditor.previous);
+    if (mergeEditor.canGoNext) move("next-conflict", mergeEditor.next);
+    for (const [id, choice] of MERGE_EDITOR_CHOICES) {
+      add({
+        id,
+        label: `${mergeEditorShortcut(id).description} (current conflict)`,
+        keywords: [...keywords, "accept", "take", "choose", "side"],
+        run: () => mergeEditor.choose(choice),
+        keys: mergeEditorShortcutLabel(id),
       });
     }
   }

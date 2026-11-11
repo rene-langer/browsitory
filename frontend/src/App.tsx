@@ -153,7 +153,6 @@ function AppContent({
 
   const appToasts = useToasts();
   const [cloning, setCloning] = useState(false);
-  const cloneRunning = useRef(false);
   const [existingRepoPrompt, setExistingRepoPrompt] = useState<string | null>(null);
   const { push: pushAppToast } = appToasts;
   const startClone = useCallback(() => {
@@ -545,26 +544,18 @@ function AppContent({
         </Overlay>
       )}
       {cloning && (
-        // FormDialog already blocks Escape while running; this guard is belt-and-braces for the
-        // backdrop path so a running clone is never dismissed invisibly.
-        <Overlay
-          ariaLabel="Clone repository"
-          onClose={() => {
-            if (!cloneRunning.current) setCloning(false);
+        // CloneDialog is its own modal dialog (FormDialog), which ignores Escape while a clone
+        // runs; no Overlay around it, or there are two nested dialogs (#761).
+        <CloneDialog
+          client={client}
+          onCancel={() => setCloning(false)}
+          onCloned={(outcome, name) => {
+            setCloning(false);
+            void openRepoTab(outcome.path);
+            const incomplete = outcome.submoduleFailures.length > 0 || outcome.credentialSaveFailed;
+            pushAppToast(cloneToastMessage(outcome, name), { tone: incomplete ? "warning" : "success" });
           }}
-        >
-          <CloneDialog
-            client={client}
-            onCancel={() => setCloning(false)}
-            onRunningChange={(running) => (cloneRunning.current = running)}
-            onCloned={(outcome, name) => {
-              setCloning(false);
-              void openRepoTab(outcome.path);
-              const incomplete = outcome.submoduleFailures.length > 0 || outcome.credentialSaveFailed;
-              pushAppToast(cloneToastMessage(outcome, name), { tone: incomplete ? "warning" : "success" });
-            }}
-          />
-        </Overlay>
+        />
       )}
       {existingRepoPrompt !== null && (
         <ConfirmDialog

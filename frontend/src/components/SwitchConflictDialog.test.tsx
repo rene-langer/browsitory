@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SwitchConflictDialog } from "./SwitchConflictDialog";
+import { describedByText } from "../test/describedBy";
 
 function renderDialog(props: Partial<Parameters<typeof SwitchConflictDialog>[0]> = {}) {
   const handlers = { onStashAndSwitch: vi.fn(), onCancel: vi.fn() };
@@ -49,6 +50,7 @@ describe("SwitchConflictDialog (#653)", () => {
   it("disables Stash and switch while the repository is busy, and Cancel closes", () => {
     const { dialog, onCancel } = renderDialog({ operationDisabled: true, operationDisabledReason: "A merge is in progress." });
     expect(within(dialog).getByRole("button", { name: "Stash and switch" })).toBeDisabled();
+    expect(describedByText(within(dialog).getByRole("button", { name: "Stash and switch" }))).toBe("A merge is in progress.");
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(onCancel).toHaveBeenCalled();
   });

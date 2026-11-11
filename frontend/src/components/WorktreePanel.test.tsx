@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { BranchInfo, WorktreeInfo } from "../ipc/RepoClient";
 import { WorktreePanel } from "./WorktreePanel";
+import { describedByText } from "../test/describedBy";
 
 const mainWorktree: WorktreeInfo = {
   name: "main",
@@ -76,28 +77,39 @@ describe("WorktreePanel", () => {
     expect(screen.getByText("/repos/project-feature")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Remove /repos/project" }),
-    ).toBeDisabled();
+    ).toHaveAttribute("aria-disabled", "true");
     expect(
       screen.getByRole("button", { name: "Remove /repos/project-feature" }),
     ).toBeEnabled();
   });
 
   // Disabled buttons went inert with no explanation — issue #31/UX-003.
-  it("explains why its controls are disabled via their title", () => {
+  it("explains why its controls are disabled", () => {
     renderPanel({ operationDisabled: true, operationDisabledReason: "A merge is in progress." });
 
     expect(screen.getByRole("button", { name: "Create worktree" })).toHaveAttribute(
       "title",
       "A merge is in progress.",
     );
-    expect(screen.getByRole("button", { name: "Open /repos/project" })).toHaveAttribute(
-      "title",
-      "A merge is in progress.",
-    );
-    expect(screen.getByRole("button", { name: "Prune worktrees" })).toHaveAttribute(
-      "title",
-      "A merge is in progress.",
-    );
+    // #748: the reason is the button's description, not only its title.
+    const open = screen.getByRole("button", { name: "Open /repos/project" });
+    expect(open).toHaveAttribute("aria-disabled", "true");
+    expect(open).toHaveAccessibleDescription("A merge is in progress.");
+    const prune = screen.getByRole("button", { name: "Prune worktrees" });
+    expect(prune).toHaveAttribute("aria-disabled", "true");
+    expect(prune).toHaveAccessibleDescription("A merge is in progress.");
+  });
+
+  it("says why in visible text tied to the buttons (#748)", () => {
+    const onPruneWorktrees = vi.fn().mockResolvedValue(undefined);
+    renderPanel({ operationDisabled: true, operationDisabledReason: "A merge is in progress.", onPruneWorktrees });
+
+    expect(describedByText(screen.getByRole("button", { name: "Create worktree" }))).toBe("A merge is in progress.");
+    expect(screen.getByRole("form", { name: "Create worktree" })).toHaveTextContent("A merge is in progress.");
+    fireEvent.click(screen.getByRole("button", { name: "Prune worktrees" }));
+    expect(onPruneWorktrees).not.toHaveBeenCalled();
+    const removeMain = screen.getByRole("button", { name: "Remove /repos/project" });
+    expect(describedByText(removeMain)).toBe("A merge is in progress.");
   });
 
   it("forwards the name, path, branch, and start point supplied by the creation form", async () => {
@@ -198,6 +210,7 @@ describe("WorktreePanel", () => {
     const confirm = within(dialog).getByRole("button", { name: "Remove worktree" });
     expect(confirm).toBeDisabled();
     expect(confirm).toHaveAttribute("title", "A merge is in progress.");
+    expect(describedByText(confirm)).toBe("A merge is in progress.");
     fireEvent.click(confirm);
     expect(onRemoveWorktree).not.toHaveBeenCalled();
   });

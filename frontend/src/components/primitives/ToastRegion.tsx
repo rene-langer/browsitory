@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { CircleAlert, CircleCheck, CircleX, Info, X, type LucideIcon } from "lucide-react";
-import type { Toast, ToastTone } from "../../state/useToasts";
+import { toastActions, type Toast, type ToastTone } from "../../state/useToasts";
 import styles from "./ToastRegion.module.css";
 
 // Each tone has its own icon shape, so the tone never rests on colour alone.
@@ -82,18 +82,19 @@ export function ToastRegion({
             {TONE_PREFIX[toast.tone] !== null && <span className={styles.srOnly}>{TONE_PREFIX[toast.tone]}</span>}
             {toast.message}
           </span>
-          {toast.action !== undefined && (
+          {toastActions(toast).map((action) => (
             <button
+              key={action.label}
               type="button"
               className={styles.action}
               onClick={() => {
-                toast.action?.run();
+                action.run();
                 onDismiss(toast.id);
               }}
             >
-              {toast.action.label}
+              {action.label}
             </button>
-          )}
+          ))}
           <button type="button" className={styles.dismiss} aria-label="Dismiss notification" onClick={() => onDismiss(toast.id)}>
             <X size={14} aria-hidden="true" />
           </button>

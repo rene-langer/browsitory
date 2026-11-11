@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { RewordDialog } from "./RewordDialog";
+import { describedByText } from "../test/describedBy";
 
 function renderDialog(overrides: Partial<Parameters<typeof RewordDialog>[0]> = {}) {
   const props = {
@@ -49,6 +50,7 @@ describe("RewordDialog", () => {
 
     expect(screen.getByRole("button", { name: "Reword" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Reword" })).toHaveAttribute("title", "A merge is running.");
+    expect(describedByText(screen.getByRole("button", { name: "Reword" }))).toBe("A merge is running.");
   });
 
   it("shows a message that can't be loaded and still lets you cancel", async () => {

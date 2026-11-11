@@ -1,4 +1,6 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
+import { BlockedReason } from "./BlockedReason";
+import { describedBy } from "../../lib/ariaDescribedBy";
 import { useRestoreFocus } from "./useRestoreFocus";
 import styles from "./ConfirmDialog.module.css";
 
@@ -22,6 +24,7 @@ export function ConfirmDialog({
   onCancel,
   confirmDisabled = false,
   confirmTitle,
+  confirmReason = null,
   hideConfirm = false,
 }: {
   /** Accessible name for the dialog (`aria-label`). */
@@ -35,10 +38,16 @@ export function ConfirmDialog({
   confirmDisabled?: boolean;
   /** `title` for the confirm button — e.g. explaining why it's disabled (issue #31/UX-003). */
   confirmTitle?: string;
+  /**
+   * Why the confirm button can't run now (#748): shown under the message, tied to the button with
+   * `aria-describedby`, and the button is disabled. `null` leaves it to `confirmDisabled`.
+   */
+  confirmReason?: string | null;
   /** Omits the confirm button: an informational dialog whose only action is `cancelLabel`. */
   hideConfirm?: boolean;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const reasonId = useId();
   useRestoreFocus();
 
   useEffect(() => {
@@ -62,14 +71,18 @@ export function ConfirmDialog({
         onCancel();
       }}
     >
-      <div className={styles.message}>{message}</div>
+      <div className={styles.message}>
+        {message}
+        <BlockedReason id={reasonId} reason={confirmReason} />
+      </div>
       <div className={styles.actions}>
         {!hideConfirm && (
           <button
             type="button"
             className={styles.confirmButton}
-            disabled={confirmDisabled}
-            title={confirmTitle}
+            disabled={confirmDisabled || confirmReason !== null}
+            title={confirmTitle ?? confirmReason ?? undefined}
+            aria-describedby={describedBy(reasonId, confirmReason)}
             onClick={onConfirm}
           >
             {confirmLabel}

@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BranchTree } from "./BranchTree";
 import { renderTree, treeProps } from "../test/branchTreeProps";
+import { describedByText } from "../test/describedBy";
 
 describe("NewBranchForm (in BranchTree)", () => {
   beforeEach(() => {
@@ -122,6 +123,7 @@ describe("NewBranchForm (in BranchTree)", () => {
     const create = screen.getByRole("button", { name: "Create" });
     expect(create).toBeDisabled();
     expect(create).toHaveAttribute("title", "A merge is in progress.");
+    expect(describedByText(create)).toBe("A merge is in progress.");
     expect(within(screen.getByRole("form", { name: "New branch" })).getByText("A merge is in progress.")).toBeInTheDocument();
     fireEvent.submit(screen.getByRole("form", { name: "New branch" }));
     expect(props.onCreateBranch).not.toHaveBeenCalled();

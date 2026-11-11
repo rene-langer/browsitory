@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { RemoteInfo } from "../ipc/RepoClient";
 import { DeleteRemoteTagDialog } from "./DeleteRemoteTagDialog";
+import { describedByText } from "../test/describedBy";
 
 const remote = (name: string): RemoteInfo => ({ name, fetchUrl: name, pushUrl: null, authMode: null, authUsername: null });
 
@@ -54,5 +55,6 @@ describe("DeleteRemoteTagDialog", () => {
     const button = screen.getByRole("button", { name: "Delete from remote" });
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute("title", "A transfer is in progress.");
+    expect(describedByText(button)).toBe("A transfer is in progress.");
   });
 });

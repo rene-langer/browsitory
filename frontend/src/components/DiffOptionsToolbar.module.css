@@ -1,6 +1,9 @@
 /* One row per pane (#640): icon buttons, never wrapping onto a second line; a pane too narrow
    for it scrolls the row sideways instead. */
 .toolbar {
+  /* Never squeezed by a long file list above it in the working tree's column (#752): with its
+     own overflow, a shrinkable toolbar collapsed to half a row. */
+  flex-shrink: 0;
   display: flex;
   flex-wrap: nowrap;
   align-items: center;

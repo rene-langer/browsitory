@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FileContent, RepoClient, TreeEntry, TreeListing } from "../ipc/RepoClient";
 import { CommitTreeBrowser, FILTER_DEBOUNCE_MS } from "./CommitTreeBrowser";
 import { fakeRepoClient } from "../test/fakeRepoClient";
+import { describedByText } from "../test/describedBy";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 
@@ -48,7 +49,7 @@ function renderBrowser(props: Partial<Parameters<typeof CommitTreeBrowser>[0]> =
   const client = (props.client as ReturnType<typeof fakeClient> | undefined) ?? fakeClient();
   const onRestoreFileVersion = vi.fn();
   const onOpenFileHistory = vi.fn();
-  render(
+  const browser = (more: Partial<Parameters<typeof CommitTreeBrowser>[0]> = {}) => (
     <CommitTreeBrowser
       repoPath="/repo"
       client={client}
@@ -57,9 +58,12 @@ function renderBrowser(props: Partial<Parameters<typeof CommitTreeBrowser>[0]> =
       onOpenFileHistory={onOpenFileHistory}
       onRestoreFileVersion={onRestoreFileVersion}
       {...props}
-    />,
+      {...more}
+    />
   );
-  return { client, onRestoreFileVersion, onOpenFileHistory };
+  const { rerender } = render(browser());
+  const rerenderWith = (more: Partial<Parameters<typeof CommitTreeBrowser>[0]>) => rerender(browser(more));
+  return { client, onRestoreFileVersion, onOpenFileHistory, rerenderWith };
 }
 
 afterEach(() => {
@@ -146,9 +150,22 @@ describe("CommitTreeBrowser", () => {
     const { onRestoreFileVersion } = renderBrowser({ restoreBlockedReason: "A merge is in progress." });
     fireEvent.click(await screen.findByRole("button", { name: /README\.txt/ }));
     const restore = await screen.findByRole("button", { name: "Restore…" });
-    expect(restore).toBeDisabled();
-    expect(restore).toHaveAttribute("title", "A merge is in progress.");
+    expect(restore).toHaveAttribute("aria-disabled", "true");
+    expect(restore).toHaveAccessibleDescription("A merge is in progress.");
     fireEvent.click(restore);
+    expect(onRestoreFileVersion).not.toHaveBeenCalled();
+  });
+
+  it("says why the open Restore confirmation can't restore once the repository is busy (#748)", async () => {
+    const { onRestoreFileVersion, rerenderWith } = renderBrowser();
+    fireEvent.click(await screen.findByRole("button", { name: /README\.txt/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Restore…" }));
+    rerenderWith({ restoreBlockedReason: "A merge is in progress." });
+    const dialog = screen.getByRole("dialog", { name: "Confirm restore" });
+    const confirm = within(dialog).getByRole("button", { name: "Restore" });
+    expect(confirm).toBeDisabled();
+    expect(describedByText(confirm)).toBe("A merge is in progress.");
+    fireEvent.click(confirm);
     expect(onRestoreFileVersion).not.toHaveBeenCalled();
   });
 

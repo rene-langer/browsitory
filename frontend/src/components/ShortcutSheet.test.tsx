@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ShortcutSheet } from "./ShortcutSheet";
 
@@ -85,5 +85,17 @@ describe("ShortcutSheet", () => {
     expect(screen.getByRole("heading", { name: "Command palette" })).toBeInTheDocument();
     expect(screen.getByText("Move the highlight by a page")).toBeInTheDocument();
     expect(screen.getByText(/^First \/ last command/)).toBeInTheDocument();
+  });
+
+  it("lists the merge editor keys (#764)", () => {
+    render(<ShortcutSheet onClose={vi.fn()} apple={false} />);
+    const heading = screen.getByRole("heading", { name: "Merge editor" });
+    const group = heading.closest("section") ?? heading.parentElement!;
+    for (const text of ["Accept ours", "Accept theirs", "Ours then theirs", "Theirs then ours", "Accept base"]) {
+      expect(within(group).getByText(new RegExp(`^${text}`))).toBeInTheDocument();
+    }
+    expect(within(group).getByText("F7")).toBeInTheDocument();
+    expect(within(group).getByText("Shift+F7")).toBeInTheDocument();
+    expect(within(group).getByText(/back to its block/)).toBeInTheDocument();
   });
 });

@@ -17,6 +17,14 @@ describe("toastDuration", () => {
     expect(toastDuration({ message: "Committed", tone: "success", action: { label: "Undo", run: () => {} } })).toBe(10000);
   });
 
+  it("gives a toast with two actions at least 10 seconds (#733)", () => {
+    const actions = [
+      { label: "Push", run: () => {} },
+      { label: "Undo", run: () => {} },
+    ];
+    expect(toastDuration({ message: "Committed", tone: "success", actions })).toBe(10000);
+  });
+
   it("keeps a warning at least 8 seconds", () => {
     expect(toastDuration({ message: "Fetch failed", tone: "warning" })).toBe(8000);
   });
@@ -37,6 +45,14 @@ describe("useToasts", () => {
     expect(result.current.toasts).toEqual([
       { id: 1, message: "Committed", tone: "success", action: { label: "Undo", run } },
     ]);
+  });
+
+  it("keeps two actions in order (#733)", () => {
+    const { result } = renderHook(() => useToasts());
+    const push = { label: "Push", run: vi.fn() };
+    const undo = { label: "Undo", run: vi.fn() };
+    act(() => result.current.push("Committed", { actions: [push, undo] }));
+    expect(result.current.toasts).toEqual([{ id: 1, message: "Committed", tone: "success", actions: [push, undo] }]);
   });
 
   it("closes a toast after its duration", () => {
