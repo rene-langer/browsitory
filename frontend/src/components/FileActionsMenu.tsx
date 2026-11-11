@@ -15,9 +15,10 @@ export type FileAction =
   | { kind: "discardSelection" }
   | { kind: "ignoreSelection" }
   | { kind: "stashSelection" }
-  // A commit's file (#448): revert or apply its change in the working tree, save it as a patch.
-  | { kind: "revertCommitFile" }
-  | { kind: "applyCommitFile" }
+  // A commit's file (#448): revert or apply its change in the working tree (`stage`: and in the
+  // index, #536), save it as a patch.
+  | { kind: "revertCommitFile"; stage: boolean }
+  | { kind: "applyCommitFile"; stage: boolean }
   | { kind: "saveFilePatch" };
 
 export const isUntracked = (entry: StatusEntry) => !entry.staged && entry.kind === "New";
@@ -180,7 +181,8 @@ export function selectionMenuItems(
 
 /**
  * The menu of a read-only file section (a commit's or a compare's file). With `patch` (a commit's
- * file, #448), it starts with Revert / Apply in the working tree (disabled with `blockedReason`
+ * file, #448), it starts with Revert / Apply in the working tree, each also "and stage" (#536)
+ * (disabled with `blockedReason`
  * while repository actions can't run) and "Save file as patch…"; with `tools`, the external
  * tools follow.
  */
@@ -192,11 +194,23 @@ export function commitFileMenuItems(
   if (patch !== null) {
     const blocked = { disabled: patch.blockedReason !== null, title: patch.blockedReason ?? undefined };
     items.push(
-      { label: "Revert this file", ...blocked, onSelect: () => onPick({ kind: "revertCommitFile" }), group: "patch" },
+      { label: "Revert this file", ...blocked, onSelect: () => onPick({ kind: "revertCommitFile", stage: false }), group: "patch" },
+      {
+        label: "Revert this file and stage",
+        ...blocked,
+        onSelect: () => onPick({ kind: "revertCommitFile", stage: true }),
+        group: "patch",
+      },
       {
         label: "Apply this file to the working tree",
         ...blocked,
-        onSelect: () => onPick({ kind: "applyCommitFile" }),
+        onSelect: () => onPick({ kind: "applyCommitFile", stage: false }),
+        group: "patch",
+      },
+      {
+        label: "Apply this file and stage",
+        ...blocked,
+        onSelect: () => onPick({ kind: "applyCommitFile", stage: true }),
         group: "patch",
       },
       { label: "Save file as patch…", onSelect: () => onPick({ kind: "saveFilePatch" }), group: "patch" },

@@ -227,8 +227,13 @@ where
                 patch::apply_commit_change(&self.repo, change, reply)
             }
             Command::GetPatch { source, reply } => patch::get_patch(&self.repo, source, reply),
-            Command::ApplyPatch { content, reply } => {
-                patch::apply_patch(&self.repo, content, reply)
+            Command::ApplyPatch {
+                content,
+                how,
+                reply,
+            } => patch::apply_patch(&self.repo, content, how, reply),
+            Command::PreviewPatch { content, reply } => {
+                patch::preview_patch(&self.repo, content, reply)
             }
             Command::IgnorePath { pattern, reply } => {
                 status::ignore_path(&self.repo, pattern, reply)

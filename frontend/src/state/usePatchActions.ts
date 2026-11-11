@@ -1,7 +1,8 @@
 import { useCallback } from "react";
-import type { CommitChangeRequest, GraphCommit, PatchSource, RepoClient } from "../ipc/RepoClient";
+import type { CommitChangeRequest, GraphCommit, PatchApply, PatchContent, PatchPreview, PatchSource, RepoClient } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
 import { failureError, type RunMutationWithOutcome } from "./useMutationRunner";
+import { withoutDialog } from "./workspaceDialog";
 
 /**
  * A commit's file or hunk reverted or applied in the working tree, "Save as patch…" and "Apply
@@ -13,8 +14,10 @@ export interface PatchActions {
   applyCommitChange(change: CommitChangeRequest): Promise<void>;
   /** Asks where to save `source`'s patch, offering `suggestedName`. */
   savePatch(source: PatchSource, suggestedName: string): Promise<void>;
-  /** Asks for a patch file and applies it to the working tree. */
+  /** Asks for a patch file and opens its preview (#658), which applies it with `applyPatch`. */
   applyPatchFile(): Promise<void>;
+  /** Applies the previewed patch `how` the preview's buttons say, closing the preview. */
+  applyPatch(content: PatchContent, preview: PatchPreview, how: PatchApply): Promise<void>;
   /**
    * Applies the patch files at `paths` (dropped on the window, #649) in order, each its own undo
    * step; the first that can't be read or doesn't apply stops the rest.
@@ -35,6 +38,15 @@ export function commitChangeMessage(change: CommitChangeRequest): string {
   const what = change.hunk === null ? change.path : `hunk in ${change.path}`;
   const where = change.stage ? " (staged)" : " in the working tree";
   return `${verb} ${what} from ${short(change.commitId)}${where}`;
+}
+
+/** The toast after a patch file was applied `how` (#658). */
+export function applyPatchMessage(preview: PatchPreview, how: PatchApply): string {
+  if (how === "Commits") {
+    const n = preview.parts.length;
+    return n === 1 ? "Committed the patch" : `Committed the patch as ${n} commits`;
+  }
+  return how === "Stage" ? "Applied and staged the patch" : "Applied the patch to the working tree";
 }
 
 /** A file name for a patch: `0001-fix-the-thing.patch`, like `git format-patch`. */
@@ -95,9 +107,23 @@ export function usePatchActions(
       return;
     }
     if (content === null) return;
-    const ok = await runMutationWithOutcome(() => client.applyPatch(repoPath, content));
-    if (ok) setState((prev) => ({ ...prev, patchOutcome: { message: "Applied the patch to the working tree", undoable: true } }));
-  }, [client, repoPath, runMutationWithOutcome, setState]);
+    // The preview only reads, like the file dialog: no `pending`, no refresh.
+    try {
+      const preview = await client.previewPatch(repoPath, content);
+      setState((prev) => ({ ...prev, dialog: { kind: "applyPatch", content, preview } }));
+    } catch (err) {
+      setState((prev) => ({ ...prev, ...failureError(err) }));
+    }
+  }, [client, repoPath, setState]);
+
+  const applyPatch = useCallback(
+    async (content: PatchContent, preview: PatchPreview, how: PatchApply) => {
+      setState((prev) => ({ ...prev, patchOutcome: null, dialog: withoutDialog(prev.dialog, "applyPatch") }));
+      const ok = await runMutationWithOutcome(() => client.applyPatch(repoPath, content, how));
+      if (ok) setState((prev) => ({ ...prev, patchOutcome: { message: applyPatchMessage(preview, how), undoable: true } }));
+    },
+    [client, repoPath, runMutationWithOutcome, setState],
+  );
 
   const applyPatchFiles = useCallback(
     async (paths: string[]) => {
@@ -110,7 +136,7 @@ export function usePatchActions(
           setState((prev) => ({ ...prev, ...failureError(err) }));
           return;
         }
-        const ok = await runMutationWithOutcome(() => client.applyPatch(repoPath, content));
+        const ok = await runMutationWithOutcome(() => client.applyPatch(repoPath, content, "WorkTree"));
         if (!ok) return;
         const message = `Applied ${fileName(path)} to the working tree`;
         setState((prev) => ({ ...prev, patchOutcome: { message, undoable: true } }));
@@ -119,5 +145,5 @@ export function usePatchActions(
     [client, repoPath, runMutationWithOutcome, setState],
   );
 
-  return { applyCommitChange, savePatch, applyPatchFile, applyPatchFiles };
+  return { applyCommitChange, savePatch, applyPatchFile, applyPatch, applyPatchFiles };
 }

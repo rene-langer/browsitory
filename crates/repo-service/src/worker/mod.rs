@@ -296,9 +296,16 @@ pub(crate) enum Command {
         source: PatchSource,
         reply: Sender<Result<Vec<u8>, ErrorDto>>,
     },
+    /// #658: a patch file applied to the working tree, also staged, or as commits.
     ApplyPatch {
         content: Vec<u8>,
+        how: git_core::patch::PatchApply,
         reply: Sender<Result<(), ErrorDto>>,
+    },
+    /// #658: what a patch file holds and whether it applies; changes nothing.
+    PreviewPatch {
+        content: Vec<u8>,
+        reply: Sender<Result<git_core::patch::PatchPreview, ErrorDto>>,
     },
     IgnorePath {
         pattern: String,

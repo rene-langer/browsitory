@@ -19,6 +19,7 @@ pub mod merge;
 pub mod os_error;
 mod partial_checkout;
 pub mod patch;
+mod patch_mail;
 pub mod pick;
 pub mod process;
 pub mod rebase;

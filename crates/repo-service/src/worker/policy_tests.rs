@@ -321,9 +321,27 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             "-",
         ),
         (
-            cmd!(ApplyPatch { content: vec![] }),
+            cmd!(ApplyPatch {
+                content: vec![],
+                how: git_core::patch::PatchApply::WorkTree
+            }),
             "undo(Full, Apply patch) lock busy=Discard hold",
         ),
+        (
+            cmd!(ApplyPatch {
+                content: vec![],
+                how: git_core::patch::PatchApply::Stage
+            }),
+            "undo(Full, Apply and stage patch) lock busy=Discard hold",
+        ),
+        (
+            cmd!(ApplyPatch {
+                content: vec![],
+                how: git_core::patch::PatchApply::Commits
+            }),
+            "undo(Full, Apply patch as commits) lock busy=Discard hold gate",
+        ),
+        (cmd!(PreviewPatch { content: vec![] }), "-"),
         (
             cmd!(IgnorePath {
                 pattern: s("*.log")

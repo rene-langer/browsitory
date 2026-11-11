@@ -127,23 +127,27 @@ describe("FileActionsMenu", () => {
       ]);
     });
 
-    it("puts a commit file's revert, apply and save first, disabling only the repository actions when blocked (#448)", () => {
+    it("puts a commit file's revert, apply (each also staged, #536) and save first, disabling only the repository actions when blocked (#448)", () => {
       const onPick = vi.fn();
       const items = commitFileMenuItems(onPick, { tools: false, patch: { blockedReason: "A merge is in progress." } });
       expect(items.map((i) => i.label)).toEqual([
         "Revert this file",
+        "Revert this file and stage",
         "Apply this file to the working tree",
+        "Apply this file and stage",
         "Save file as patch…",
       ]);
-      expect(items.map((i) => i.disabled ?? false)).toEqual([true, true, false]);
+      expect(items.map((i) => i.disabled ?? false)).toEqual([true, true, true, true, false]);
       expect(items[0].title).toBe("A merge is in progress.");
       for (const item of items) item.onSelect();
       expect(onPick.mock.calls.map(([action]) => action)).toEqual([
-        { kind: "revertCommitFile" },
-        { kind: "applyCommitFile" },
+        { kind: "revertCommitFile", stage: false },
+        { kind: "revertCommitFile", stage: true },
+        { kind: "applyCommitFile", stage: false },
+        { kind: "applyCommitFile", stage: true },
         { kind: "saveFilePatch" },
       ]);
-      expect(commitFileMenuItems(onPick, { patch: { blockedReason: null } })).toHaveLength(6);
+      expect(commitFileMenuItems(onPick, { patch: { blockedReason: null } })).toHaveLength(8);
     });
 
     it("builds the commit file menu and reports picks", () => {

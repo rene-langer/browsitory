@@ -3,7 +3,7 @@
 use crate::wire::ErrorDto;
 use std::sync::mpsc::Sender;
 
-use git_core::patch::{ApplyTarget, CommitHunk};
+use git_core::patch::{ApplyTarget, CommitHunk, PatchApply, PatchPreview};
 
 use super::{Command, WorkerHandle};
 
@@ -81,9 +81,23 @@ pub(super) fn get_patch(
 pub(super) fn apply_patch(
     repo: &git2::Repository,
     content: Vec<u8>,
+    how: PatchApply,
     reply: Sender<Result<(), ErrorDto>>,
 ) {
-    let _ = reply.send(git_core::patch::apply_patch(repo, &content).map_err(ErrorDto::from_error));
+    let _ = reply.send(
+        git_core::patch::apply_patch_as(repo, &content, how)
+            .map(|_| ())
+            .map_err(ErrorDto::from_error),
+    );
+}
+
+pub(super) fn preview_patch(
+    repo: &git2::Repository,
+    content: Vec<u8>,
+    reply: Sender<Result<PatchPreview, ErrorDto>>,
+) {
+    let _ =
+        reply.send(git_core::patch::preview_patch(repo, &content).map_err(ErrorDto::from_error));
 }
 
 impl WorkerHandle {
@@ -97,9 +111,18 @@ impl WorkerHandle {
         self.request(|tx| Command::GetPatch { source, reply: tx })
     }
 
-    /// Applies a patch file's `content` to the working tree, all of it or nothing. Recorded for
-    /// Undo.
-    pub fn apply_patch(&self, content: Vec<u8>) -> Result<(), ErrorDto> {
-        self.request(|tx| Command::ApplyPatch { content, reply: tx })
+    /// Applies a patch file's `content` to the working tree (`how`: also to the index, or as
+    /// commits with the mails' authorship), all of it or nothing. Recorded for Undo.
+    pub fn apply_patch(&self, content: Vec<u8>, how: PatchApply) -> Result<(), ErrorDto> {
+        self.request(|tx| Command::ApplyPatch {
+            content,
+            how,
+            reply: tx,
+        })
+    }
+
+    /// What a patch file's `content` holds and whether it applies; changes nothing.
+    pub fn preview_patch(&self, content: Vec<u8>) -> Result<PatchPreview, ErrorDto> {
+        self.request(|tx| Command::PreviewPatch { content, reply: tx })
     }
 }

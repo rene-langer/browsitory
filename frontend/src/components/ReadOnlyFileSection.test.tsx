@@ -78,14 +78,21 @@ describe("ReadOnlyFileSection", () => {
     };
     renderSection({ fetchDiff: vi.fn(async () => [hunk]), patch });
     fireEvent.click(await screen.findByRole("button", { name: "Revert hunk" }));
-    expect(patch.onRevertHunk).toHaveBeenCalledWith({ oldStart: 4, newStart: 5, contextLines: 3, algorithm: "Default" });
+    expect(patch.onRevertHunk).toHaveBeenCalledWith({ oldStart: 4, newStart: 5, contextLines: 3, algorithm: "Default" }, false);
     fireEvent.click(screen.getByRole("button", { name: "Apply hunk" }));
-    expect(patch.onApplyHunk).toHaveBeenCalledWith({ oldStart: 4, newStart: 5, contextLines: 3, algorithm: "Default" });
+    expect(patch.onApplyHunk).toHaveBeenCalledWith({ oldStart: 4, newStart: 5, contextLines: 3, algorithm: "Default" }, false);
+    // #536: Shift+click also stages, as the title says.
+    expect(screen.getByRole("button", { name: "Apply hunk" })).toHaveAttribute("title", "Shift+click to stage the result too");
+    fireEvent.click(screen.getByRole("button", { name: "Apply hunk" }), { shiftKey: true });
+    expect(patch.onApplyHunk).toHaveBeenLastCalledWith({ oldStart: 4, newStart: 5, contextLines: 3, algorithm: "Default" }, true);
 
     // The file menu opens without external tools, and holds the file's actions.
     fireEvent.click(screen.getByRole("button", { name: "Actions for a.txt" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Revert this file" }));
-    expect(patch.onRevertFile).toHaveBeenCalled();
+    expect(patch.onRevertFile).toHaveBeenCalledWith(false);
+    fireEvent.click(screen.getByRole("button", { name: "Actions for a.txt" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Apply this file and stage" }));
+    expect(patch.onApplyFile).toHaveBeenCalledWith(true);
     expect(screen.queryByRole("menuitem", { name: "Open in editor" })).toBeNull();
   });
 
@@ -119,7 +126,7 @@ describe("ReadOnlyFileSection", () => {
     );
     fireEvent.click(await screen.findByRole("button", { name: "Revert hunk" }));
     expect(fetchDiff).toHaveBeenCalledWith({ ignoreWhitespace: false, contextLines: 3, algorithm: "Patience" });
-    expect(patch.onRevertHunk).toHaveBeenCalledWith({ oldStart: 4, newStart: 5, contextLines: 3, algorithm: "Patience" });
+    expect(patch.onRevertHunk).toHaveBeenCalledWith({ oldStart: 4, newStart: 5, contextLines: 3, algorithm: "Patience" }, false);
   });
 
   it("disables a commit's hunk actions with the reason while repository actions are blocked", async () => {

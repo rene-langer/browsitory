@@ -1,3 +1,5 @@
+import type { PatchContent, PatchPreview } from "../ipc/RepoClient";
+
 /**
  * The workspace's one open modal dialog (#493), in `AppState.dialog`. These are the dialogs that
  * more than one place opens (a menu and the command palette, say) or that an action opens or
@@ -26,7 +28,10 @@ export type WorkspaceDialog =
   // Reword an older commit (#442); `onto` is its parent.
   | { kind: "reword"; commitId: string; onto: string }
   // The stash options dialog; `paths` non-empty for a file stash.
-  | { kind: "stash"; paths: string[] };
+  | { kind: "stash"; paths: string[] }
+  // "Apply patch…"'s preview of the patch file picked (#658): Apply, Apply and stage, Apply as
+  // commits.
+  | { kind: "applyPatch"; content: PatchContent; preview: PatchPreview };
 
 export type WorkspaceDialogKind = WorkspaceDialog["kind"];
 

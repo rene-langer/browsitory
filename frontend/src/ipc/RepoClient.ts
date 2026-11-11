@@ -853,6 +853,40 @@ export type PatchSource =
 export interface PatchContent {
   base64: string;
 }
+/**
+ * How "Apply patch…" applies a patch file (#658): to the working tree, to the working tree and
+ * the index, or each mail as a commit with its author, date and message.
+ */
+export type PatchApply = "WorkTree" | "Stage" | "Commits";
+/** What a patch file holds and whether it applies (#658). */
+export interface PatchPreview {
+  /** One per mail, in order (one for a plain diff). */
+  parts: PatchPreviewPart[];
+  /** Why it doesn't apply to the working tree; only the first mail is checked against it. */
+  problem: string | null;
+}
+export interface PatchPreviewPart {
+  /** `null` for a plain diff. */
+  mail: PatchMail | null;
+  files: PatchPreviewFile[];
+}
+export interface PatchMail {
+  subject: string;
+  body: string;
+  authorName: string;
+  authorEmail: string;
+  /** Seconds since the epoch; `null` when the mail's date couldn't be read. */
+  timestamp: number | null;
+}
+export type PatchFileStatus = "Added" | "Deleted" | "Modified" | "Renamed" | "Copied";
+export interface PatchPreviewFile {
+  path: string;
+  oldPath: string | null;
+  status: PatchFileStatus;
+  additions: number;
+  deletions: number;
+  binary: boolean;
+}
 /** `HandedOff`: VSCode's merge editor took over, and Browsitory can't see when it's done. */
 export type MergeToolOutcome = "Resolved" | "Unresolved" | "HandedOff";
 export type MarkResolvedOutcome = "Resolved" | "MarkersRemain";
@@ -1131,9 +1165,12 @@ export interface RepoClient {
   getPatch(repoPath: string, source: PatchSource): Promise<PatchContent>;
   /**
    * Applies a patch file's content (a diff, or `git format-patch` mails in order) to the working
-   * tree, all or nothing (#448). Recorded for Undo.
+   * tree, all or nothing (#448); `how` also stages it, or commits each mail with its authorship
+   * (#658). Recorded for Undo.
    */
-  applyPatch(repoPath: string, content: PatchContent): Promise<void>;
+  applyPatch(repoPath: string, content: PatchContent, how: PatchApply): Promise<void>;
+  /** What a patch file's content holds and whether it applies (#658); changes nothing. */
+  previewPatch(repoPath: string, content: PatchContent): Promise<PatchPreview>;
   /** Asks the user where to save `content` and writes it: the path, or `null` when cancelled. */
   savePatchFile(suggestedName: string, content: PatchContent): Promise<string | null>;
   /** Asks the user for a patch file: its content, or `null` when cancelled. */

@@ -187,7 +187,35 @@ export type OpenRepoEntryInput = { path: string, workspaceId: string | null, };
 
 export type OperationKind = "Merge" | "CherryPick" | "Revert";
 
+export type PatchApply = "WorkTree" | "Stage" | "Commits";
+
 export type PatchContent = { base64: string, };
+
+export type PatchFileStatus = "Added" | "Deleted" | "Modified" | "Renamed" | "Copied";
+
+export type PatchMail = { subject: string, body: string, authorName: string, authorEmail: string, 
+/**
+ * Seconds since the epoch; `null` when the mail's date couldn't be read.
+ */
+timestamp: number | null, };
+
+export type PatchPreview = { 
+/**
+ * One per mail, in order (one for a plain diff).
+ */
+parts: Array<PatchPreviewPart>, 
+/**
+ * Why it doesn't apply to the working tree; only the first mail is checked against it.
+ */
+problem: string | null, };
+
+export type PatchPreviewFile = { path: string, oldPath: string | null, status: PatchFileStatus, additions: number, deletions: number, binary: boolean, };
+
+export type PatchPreviewPart = { 
+/**
+ * `null` for a plain diff.
+ */
+mail: PatchMail | null, files: Array<PatchPreviewFile>, };
 
 export type PatchSource = { "kind": "Commits", commitIds: Array<string>, } | { "kind": "CommitFile", commitId: string, path: string, oldPath: string | null, } | { "kind": "Staged" };
 

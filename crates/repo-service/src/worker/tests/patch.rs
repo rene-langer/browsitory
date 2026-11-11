@@ -1,6 +1,8 @@
-//! #448 through the worker: a commit's hunk reverted (undoable), a patch saved and applied.
+//! #448 through the worker: a commit's hunk reverted (undoable), a patch saved and applied;
+//! #658: previewed, and applied as commits (one Undo step).
 use super::*;
 use crate::worker::{CommitChange, PatchSource};
+use git_core::patch::PatchApply;
 
 fn head(repo: &git2::Repository) -> String {
     repo.head()
@@ -75,7 +77,9 @@ fn a_patch_that_does_not_apply_records_nothing() {
         .unwrap();
 
     // The working tree already holds the change: the patch doesn't apply.
-    let error = handle.apply_patch(patch.clone()).unwrap_err();
+    let error = handle
+        .apply_patch(patch.clone(), PatchApply::WorkTree)
+        .unwrap_err();
     assert!(
         error.message.starts_with("The patch doesn't apply"),
         "{error}"
@@ -84,7 +88,7 @@ fn a_patch_that_does_not_apply_records_nothing() {
 
     // Reverted first, it applies, and Undo takes it back.
     write_file(dir.path(), "a.txt", "one\n");
-    handle.apply_patch(patch).unwrap();
+    handle.apply_patch(patch, PatchApply::WorkTree).unwrap();
     assert_eq!(
         std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
         "two\n"
@@ -92,5 +96,53 @@ fn a_patch_that_does_not_apply_records_nothing() {
     assert_eq!(
         handle.get_undo_state().unwrap().undo,
         Some("Apply patch".to_string())
+    );
+}
+
+#[test]
+fn a_patch_applied_as_commits_is_one_undo_step() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "one\n");
+    commit_all(&repo, "base");
+    let base = head(&repo);
+    write_file(dir.path(), "a.txt", "two\n");
+    commit_all(&repo, "Second");
+    write_file(dir.path(), "a.txt", "three\n");
+    commit_all(&repo, "Third");
+    let tip = head(&repo);
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let walk: Vec<String> = {
+        let mut revwalk = repo.revwalk().unwrap();
+        revwalk.push(git2::Oid::from_str(&tip).unwrap()).unwrap();
+        revwalk.set_sorting(git2::Sort::REVERSE).unwrap();
+        revwalk.map(|id| id.unwrap().to_string()).skip(1).collect()
+    };
+    let patch = handle.get_patch(PatchSource::Commits(walk)).unwrap();
+    let base_commit = repo
+        .find_commit(git2::Oid::from_str(&base).unwrap())
+        .unwrap();
+    repo.reset(base_commit.as_object(), git2::ResetType::Hard, None)
+        .unwrap();
+
+    let preview = handle.preview_patch(patch.clone()).unwrap();
+    assert_eq!(preview.parts.len(), 2);
+    assert_eq!(preview.problem, None);
+    assert_eq!(head(&repo), base, "the preview changed HEAD");
+
+    handle.apply_patch(patch, PatchApply::Commits).unwrap();
+    let applied = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(applied.summary().unwrap(), Some("Third"));
+    assert_eq!(
+        applied.parent(0).unwrap().parent_id(0).unwrap().to_string(),
+        base
+    );
+    let label = "Apply patch as commits".to_string();
+    assert_eq!(handle.get_undo_state().unwrap().undo, Some(label.clone()));
+    assert_eq!(handle.undo().unwrap(), UndoOutcome::Done { label });
+    assert_eq!(head(&repo), base);
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        "one\n"
     );
 }
