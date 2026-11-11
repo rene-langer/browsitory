@@ -43,8 +43,11 @@ The palette has almost every action in Browsitory, grouped like this:
   worktree and submodule actions, **Preferences…**, **Show keyboard shortcuts**, **Check for
   updates** (desktop app), **Third-party licences** and **Open user guide**.
 
-Commands that can't run right now are left out. For example, while a rebase is paused, the
-palette offers only the commands that are safe until it is finished.
+Before you type, commands that can't run right now are left out. For example, while a rebase is
+paused, the list offers only the commands that are safe until it is finished. Once you type, the
+matching commands that can't run follow the others under **Unavailable now**, greyed out, each
+with the reason, such as "A rebase is in progress." for **Push to origin**. Choosing one does
+nothing.
 
 ## Go to a commit, branch, tag or stash
 

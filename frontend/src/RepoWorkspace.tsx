@@ -44,6 +44,7 @@ import { useSidebarReveal } from "./state/useSidebarReveal";
 import styles from "./App.module.css";
 import { useAnnounce } from "./state/useAnnounce";
 import { CopyToClipboardContext, useClipboardFeedback } from "./state/useCopyToClipboard";
+import { useEarlierErrors } from "./state/useEarlierErrors";
 import { useCommitDraftActions } from "./state/useCommitDraftActions";
 import { useCommitFlow } from "./state/useCommitFlow";
 import { useNarrowLayout } from "./state/useNarrowLayout";
@@ -190,6 +191,12 @@ export function RepoWorkspace({
   const clearFocusCommitMessage = useCallback(() => setFocusCommitMessage(false), []);
   // Discard confirmations live here (not in DiffPane) so the palette can open the same dialogs.
   const [discardRequest, setDiscardRequest] = useState<DiscardRequest | null>(null);
+  // The operation strip's "Go to conflict" (#665): the working tree shows its first conflict.
+  const [conflictRequest, setConflictRequest] = useState(false);
+  const goToConflict = useCallback(() => {
+    appState.selectRow("uncommitted");
+    setConflictRequest(true);
+  }, [appState]);
   // The parent picker and reset dialog of one commit (#507, #514): the commit menu and the
   // palette open this one instance, so the palette needs no rendered graph row (search results,
   // file history) and both get the same busy guard.
@@ -306,6 +313,8 @@ export function RepoWorkspace({
   const announce = useAnnounce(appState, pushToast, undoToastAction);
   // The context menus' "Copy …" items (#614).
   const clipboard = useClipboardFeedback(pushToast);
+  // The errors the banner's current one replaced, shown under it until it is dismissed (#663).
+  const earlierErrors = useEarlierErrors(appState.state.error, appState.dismissError);
 
   // "Fetch automatically" (#440): the repository's override, else the app setting.
   const fetchSettings = useFetchSettingsContext();
@@ -686,16 +695,20 @@ export function RepoWorkspace({
         onAbortRebase={() => void abortRebase()}
         onContinueSequence={continueSequence}
         onAbortSequence={abortSequence}
+        mergeMessage={appState.state.mergeMessage}
+        currentBranch={appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null}
+        onGoToConflict={goToConflict}
+        onContinueRebase={() => void appState.rebaseContinue()}
       />
       <HookRunStrip running={appState.state.hookRun} onCancel={() => void appState.cancelHookRun()} />
       {externalTools.error !== null && (
         <div className={styles.errorLayer}>
-          <InlineError message={externalTools.error} onDismiss={externalTools.dismissError} />
+          <InlineError message={externalTools.error} copyDetails onDismiss={externalTools.dismissError} />
         </div>
       )}
       {clipboard.error !== null && (
         <div className={styles.errorLayer}>
-          <InlineError message={clipboard.error} onDismiss={clipboard.dismissError} />
+          <InlineError message={clipboard.error} copyDetails onDismiss={clipboard.dismissError} />
         </div>
       )}
       {appState.state.error !== null && (
@@ -703,7 +716,9 @@ export function RepoWorkspace({
           <InlineError
             message={appState.state.error}
             hint={appState.state.errorHint ?? undefined}
-            onDismiss={appState.dismissError}
+            copyDetails
+            earlier={earlierErrors.earlier}
+            onDismiss={earlierErrors.dismiss}
           />
           {appState.state.forcePushOffer !== null && appState.state.dialog?.kind !== "forcePush" && (
             <button
@@ -874,6 +889,8 @@ export function RepoWorkspace({
             externalTools={externalTools}
             discardRequest={discardRequest}
             onDiscardRequestChange={setDiscardRequest}
+            conflictRequest={conflictRequest}
+            onConflictRequestHandled={() => setConflictRequest(false)}
             initialCommitDraft={getCommitDraft(repoPath)}
             discardBlockedReason={discardDropBlockedReason}
             focusCommitMessage={focusCommitMessage}

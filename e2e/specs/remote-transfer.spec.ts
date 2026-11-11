@@ -206,7 +206,10 @@ describe("Browsitory remote transfer", () => {
 
     // The repository toolbar's Pull (#637): the sidebar no longer has one of its own.
     const pullButton = await $("div[aria-label='Repository']").$("button=Pull");
-    await pullButton.waitForEnabled();
+    // A busy Pull is `aria-disabled` with its reason (#664), not `disabled`.
+    await browser.waitUntil(async () => (await pullButton.getAttribute("aria-disabled")) !== "true", {
+      timeoutMsg: "expected Pull to become available",
+    });
     await pullButton.click();
 
     const remoteHead = git(REMOTE_SOURCE_PATH, "rev-parse", "refs/heads/main");

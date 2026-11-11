@@ -89,7 +89,7 @@ describe("App", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Loading");
   });
 
-  it("shows a failed open-repos restore in the reserved error slot instead of shifting the layout", async () => {
+  it("shows a failed open-repos restore in the error slot above the workspace, with Copy details (#663)", async () => {
     const client = fakeClient({
       listOpenRepos: async () => {
         throw new Error("config.toml is unreadable");
@@ -99,10 +99,10 @@ describe("App", () => {
     render(<App client={client} />);
 
     const banner = await screen.findByText("Error: config.toml is unreadable");
-    // The reserved-space slot (`.errorLayer`, shared with the other App-level banners) floats
-    // the banner over the workspace instead of pushing it down (FB-004) — asserting the class
-    // instead of computed layout, since jsdom doesn't run layout.
+    // The slot (`.errorLayer`, shared with the other App-level banners) sits in the flow, so it
+    // never covers the toolbar (#663) — asserting the class, since jsdom doesn't run layout.
     expect(banner.closest(`.${styles.errorLayer}`)).not.toBeNull();
+    expect(within(screen.getByRole("alert")).getByRole("button", { name: "Copy details" })).toBeInTheDocument();
   });
 
   it("renders a single Notifications region with a repository open", async () => {
@@ -2805,7 +2805,9 @@ describe("App external tools", () => {
 
     it("shows a plain error's message alone", async () => {
       const alert = await stageAndFail(vi.fn().mockRejectedValue(new Error("boom")));
-      expect(alert.textContent).toBe("boom");
+      // The message with no hint; then the banner's own buttons (#663).
+      expect(alert.querySelector("span")?.textContent).toBe("boom");
+      expect(within(alert).getByRole("button", { name: "Copy details" })).toBeInTheDocument();
     });
 
     it("drops the hint when the next failure has none", async () => {
@@ -2818,6 +2820,11 @@ describe("App external tools", () => {
       fireEvent.click(screen.getByRole("button", { name: "Stage a.txt" }));
       await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("boom"));
       expect(screen.getByRole("alert")).not.toHaveTextContent(PERMISSION_HINT);
+      // The replaced error is kept under the new one until the banner is dismissed (#663).
+      expect(within(screen.getByRole("alert")).getByText("1 earlier error")).toBeInTheDocument();
+      expect(within(screen.getByRole("alert")).getByText("Permission denied")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Dismiss error" }));
+      expect(screen.queryByRole("alert")).toBeNull();
     });
   });
 

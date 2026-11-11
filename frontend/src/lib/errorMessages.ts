@@ -13,9 +13,19 @@ export interface DescribedError {
   hint?: string;
 }
 
+// One per kind that has a next step (#663). `WorkerStopped` and `CredentialStoreFailure` have
+// none: their message is already the remediation (`credentialFailureMessage`). `Other` is the
+// backend's own text, whatever failed.
 const HINTS: Partial<Record<RepoErrorKind, string>> = {
   TransportLost: "The connection to the backend was lost. Retry, or reopen the repository.",
   PermissionDenied: "File permissions blocked this. Check that you can read and write the file or folder.",
+  DirtyWorktree: "Commit or stash your changes, then try again.",
+  PullFailed: "Check the remote and your connection, then pull again.",
+  Cancelled: "It was cancelled before it finished. Run it again when you are ready.",
+  AddDeleteConflict: "One side deleted the file: keep it or delete it to resolve the conflict.",
+  InvalidSearchQuery: "Check the search for a typo, or a branch, tag or path that doesn't exist.",
+  LocalChanges: "Commit or stash the changes to those files first, or use Stash and switch.",
+  MissingIdentity: "Set your name and email for commits, then commit again.",
 };
 
 export function describeError(err: unknown): DescribedError {

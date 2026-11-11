@@ -164,7 +164,7 @@ describe("Apply patch… in the toolbar (#649)", () => {
     const applyPatch = vi.fn(async () => {});
     await renderApp(layoutClient({ openPatchFile, applyPatch }));
     const button = within(toolbar()).getByRole("button", { name: "Apply patch…" });
-    await waitFor(() => expect(button).toBeEnabled());
+    await waitFor(() => expect(button).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(button);
     await waitFor(() => expect(applyPatch).toHaveBeenCalledWith("/repos/a", content));
     expect(openPatchFile).toHaveBeenCalledOnce();

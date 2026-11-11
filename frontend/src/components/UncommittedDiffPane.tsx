@@ -58,6 +58,9 @@ export function UncommittedDiffPane({
   refreshGeneration,
   discardRequest,
   onDiscardRequestChange: setDiscardRequest,
+  conflictRequest = false,
+  onConflictRequestHandled,
+  statusLoaded = true,
   initialCommitDraft,
   selectionBusyReason,
   discardBlockedReason,
@@ -72,6 +75,14 @@ export function UncommittedDiffPane({
   // (#493).
   discardRequest: DiscardRequest | null;
   onDiscardRequestChange: (request: DiscardRequest | null) => void;
+  /**
+   * "Go to conflict" from the operation strip (#665): the first conflicted file becomes the
+   * current one, its resolution focused; then `onConflictRequestHandled`.
+   */
+  conflictRequest?: boolean;
+  onConflictRequestHandled?: () => void;
+  /** Until the first status read is in, an empty list says nothing (no "clean" claim). */
+  statusLoaded?: boolean;
   initialCommitDraft?: CommitDraft;
   /** The loaded history (may be a file history or search results); stands in for
    * `branchCommits` when that is absent. */
@@ -172,7 +183,9 @@ export function UncommittedDiffPane({
   const staleness = (key: string) => (diffVersion[key] ?? 0) + refreshGeneration;
 
   const stagedEntries = status.filter((entry) => entry.staged);
-  const unstagedEntries = status.filter((entry) => !entry.staged);
+  // Conflicts head Changes, in a group of their own (#665).
+  const conflictEntries = status.filter((entry) => !entry.staged && entry.kind === "Conflicted");
+  const unstagedEntries = [...conflictEntries, ...status.filter((entry) => !entry.staged && entry.kind !== "Conflicted")];
   const stagedCount = stagedEntries.length;
   const conflictCount = status.filter((entry) => entry.kind === "Conflicted").length;
   // Both bulk actions skip conflicts (see `lib/stagePaths`). "Stage modified" (#621) also skips
@@ -240,6 +253,21 @@ export function UncommittedDiffPane({
     setFocusRequest(null);
   };
   const selectEntry = (entry: StatusEntry) => focusEntry(entry, selectOnlyFile(entry.staged, entry.path));
+
+  // "Go to conflict" (#665): once per request, the first conflict becomes the current file with
+  // the focus in its resolution; the request is then handed back.
+  const [conflictRequestSeen, setConflictRequestSeen] = useState(false);
+  if (conflictRequest !== conflictRequestSeen) {
+    setConflictRequestSeen(conflictRequest);
+    const first = conflictEntries[0];
+    if (conflictRequest && first !== undefined) {
+      selectEntry(first);
+      setFocusRequest((prev) => ({ key: entryKey(first), n: (prev?.n ?? 0) + 1 }));
+    }
+  }
+  useEffect(() => {
+    if (conflictRequest && conflictRequestSeen) onConflictRequestHandled?.();
+  }, [conflictRequest, conflictRequestSeen, onConflictRequestHandled]);
 
   // Ctrl/Cmd+click toggles a file, Shift+click selects the range from the anchor.
   const handleRowClick = (entry: StatusEntry) => (event?: MouseEvent) => {
@@ -588,7 +616,31 @@ export function UncommittedDiffPane({
             tabIndex={0}
             onKeyDown={handleGroupKeyDown(entries)}
           >
-            {entries.map(renderRow)}
+            {!staged && conflictEntries.length > 0 ? (
+              // Conflicts first, in a group of their own (#665); the keys move through both.
+              <>
+                <li role="group" aria-labelledby={`${rowIdPrefix}-conflicts`} className={styles.subgroup}>
+                  <span id={`${rowIdPrefix}-conflicts`} className={styles.subgroupHeading}>
+                    Conflicts ({conflictEntries.length}) · resolve these first
+                  </span>
+                  <ul role="none" className={styles.fileList}>
+                    {conflictEntries.map(renderRow)}
+                  </ul>
+                </li>
+                {entries.length > conflictEntries.length && (
+                  <li role="group" aria-labelledby={`${rowIdPrefix}-other-changes`} className={styles.subgroup}>
+                    <span id={`${rowIdPrefix}-other-changes`} className={styles.subgroupHeading}>
+                      Other changes
+                    </span>
+                    <ul role="none" className={styles.fileList}>
+                      {entries.slice(conflictEntries.length).map((entry, index) => renderRow(entry, conflictEntries.length + index))}
+                    </ul>
+                  </li>
+                )}
+              </>
+            ) : (
+              entries.map(renderRow)
+            )}
           </ul>
         )}
       </div>
@@ -600,6 +652,23 @@ export function UncommittedDiffPane({
       <span aria-live="polite" aria-atomic="true" className={styles.srOnly} data-testid="file-selection-announcement">
         {selectionAnnouncement}
       </span>
+      {allEntries.length === 0 && statusLoaded && (
+        // Nothing to list (#665): say the tree is clean, or how a new repository gets its first
+        // commit, instead of an empty pane.
+        <div className={styles.emptyState} role="status">
+          {headInfo.headId === null ? (
+            <>
+              <p className={styles.emptyStateTitle}>No commits yet</p>
+              <p>Add files to the repository folder: they appear here. Stage them and commit to make the first commit.</p>
+            </>
+          ) : (
+            <>
+              <p className={styles.emptyStateTitle}>Working tree clean</p>
+              <p>Nothing to commit. Changes to files in the repository folder appear here.</p>
+            </>
+          )}
+        </div>
+      )}
       {allEntries.length > 0 && (
         <div className={styles.fileGroups}>
           <div className={styles.groupHeading}>

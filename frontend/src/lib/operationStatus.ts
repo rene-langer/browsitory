@@ -16,6 +16,25 @@ import type {
 import { type TransferSubject, transferBusyReason } from "./transferCopy";
 
 /** Visible reason a merge/rebase step is blocked, or `undefined` when nothing blocks it. */
+/**
+ * What a merge merges, from git's `MERGE_MSG` (#665): "Merge branch 'feature/x'" → "feature/x";
+ * also a remote-tracking branch, a tag or a commit. `null` when the message names none (a
+ * message the user edited, or an octopus merge of several branches).
+ */
+export function mergeSource(mergeMessage: string | null): string | null {
+  if (mergeMessage === null) return null;
+  const match = /^Merge (?:remote-tracking branch|branch|tag|commit) '([^']+)'/.exec(mergeMessage.trimStart());
+  return match === null ? null : match[1];
+}
+
+/** The strip's "Merging feature/x into main" (#665), with whatever of the two is known. */
+export function mergeContext(mergeMessage: string | null, currentBranch: string | null): string | null {
+  const source = mergeSource(mergeMessage);
+  if (source !== null && currentBranch !== null) return `${source} into ${currentBranch}`;
+  if (source !== null) return source;
+  return currentBranch === null ? null : `into ${currentBranch}`;
+}
+
 export function conflictReason(conflictCount: number): string | undefined {
   if (conflictCount <= 0) return undefined;
   return `Resolve ${conflictCount} ${conflictCount === 1 ? "conflict" : "conflicts"} to continue`;

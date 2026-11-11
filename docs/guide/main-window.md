@@ -34,6 +34,18 @@ window has three columns:
 While a repository opens, or after you switch tabs, the graph and the Branches section show grey
 placeholder rows until the repository has been read.
 
+**When a button can't run.** A toolbar button that can't run now, such as **Push** while a
+merge is in progress, is dimmed; point at it or move the keyboard focus to it and a note under it
+says why. A menu item that can't run shows the reason under its label, and a dialog shows it
+above its buttons.
+
+**Errors.** When something fails, a red banner appears between the toolbar and the columns,
+pushing them down rather than covering them. It shows Git's or the system's own message and,
+where there is one, what to do next, for example "Commit or stash your changes, then try again."
+**Copy details** copies the message and that hint, for a bug report. An error you didn't
+dismiss isn't lost when a later action fails: the banner lists it under **1 earlier error** (up
+to five). The ✕ dismisses the banner with them.
+
 **Menus.** A menu (right-click, the **⋯** button, or the Menu key or Shift+F10) is split into
 groups by thin lines: in a commit's menu, for example, new branches and tags, applying the commit
 elsewhere, moving HEAD, history edits, **Drop**, exports and copying. Destructive items are red

@@ -17,6 +17,23 @@ describe("describeError", () => {
     expect(result.hint).toBe("File permissions blocked this. Check that you can read and write the file or folder.");
   });
 
+  // #663: every kind with a next step has a hint; those whose message is the remediation don't.
+  it.each([
+    ["DirtyWorktree", "Commit or stash your changes, then try again."],
+    ["PullFailed", "Check the remote and your connection, then pull again."],
+    ["Cancelled", "It was cancelled before it finished. Run it again when you are ready."],
+    ["AddDeleteConflict", "One side deleted the file: keep it or delete it to resolve the conflict."],
+    ["InvalidSearchQuery", "Check the search for a typo, or a branch, tag or path that doesn't exist."],
+    ["LocalChanges", "Commit or stash the changes to those files first, or use Stash and switch."],
+    ["MissingIdentity", "Set your name and email for commits, then commit again."],
+  ] as const)("adds a hint for %s", (kind, hint) => {
+    expect(describeError(new RepoError(kind, "raw backend text"))).toEqual({ message: "raw backend text", hint });
+  });
+
+  it.each(["WorkerStopped", "CredentialStoreFailure", "Other"] as const)("adds no hint for %s", (kind) => {
+    expect(describeError(new RepoError(kind, "text")).hint).toBeUndefined();
+  });
+
   it("adds no permission hint to a message that only mentions it", () => {
     expect(describeError(new RepoError("Other", "Permission denied")).hint).toBeUndefined();
   });
