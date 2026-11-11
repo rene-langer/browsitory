@@ -1,8 +1,11 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { RepoError, type ConflictSegment, type RepoClient } from "../ipc/RepoClient";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import { fakeRepoClient } from "../test/fakeRepoClient";
+import { DEFAULT_DIFF_SETTINGS } from "../ipc/generated/wire-constants";
+import { DiffSettingsContext } from "../state/useDiffSettings";
 
 const TEST_REPO_PATH = "/repo";
 
@@ -533,5 +536,71 @@ describe("ConflictResolutionPane merge editor (#720)", () => {
     const block = screen.getByRole("region", { name: "Conflict 1 of 1" });
     // The blocks keep their choices; only the whole-result edits are dropped.
     expect(within(block).getByRole("button", { name: "Accept ours" })).toHaveAttribute("aria-pressed", "true");
+  });
+});
+
+// #763: the read-only parts are highlighted like the diff viewer; the results stay plain fields.
+describe("ConflictResolutionPane syntax highlighting", () => {
+  const tsSegments: ConflictSegment[] = [
+    { kind: "Clean", content: "const one = 1;\n" },
+    { kind: "Conflict", ours: "const ours = 2;\n", base: "const base = 2;\n", theirs: "const theirs = 2;\n" },
+    { kind: "Clean", content: "const three = 3;\n" },
+  ];
+  const highlighted = (element: Element) => element.querySelector('[style*="--shiki-token"]') !== null;
+  const withSettings = (syntaxHighlight: boolean, children: ReactNode) => (
+    <DiffSettingsContext.Provider
+      value={{
+        settings: { ...DEFAULT_DIFF_SETTINGS, syntaxHighlight },
+        update: () => {},
+        error: null,
+        dismissError: () => {},
+      }}
+    >
+      {children}
+    </DiffSettingsContext.Provider>
+  );
+  const pane = (path: string) => (
+    <ConflictResolutionPane
+      repoPath={TEST_REPO_PATH}
+      client={fakeClient({ getConflictHunks: async () => tsSegments })}
+      path={path}
+      onResolve={vi.fn()}
+      onResolveAddDelete={vi.fn()}
+    />
+  );
+
+  it("highlights ours, theirs, base and the unchanged lines, keeping their text", async () => {
+    const { container } = render(withSettings(true, pane("src/a.ts")));
+    const block = await screen.findByRole("region", { name: "Conflict 1 of 1" });
+    fireEvent.click(screen.getByRole("button", { name: "Show base" }));
+    await waitFor(() => expect(highlighted(block)).toBe(true), { timeout: 15000 });
+    const parts = [...container.querySelectorAll("pre")];
+    expect(parts.map((part) => part.textContent)).toEqual([
+      "const one = 1;\n",
+      "const base = 2;\n",
+      "const ours = 2;\n",
+      "const theirs = 2;\n",
+      "const three = 3;\n",
+    ]);
+    for (const part of parts) expect(highlighted(part)).toBe(true);
+    // The editable result is a plain text field.
+    fireEvent.click(within(block).getByRole("button", { name: "Accept ours" }));
+    expect(within(block).getByLabelText("Result")).toHaveValue("const ours = 2;\n");
+  }, 20000);
+
+  it("leaves everything plain when syntax highlighting is off", async () => {
+    const { container } = render(withSettings(false, pane("src/a.ts")));
+    await screen.findByRole("region", { name: "Conflict 1 of 1" });
+    // Give a highlighter that would run a chance to finish.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(highlighted(container)).toBe(false);
+    expect(screen.getByText("const ours = 2;")).toBeInTheDocument();
+  });
+
+  it("leaves a file of an unknown language plain", async () => {
+    const { container } = render(withSettings(true, pane("notes.unknownext")));
+    await screen.findByRole("region", { name: "Conflict 1 of 1" });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(highlighted(container)).toBe(false);
   });
 });
