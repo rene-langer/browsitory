@@ -177,6 +177,8 @@ export const tauriRepoClient: RepoClient = {
       stop?.();
     };
   },
+  // Requests from the VSCode extension host (#677); the desktop app has none.
+  subscribeHostRequests: () => () => {},
   readPatchFile: (path: string) => call<PatchContent>("read_patch_file", { path }),
   logFrontendError: (context: string, error: unknown) => logFrontendError(context, error),
 };

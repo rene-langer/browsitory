@@ -51,6 +51,7 @@ import { RepoWorkspace } from "./RepoWorkspace";
 import { useBusyPaths } from "./state/useBusyPaths";
 import { useCommitDrafts } from "./state/useCommitDrafts";
 import { useE2eAutoOpen } from "./state/useE2eAutoOpen";
+import { useHostRequests } from "./state/useHostRequests";
 import { allReleaseNotes, useReleaseNotes } from "./state/useReleaseNotes";
 import { useTheme } from "./state/useTheme";
 
@@ -141,6 +142,9 @@ function AppContent({
     },
     [openRepo],
   );
+
+  // "Browsitory: Open", its menus and the contributed shortcut keys in VSCode (#677).
+  useHostRequests(client, !openRepos.loading, openRepoTab);
 
   const appToasts = useToasts();
   const [cloning, setCloning] = useState(false);

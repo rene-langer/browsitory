@@ -27,7 +27,9 @@ undo for most of it. It is the same app as the
 - **Command palette** (Ctrl+K, or Cmd+K on macOS) with almost every action, and keyboard
   shortcuts for the rest.
 - **VSCode integration.** Files open in VSCode's editor, diffs in its diff view, conflicts in
-  its merge editor, and terminals in its integrated terminal.
+  its merge editor, and terminals in its integrated terminal. **Open in Browsitory**, **Show
+  File History in Browsitory** and **Show Line History in Browsitory** in the Explorer, editor
+  and Source Control menus, and Browsitory's shortcuts as VSCode keybindings you can change.
 
 ![Staging a change, with the diff and the commit message](https://raw.githubusercontent.com/rene-langer/browsitory/main/docs/guide/assets/staging.png)
 
@@ -37,7 +39,9 @@ undo for most of it. It is the same app as the
 
 1. Install Browsitory from the Extensions view.
 2. Run **Browsitory: Open** from the Command Palette (Ctrl+Shift+P, or Cmd+Shift+P on macOS).
-3. Pick a repository folder.
+   It opens the repository of the file you are editing, or your workspace folders'
+   repositories.
+3. Without one, pick a repository folder.
 
 To clone or create a repository, use VSCode's own **Git: Clone** and **Git: Initialize
 Repository**, then open it in Browsitory.

@@ -1446,3 +1446,43 @@ describe("vscodeRepoClient", () => {
     await expect(cancel).resolves.toBeNull();
   });
 });
+
+describe("vscodeRepoClient host requests (#677, #679)", () => {
+  let postMessage: ReturnType<typeof vi.fn>;
+  let client: RepoClient;
+  let reset: (() => void) | undefined;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    postMessage = vi.fn();
+    (globalThis as unknown as { acquireVsCodeApi: () => { postMessage: typeof postMessage } }).acquireVsCodeApi = () => ({
+      postMessage,
+    });
+    const clientModule = await import("./vscodeRepoClient");
+    client = clientModule.vscodeRepoClient;
+    reset = clientModule.__resetVscodeRepoClientForTests;
+  });
+
+  afterEach(() => {
+    reset?.();
+  });
+
+  it("tells the host it listens, reports the focus, and delivers the host's requests", () => {
+    const listener = vi.fn();
+    const stop = client.subscribeHostRequests(listener);
+
+    expect(postMessage).toHaveBeenCalledWith({ jsonrpc: "2.0", method: "hostReady" });
+    expect(postMessage).toHaveBeenCalledWith({ jsonrpc: "2.0", method: "webviewFocus", params: { focused: expect.any(Boolean) } });
+    postMessage.mockClear();
+    window.dispatchEvent(new FocusEvent("blur"));
+    expect(postMessage).toHaveBeenCalledWith({ jsonrpc: "2.0", method: "webviewFocus", params: { focused: expect.any(Boolean) } });
+
+    const request = { kind: "openRepositories", paths: ["/repo"] };
+    window.dispatchEvent(new MessageEvent("message", { data: { jsonrpc: "2.0", method: "hostRequest", params: request } }));
+    expect(listener).toHaveBeenCalledWith(request);
+
+    stop();
+    window.dispatchEvent(new MessageEvent("message", { data: { jsonrpc: "2.0", method: "hostRequest", params: request } }));
+    expect(listener).toHaveBeenCalledOnce();
+  });
+});

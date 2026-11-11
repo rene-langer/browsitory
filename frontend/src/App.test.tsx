@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { describe, expect, it, vi } from "vitest";
 import App from "./App";
 import styles from "./App.module.css";
-import { RepoError, type CommitOutcome, type HookProgress, type OperationKind, type RepoClient, type RootFileName, type SequenceOutcome, type TerminalSequence } from "./ipc/RepoClient";
+import { RepoError, type CommitOutcome, type HostRequest, type HookProgress, type OperationKind, type RepoClient, type RootFileName, type SequenceOutcome, type TerminalSequence } from "./ipc/RepoClient";
 import { credentialRemediation } from "./lib/errorMessages";
 import { publishTransportStatus } from "./ipc/transportStatus";
 import type { ReleaseNotesEntry } from "./components/ReleaseNotesModal";
@@ -48,6 +48,32 @@ describe("App", () => {
     render(<App client={client} />);
 
     await waitFor(() => expect(listOpenRepos).toHaveBeenCalledOnce());
+  });
+
+  it("opens a repository and a file's history when the VSCode extension asks (#677, #678)", async () => {
+    let emit: (request: HostRequest) => void = () => {};
+    const subscribeHostRequests = vi.fn((listener: (request: HostRequest) => void) => {
+      emit = listener;
+      return () => {};
+    });
+    const openRepo = vi.fn(async () => {});
+    const getFileHistory = vi.fn(async () => []);
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo,
+      persistOpenRepos: async () => {},
+      getFileHistory,
+      subscribeHostRequests,
+    });
+    render(<App client={client} />);
+    // Only once the restored tab is open.
+    await waitFor(() => expect(subscribeHostRequests).toHaveBeenCalledOnce());
+    expect(openRepo).toHaveBeenCalledWith("/repos/a");
+
+    act(() => emit({ kind: "showHistory", repoPath: "/repos/b", path: "src/a.ts" }));
+
+    await waitFor(() => expect(getFileHistory).toHaveBeenCalledWith("/repos/b", "src/a.ts", expect.any(Number)));
+    expect(screen.getByRole("tab", { name: /^b/, selected: true })).toBeInTheDocument();
   });
 
   it("leaves updater UI absent unless the transport bootstrap injects it", async () => {

@@ -1,4 +1,4 @@
-import type { HookProgress, OpenRepoEntry, RepoClient, TransferProgress } from "./RepoClient";
+import type { HookProgress, HostRequest, OpenRepoEntry, RepoClient, TransferProgress } from "./RepoClient";
 import { createRepoClient } from "./createRepoClient";
 import { RepoError, toRepoError } from "./RepoClient";
 import { __resetHostVisibilityForTests, publishHostVisibility } from "./hostVisibility";
@@ -92,6 +92,8 @@ const pending = new Map<
 >();
 const transferProgressListeners = new Set<(progress: TransferProgress) => void>();
 const hookProgressListeners = new Set<(event: HookProgress) => void>();
+const hostRequestListeners = new Set<(request: HostRequest) => void>();
+let focusTracked = false;
 
 function handleMessage(event: MessageEvent) {
   const message = event.data;
@@ -115,6 +117,12 @@ function handleMessage(event: MessageEvent) {
   if (message.method === "hookProgress") {
     const hookEvent = message.params as HookProgress;
     for (const listener of hookProgressListeners) listener(hookEvent);
+    return;
+  }
+  if (message.method === "hostRequest") {
+    // "Browsitory: Open", the menus' history commands and the contributed shortcut keys (#677).
+    const request = message.params as HostRequest;
+    for (const listener of hostRequestListeners) listener(request);
     return;
   }
   if (message.method === "panelVisibility") {
@@ -149,6 +157,27 @@ function ensureInitialized(): VsCodeWebviewApi {
   return vscode;
 }
 
+/** A notification to the extension host itself: no `id`, no reply. */
+function notifyHost(method: string, params?: Record<string, unknown>): void {
+  ensureInitialized().postMessage(params === undefined ? { jsonrpc: "2.0", method } : { jsonrpc: "2.0", method, params });
+}
+
+function reportFocus(): void {
+  notifyHost("webviewFocus", { focused: document.hasFocus() });
+}
+
+/**
+ * Tells the host whether the webview has the focus: its contributed shortcut keybindings apply
+ * only then (#679), so F6 in the terminal stays VSCode's while the panel is the active editor.
+ */
+function trackFocus(): void {
+  if (focusTracked) return;
+  focusTracked = true;
+  window.addEventListener("focus", reportFocus);
+  window.addEventListener("blur", reportFocus);
+  reportFocus();
+}
+
 // A method without arguments sends empty `params`.
 function call<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
   const api = ensureInitialized();
@@ -166,6 +195,12 @@ export function __resetVscodeRepoClientForTests() {
     window.removeEventListener("message", handleMessage);
     listenerRegistered = false;
   }
+  if (focusTracked) {
+    window.removeEventListener("focus", reportFocus);
+    window.removeEventListener("blur", reportFocus);
+    focusTracked = false;
+  }
+  hostRequestListeners.clear();
   vscode = undefined;
   nextRequestId = 1;
   pending.clear();
@@ -197,6 +232,15 @@ export const vscodeRepoClient: RepoClient = {
     hookProgressListeners.add(listener);
     return () => {
       hookProgressListeners.delete(listener);
+    };
+  },
+  subscribeHostRequests: (listener: (request: HostRequest) => void) => {
+    hostRequestListeners.add(listener);
+    trackFocus();
+    // The host holds its requests until the app listens (the panel may still be loading).
+    notifyHost("hostReady");
+    return () => {
+      hostRequestListeners.delete(listener);
     };
   },
   // VSCode handles what is dropped on its windows (#649): no drops reach the webview's app.

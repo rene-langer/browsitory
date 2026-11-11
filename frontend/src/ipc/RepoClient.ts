@@ -1034,6 +1034,21 @@ export type RootFileName = (typeof ROOT_FILE_NAMES)[number];
  */
 export type FileDropEvent = { kind: "over" } | { kind: "leave" } | { kind: "drop"; paths: string[] };
 
+/**
+ * What the VSCode extension host asks the app to do (#677, #678, #679); `extension/src/
+ * hostRequests.ts` holds the same type.
+ */
+export type HostRequest =
+  /** Opens each repository as a tab (or keeps its tab) and shows the first one. */
+  | { kind: "openRepositories"; paths: string[] }
+  /**
+   * Opens `repoPath`'s tab and shows the history of `path` (relative to the work tree, with "/"),
+   * or of its lines `startLine`..`endLine` as they are in HEAD.
+   */
+  | { kind: "showHistory"; repoPath: string; path: string; lines?: { startLine: number; endLine: number } }
+  /** A global shortcut (`ShortcutId`) VSCode would otherwise take; `index` is Ctrl/Cmd+1…9's tab. */
+  | { kind: "shortcut"; id: string; index?: number };
+
 export interface RepoClient {
   pickRepoFolder(): Promise<string | null>;
   listRecentRepos(): Promise<string[]>;
@@ -1279,6 +1294,11 @@ export interface RepoClient {
    * only: in the VSCode extension, VSCode handles drops itself and this never calls `listener`.
    */
   subscribeFileDrops(listener: (event: FileDropEvent) => void): () => void;
+  /**
+   * The VSCode extension host's requests (#677), until the returned function is called; the host
+   * holds them until the first subscription. Desktop: never calls `listener`.
+   */
+  subscribeHostRequests(listener: (request: HostRequest) => void): () => void;
   listStashes(repoPath: string): Promise<StashEntry[]>;
   saveStash(repoPath: string, options: StashOptions): Promise<void>;
   /**
