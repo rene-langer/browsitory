@@ -122,6 +122,27 @@ describe("DiffView", () => {
     ]);
   });
 
+  it("heads each hunk with its lines in words, not git's @@ range (#682)", () => {
+    const hunks: DiffHunk[] = [
+      {
+        oldStart: 10,
+        oldLines: 2,
+        newStart: 20,
+        newLines: 2,
+        lines: [
+          { origin: "Context", content: "keep" },
+          { origin: "Remove", content: "gone" },
+          { origin: "Add", content: "fresh" },
+        ],
+      },
+    ];
+    const { container } = render(<DiffView hunks={hunks} />);
+
+    const header = screen.getByText("Lines 20–21");
+    expect(header).toHaveAttribute("title", "Before: lines 10–11. After: lines 20–21.");
+    expect(container.textContent).not.toContain("@@");
+  });
+
   it("hunk buttons are not tab stops; the diff container is one", () => {
     const hunks: DiffHunk[] = [
       { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [] },

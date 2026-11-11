@@ -1025,6 +1025,34 @@ fn remote_url_lifecycle_supports_distinct_push_urls_and_clearing_them() {
     assert_eq!(remote.push_url, None);
 }
 
+// The message names the branches as a plain list, not Rust's `["alpha", "topic"]` (#682).
+#[test]
+fn removal_blocked_by_upstreams_names_the_branches_in_plain_text() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "README.md", "initial commit\n");
+    common::commit_all(&repo, "initial commit");
+    add_remote(&repo, "origin", "file:///tmp/origin.git", None).unwrap();
+
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let mut config = repo.config().unwrap();
+    for branch in ["alpha", "topic"] {
+        repo.branch(branch, &head, false).unwrap();
+        config
+            .set_str(&format!("branch.{branch}.remote"), "origin")
+            .unwrap();
+        config
+            .set_str(&format!("branch.{branch}.merge"), "refs/heads/main")
+            .unwrap();
+    }
+
+    let error = remove_remote(&repo, "origin").unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Remote 'origin' wasn't removed: it is the upstream of alpha, topic. Try again to \
+         remove it and clear the upstream."
+    );
+}
+
 #[test]
 fn removal_is_blocked_by_a_non_current_branchs_upstream() {
     let (dir, repo) = common::init_repo();

@@ -67,6 +67,18 @@ describe("ReflogPanel", () => {
     expect(screen.getByRole("button", { name: `Restore main to ${entry.newId}` })).toBeEnabled();
   });
 
+  it("shows short names but selects by the full reference (#682)", () => {
+    const onSelectReference = vi.fn().mockResolvedValue(undefined);
+    renderPanel({ onSelectReference });
+
+    const selector = screen.getByRole("combobox", { name: "Reflog reference" });
+    expect(within(selector).getByRole("option", { name: "main" })).toHaveValue("refs/heads/main");
+    expect(selector).toHaveValue("refs/heads/main");
+    fireEvent.change(selector, { target: { value: "HEAD" } });
+    expect(onSelectReference).toHaveBeenCalledWith("HEAD");
+    expect(screen.queryByText(/refs\/heads\//)).not.toBeInTheDocument();
+  });
+
   it("requires a named dialog confirmation that identifies the target before restoring", () => {
     const onRestore = vi.fn().mockResolvedValue(undefined);
     renderPanel({ onRestore });
