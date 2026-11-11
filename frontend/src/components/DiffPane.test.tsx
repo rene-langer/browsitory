@@ -2131,10 +2131,11 @@ describe("DiffPane stash view", () => {
     const section = await screen.findByRole("region", { name: "Stash details" });
 
     for (const name of ["Apply", "Pop"]) {
-      expect(within(section).getByRole("button", { name })).toBeDisabled();
-      expect(within(section).getByRole("button", { name })).toHaveAttribute("title", "Unstage or commit staged changes first.");
+      expect(within(section).getByRole("button", { name })).toHaveAttribute("aria-disabled", "true");
+      expect(describedByText(within(section).getByRole("button", { name }))).toBe("Unstage or commit staged changes first.");
     }
     expect(within(section).getByRole("button", { name: "Drop…" })).toBeEnabled();
+    expect(within(section).getByRole("button", { name: "Drop…" })).not.toHaveAttribute("aria-disabled");
   });
 
   it("disables Drop… and its open confirmation, saying why, while an action is in progress (#521)", async () => {
@@ -2162,8 +2163,8 @@ describe("DiffPane stash view", () => {
 
     rerender(<DiffPane {...props({ ...actions, blockers: { apply: null, drop: reason } })} />);
     const drop = within(section).getByRole("button", { name: "Drop…" });
-    expect(drop).toBeDisabled();
-    expect(drop).toHaveAttribute("title", reason);
+    expect(drop).toHaveAttribute("aria-disabled", "true");
+    expect(describedByText(drop)).toBe(reason);
     const dialog = screen.getByRole("dialog", { name: "Drop stash wip", hidden: true });
     expect(dialog).toHaveTextContent(reason);
     const confirm = within(dialog).getByRole("button", { name: "Drop stash", hidden: true });
