@@ -146,13 +146,14 @@ stash that holds staged changes also offers **Apply as unstaged** and **Pop as u
 bring everything back unstaged (`git stash apply`). For other stashes the two would do the same,
 so only Apply and Pop are shown.
 
-Apply and Pop need nothing staged and no unresolved conflicts; the buttons and menu items are
-disabled with the reason until then. A stash that conflicts with your current files applies anyway and opens the
+Apply and Pop need nothing staged and no unresolved conflicts; until then the menu items are
+disabled with the reason, and the stash view's buttons show the reason below them while you hover
+or focus them (a screen reader reads it as the button's description). A stash that conflicts with your current files applies anyway and opens the
 files in the conflict pane; a conflicting **Pop** keeps the stash, so drop it yourself once the
 files are resolved. If the stash list changed since you looked (another tool stashed or
 dropped), Apply, Pop and Drop stop and ask you to refresh. Dropping asks for confirmation first, since it can't be undone, and stash
 operations are not part of **Undo**. You can drop a stash while a merge, rebase, cherry-pick or
 revert is paused; while another action or a fetch, pull or push is running, **Drop…** and its
-confirmation are disabled with the reason. The command palette's **Apply stash**, **Pop stash** and
+confirmation are disabled, and the confirmation says why under its question. The command palette's **Apply stash**, **Pop stash** and
 **Drop stash** commands (and **Apply stash as unstaged** and **Pop stash as unstaged** for a stash
 with staged changes) follow the same rules.
