@@ -28,7 +28,9 @@ The palette has almost every action in Browsitory, grouped like this:
 - **Diff:** ignore whitespace, show whitespace, more or fewer context lines, syntax
   highlighting, wrap lines and show whole file in the current diff (see [Diff options](history.md#diff-options)), file
   history of the current file, stage, unstage or discard the selected files, discard the current
-  file or all unstaged changes, open the current file in your editor or diff tool, **Apply
+  file or all unstaged changes, in the merge editor **Previous conflict**, **Next conflict** and
+  a choice for the current conflict (see [Conflicts](conflicts.md)), open the current file in
+  your editor or diff tool, **Apply
   patch…** and **Save staged changes as patch…** (see [Patches and partial
   reverts](patches.md)).
 - **Go to:** **Go to commit…**, **Go to branch…**, **Go to tag…** and **Go to stash…** (see
@@ -137,6 +139,14 @@ In lists and diffs (Ctrl means ⌘ on macOS):
 | F2 | Rename the focused tab |
 | Menu key or Shift+F10 | Open the focused item's menu |
 | Esc | Close a dialog or menu |
+
+In the merge editor of the conflict pane (see [Conflicts](conflicts.md)):
+
+| Keys | What they do |
+|---|---|
+| 1 … 5 | Accept ours, Accept theirs, Ours then theirs, Theirs then ours, Accept base (with a conflict block focused, outside its result field) |
+| F7 / Shift+F7 | Next and previous conflict (⇧F7 on macOS) |
+| Esc | Leave a block's result field, back to the block |
 
 **Context menus from the keyboard.** The Menu key or Shift+F10 (Fn+Shift+F10 on most Mac
 keyboards) opens the menu of the focused branch, remote, changed file, commit or tab. In a menu,

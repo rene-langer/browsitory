@@ -1539,6 +1539,34 @@ describe("diff option and discard commands", () => {
     expect(none).not.toContain("toggle-show-whole-file");
   });
 
+  // #764: the merge editor's moves and choices, with the keys the pane binds.
+  it("offers the merge editor's conflict moves and choices", () => {
+    const mergeEditor = {
+      path: "src/a.ts",
+      canGoPrevious: false,
+      canGoNext: true,
+      previous: vi.fn(),
+      next: vi.fn(),
+      choose: vi.fn(),
+    };
+    const { commands } = build(makeAppState(), { mergeEditor });
+    const next = commands.find((c) => c.id === "next-conflict")!;
+    expect(next.label).toBe("Next conflict (src/a.ts)");
+    expect(next.keys).toBe("F7");
+    next.run();
+    expect(mergeEditor.next).toHaveBeenCalled();
+    expect(commands.some((c) => c.id === "previous-conflict")).toBe(false);
+    const theirs = commands.find((c) => c.id === "conflict-theirs")!;
+    expect(theirs.label).toBe("Accept theirs (current conflict)");
+    expect(theirs.keys).toBe("2");
+    theirs.run();
+    expect(mergeEditor.choose).toHaveBeenCalledWith("theirs");
+    const both = commands.find((c) => c.id === "conflict-theirs-then-ours")!;
+    both.run();
+    expect(mergeEditor.choose).toHaveBeenCalledWith("theirsThenOurs");
+    expect(build(makeAppState()).commands.some((c) => c.id === "next-conflict")).toBe(false);
+  });
+
   it("offers discard commands that only request a confirmation", () => {
     const state = makeAppState({ status: [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }] });
     const { commands, diffCommands } = build(state, { currentFile: "a.txt" });

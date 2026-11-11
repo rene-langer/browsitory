@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { StashEntry } from "../ipc/RepoClient";
 import { StashPanel } from "./StashPanel";
+import { describedByText } from "../test/describedBy";
 import { formatAbsoluteDate, formatRelativeDate } from "../lib/formatDate";
 
 // Branch, age and file count (#657); the tests below that need others set their own.
@@ -422,6 +423,18 @@ describe("StashPanel", () => {
     fireEvent.click(confirm);
 
     expect(onDropStash).not.toHaveBeenCalled();
+  });
+
+  it("ties the open Drop confirmation's reason to its button, shown once (#772)", () => {
+    const { rerender } = renderPanel({ onDropStash: vi.fn() });
+    openMenu(/stash0fix/);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Drop…" }));
+
+    rerender(panel({ onDropStash: vi.fn(), blockers: { apply: null, drop: "Another action is in progress." } }));
+    const dialog = screen.getByRole("dialog", { name: /Drop stash/ });
+    const confirm = within(dialog).getByRole("button", { name: "Drop stash" });
+    expect(describedByText(confirm)).toBe("Another action is in progress.");
+    expect(within(dialog).getAllByText("Another action is in progress.")).toHaveLength(1);
   });
 });
 

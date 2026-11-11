@@ -1,8 +1,6 @@
 // Types and helpers shared by `DiffPane` and its views (`UncommittedDiffPane`, `CommitDiffPane`,
 // `StashDiffPane`, `UncommittedFileSection`).
-import { type ReactNode } from "react";
 import type { CommitChangeRequest, PatchSource, HeadInfo } from "../ipc/RepoClient";
-import formStyles from "./primitives/FormDialog.module.css";
 import { type StashBlockers } from "../lib/actions/stashActions";
 
 /** The hook controls `DiffPane` hands to `CommitBox` (whether hooks are installed is derived). */
@@ -33,20 +31,6 @@ export interface StashActions {
   // Why Apply/Pop and Drop can't run now (`stashBlockers`, shared with the stash list and the
   // palette, #509). A paused merge, rebase or sequence step allows Drop (#521).
   blockers: StashBlockers;
-}
-
-/**
- * A confirmation's message plus, while the action is blocked, why (#521): the repository can
- * become busy while the confirmation is open.
- */
-export function withBlockedReason(message: ReactNode, blockedReason: string | null): ReactNode {
-  if (blockedReason === null) return message;
-  return (
-    <>
-      {typeof message === "string" ? <p>{message}</p> : message}
-      <p className={formStyles.blocked}>{blockedReason}</p>
-    </>
-  );
 }
 
 /** What the discard confirm dialogs are currently asking about; null when none is open. */

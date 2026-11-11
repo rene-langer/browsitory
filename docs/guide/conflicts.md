@@ -26,7 +26,16 @@ A conflicted file opens the **Resolve conflict** pane:
   as "1 of 3 resolved" shows how far you are. **Save resolution** is enabled once every block
   has a result. The sides are labelled with what they are, for example "Ours (main)" and
   "Theirs (feature)" for a merge. **Previous conflict** and **Next conflict** move between the
-  blocks.
+  blocks. Our lines, their lines, the base and the unchanged lines are syntax highlighted like
+  the diff, following the diff's **Syntax highlighting** option; the result fields stay plain
+  text.
+- From the keyboard: with a block focused, **1** to **5** take **Accept ours**, **Accept
+  theirs**, **Ours then theirs**, **Theirs then ours** and **Accept base**. **F7** and
+  **Shift+F7** (⇧F7 on macOS) go to the next and previous conflict from anywhere in the merge
+  editor and focus that block. In a block's **Result** field the digits are typed as text: press
+  **Esc**, **Shift+Tab** or **F7** first to get back to a block. The command palette offers the
+  same moves and choices (**Next conflict**, **Accept theirs (current conflict)** and so on) for
+  the conflict last focused (the first one before that).
 - **Edit whole result** turns the file into one text field, for changes outside the blocks too.
   It starts from your choices; a block without one is written with git's conflict markers
   (`<<<<<<< ours`, `||||||| base`, `=======`, `>>>>>>> theirs`), and **Save resolution** stays
