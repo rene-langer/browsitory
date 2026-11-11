@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { BranchInfo } from "../ipc/RepoClient";
 import { readCheckoutNewBranch, writeCheckoutNewBranch } from "../lib/checkoutNewBranch";
 import { branchNameProblem } from "../lib/refName";
-import formStyles from "./primitives/FormDialog.module.css";
 import { InlineError } from "./primitives/InlineError";
 import styles from "./BranchTree.module.css";
+import { BlockedReason } from "./primitives/BlockedReason";
+import { describedBy } from "../lib/ariaDescribedBy";
 
 /**
  * The Branches section's inline "New branch" form, shown while `draft` is non-null. It owns its
@@ -30,6 +31,7 @@ export function NewBranchForm({
   onCreateBranch: (name: string, startPoint: string, checkout: boolean) => Promise<string | null>;
   onClose: () => void;
 }) {
+  const reasonId = useId();
   // On by default and remembered (#656).
   const [checkoutAfterCreate, setCheckoutAfterCreate] = useState(readCheckoutNewBranch);
   const [newBranchName, setNewBranchName] = useState("");
@@ -106,12 +108,13 @@ export function NewBranchForm({
         />
         Check out after creating
       </label>
-      {busyReason !== null && <p className={formStyles.blocked}>{busyReason}</p>}
+      <BlockedReason id={reasonId} reason={busyReason} />
       <div className={styles.draftActions}>
         <button
           type="submit"
           disabled={newBranchName.trim() === "" || newBranchProblem !== null || operationDisabled}
           title={busyReason ?? undefined}
+          aria-describedby={describedBy(reasonId, busyReason)}
         >
           Create
         </button>

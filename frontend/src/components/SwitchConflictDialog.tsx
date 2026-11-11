@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { FormDialog } from "./primitives/FormDialog";
 import styles from "./SwitchConflictDialog.module.css";
+import { describedBy } from "../lib/ariaDescribedBy";
 
 /** How many of the files in the way the dialog lists before "and N more". */
 const SHOWN_FILES = 8;
@@ -28,6 +29,8 @@ export function SwitchConflictDialog({
   onStashAndSwitch: (reapply: boolean) => void;
   onCancel: () => void;
 }) {
+  const reasonId = useId();
+  const busyReason = operationDisabled ? operationDisabledReason : null;
   const [reapply, setReapply] = useState(true);
   const shown = files.slice(0, SHOWN_FILES);
   const more = files.length - shown.length;
@@ -59,14 +62,17 @@ export function SwitchConflictDialog({
             : "The changes stay in the stash list, to apply later."}{" "}
           Undo goes back to {currentBranch ?? "the current branch"} with them.
         </p>
-        {operationDisabled && operationDisabledReason !== null && (
-          <p className={styles.hint}>{operationDisabledReason}</p>
+        {busyReason !== null && (
+          <p id={reasonId} className={styles.hint}>
+            {busyReason}
+          </p>
         )}
         <div className={styles.actions}>
           <button
             type="button"
             disabled={operationDisabled}
-            title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
+            title={busyReason ?? undefined}
+            aria-describedby={describedBy(reasonId, busyReason)}
             onClick={() => onStashAndSwitch(reapply)}
           >
             Stash and switch
