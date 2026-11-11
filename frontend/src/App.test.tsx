@@ -3035,6 +3035,26 @@ describe("App external tools", () => {
     expect(await screen.findByText("Couldn't check for updates: offline")).toBeInTheDocument();
   });
 
+  it("the untracked-file note opens Preferences on the Diff group (#784)", async () => {
+    localStorage.removeItem("preferences-group");
+    render(
+      <App
+        client={toolsClient({
+          getStatus: async () => [{ path: "new.txt", oldPath: null, staged: false, kind: "New" }],
+          getDiffSettings: async () => ({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false, expandUntracked: false }),
+        })}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("option", { name: /^new\.txt ?\(New\)/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Diff preferences" }));
+    const dialog = await screen.findByRole("dialog", { name: "Preferences" });
+    expect(within(dialog).getByRole("tab", { name: "Diff" })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() =>
+      expect(within(dialog).getByRole("checkbox", { name: "Expand untracked files" })).not.toBeChecked(),
+    );
+    localStorage.removeItem("preferences-group");
+  });
+
   it("Preferences has an Updates section with the updater only (#630)", async () => {
     const check = vi.fn<UpdateCheck>().mockResolvedValue({ kind: "none" });
     const getUpdateSettings = vi.fn(async () => ({ checkAutomatically: false }));

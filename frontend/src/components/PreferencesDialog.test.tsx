@@ -10,7 +10,10 @@ import {
   ExternalToolsSection,
   FetchSection,
   PreferencesDialog,
+  PreferencesSection,
   UpdatesSection,
+  type PreferencesGroup,
+  type PreferencesGroupId,
 } from "./PreferencesDialog";
 import { UpdateSettingsProvider } from "../state/UpdateSettingsProvider";
 import type { UpdateCheckOutcome } from "../state/updateCheck";
@@ -620,5 +623,180 @@ describe("Updates preferences (#630)", () => {
     fireEvent.click(button);
     answer({ kind: "failed", message: "no endpoint answered" });
     expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't check for updates: no endpoint answered");
+  });
+});
+
+describe("Preference groups (#784)", () => {
+  afterEach(() => localStorage.clear());
+
+  const field = (label: string) => (
+    <label>
+      {label}
+      <input type="text" />
+    </label>
+  );
+  const groups: PreferencesGroup[] = [
+    {
+      id: "appearance",
+      label: "Appearance",
+      content: <PreferencesSection title="Appearance">{[field("Code font"), field("Tab size")]}</PreferencesSection>,
+    },
+    {
+      id: "diff",
+      label: "Diff",
+      content: <PreferencesSection title="Diff">{[field("Word wrap"), field("Diff algorithm")]}</PreferencesSection>,
+    },
+    {
+      id: "commit-message",
+      label: "Commit message",
+      content: <PreferencesSection title="Commit message">{field("Summary length limit")}</PreferencesSection>,
+    },
+    {
+      id: "fetch",
+      label: "Fetch",
+      content: <PreferencesSection title="Fetch">{field("Fetch automatically")}</PreferencesSection>,
+    },
+  ];
+
+  function renderGroups(props: { initialGroup?: PreferencesGroupId; onClose?: () => void } = {}) {
+    return render(<PreferencesDialog onClose={props.onClose ?? (() => {})} groups={groups} initialGroup={props.initialGroup} />);
+  }
+  const tab = (name: string) => screen.getByRole("tab", { name });
+
+  it("lists the groups as tabs and shows only the first group's settings", () => {
+    renderGroups();
+    const list = screen.getByRole("tablist", { name: "Preference groups" });
+    expect(list).toHaveAttribute("aria-orientation", "vertical");
+    expect(within(list).getAllByRole("tab").map((t) => t.textContent)).toEqual([
+      "Appearance",
+      "Diff",
+      "Commit message",
+      "Fetch",
+    ]);
+    expect(tab("Appearance")).toHaveAttribute("aria-selected", "true");
+    expect(tab("Diff")).toHaveAttribute("aria-selected", "false");
+    const panel = screen.getByRole("tabpanel", { name: "Appearance" });
+    expect(tab("Appearance")).toHaveAttribute("aria-controls", panel.id);
+    expect(within(panel).getByRole("group", { name: "Appearance" })).toBeInTheDocument();
+    expect(screen.getAllByRole("tabpanel")).toHaveLength(1);
+    expect(screen.queryByRole("group", { name: "Diff" })).toBeNull();
+  });
+
+  it("shows another group when its tab is clicked", () => {
+    renderGroups();
+    fireEvent.click(tab("Diff"));
+    expect(tab("Diff")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel", { name: "Diff" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Word wrap" })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Appearance" })).toBeNull();
+  });
+
+  it("keeps a group's unsaved edits while another group is shown", () => {
+    renderGroups();
+    fireEvent.change(screen.getByRole("textbox", { name: "Code font" }), { target: { value: "Fira Code" } });
+    fireEvent.click(tab("Diff"));
+    fireEvent.click(tab("Appearance"));
+    expect(screen.getByRole("textbox", { name: "Code font" })).toHaveValue("Fira Code");
+  });
+
+  it("moves between groups with the arrow keys, Home and End, wrapping around", () => {
+    renderGroups();
+    tab("Appearance").focus();
+    fireEvent.keyDown(tab("Appearance"), { key: "ArrowDown" });
+    expect(tab("Diff")).toHaveFocus();
+    expect(tab("Diff")).toHaveAttribute("aria-selected", "true");
+    expect(tab("Diff")).toHaveAttribute("tabindex", "0");
+    expect(tab("Appearance")).toHaveAttribute("tabindex", "-1");
+    fireEvent.keyDown(tab("Diff"), { key: "ArrowRight" });
+    expect(tab("Commit message")).toHaveFocus();
+    fireEvent.keyDown(tab("Commit message"), { key: "ArrowUp" });
+    expect(tab("Diff")).toHaveFocus();
+    fireEvent.keyDown(tab("Diff"), { key: "ArrowLeft" });
+    expect(tab("Appearance")).toHaveFocus();
+    fireEvent.keyDown(tab("Appearance"), { key: "ArrowUp" });
+    expect(tab("Fetch")).toHaveFocus();
+    expect(screen.getByRole("tabpanel", { name: "Fetch" })).toBeInTheDocument();
+    fireEvent.keyDown(tab("Fetch"), { key: "ArrowDown" });
+    expect(tab("Appearance")).toHaveFocus();
+    fireEvent.keyDown(tab("Appearance"), { key: "End" });
+    expect(tab("Fetch")).toHaveFocus();
+    fireEvent.keyDown(tab("Fetch"), { key: "Home" });
+    expect(tab("Appearance")).toHaveFocus();
+  });
+
+  it("starts with the focus in the filter field", () => {
+    renderGroups();
+    expect(screen.getByRole("searchbox", { name: "Filter settings" })).toHaveFocus();
+  });
+
+  it("reopens on the last group shown on this machine", () => {
+    const view = renderGroups();
+    fireEvent.click(tab("Commit message"));
+    expect(localStorage.getItem("preferences-group")).toBe("commit-message");
+    view.unmount();
+
+    renderGroups();
+    expect(tab("Commit message")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel", { name: "Commit message" })).toBeInTheDocument();
+  });
+
+  it("opens on the first group when the remembered one isn't offered", () => {
+    localStorage.setItem("preferences-group", "updates");
+    renderGroups();
+    expect(tab("Appearance")).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("opens on the group it is asked for", () => {
+    localStorage.setItem("preferences-group", "fetch");
+    renderGroups({ initialGroup: "diff" });
+    expect(tab("Diff")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel", { name: "Diff" })).toBeInTheDocument();
+  });
+
+  it("filters the groups by setting label and says how many match", () => {
+    renderGroups();
+    const filter = screen.getByRole("searchbox", { name: "Filter settings" });
+    expect(screen.getByRole("status").textContent).toBe("");
+
+    fireEvent.change(filter, { target: { value: "WRAP" } });
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Diff"]);
+    expect(tab("Diff")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel", { name: "Diff" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("1 group matches");
+
+    fireEvent.change(filter, { target: { value: "f" } });
+    // "Code font" and "Diff algorithm", "Fetch automatically"; the shown group stays shown.
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Appearance", "Diff", "Fetch"]);
+    expect(tab("Diff")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("status")).toHaveTextContent("3 groups match");
+
+    fireEvent.change(filter, { target: { value: "commit" } });
+    // A group's own name matches too.
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Commit message"]);
+
+    fireEvent.change(filter, { target: { value: "" } });
+    expect(screen.getAllByRole("tab")).toHaveLength(4);
+    expect(tab("Commit message")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("status").textContent).toBe("");
+  });
+
+  it("says so when no setting matches the filter", () => {
+    renderGroups();
+    fireEvent.change(screen.getByRole("searchbox", { name: "Filter settings" }), { target: { value: "zzz" } });
+    expect(screen.queryAllByRole("tab")).toHaveLength(0);
+    expect(screen.queryByRole("tabpanel")).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("No settings match “zzz”");
+    expect(screen.getByText("No settings match “zzz”")).toBeVisible();
+  });
+
+  it("Escape in the filter clears it before it closes the dialog", () => {
+    const onClose = vi.fn();
+    renderGroups({ onClose });
+    const filter = screen.getByRole("searchbox", { name: "Filter settings" });
+    fireEvent.change(filter, { target: { value: "wrap" } });
+    fireEvent.keyDown(filter, { key: "Escape" });
+    expect(filter).toHaveValue("");
+    expect(screen.getAllByRole("tab")).toHaveLength(4);
+    expect(onClose).not.toHaveBeenCalled();
   });
 });
