@@ -2407,6 +2407,9 @@ only `error`.
   `crates/vscode-sidecar/src/dispatch/wire_snapshots.rs` builds every output DTO from the same
   domain values (`crates/test-support/wire_fixtures.rs`, included by both with `#[path]`),
   through the same `From` impls and helpers the commands and handlers call, and
+  from one case list (`shared_wire_cases` in `crates/test-support/wire_cases.rs`, also
+  included with `#[path]`; each transport serializes the cases its own way and adds its own
+  cases at named slots, #488), and
   compares the exact bytes with `crates/*/tests/wire/dto-snapshots.txt`, one
   `<dto>/<case> <json>` line per case. The fixtures cover every enum variant and both `None`
   and `Some` of every optional field: a fieldless enum's list and a data-carrying enum's
