@@ -28,7 +28,7 @@ describe("Back/Forward keys (#618)", () => {
   });
 
   it("are named for the platform", () => {
-    expect(navigationKeyLabels(false)).toEqual({ back: "Alt+Left", forward: "Alt+Right" });
+    expect(navigationKeyLabels(false)).toEqual({ back: "Alt+←", forward: "Alt+→" });
     expect(navigationKeyLabels(true)).toEqual({ back: "⌘[", forward: "⌘]" });
   });
 });

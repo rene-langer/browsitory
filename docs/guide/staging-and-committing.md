@@ -32,7 +32,9 @@ When **Changes** holds both changes to tracked files and untracked (new) files, 
 modified** sits next to **Stage all**: it stages the tracked files' changes (edits, deletions,
 type changes) and leaves the untracked files where they are, like `git add -u`. **Stage all**
 stages the untracked files too. Both leave conflicted files alone, and each is one undo step. The
-command palette has the same action as **Stage modified files (tracked only)**.
+command palette has the same actions as **Stage all changes** and **Stage modified files
+(tracked only)**; **Ctrl+Shift+A** (**⇧⌘A** on macOS) stages all changes from anywhere outside a
+text field.
 
 Only the current file's diff is loaded. To keep large new or generated files from loading when
 you move onto them, turn off **Preferences → Diff → Expand untracked files**: an untracked file
@@ -45,7 +47,7 @@ lines) apply to every file and are remembered; see [Diff options](history.md#dif
 
 Each hunk header has the buttons **Stage hunk** (or **Unstage hunk**) and **Discard hunk**, which
 is red; their keys are `s` and `d`. Discard doesn't ask: the hunk goes at once, and the
-notification that says so has an **Undo** button (Ctrl/Cmd+Z works too).
+notification that says so has an **Undo** button (Ctrl+Z, ⌘Z on macOS, works too).
 
 A rename you staged (`git mv`, or staging both the deletion and the new file) is one **Staged**
 row under the new name with "Renamed from …": its diff shows only the edits, an image previews
@@ -59,7 +61,7 @@ but not staged yet shows as deleted plus new, like `git status`.
 Click a file's row to select it. **Ctrl+click** (**Cmd+click** on macOS) adds a file to the
 selection or removes it, and **Shift+click** selects every file from the last one clicked. With
 the **Changes** or **Staged** list focused, `↑`/`↓` (or `j`/`k`) move to the next file and on into
-the other list past either end, `Shift+↑`/`Shift+↓` extend the selection, **Ctrl/Cmd+A** selects
+the other list past either end, `Shift+↑`/`Shift+↓` extend the selection, **Ctrl+A** (**⌘A**) selects
 the whole list, **Esc** keeps only the current file and **Enter** moves the focus into its diff.
 With the focus in the diff, `j` and `k` go to the next and previous file and keep the focus
 there. A selection stays within one list: clicking a file in the other list starts a new one.
@@ -78,6 +80,9 @@ action is running, the bar's buttons are disabled.
 
 ## Writing the commit message
 
+**Alt+C** (**⌥C** on macOS), or **Go to commit message** in the command palette, shows the
+working tree and puts the cursor in the message from anywhere outside a text field.
+
 Below the message, **Summary 42/50** counts the characters of the first line. Past the limit it
 turns to a warning color, because many tools cut longer summaries; it never stops a commit. A
 faint ruler marks column 72 for wrapping the body, and the field uses a monospace font while the
@@ -95,7 +100,7 @@ uses them too. They are hidden while a merge, cherry-pick or revert pre-fills th
 you committed or amended in Browsitory in this repository (newest first; kept per repository on
 this computer, not in the repository), then the 10 newest commits on the current branch, each
 summary once. Use the arrow keys and Enter, or click, to put that full message in the box; it
-replaces what was there. **Ctrl+Z** (**Cmd+Z** on macOS) in the field, or **Restore message**,
+replaces what was there. **Ctrl+Z** (**⌘Z** on macOS) in the field, or **Restore message**,
 brings back the replaced text until you edit the field. A merge, cherry-pick, revert or squash
 message that git wrote and you committed unchanged is not kept.
 

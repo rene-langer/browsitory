@@ -2,7 +2,7 @@
 
 ## Command palette
 
-Press **Ctrl+K** (**Cmd+K** on macOS) anywhere to open the command palette, or click
+Press **Ctrl+K** (**⌘K** on macOS) anywhere to open the command palette, or click
 **Commands** in the header. Before you type, it lists every command it can run now: the ones you
 used last under **Recent**, then the rest in their groups. Type to filter the list. The words you
 type can come in any order and can be shortened: `sw main` finds **Switch to main**, and `ftch`
@@ -75,29 +75,60 @@ adds that branch to the graph), it is on a side branch of the one branch the gra
 ## Keyboard shortcuts
 
 Press **?** (outside a text field), or choose **Keyboard shortcuts** in the header's **Help**
-menu, for the full list of shortcuts. The most useful ones:
+menu, for the full list of shortcuts, written for your platform: **Ctrl** on Windows and Linux,
+**⌘** and the other Apple symbols (⌥ Option, ⇧ Shift, ⌃ Control) on macOS. The command palette
+shows a command's shortcut at the right of its row, and the toolbar's tooltips show theirs
+(**Refresh (F5)**).
+
+The global shortcuts work anywhere in the window:
+
+| Windows and Linux | macOS | What they do |
+|---|---|---|
+| Ctrl+K | ⌘K | Open the command palette |
+| F5 | F5 | Refresh the repository |
+| Shift+F5 | ⇧F5 | Fetch, as the toolbar's **Fetch** does |
+| Ctrl+Shift+L | ⇧⌘L | Pull the current branch |
+| Ctrl+Shift+K | ⇧⌘K | Push the current branch, as the toolbar's **Push** does |
+| Ctrl+Shift+A | ⇧⌘A | Stage all changes (outside a text field) |
+| Alt+C | ⌥C | Show the working tree and go to the commit message (outside a text field) |
+| Ctrl+Z | ⌘Z | Undo the last Git operation (outside a text field) |
+| Ctrl+Shift+Z or Ctrl+Y | ⇧⌘Z | Redo |
+| F6, Shift+F6 | F6, ⇧F6 | Move to the next or previous pane: toolbar, sidebar, history, diff |
+| Ctrl+Alt+B | ⌥⌘B | Show or hide the sidebar |
+| Ctrl+Tab, Ctrl+Shift+Tab | ⌃⇥, ⌃⇧⇥ | Switch to the next or previous tab |
+| Ctrl+1 … Ctrl+8, Ctrl+9 | ⌘1 … ⌘8, ⌘9 | Switch to tab 1 to 8, or to the last tab |
+| Ctrl+W | ⌘W | Close the active tab |
+| Ctrl+Shift+T | ⇧⌘T | Reopen the last closed tab |
+| Alt+← / Alt+→ | ⌘[ / ⌘] | Back and forward through the selected commits (outside a text field) |
+| ? | ? | Show the keyboard shortcuts (outside a text field) |
+
+A shortcut that can't run says why in a notification, for example "Can't pull now. No upstream
+set for the current branch." The host may take some keys before Browsitory sees them: the
+macOS app menu takes ⌘W, and in VSCode the editor's own keybindings may take Ctrl+Tab,
+Ctrl+1 … Ctrl+9, Ctrl+W, Ctrl+Shift+T, Ctrl+Alt+B or Alt+←. The toolbar, the tab strip and the
+command palette do the same things.
+
+**Moving between panes.** F6 moves the focus to the next pane (the repository toolbar, the
+sidebar, the history, the diff) and Shift+F6 to the previous one, wrapping around. A pane gets
+the focus back where you left it; the first time, the history and the diff focus their list.
+Screen readers announce the sidebar, history and diff as regions.
+
+In lists and diffs (Ctrl means ⌘ on macOS):
 
 | Keys | What they do |
 |---|---|
-| Ctrl/Cmd+K | Open the command palette |
-| Ctrl/Cmd+Alt+B | Show or hide the sidebar (where the host doesn't use it) |
-| Ctrl/Cmd+Z | Undo the last Git operation |
-| Ctrl/Cmd+Shift+Z or Ctrl+Y | Redo |
-| Ctrl/Cmd+W | Close the active tab (in VSCode only where VSCode doesn't use it) |
-| Ctrl/Cmd+Shift+T | Reopen the last closed tab (where the host doesn't use it) |
-| Ctrl/Cmd+F | Search commits (with the commit list focused) |
-| Ctrl/Cmd+Enter | Commit (in the commit message) |
-| ↑/↓ or j/k | Move through commits or changed files |
-| Shift+↑/↓ | Select several commits or changed files |
-| Ctrl/Cmd+A | Select every file in a change list (with the list focused) |
-| Home/End, PageUp/PageDown | Jump in the commit list |
+| Ctrl+F | Search commits (with the commit list focused) |
+| Ctrl+Enter | Commit (in the commit message) |
+| ↑ / ↓ or j / k | Move through commits or changed files |
+| Shift+↑ / Shift+↓ | Select several commits or changed files |
+| Ctrl+A | Select every file in a change list (with the list focused) |
+| Home / End, Page Up / Page Down | Jump in the commit list |
 | s | Stage or unstage the selected files, lines or hunk |
 | d d | Discard the selected lines or hunk |
 | [ and ] | Previous and next hunk (in a diff); parent and child commit (in the commit list) |
 | Shift+[ | Choose one of a merge commit's parents (in the commit list) |
-| →/← | Expand or collapse a merge with **Collapse merges** on (in the commit list) |
-| Alt+Left/Right (Cmd+[ / Cmd+] on macOS) | Back and forward through the selected commits (where the host doesn't use them) |
-| Left/Right, Home/End | Move between tabs, with a tab focused; Enter or Space switches |
+| → / ← | Expand or collapse a merge with **Collapse merges** on (in the commit list) |
+| ← / →, Home / End | Move between tabs, with a tab focused; Enter or Space switches |
 | Delete | Close the focused tab |
 | F2 | Rename the focused tab |
 | Menu key or Shift+F10 | Open the focused item's menu |
@@ -108,5 +139,5 @@ keyboards) opens the menu of the focused branch, remote, changed file, commit or
 ↑/↓, Home/End or a letter move between items, Enter or Space runs one, Esc closes the menu, and
 Tab closes it and moves on.
 
-**Resizing.** With a divider between the columns focused, Left/Right resize the columns.
+**Resizing.** With a divider between the columns focused, ← / → resize the columns.
 Double-click a divider to collapse or expand the sidebar.

@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { autoFetchLabel } from "../lib/autoFetch";
 import { formatRelativeDate } from "../lib/formatDate";
 import type { PullStrategy, RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
+import { shortcutLabel } from "../lib/keybindings";
 import { upstreamPushBranch } from "../lib/pushTarget";
 import { ReasonButton } from "./primitives/ReasonButton";
 import { SplitButton } from "./primitives/SplitButton";
@@ -42,6 +43,7 @@ export function SyncBar({
   ariaLabel,
   lastFetchedAt = null,
   autoFetchMinutes = 0,
+  pane = false,
 }: {
   remotes: RemoteInfo[];
   upstream: UpstreamInfo | null;
@@ -76,6 +78,8 @@ export function SyncBar({
   lastFetchedAt?: number | null;
   /** The effective "Fetch automatically" interval, for the last-fetch tooltip; 0 is off. */
   autoFetchMinutes?: number;
+  /** One of the panes F6 moves between (#670). */
+  pane?: boolean;
 }) {
   const fetchRemote = upstream?.remoteName ?? remotes[0]?.name ?? null;
   // Why each action can't run, shown next to it on hover and focus (#664), else `null`.
@@ -85,7 +89,8 @@ export function SyncBar({
   const noUpstream = "No upstream set for the current branch.";
   const showCounts = !detached && upstream !== null && upstream.ahead != null && upstream.behind != null;
   const fetchReason = busy ?? (fetchRemote === null ? "No remote configured." : null);
-  const fetchTitle = fetchRemote === null ? undefined : `Fetch from ${fetchRemote}`;
+  // The tooltips name the shortcuts (#646).
+  const fetchTitle = fetchRemote === null ? undefined : `Fetch from ${fetchRemote} (${shortcutLabel("fetch")})`;
   const pullReason =
     busy ??
     (detached
@@ -95,19 +100,26 @@ export function SyncBar({
         : pullPending
           ? "Choose how to finish the diverged pull first."
           : null);
-  const pullTitle = upstream === null ? undefined : `Pull from ${upstream.remoteName}/${upstream.remoteBranch}`;
+  const pullTitle =
+    upstream === null ? undefined : `Pull from ${upstream.remoteName}/${upstream.remoteBranch} (${shortcutLabel("pull")})`;
   const canPublish = !detached && upstream === null && remotes.length > 0;
   const pushBranch = upstream === null ? null : upstreamPushBranch(upstream);
   const pushReason = busy ?? (detached ? detachedReason : upstream === null && !canPublish ? "No remote configured." : null);
-  const pushTitle =
+  const pushTitle = `${
     upstream !== null
       ? pushBranch === null
         ? `Choose where to push ${upstream.localBranch} on ${upstream.remoteName}…`
         : `Push to ${upstream.remoteName}/${pushBranch}`
-      : "Push this branch to a remote and set its upstream…";
+      : "Push this branch to a remote and set its upstream…"
+  } (${shortcutLabel("push")})`;
 
   return (
-    <div className={styles.bar} role={ariaLabel === undefined ? undefined : "group"} aria-label={ariaLabel}>
+    <div
+      className={styles.bar}
+      role={ariaLabel === undefined ? undefined : "group"}
+      aria-label={ariaLabel}
+      data-pane={pane ? "" : undefined}
+    >
       {leading}
       <Toolbar aria-label="Sync">
         <SplitButton

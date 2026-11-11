@@ -57,6 +57,7 @@ import { useOutcomeToasts } from "./state/useOutcomeToasts";
 import { useSequenceActions } from "./state/useSequenceActions";
 import { useUndoRedoActions } from "./state/useUndoRedoActions";
 import { useWorkspaceShortcuts } from "./state/useWorkspaceShortcuts";
+import { runShortcutCommand } from "./lib/shortcutCommands";
 import { onWorkspaceRequest } from "./lib/workspaceRequests";
 import { WorkspaceActionsContext, type WorkspaceActions } from "./state/useWorkspaceActions";
 import { WorkspaceDialogs, type CommitDialogRequest } from "./WorkspaceDialogs";
@@ -295,6 +296,14 @@ export function RepoWorkspace({
     handleRedo,
     pending,
     transfer,
+    // Refresh, Fetch, Pull, Push, Stage all and the commit message run the palette's commands
+    // (#646), so they follow its rules and say why they can't run.
+    runCommand: (shortcut) => {
+      const problem = runShortcutCommand(paletteCommands(), shortcut, pending || transfer !== null);
+      if (problem !== null) pushToast(problem, { tone: "info" });
+    },
+    tabs: { paths: openRepos.map((repo) => repo.path), onSwitch: onSwitchRepoTab },
+    workspaceElement,
   });
 
   // The toolbar's branch chip opens the palette straight into "Switch branch…" (#638).
@@ -439,6 +448,10 @@ export function RepoWorkspace({
     buildPaletteCommands({
       appState: { ...appState, abortRebase, abortSequence: paletteAbortSequence, abortMerge: paletteAbortMerge },
       onShowShortcuts: () => setShortcutsOpen(true),
+      onFocusCommitMessage: () => {
+        selectRowClosingCompare("uncommitted");
+        setFocusCommitMessage(true);
+      },
       app: appCommands,
       tabs: {
         onOpenRepoTab: (path) => void onOpenRepoTab(path),
@@ -855,6 +868,7 @@ export function RepoWorkspace({
         collapsible
         forceCollapsed={narrow}
         label="Sidebar width"
+        leftRegion="Sidebar"
         leftId={sidebarId}
         request={sidebarRequest}
         onLeftStateChange={setSidebarState}

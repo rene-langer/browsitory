@@ -1639,6 +1639,23 @@ describe("diff option and discard commands", () => {
     expect(command?.group).toBe("Diff");
   });
 
+  it("offers staging all changes but conflicts, with its shortcut (#646)", () => {
+    const status = [
+      { path: "a.txt", oldPath: null, staged: false, kind: "Modified" as const },
+      { path: "new.txt", oldPath: null, staged: false, kind: "New" as const },
+      { path: "shared.txt", oldPath: null, staged: false, kind: "Conflicted" as const },
+      { path: "b.txt", oldPath: null, staged: true, kind: "Modified" as const },
+    ];
+    const state = makeAppState({ status });
+    const command = build(state).commands.find((c) => c.id === "stage-all-files");
+    expect(command?.label).toBe("Stage all changes");
+    expect(command?.shortcut).toBe("stage-all");
+    command!.run();
+    expect(state.stageAllFiles).toHaveBeenCalledWith(["a.txt", "new.txt"]);
+    expect(build(makeAppState({ status: [status[2]] })).commands.some((c) => c.id === "stage-all-files")).toBe(false);
+    expect(build(makeAppState({ pending: true, status })).commands.some((c) => c.id === "stage-all-files")).toBe(false);
+  });
+
   it("omits staging the tracked files' changes when there are none, or while busy (#621)", () => {
     const untrackedAndConflict = [
       { path: "new.txt", oldPath: null, staged: false, kind: "New" as const },
@@ -2475,6 +2492,7 @@ describe("command ids and groups", () => {
       ["search-commits", "General"],
       ["show-shortcuts", "General"],
       ["show-stash:0", "Stash"],
+      ["stage-all-files", "Diff"],
       ["stage-modified-files", "Diff"],
       ["stage-selected-files", "Diff"],
       ["stash-current-file", "Stash"],
@@ -2533,6 +2551,7 @@ describe("command ids and groups", () => {
       ["search-commits", "General"],
       ["show-shortcuts", "General"],
       ["show-stash:0", "Stash"],
+      ["stage-all-files", "Diff"],
       ["stage-modified-files", "Diff"],
       ["stage-selected-files", "Diff"],
       ["switch-repo:/other", "Repositories"],
@@ -2585,6 +2604,7 @@ describe("command ids and groups", () => {
       ["search-commits", "General"],
       ["show-shortcuts", "General"],
       ["show-stash:0", "Stash"],
+      ["stage-all-files", "Diff"],
       ["stage-modified-files", "Diff"],
       ["stage-selected-files", "Diff"],
       ["switch-repo:/other", "Repositories"],
@@ -2637,6 +2657,7 @@ describe("command ids and groups", () => {
       ["search-commits", "General"],
       ["show-shortcuts", "General"],
       ["show-stash:0", "Stash"],
+      ["stage-all-files", "Diff"],
       ["stage-modified-files", "Diff"],
       ["stage-selected-files", "Diff"],
       ["stash-current-file", "Stash"],
@@ -2739,5 +2760,50 @@ describe("command ids and groups", () => {
     const actual = commands.map((command): [string, CommandGroup] => [command.id, command.group]);
     expect(actual.sort(([a], [b]) => a.localeCompare(b))).toEqual(EXPECTED[name].sort(([a], [b]) => a.localeCompare(b)));
     expect(new Set(commands.map((command) => command.id)).size).toBe(commands.length);
+  });
+});
+
+describe("global shortcuts on palette commands (#646)", () => {
+  const shortcutOf = (commands: Command[], id: string) => commands.find((command) => command.id === id)?.shortcut;
+
+  it("marks the toolbar's Fetch, Pull and Push, Refresh and the commit message", () => {
+    const onFocusCommitMessage = vi.fn();
+    const commands = buildPaletteCommands({ appState: makeAppState(), onFocusCommitMessage });
+    expect(shortcutOf(commands, "refresh")).toBe("refresh");
+    expect(shortcutOf(commands, "pull")).toBe("pull");
+    expect(shortcutOf(commands, "fetch-remote:origin")).toBe("fetch");
+    expect(shortcutOf(commands, "push-branch:origin")).toBe("push");
+    expect(shortcutOf(commands, "push-branch-to")).toBeUndefined();
+    const focus = commands.find((command) => command.id === "focus-commit-message");
+    expect(focus?.shortcut).toBe("focus-commit-message");
+    expect(focus?.label).toBe("Go to commit message");
+    focus!.run();
+    expect(onFocusCommitMessage).toHaveBeenCalled();
+    // One command per shortcut.
+    const marked = commands.flatMap((command) => (command.shortcut === undefined ? [] : [command.shortcut]));
+    expect(new Set(marked).size).toBe(marked.length);
+  });
+
+  it("fetches from the upstream's remote, and publishes a branch without one", () => {
+    const remotes = [
+      { name: "backup", fetchUrl: "https://example.com/b.git", pushUrl: null, authMode: null, authUsername: null },
+      { name: "origin", fetchUrl: "https://example.com/o.git", pushUrl: null, authMode: null, authUsername: null },
+    ];
+    const tracking = buildPaletteCommands({
+      appState: makeAppState({ remotes, upstream: { localBranch: "main", remoteName: "origin", remoteBranch: "main" } }),
+    });
+    expect(shortcutOf(tracking, "fetch-remote:origin")).toBe("fetch");
+    expect(shortcutOf(tracking, "fetch-remote:backup")).toBeUndefined();
+
+    const untracked = buildPaletteCommands({ appState: makeAppState({ remotes, upstream: null }) });
+    expect(shortcutOf(untracked, "fetch-remote:backup")).toBe("fetch");
+    expect(shortcutOf(untracked, "push-branch-to")).toBe("push");
+    expect(untracked.some((command) => command.shortcut === "pull")).toBe(false);
+  });
+
+  it("keeps the shortcut on a command that can't run now, with its reason", () => {
+    const commands = buildPaletteCommands({ appState: makeAppState({ pending: true }) });
+    const push = commands.find((command) => command.shortcut === "push");
+    expect(push?.disabledReason).toBeDefined();
   });
 });

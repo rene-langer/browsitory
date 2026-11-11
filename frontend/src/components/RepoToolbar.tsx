@@ -3,13 +3,12 @@ import type { ComponentProps } from "react";
 import { FileDiff, GitBranch, PanelLeft, RefreshCw } from "lucide-react";
 import type { UpstreamInfo } from "../ipc/RepoClient";
 import type { SplitViewLeftState } from "./primitives/SplitView";
+import { ariaKeyShortcuts, shortcutLabel } from "../lib/keybindings";
 import { NavigationButtons } from "./NavigationButtons";
 import { SyncBar } from "./SyncBar";
 import { UndoRedoButtons } from "./UndoRedoButtons";
 import styles from "./RepoToolbar.module.css";
 
-/** The sidebar toggle's shortcut (`useWorkspaceShortcuts`), for its tooltip. */
-export const SIDEBAR_SHORTCUT_LABEL = "Ctrl/Cmd+Alt+B";
 
 /**
  * The one repository toolbar above the sidebar, graph and diff (#637): the sidebar toggle (a
@@ -36,7 +35,7 @@ export function RepoToolbar({
   };
   navigation: ComponentProps<typeof NavigationButtons>;
   /** Includes `activity`, the running transfer or action (#659, #660). */
-  sync: Omit<ComponentProps<typeof SyncBar>, "leading" | "trailing" | "ariaLabel">;
+  sync: Omit<ComponentProps<typeof SyncBar>, "leading" | "trailing" | "ariaLabel" | "pane">;
   undo: ComponentProps<typeof UndoRedoButtons>;
   /** "Apply patch…" (#649), disabled with `disabledReason` while repository actions can't run. */
   applyPatch: { disabledReason: string | null; onApplyPatch: () => void };
@@ -47,6 +46,7 @@ export function RepoToolbar({
     <SyncBar
       {...sync}
       ariaLabel="Repository"
+      pane
       leading={
         <>
           <button
@@ -55,7 +55,8 @@ export function RepoToolbar({
             aria-label="Sidebar"
             aria-expanded={sidebarShown}
             aria-controls={sidebar.controls}
-            title={`${sidebarShown ? "Hide" : "Show"} the sidebar (${SIDEBAR_SHORTCUT_LABEL})`}
+            title={`${sidebarShown ? "Hide" : "Show"} the sidebar (${shortcutLabel("toggle-sidebar")})`}
+            aria-keyshortcuts={ariaKeyShortcuts("toggle-sidebar")}
             onClick={(event) => sidebar.onToggle(event.currentTarget)}
           >
             <PanelLeft size={16} aria-hidden="true" />
@@ -76,7 +77,14 @@ export function RepoToolbar({
             <FileDiff size={14} aria-hidden="true" />
           </ReasonButton>
           <UndoRedoButtons {...undo} />
-          <button type="button" className={styles.iconButton} aria-label="Refresh" title="Refresh" onClick={onRefresh}>
+          <button
+            type="button"
+            className={styles.iconButton}
+            aria-label="Refresh"
+            title={`Refresh (${shortcutLabel("refresh")})`}
+            aria-keyshortcuts={ariaKeyShortcuts("refresh")}
+            onClick={onRefresh}
+          >
             <RefreshCw size={14} aria-hidden="true" />
           </button>
         </>

@@ -1,6 +1,6 @@
 # Searching commits
 
-The search field sits above the commit graph. Click it, press **Ctrl+F** (**Cmd+F** on macOS)
+The search field sits above the commit graph. Click it, press **Ctrl+F** (**⌘F** on macOS)
 while the commit list has focus, or run **Search commits** from the command palette. Once you
 stop typing, the graph is replaced by the matching commits and the first match is selected.
 Press ↓ in the field to move into the results.

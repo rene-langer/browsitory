@@ -19,6 +19,7 @@ import {
   type PickerItem,
 } from "../lib/commands";
 import { matchItem, type MatchRange } from "../lib/fuzzyMatch";
+import { shortcutLabel } from "../lib/keybindings";
 import styles from "./CommandPalette.module.css";
 
 /** How many recently used commands head the unfiltered list (#644). */
@@ -204,6 +205,7 @@ export function CommandPalette({
         {results.map((command, index) => {
           const heading = headings.get(index);
           const disabledReason = "disabledReason" in command ? command.disabledReason : undefined;
+          const shortcut = "shortcut" in command ? command.shortcut : undefined;
           const optionId = `${listboxId}-option-${index}`;
           return (
             <Fragment key={command.id}>
@@ -226,6 +228,12 @@ export function CommandPalette({
                   <span id={`${optionId}-reason`} className={styles.reason} aria-hidden="true">
                     {disabledReason}
                   </span>
+                )}
+                {shortcut !== undefined && (
+                  // The command's global shortcut (#646), a hint beside its name.
+                  <kbd className={styles.shortcut} aria-hidden="true">
+                    {shortcutLabel(shortcut)}
+                  </kbd>
                 )}
               </ListRow>
             </Fragment>

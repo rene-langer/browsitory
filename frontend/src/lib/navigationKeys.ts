@@ -1,8 +1,7 @@
-/** Whether the page runs on macOS or iOS, where Back/Forward are Cmd+[ / Cmd+]. */
-export function isApplePlatform(): boolean {
-  if (typeof navigator === "undefined") return false;
-  return /mac|iphone|ipad/i.test(`${navigator.platform ?? ""} ${navigator.userAgent ?? ""}`);
-}
+import { shortcutLabel } from "./keybindings";
+import { isApplePlatform } from "./platform";
+
+export { isApplePlatform };
 
 type KeyLike = Pick<KeyboardEvent, "key" | "altKey" | "ctrlKey" | "metaKey" | "shiftKey">;
 
@@ -22,5 +21,5 @@ export function navigationKeyDirection(event: KeyLike, apple: boolean = isAppleP
 
 /** The Back and Forward keys as the platform writes them, for tooltips. */
 export function navigationKeyLabels(apple: boolean = isApplePlatform()): { back: string; forward: string } {
-  return apple ? { back: "⌘[", forward: "⌘]" } : { back: "Alt+Left", forward: "Alt+Right" };
+  return { back: shortcutLabel("go-back", apple), forward: shortcutLabel("go-forward", apple) };
 }
