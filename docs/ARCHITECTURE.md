@@ -2495,6 +2495,12 @@ only `error`.
     `waitForDisplayed({ reverse: true })` on an element that stays mounted is fine. After a
     commit made through the UI, wait on the repository (`e2e/support/git.ts`), not on a row
     whose text may already match something else.
+  - Blocked buttons and prefilled fields: a `ReasonButton` that can't run is `aria-disabled`,
+    not `disabled`, and ignores clicks, so `waitForEnabled` doesn't wait for it; click it with
+    `clickInPage`, which waits until it is neither (#790). A field that starts with text (a
+    reword or combined message) is set with `setValueInPage`, not `setValue`: WebKitWebDriver's
+    clear fires no `input` event, so a render before the first keystroke puts the old text back
+    and the typed text is appended to it (#783, #791). `setValue` on an empty field is fine.
   - Shared spec helpers (#500): specs run the git CLI only through `e2e/support/git.ts`
     (`git(cwd, ...args)` returns trimmed output and throws with git's stderr; `gitIn(repo)`
     binds a repository; `gitWith` keeps output untrimmed or discards it). The VSCode specs

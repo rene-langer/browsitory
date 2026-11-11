@@ -112,3 +112,45 @@ export async function clickInPage(
     { timeout, timeoutMsg: `${describeTarget(selector, text, contains)} never became clickable (present, enabled and rendered)` },
   );
 }
+
+/**
+ * Sets the text field matching `selector` to `value` the way typing does, inside the page: the
+ * native value setter, then an `input` event, so React's `onChange` sees it (#783, #791).
+ *
+ * WebdriverIO's `setValue` clears the field and then types. WebKitWebDriver's clear fires no
+ * `input` event, so React keeps the old value in its state, and any render before the first
+ * keystroke (a refresh, a message that finished loading) puts the old text back: the keys are
+ * then appended to it. That only bites a field that isn't empty to begin with, such as a
+ * reword or combined message.
+ *
+ * Waits until the field exists, is enabled, editable (`readOnly` is how a dialog marks a field
+ * still loading) and rendered. Each poll sets the value if it differs, and only a later poll
+ * that still finds it passes, so a render that restored the old text in between is caught.
+ */
+export async function setValueInPage(
+  selector: string,
+  value: string,
+  { timeout = UI_TIMEOUT }: { timeout?: number } = {},
+): Promise<void> {
+  await browser.waitUntil(
+    () =>
+      browser.execute(
+        (sel: string, wanted: string) => {
+          const field = document.querySelector(sel);
+          if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) return false;
+          if (field.disabled || field.readOnly || field.getClientRects().length === 0) return false;
+          if (field.value === wanted && field.dataset.e2eSetValue === wanted) return true;
+          const prototype = field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+          Object.getOwnPropertyDescriptor(prototype, "value")!.set!.call(field, wanted);
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+          // Marks the value as set here, so a field that merely started with it still gets the
+          // `input` event once.
+          field.dataset.e2eSetValue = wanted;
+          return false;
+        },
+        selector,
+        value,
+      ),
+    { timeout, timeoutMsg: `${selector} never took the value ${JSON.stringify(value)} (missing, disabled, read-only or reset)` },
+  );
+}

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { clickInPage } from "../support/dom";
 import { gitIn } from "../support/git";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
@@ -67,13 +68,15 @@ describe("Browsitory cherry-pick sequence", () => {
     await conflicted.waitForExist();
     await conflicted.scrollIntoView({ block: "center" });
     await browser.execute((el) => (el as HTMLElement).click(), conflicted);
-    const ours = await $("button=Use ours (whole file)");
-    await ours.waitForEnabled();
-    await browser.execute((el) => (el as HTMLElement).click(), ours);
+    await clickInPage("button", "Use ours (whole file)");
+    await browser.waitUntil(() => git("diff", "--name-only", "--diff-filter=U") === "", {
+      timeoutMsg: "seq-shared.txt is still conflicted",
+    });
 
-    const cont = await strip.$("button=Continue");
-    await cont.waitForEnabled();
-    await browser.execute((el) => (el as HTMLElement).click(), cont);
+    // Continue is a `ReasonButton`: blocked, it is `aria-disabled`, not `disabled`, and ignores
+    // a click, so `waitForEnabled` passed at once and the click could land while "Use ours" was
+    // still being applied and do nothing (#790). `clickInPage` waits until it isn't blocked.
+    await clickInPage('[aria-label="Operation status"] button', "Continue");
 
     await browser.waitUntil(() => git("log", "-1", "--format=%s") === "e2e: seq three", {
       timeoutMsg: "the sequence did not finish",

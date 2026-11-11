@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
-import { clickInPage, waitUntilGoneInPage, waitUntilInPage } from "../support/dom";
+import { clickInPage, setValueInPage, waitUntilGoneInPage, waitUntilInPage } from "../support/dom";
 import { gitIn } from "../support/git";
 import { SLOW_UI_TIMEOUT } from "../support/timeouts";
 
@@ -102,11 +102,17 @@ describe("Browsitory one-click history edits", () => {
       .map((line) => line.split("\t"))
       .find(([, s]) => s === subject)![0];
   const subjects = (count: number) => git("log", "--format=%s", `-${count}`).split("\n");
-  const waitForSubjects = (expected: string[]) =>
-    browser.waitUntil(() => JSON.stringify(subjects(expected.length)) === JSON.stringify(expected), {
-      timeout: SLOW_UI_TIMEOUT,
-      timeoutMsg: `history never became ${JSON.stringify(expected)}; it is ${JSON.stringify(subjects(expected.length))}`,
-    });
+  // The message names the history when the wait gave up. (Built in `timeoutMsg`, it would name
+  // the history when the wait started, mid-rebase, which once read as a lost commit, #783.)
+  const waitForSubjects = async (expected: string[]) => {
+    try {
+      await browser.waitUntil(() => JSON.stringify(subjects(expected.length)) === JSON.stringify(expected), {
+        timeout: SLOW_UI_TIMEOUT,
+      });
+    } catch {
+      throw new Error(`history never became ${JSON.stringify(expected)}; it is ${JSON.stringify(subjects(expected.length))}`);
+    }
+  };
 
   before(() => {
     commitFile("edit-1.txt", "1\n", "e2e: edit one");
@@ -122,7 +128,9 @@ describe("Browsitory one-click history edits", () => {
     const field = await $("dialog[aria-label^='Reword commit'] textarea");
     await field.waitForExist();
     await browser.waitUntil(async () => (await field.getValue()).startsWith("e2e: edit two"));
-    await field.setValue("e2e: edit two reworded");
+    // Not `setValue`: the field starts with the old message, and a render between its clear
+    // and the typing put that back, so the commit got both messages run together (#783).
+    await setValueInPage("dialog[aria-label^='Reword commit'] textarea", "e2e: edit two reworded");
     await clickInPage("dialog[aria-label^='Reword commit'] button", "Reword");
     await waitForSubjects(["e2e: edit four", "e2e: edit three", "e2e: edit two reworded", "e2e: edit one"]);
 
