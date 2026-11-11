@@ -103,8 +103,8 @@ describe("ReflogPanel", () => {
     };
     renderPanel({ entries: [entry, olderEntry] });
 
-    expect(screen.getByTitle(new RegExp(`^Old ID: ${entry.oldId}\n`))).toBeInTheDocument();
-    expect(screen.getByTitle(new RegExp(`^Old ID: ${olderEntry.oldId}\n`))).toBeInTheDocument();
+    expect(screen.getByTitle(new RegExp(`^Old ID: ${entry.oldId}\\s`))).toBeInTheDocument();
+    expect(screen.getByTitle(new RegExp(`^Old ID: ${olderEntry.oldId}\\s`))).toBeInTheDocument();
     expect(screen.getByRole("button", { name: `Restore refs/heads/main to ${entry.newId}` })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: `Restore refs/heads/main to ${olderEntry.newId}` })).toBeInTheDocument();
   });
