@@ -30,7 +30,15 @@ import { useScrollMemory } from "./state/useScrollMemory";
 import { useFetchSettingsContext } from "./state/useFetchSettings";
 import { useAppState } from "./state/useAppState";
 import { useFileHistory } from "./state/useFileHistory";
-import { busyReason, operationBlockers, pickToast, stashBlockReason } from "./lib/operationStatus";
+import {
+  busyReason,
+  operationBlockers,
+  pickToast,
+  sequenceToast,
+  sequenceUndoable,
+  stashBlockReason,
+} from "./lib/operationStatus";
+import { CommitDragContext, useCommitDragSession } from "./state/useCommitDrag";
 import { stashBlockers } from "./lib/actions/stashActions";
 import { useCommitSearch } from "./state/useCommitSearch";
 import { useCompare } from "./state/useCompare";
@@ -467,6 +475,19 @@ export function RepoWorkspace({
         null,
     });
   };
+  // Commits dragged from the graph onto the current branch (#744) run the commit menu's own
+  // Cherry-pick, its parent picker, or the multi-selection's sequence.
+  const commitDrag = useCommitDragSession((run) => {
+    if (run.kind === "pick") cherryPickCommit(run.commitId, null);
+    else if (run.kind === "choose-parent") openCommitDialog("Cherry-pick", run.commitId);
+    else {
+      void runPickAction(
+        () => appState.cherryPickMany(run.commitIds),
+        (outcome) => sequenceToast("CherryPick", outcome),
+        sequenceUndoable,
+      );
+    }
+  });
   const commitCommands: CommitCommands = {
     onCherryPick: (commitId) => cherryPickCommit(commitId, null),
     onRevert: (commitId) => revertCommit(commitId, null),
@@ -749,6 +770,7 @@ export function RepoWorkspace({
     <MergeEditorContext.Provider value={mergeEditor}>
     <WorkspaceActionsContext.Provider value={workspaceActions}>
     <CopyToClipboardContext.Provider value={clipboard.copy}>
+    <CommitDragContext.Provider value={commitDrag}>
     <div
       ref={setWorkspaceElement}
       style={{ display: active ? "contents" : "none" }}
@@ -981,6 +1003,7 @@ export function RepoWorkspace({
       />
       </div>
     </div>
+    </CommitDragContext.Provider>
     </CopyToClipboardContext.Provider>
     </WorkspaceActionsContext.Provider>
     </MergeEditorContext.Provider>

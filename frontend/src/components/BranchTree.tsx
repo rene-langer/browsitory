@@ -24,10 +24,18 @@ import {
   type RebaseTarget,
 } from "../lib/actions/branchActions";
 import { scrollParent, usePointerDrag } from "../state/usePointerDrag";
+import { useCommitDrag, type CommitDropTarget } from "../state/useCommitDrag";
+import {
+  COMMIT_DROP_NEEDS_BRANCH,
+  commitDropActions,
+  type CommitDrop,
+  type DraggedCommits,
+} from "../lib/actions/commitActions";
 import { branchDropKey, parseBranchDropKey } from "../lib/branchDropKey";
 import {
   addMenuItems,
   branchDropMenuItems,
+  commitDropMenuItems,
   localBranchMenuItems,
   remoteBranchMenuItems,
   remoteFolderMenuItems,
@@ -301,25 +309,104 @@ export function BranchTree({
       });
     },
   });
+
+  // Commits dragged from the graph onto a branch (#744): the graph starts the drag, this section
+  // is its drop side. Only the current branch takes a cherry-pick.
+  const commitDrag = useCommitDrag();
+  const draggedName = (dragged: DraggedCommits) =>
+    dragged.commits.length === 1 ? `commit ${dragged.commits[0].shortId}` : `${dragged.commits.length} commits`;
+  const commitDropAt = (
+    dragged: DraggedCommits,
+    key: string | undefined,
+  ): { target: RebaseTarget; drop: CommitDrop } | null => {
+    const target = key === undefined ? null : parseBranchDropKey(key);
+    return target === null ? null : { target, drop: commitDropActions(blockers, branches, dragged, target) };
+  };
+  const commitDropTarget: CommitDropTarget = {
+    autoScroll: () => scrollParent(treeRef.current),
+    onStart: (dragged) => {
+      setRowMenu(null);
+      const name = draggedName(dragged);
+      if (currentBranch === null) setAnnouncement(`Dragging ${name}. ${COMMIT_DROP_NEEDS_BRANCH}`);
+      else {
+        const them = dragged.commits.length === 1 ? "it" : "them";
+        setAnnouncement(`Dragging ${name}. Drop ${them} on ${currentBranch} to cherry-pick; Escape cancels.`);
+      }
+    },
+    onCancel: () => setAnnouncement("Drag cancelled."),
+    onDrop: (dragged, over) => {
+      const hit = commitDropAt(dragged, over?.key);
+      if (hit === null) {
+        setAnnouncement("Drag cancelled.");
+        return;
+      }
+      if (hit.drop.kind === "refused") {
+        setAnnouncement(`Can't drop here. ${hit.drop.reason}`);
+        return;
+      }
+      setAnnouncement(`Dropped ${draggedName(dragged)} on ${refName(hit.target)}: ${hit.drop.item.label}`);
+      setRowMenu({
+        kind: "commit-drop",
+        dragged,
+        target: hit.target,
+        x: commitDrag?.drag?.x ?? 0,
+        y: commitDrag?.drag?.y ?? 0,
+        returnFocusTo: over?.element,
+      });
+    },
+  };
+  // The session calls the latest handlers, which close over this render's branches and state.
+  const commitDropTargetRef = useRef(commitDropTarget);
+  useEffect(() => {
+    commitDropTargetRef.current = commitDropTarget;
+  });
+  const registerCommitDropTarget = commitDrag?.registerTarget;
+  useEffect(
+    () =>
+      registerCommitDropTarget?.({
+        autoScroll: () => commitDropTargetRef.current.autoScroll?.() ?? null,
+        onStart: (dragged) => commitDropTargetRef.current.onStart(dragged),
+        onCancel: () => commitDropTargetRef.current.onCancel(),
+        onDrop: (dragged, over) => commitDropTargetRef.current.onDrop(dragged, over),
+      }),
+    [registerCommitDropTarget],
+  );
+
   const hovered = drag === null ? null : dropAt(drag.payload, drag.over?.key);
+  const commitDragState = commitDrag?.drag ?? null;
+  const commitHovered =
+    commitDragState === null ? null : commitDropAt(commitDragState.payload, commitDragState.over?.key);
   const treeDrag: BranchTreeDrag | null =
-    drag === null
-      ? null
-      : {
+    drag !== null
+      ? {
           sourceKey: branchDropKey(drag.payload),
           overKey: drag.over?.key ?? null,
           overState:
             hovered === null || hovered.drop.kind === "none" ? null : hovered.drop.kind === "menu" ? "on" : "refused",
-        };
+        }
+      : commitDragState !== null
+        ? {
+            sourceKey: null,
+            overKey: commitDragState.over?.key ?? null,
+            overState: commitHovered === null ? null : commitHovered.drop.kind === "menu" ? "on" : "refused",
+          }
+        : null;
   // The label that follows the pointer: what the drop offers, or why it can't run.
   const dragLabel =
-    drag === null
-      ? null
-      : hovered === null || hovered.drop.kind === "none"
+    drag !== null
+      ? hovered === null || hovered.drop.kind === "none"
         ? refName(drag.payload)
         : hovered.drop.kind === "menu"
           ? hovered.drop.items.map((item) => item.label).join(" / ")
-          : hovered.drop.reason;
+          : hovered.drop.reason
+      : commitDragState !== null
+        ? commitHovered === null
+          ? draggedName(commitDragState.payload)
+          : commitHovered.drop.kind === "menu"
+            ? commitHovered.drop.item.label
+            : commitHovered.drop.reason
+        : null;
+  const labelAt = drag ?? commitDragState;
 
   const renameProblem = renaming !== null ? branchNameProblem(renameValue.trim()) : null;
 
@@ -434,8 +521,8 @@ export function BranchTree({
             onStartDrag={startDrag}
           />
         </div>
-        {drag !== null && dragLabel !== null && (
-          <div className={styles.dragLabel} style={{ left: drag.x + 12, top: drag.y + 12 }} aria-hidden="true">
+        {labelAt !== null && dragLabel !== null && (
+          <div className={styles.dragLabel} style={{ left: labelAt.x + 12, top: labelAt.y + 12 }} aria-hidden="true">
             {dragLabel}
           </div>
         )}
@@ -518,6 +605,19 @@ export function BranchTree({
                 key={rowMenuKey(rowMenu)}
                 {...menuProps(rowMenu)}
                 items={branchDropMenuItems(drop, { onMergeBranch, onRebaseOnto })}
+              />
+            ) : null;
+          })()}
+        {rowMenu !== null &&
+          rowMenu.kind === "commit-drop" &&
+          (() => {
+            // Re-checked at render, like a branch drop's menu.
+            const drop = commitDropActions(blockers, branches, rowMenu.dragged, rowMenu.target);
+            return drop.kind === "menu" && commitDrag !== null ? (
+              <ContextMenu
+                key={rowMenuKey(rowMenu)}
+                {...menuProps(rowMenu)}
+                items={commitDropMenuItems(drop, commitDrag.run)}
               />
             ) : null;
           })()}
