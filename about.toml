@@ -38,6 +38,11 @@ accepted = [
 [option-ext]
 accepted = ["MPL-2.0"]
 
+# Owner decision (#756, deny.toml's exceptions): the file watcher in repo-service. CC0-1.0
+# grants no patent licence; accepted for a wrapper over the operating systems' watch APIs.
+[notify]
+accepted = ["CC0-1.0"]
+
 # Build time only (tauri-macros > tauri-codegen > tauri-utils > dom_query; deny.toml's
 # exceptions). cargo-about can't tell a proc macro's dependencies from the shipped ones, so
 # it needs to accept them; the generator then keeps only what `cargo tree -e
