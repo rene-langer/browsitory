@@ -3821,6 +3821,72 @@ describe("commit flow (#651)", () => {
     expect(screen.queryByRole("dialog", { name: /^Push / })).toBeNull();
   });
 
+  // #816: the clicks land as soon as their target is on screen, before React's passive effects
+  // run (a test's `findBy*` resolves there too, through its MutationObserver).
+  async function clickWhenShown(find: () => HTMLElement | null, act: () => void | Promise<void>) {
+    let clicked = false;
+    const observer = new MutationObserver(() => {
+      const target = find();
+      if (clicked || !target) return;
+      clicked = true;
+      fireEvent.click(target);
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    try {
+      await act();
+      await waitFor(() => expect(clicked).toBe(true));
+    } finally {
+      observer.disconnect();
+    }
+  }
+  const pushInToast = () => {
+    const status = screen.queryByRole("status", { name: "Notifications" });
+    return status && within(status).queryByRole("button", { name: "Push" });
+  };
+
+  it("the toast's Push pushes when clicked as soon as the toast is on screen (#816)", async () => {
+    const pushCurrentBranch = vi.fn(async () => "push-1");
+    render(
+      <App
+        client={flowClient({
+          listRemotes: async () => [origin],
+          getCurrentUpstream: async () => ({ localBranch: "main", remoteName: "origin", remoteBranch: "main", ahead: 0, behind: 0, pushBranch: "main" }),
+          pushCurrentBranch,
+        })}
+      />,
+    );
+    const { button } = await typeAndFind();
+    await clickWhenShown(pushInToast, () => fireEvent.click(button));
+    await waitFor(() => expect(pushCurrentBranch).toHaveBeenCalledWith("/repos/a", "origin", false));
+  });
+
+  it("the toast's Push refuses a branch checked out since the commit as soon as it shows (#816)", async () => {
+    let current = "main";
+    const pushCurrentBranch = vi.fn(async () => "push-1");
+    const branch = (name: string) => ({ name, isCurrent: current === name, upstream: `origin/${name}`, ahead: 0, behind: 0 });
+    render(
+      <App
+        client={flowClient({
+          listRemotes: async () => [origin],
+          listBranches: async () => [branch("main"), branch("feature")],
+          getCurrentUpstream: async () => ({ localBranch: current, remoteName: "origin", remoteBranch: current, ahead: 0, behind: 0, pushBranch: current }),
+          pushCurrentBranch,
+        })}
+      />,
+    );
+    const { button } = await typeAndFind();
+    fireEvent.click(button);
+    await notifications().findByText("Committed abcdef1 to main");
+
+    // Push is clicked the moment the workspace shows the other branch.
+    current = "feature";
+    const onFeature = () => screen.queryByRole("button", { name: "Commit 2 files to feature" }) && pushInToast();
+    await clickWhenShown(onFeature, () => fireEvent.click(screen.getByRole("button", { name: "Refresh" })));
+    expect(await notifications().findByText("Not pushed: main is no longer the current branch.")).toBeInTheDocument();
+    expect(pushCurrentBranch).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: /^Push / })).toBeNull();
+  });
+
   it("commits and pushes from the commit button's menu", async () => {
     const commit = vi.fn(async () => ({ kind: "Committed" as const, commitId: COMMIT_ID }));
     const pushCurrentBranch = vi.fn(async () => "push-1");
