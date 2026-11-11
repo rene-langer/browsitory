@@ -355,6 +355,13 @@ mod walk_types {
             "error: the working tree kept changing while it was being written";
 
         #[test]
+        fn temp_numbers_are_never_handed_out_twice() {
+            let first = next_temp_number();
+            let second = next_temp_number();
+            assert!(second > first, "{first} then {second}");
+        }
+
+        #[test]
         fn holds_every_folder_down_to_the_leafs_parent() {
             let r = refuse("a/b/f", &[Answer::Dir, Answer::Dir]);
             assert_eq!(r.end, r#"found ["", "a", "a/b"]"#);

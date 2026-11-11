@@ -1679,4 +1679,99 @@ mod tests {
         eprintln!("{written} writes inside, outside f = {outside_f:?}");
         assert_eq!(outside_f, "OUTSIDE\n");
     }
+
+    // ---- the `HeldDir` primitives the shared walk (`walk_types::walk_from`) runs on ----------
+
+    fn held(dir: &Path) -> OwnedFd {
+        File::open(dir).unwrap().into()
+    }
+
+    fn skip_as_root() -> bool {
+        // SAFETY: `geteuid` has no preconditions.
+        let root = unsafe { libc::geteuid() } == 0;
+        if root {
+            eprintln!("skipped: root ignores folder permissions");
+        }
+        root
+    }
+
+    #[test]
+    fn a_held_folder_tells_what_stands_at_a_name() {
+        let (dir, outside) = tree();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("link")).unwrap();
+        let root = held(dir.path());
+        assert!(matches!(
+            root.open_child_dir(OsStr::new("d")).unwrap(),
+            Child::Dir(_)
+        ));
+        assert!(matches!(
+            root.open_child_dir(OsStr::new("link")).unwrap(),
+            Child::Link
+        ));
+        assert!(matches!(
+            root.open_child_dir(OsStr::new("nothing")).unwrap(),
+            Child::Missing
+        ));
+        let d = held(&dir.path().join("d"));
+        assert!(matches!(
+            d.open_child_dir(OsStr::new("f")).unwrap(),
+            Child::NotDir
+        ));
+        assert_outside_untouched(outside.path());
+    }
+
+    #[test]
+    fn a_folder_that_cannot_be_opened_is_an_error_not_a_change() {
+        use std::os::unix::fs::PermissionsExt;
+        if skip_as_root() {
+            return;
+        }
+        let (dir, _outside) = tree();
+        let d = dir.path().join("d");
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let opened = held(dir.path()).open_child_dir(OsStr::new("d"));
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let error = opened.err().expect("an error");
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn creating_a_folder_says_whether_it_was_already_there() {
+        let (dir, _outside) = tree();
+        let root = held(dir.path());
+        assert!(root.create_child_dir(OsStr::new("new")).unwrap());
+        assert!(dir.path().join("new").is_dir());
+        assert!(!root.create_child_dir(OsStr::new("new")).unwrap());
+        assert!(!root.create_child_dir(OsStr::new("d")).unwrap());
+    }
+
+    #[test]
+    fn creating_a_folder_where_that_is_not_allowed_is_an_error() {
+        use std::os::unix::fs::PermissionsExt;
+        if skip_as_root() {
+            return;
+        }
+        let (dir, _outside) = tree();
+        let d = dir.path().join("d");
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let created = held(&d).create_child_dir(OsStr::new("new"));
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let error = created.err().expect("an error");
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(!d.join("new").exists());
+    }
+
+    #[test]
+    fn clearing_a_link_says_whether_it_removed_one() {
+        let (dir, outside) = tree();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("link")).unwrap();
+        let root = held(dir.path());
+        assert!(root.clear_link(OsStr::new("link")).unwrap());
+        assert!(std::fs::symlink_metadata(dir.path().join("link")).is_err());
+        assert!(!root.clear_link(OsStr::new("link")).unwrap());
+        // A folder is never removed as a link.
+        assert!(root.clear_link(OsStr::new("d")).is_err());
+        assert!(dir.path().join("d/f").is_file());
+        assert_outside_untouched(outside.path());
+    }
 }
