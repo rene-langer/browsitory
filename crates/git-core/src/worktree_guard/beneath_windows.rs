@@ -54,6 +54,7 @@ use std::path::{Path, PathBuf};
 use super::reparse::{
     self, leaf_action, LeafAction, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
 };
+use super::walk_types::{next_temp_number, temp_name_units, ATTEMPTS, TEMP_PREFIX_LEN};
 use super::{Content, HeldFolder, Kind, Leaf, OnLink, OnMissing, Probe, Step, StepFn, Walk};
 
 const FILE_LIST_DIRECTORY: u32 = 0x0001;
@@ -904,9 +905,6 @@ fn reopen_same(at: &Beneath, first: &File, reopen: bool, access: u32) -> io::Res
     Ok(Some(second))
 }
 
-/// How often a walk retries one component that keeps changing under it before giving up.
-const ATTEMPTS: usize = 8;
-
 /// Walks `rel` (a plain relative path) below `workdir` down to its last component's parent,
 /// holding each folder. See the module docs.
 pub(super) fn walk(
@@ -1189,13 +1187,6 @@ fn is_beneath(path: &Path, root: &Path) -> bool {
 const IN_USE_TRIES: usize = 3;
 const IN_USE_WAIT: std::time::Duration = std::time::Duration::from_millis(100);
 
-/// The next number for a temporary file's name, unique in this process.
-fn next_temp_number() -> usize {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static NEXT: AtomicUsize = AtomicUsize::new(0);
-    NEXT.fetch_add(1, Ordering::Relaxed)
-}
-
 fn file_in_use(rel: &Path) -> io::Error {
     io::Error::new(
         io::ErrorKind::ResourceBusy,
@@ -1277,19 +1268,14 @@ fn on_disk_name(leaf: &OsStr, path: &Path) -> OsString {
 fn temp_name(leaf: &OsStr, n: usize) -> OsString {
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
     let units: Vec<u16> = leaf.encode_wide().collect();
-    let mut cut = units.len().min(TEMP_PREFIX_UNITS);
+    let mut cut = units.len().min(TEMP_PREFIX_LEN);
     // Not between the two halves of a surrogate pair.
     if cut > 0 && cut < units.len() && (0xD800..0xDC00).contains(&units[cut - 1]) {
         cut -= 1;
     }
-    let mut name: Vec<u16> = ".".encode_utf16().collect();
-    name.extend_from_slice(&units[..cut]);
-    name.extend(format!(".browsitory-{}-{n}.tmp", std::process::id()).encode_utf16());
+    let name = temp_name_units(&units[..cut], n, |part| part.encode_utf16().collect());
     OsString::from_wide(&name)
 }
-
-/// At most this many UTF-16 units of the leaf's name go into its temporary file's name.
-const TEMP_PREFIX_UNITS: usize = 64;
 
 /// Creates a new, empty temporary file next to `at`'s leaf, in the held parent and checked to
 /// be there (deleted again through its handle when it isn't). Its handle can write, set

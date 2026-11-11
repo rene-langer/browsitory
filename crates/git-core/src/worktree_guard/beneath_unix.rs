@@ -17,6 +17,7 @@ use std::path::Path;
 
 #[cfg(test)]
 use super::no_step;
+use super::walk_types::{next_temp_number, temp_name_units, ATTEMPTS, TEMP_PREFIX_LEN};
 use super::{Content, HeldFolder, Kind, Leaf, OnLink, OnMissing, Probe, Step, StepFn, Walk};
 
 /// The folders from the work tree root down to the leaf's parent, each held open.
@@ -178,8 +179,6 @@ pub(super) fn symlink_at(target: &[u8], dir: RawFd, name: &OsStr) -> io::Result<
 }
 
 /// How often a walk retries one component that keeps changing under it before giving up.
-const ATTEMPTS: usize = 8;
-
 /// Walks `rel` (a plain relative path, see `plain_relative`) below `workdir` down to its last
 /// component's parent, holding each folder open. See the module docs.
 pub(super) fn walk(
@@ -460,25 +459,13 @@ fn on_disk_name(parent: RawFd, leaf: &OsStr) -> io::Result<OsString> {
 /// kept short so the name fits where `leaf` itself fits.
 fn temp_name(leaf: &OsStr, n: usize) -> OsString {
     let bytes = leaf.as_bytes();
-    let mut cut = bytes.len().min(TEMP_PREFIX_BYTES);
+    let mut cut = bytes.len().min(TEMP_PREFIX_LEN);
     // Not in the middle of a UTF-8 sequence.
     while cut < bytes.len() && cut > 0 && bytes[cut] & 0xC0 == 0x80 {
         cut -= 1;
     }
-    let mut name = b".".to_vec();
-    name.extend_from_slice(&bytes[..cut]);
-    name.extend_from_slice(format!(".browsitory-{}-{n}.tmp", std::process::id()).as_bytes());
+    let name = temp_name_units(&bytes[..cut], n, |part| part.as_bytes().to_vec());
     OsString::from(OsStr::from_bytes(&name))
-}
-
-/// At most this many bytes of the leaf's name go into its temporary file's name.
-const TEMP_PREFIX_BYTES: usize = 64;
-
-/// The next number for a temporary file's name, unique in this process.
-fn next_temp_number() -> usize {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static NEXT: AtomicUsize = AtomicUsize::new(0);
-    NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
 /// Creates a new, empty temporary file next to the leaf in `parent` (`O_EXCL`: never an

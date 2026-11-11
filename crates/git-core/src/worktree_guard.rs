@@ -61,6 +61,39 @@ mod walk_types {
 
     pub(crate) fn no_step(_: Step<'_>) {}
 
+    /// How often a walk (or a temporary file's creation, or another step that races a change of
+    /// the work tree) retries before giving up.
+    pub(crate) const ATTEMPTS: usize = 8;
+
+    /// At most this many units of the leaf's name go into its temporary file's name: bytes on
+    /// Unix, UTF-16 units on Windows. Each platform cuts on a whole character.
+    pub(crate) const TEMP_PREFIX_LEN: usize = 64;
+
+    /// The next number for a temporary file's name, unique in this process.
+    pub(crate) fn next_temp_number() -> usize {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// A temporary file's name in the platform's units: `.<prefix>.browsitory-<pid>-<n>.tmp`, a
+    /// leading dot (which hides it on Unix), the start of the leaf's name (`prefix`, already cut
+    /// by the caller) and this process, so a left-over one (after a crash) says where it came
+    /// from. `encode` turns the ASCII parts into the platform's units.
+    pub(crate) fn temp_name_units<U: Copy>(
+        prefix: &[U],
+        n: usize,
+        encode: impl Fn(&str) -> Vec<U>,
+    ) -> Vec<U> {
+        let mut name = encode(".");
+        name.extend_from_slice(prefix);
+        name.extend(encode(&format!(
+            ".browsitory-{}-{n}.tmp",
+            std::process::id()
+        )));
+        name
+    }
+
     /// Where a walk ended.
     pub(crate) enum Walk<B> {
         Found(B),
