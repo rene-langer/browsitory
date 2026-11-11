@@ -163,8 +163,8 @@ shown again. An older tab unmounts (PERF-001's reason: one visible view shouldn'
 and IPC) and reads the repository again when it mounts. The tab strip activates manually: arrow
 keys only move the focus.
 
-Changes made outside the app (#650) are found by polling a change stamp, not by a file system
-watcher: `git_core::change_stamp` hashes what the app shows (the work tree as `status` reads it,
+Changes made outside the app (#650) are found by comparing a change stamp:
+`git_core::change_stamp` hashes what the app shows (the work tree as `status` reads it,
 with each changed file's size and modification time; the index entries without their stat data;
 HEAD, references, the stash reflog, the configuration, the files of an operation in progress and
 each linked worktree's HEAD). Ignored files and the rest of the git folder (objects, reflogs,
@@ -175,8 +175,33 @@ the app's own action, whose refresh already read the new stamp, causes no second
 `useExternalChanges` calls it while the tab is shown, the app visible and nothing of the tab
 running: every 3 s, stretched to ten times the last check's duration (at most 60 s), and at once
 on window focus, on becoming visible again (the VSCode panel's visibility included) and when the
-tab is shown. At most one check runs at a time, and none while a refresh runs. A push-based
-watcher would need the `notify` crate, whose licence (CC0-1.0) is outside the policy (#756).
+tab is shown. At most one check runs at a time, and none while a refresh runs.
+
+A file system watcher says when to check (#756). `repo_service::watch::RepoWatchers` keeps one
+`RepoWatcher` (the `notify` crate, a licence exception, see `docs/LICENSE_COMPLIANCE.md`) per path
+the frontend watches; `useExternalChanges` calls `watchRepo` when its workspace mounts and
+`unwatchRepo` when it unmounts (at most the 4 kept tabs are watched), and `closeRepo` stops it
+too. The watcher follows what the stamp reads: the work tree minus what git ignores, and the git
+folder's (and, for a linked worktree, the common folder's) HEAD, index, `refs/`, `packed-refs`,
+configuration, stash reflog, `info/exclude` and the files of an operation in progress; objects,
+other reflogs and `*.lock` files are left out (`watch/paths.rs`), and so are mere reads (inotify
+reports opening a file: the app's own stamp check would otherwise report itself). Events are
+debounced (300 ms quiet, at most 2 s) into one `Changed`, sent as the `repo-watch` Tauri event or
+the `repoWatch` sidecar notification (`RepoWatchDto { repoPath, kind }`), which the extension host
+relays to the webview like the other notifications. A report for the shown tab checks at once; one
+that arrives during a check queues one more check; one for a hidden tab is dropped (showing it
+checks anyway). While watched, the poll above slows to every 30 s as a fallback (some network file
+systems report nothing).
+
+On Linux, inotify needs a watch per folder and a user's watches are shared with every program
+(VS Code's own watcher included), so the watcher walks the tree itself and adds one watch per
+folder git doesn't ignore, plus the git folders that hold the files above (`.git`, `refs/**`,
+`logs`, `logs/refs`, `worktrees/*`, ...), never `objects/`. New folders get watches as they appear,
+moved or deleted ones lose them, and a changed `.gitignore` or `info/exclude` walks the tree again.
+More than 20 000 work tree folders (`MAX_FOLDERS`) is not watched. macOS (FSEvents) and Windows
+(ReadDirectoryChangesW) use one recursive watch per root. When a watcher can't start (`watchRepo`
+answers `false`) or stops (the watch limit was reached: `Stopped`), the reason goes to stderr (the
+desktop log, the extension's output channel) and the frontend polls every 3 s again.
 
 ### Who owns a dialog's open state
 
