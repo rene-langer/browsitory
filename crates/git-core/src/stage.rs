@@ -446,6 +446,21 @@ pub fn discard_all_unstaged(repo: &git2::Repository, paths: &[String]) -> Result
     Err(StageError::DiscardIncomplete { failed, message })
 }
 
+/// Stub (#528).
+pub fn stage_paths(_repo: &git2::Repository, _paths: &[String]) -> Result<(), StageError> {
+    Ok(())
+}
+
+/// Stub (#528).
+pub fn unstage_paths(_repo: &git2::Repository, _paths: &[String]) -> Result<(), StageError> {
+    Ok(())
+}
+
+/// Stub (#528).
+pub fn ignore_paths(_repo: &git2::Repository, _patterns: &[String]) -> Result<(), StageError> {
+    Ok(())
+}
+
 /// Appends `pattern` to the repo-root `.gitignore` unless it is already listed.
 pub fn ignore_path(repo: &git2::Repository, pattern: &str) -> Result<(), StageError> {
     if pattern.is_empty() || pattern.contains(['\n', '\r']) || pattern.trim() != pattern {

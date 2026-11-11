@@ -15,8 +15,8 @@ use git_core::reset::ResetMode;
 use git_core::undo::SnapshotScope::{self, Full, RefsAndIndex};
 
 use super::undo::{
-    amend_label, count_label, fit, merge_label, quoted, reset_label, short, start_rebase_label,
-    with_path, HeldReplies, UndoPlan, DISCARD_BUSY, UNDO_BUSY,
+    amend_label, count_label, fit, merge_label, quoted, reset_label, several, short,
+    start_rebase_label, with_path, HeldReplies, UndoPlan, DISCARD_BUSY, UNDO_BUSY,
 };
 use super::Command;
 
@@ -274,6 +274,16 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
             P::recorded(with_path("Unstage lines in ", path, ""), RefsAndIndex)
         }
         Command::IgnorePath { pattern, .. } => P::recorded(with_path("Ignore ", pattern, ""), Full),
+        // Several paths in one command, one undo step (#528).
+        Command::StagePaths { paths, .. } => {
+            P::recorded(several("Stage ", paths, "files"), RefsAndIndex)
+        }
+        Command::UnstagePaths { paths, .. } => {
+            P::recorded(several("Unstage ", paths, "files"), RefsAndIndex)
+        }
+        Command::IgnorePaths { patterns, .. } => {
+            P::recorded(several("Ignore ", patterns, "patterns"), Full)
+        }
 
         // Discards: recorded, and refused rather than run unrecorded.
         Command::DiscardHunk { path, .. } => {
@@ -490,6 +500,8 @@ pub(super) fn reply_of(command: &mut Command) -> Option<&mut dyn Reply> {
         GetBranchCompareRange,
         StageFile,
         UnstageFile,
+        StagePaths,
+        UnstagePaths,
         StageHunk,
         UnstageHunk,
         DiscardHunk,
@@ -503,6 +515,7 @@ pub(super) fn reply_of(command: &mut Command) -> Option<&mut dyn Reply> {
         ApplyPatch,
         PreviewPatch,
         IgnorePath,
+        IgnorePaths,
         CreateRootFile,
         Commit,
         ListBranches,

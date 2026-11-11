@@ -84,3 +84,52 @@ describe("PendingPullPrompt (#652)", () => {
     expect(handlers.onMerge).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("PendingPullPrompt for a pull git config wants as a merge commit (#740)", () => {
+  const noFastForward = { noFastForward: true };
+
+  it.each([
+    ["no strategy", null],
+    ["Merge", "Merge" as const],
+    ["an unreadable strategy", new Error("config unreadable")],
+  ])("merges with a merge commit at once for %s, without asking", async (_, strategy) => {
+    const { onMerge, onRebase } = renderPrompt(strategy, noFastForward);
+    await waitFor(() => expect(onMerge).toHaveBeenCalledWith("refs/remotes/origin/main", "Never"));
+    expect(onMerge).toHaveBeenCalledTimes(1);
+    expect(onRebase).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it.each([["Rebase" as const], ["FastForwardOnly" as const]])(
+    "fast-forwards at once when the remembered strategy is %s",
+    async (strategy) => {
+      const { onMerge, onRebase } = renderPrompt(strategy, noFastForward);
+      await waitFor(() => expect(onMerge).toHaveBeenCalledWith("refs/remotes/origin/main", "Only"));
+      expect(onRebase).not.toHaveBeenCalled();
+      expect(screen.queryByRole("dialog")).toBeNull();
+    },
+  );
+
+  it("waits while the repository is busy, without the diverged dialog, then merges once", async () => {
+    const handlers = {
+      getPullStrategy: vi.fn(async () => null),
+      setPullStrategy: vi.fn(async () => {}),
+      onMerge: vi.fn(),
+      onRebase: vi.fn(),
+      onCancel: vi.fn(),
+    };
+    const props = { upstreamRef: "refs/remotes/origin/main", branchName: "main", noFastForward: true, ...handlers };
+    const { rerender } = render(
+      <PendingPullPrompt {...props} operationDisabled operationDisabledReason="A transfer is in progress." />,
+    );
+    await waitFor(() => expect(handlers.getPullStrategy).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(handlers.onMerge).not.toHaveBeenCalled();
+
+    rerender(<PendingPullPrompt {...props} operationDisabled={false} operationDisabledReason={null} />);
+    await waitFor(() => expect(handlers.onMerge).toHaveBeenCalledWith("refs/remotes/origin/main", "Never"));
+    rerender(<PendingPullPrompt {...props} operationDisabled={false} operationDisabledReason={null} />);
+    expect(handlers.onMerge).toHaveBeenCalledTimes(1);
+  });
+});

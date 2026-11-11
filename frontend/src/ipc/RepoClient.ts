@@ -833,7 +833,13 @@ export type StashSwitchOutcome =
 export type PullOutcome =
   | { kind: "UpToDate" }
   | { kind: "FastForwarded"; upstreamRef: string }
-  | { kind: "Diverged"; upstreamRef: string };
+  | { kind: "Diverged"; upstreamRef: string }
+  /**
+   * The branch could fast-forward, but git config asks for a merge commit (`pull.ff=false`,
+   * `branch.<name>.mergeoptions=--no-ff`, `merge.ff=false`) and configures no rebase (#740).
+   * Nothing changed; the caller merges `upstreamRef` with a merge commit.
+   */
+  | { kind: "NoFastForward"; upstreamRef: string };
 
 export type ConflictSegment =
   | { kind: "Clean"; content: string }
@@ -1208,6 +1214,10 @@ export interface RepoClient {
   getCommitSignature(repoPath: string, commitId: string): Promise<CommitSignature>;
   stageFile(repoPath: string, path: string): Promise<void>;
   unstageFile(repoPath: string, path: string): Promise<void>;
+  /** Stages `paths` as one undo step; rejects, staging none of them, when one fails (#528). */
+  stagePaths(repoPath: string, paths: string[]): Promise<void>;
+  /** Unstages `paths` as one undo step; rejects, unstaging none of them, when one fails (#528). */
+  unstagePaths(repoPath: string, paths: string[]): Promise<void>;
   stageHunk(repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions): Promise<void>;
   stageLines(repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]): Promise<void>;
   unstageHunk(repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions): Promise<void>;
@@ -1243,6 +1253,8 @@ export interface RepoClient {
    */
   readPatchFile(path: string): Promise<PatchContent>;
   ignorePath(repoPath: string, pattern: string): Promise<void>;
+  /** Adds `patterns` to `.gitignore` in one write and one undo step (#528). */
+  ignorePaths(repoPath: string, patterns: string[]): Promise<void>;
   getDiffSettings(): Promise<DiffSettings>;
   setDiffSettings(settings: DiffSettings): Promise<void>;
   /**

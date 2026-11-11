@@ -91,6 +91,25 @@ describe("useAppState merge and stash options", () => {
     expect(setMergeOptions).not.toHaveBeenCalled();
   });
 
+  it("a no-ff pull merges with a merge commit, and a fast-forward-only one with Only (#740)", async () => {
+    const setMergeOptions = vi.fn(async () => {});
+    const mergeBranch = vi.fn(async () => ({ kind: "Merged" as const }));
+    const client = transferClient({ setMergeOptions, mergeBranch });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    await act(() => result.current.mergePull("refs/remotes/origin/main", "Never"));
+    expect(mergeBranch).toHaveBeenLastCalledWith(TEST_REPO_PATH, "refs/remotes/origin/main", {
+      fastForward: "Never",
+      squash: false,
+    });
+    await act(() => result.current.mergePull("refs/remotes/origin/main", "Only"));
+    expect(mergeBranch).toHaveBeenLastCalledWith(TEST_REPO_PATH, "refs/remotes/origin/main", {
+      fastForward: "Only",
+      squash: false,
+    });
+    expect(setMergeOptions).not.toHaveBeenCalled();
+  });
+
   it("saveStash defaults to stashing everything", async () => {
     const saveStash = vi.fn(async () => {});
     const client = transferClient({ saveStash });

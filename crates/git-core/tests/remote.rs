@@ -2779,3 +2779,146 @@ fn a_fetch_whose_connection_is_refused_is_unreachable() {
         TransferErrorKind::TransferFailed
     );
 }
+
+/// A pull that could fast-forward, with `settings` in the local repository's config.
+fn fast_forwardable_pull_with(
+    settings: &[(&str, &str)],
+) -> (RemoteFixture, git2::Oid, PullOutcome) {
+    let fixture = diverged_local_and_bare_remote();
+    fixture.remote_commit("remote change");
+    let head_before = fixture.local.head().unwrap().target().unwrap();
+    {
+        let mut config = fixture.local.config().unwrap();
+        for (key, value) in settings {
+            config.set_str(key, value).unwrap();
+        }
+    }
+    let outcome = pull_after_fetch(&fixture.local, "origin", "main").unwrap();
+    (fixture, head_before, outcome)
+}
+
+fn assert_no_fast_forward(settings: &[(&str, &str)]) {
+    let (fixture, head_before, outcome) = fast_forwardable_pull_with(settings);
+    assert_eq!(
+        outcome,
+        PullOutcome::NoFastForward {
+            upstream_ref: "refs/remotes/origin/main".to_string()
+        },
+        "{settings:?}"
+    );
+    // Nothing changed: the caller merges with a merge commit.
+    assert_eq!(
+        fixture.local.head().unwrap().target(),
+        Some(head_before),
+        "{settings:?}"
+    );
+    assert_ne!(fixture.remote_tip(), head_before, "{settings:?}");
+    assert!(!git_core::merge::is_merging(&fixture.local), "{settings:?}");
+}
+
+fn assert_fast_forwards(settings: &[(&str, &str)]) {
+    let (fixture, _, outcome) = fast_forwardable_pull_with(settings);
+    assert!(
+        matches!(outcome, PullOutcome::FastForwarded { .. }),
+        "{settings:?}: {outcome:?}"
+    );
+    assert_eq!(
+        fixture.local.head().unwrap().target(),
+        Some(fixture.remote_tip()),
+        "{settings:?}"
+    );
+}
+
+// The cases below are what `git pull` (2.53) does with the same config: a merge commit for the
+// `assert_no_fast_forward` ones, a fast-forward for the others (#740).
+
+#[test]
+fn pull_ff_false_asks_for_a_merge_commit_instead_of_fast_forwarding() {
+    assert_no_fast_forward(&[("pull.ff", "false")]);
+    assert_no_fast_forward(&[("pull.ff", "false"), ("pull.rebase", "false")]);
+}
+
+#[test]
+fn branch_mergeoptions_no_ff_asks_for_a_merge_commit() {
+    assert_no_fast_forward(&[("branch.main.mergeoptions", "--no-ff")]);
+    assert_no_fast_forward(&[("branch.main.mergeoptions", "--ff  --no-ff")]);
+}
+
+#[test]
+fn merge_ff_false_asks_for_a_merge_commit_like_git_pull() {
+    assert_no_fast_forward(&[("merge.ff", "false")]);
+    assert_no_fast_forward(&[("merge.ff", "no")]);
+}
+
+#[test]
+fn the_last_fast_forward_option_in_mergeoptions_wins() {
+    assert_fast_forwards(&[("branch.main.mergeoptions", "--no-ff --ff")]);
+    assert_fast_forwards(&[("branch.main.mergeoptions", "--no-ff --ff-only")]);
+}
+
+#[test]
+fn pull_ff_overrides_mergeoptions_and_merge_ff() {
+    assert_fast_forwards(&[("pull.ff", "true"), ("branch.main.mergeoptions", "--no-ff")]);
+    assert_fast_forwards(&[("pull.ff", "only"), ("merge.ff", "false")]);
+    assert_no_fast_forward(&[("pull.ff", "false"), ("branch.main.mergeoptions", "--ff")]);
+}
+
+#[test]
+fn mergeoptions_override_merge_ff() {
+    assert_fast_forwards(&[("merge.ff", "false"), ("branch.main.mergeoptions", "--ff")]);
+    assert_fast_forwards(&[
+        ("merge.ff", "false"),
+        ("branch.main.mergeoptions", "--ff-only"),
+    ]);
+    assert_no_fast_forward(&[("merge.ff", "true"), ("branch.main.mergeoptions", "--no-ff")]);
+}
+
+#[test]
+fn a_configured_rebase_fast_forwards_despite_no_ff() {
+    assert_fast_forwards(&[("pull.ff", "false"), ("pull.rebase", "true")]);
+    assert_fast_forwards(&[("pull.ff", "false"), ("branch.main.rebase", "true")]);
+    assert_fast_forwards(&[("merge.ff", "false"), ("pull.rebase", "true")]);
+}
+
+#[test]
+fn another_branchs_mergeoptions_do_not_apply() {
+    assert_fast_forwards(&[("branch.other.mergeoptions", "--no-ff")]);
+}
+
+#[test]
+fn no_ff_leaves_up_to_date_and_diverged_pulls_as_they_were() {
+    let fixture = local_and_bare_remote();
+    fixture
+        .local
+        .config()
+        .unwrap()
+        .set_str("pull.ff", "false")
+        .unwrap();
+    assert_eq!(
+        pull_after_fetch(&fixture.local, "origin", "main").unwrap(),
+        PullOutcome::UpToDate
+    );
+    fixture.remote_commit("remote change");
+    fixture.local_commit("local change");
+    assert!(matches!(
+        pull_after_fetch(&fixture.local, "origin", "main").unwrap(),
+        PullOutcome::Diverged { .. }
+    ));
+}
+
+#[test]
+fn no_ff_still_refuses_a_dirty_worktree_first() {
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit("remote change");
+    fixture
+        .local
+        .config()
+        .unwrap()
+        .set_str("pull.ff", "false")
+        .unwrap();
+    fixture.write_local("dirty.txt", "dirty");
+    assert!(matches!(
+        pull_after_fetch(&fixture.local, "origin", "main"),
+        Err(RemoteError::DirtyWorktree)
+    ));
+}

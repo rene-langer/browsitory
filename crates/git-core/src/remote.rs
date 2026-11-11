@@ -425,6 +425,10 @@ pub enum PullOutcome {
     UpToDate,
     FastForwarded { upstream_ref: String },
     Diverged { upstream_ref: String },
+    /// The branch could fast-forward, but git config asks for a merge commit (`pull.ff=false`,
+    /// `branch.<name>.mergeoptions=--no-ff`, `merge.ff=false`) and no rebase is configured
+    /// (#740). Nothing changed; the caller merges `upstream_ref` with a merge commit.
+    NoFastForward { upstream_ref: String },
 }
 
 /// How a pull reconciles a branch that has diverged from its upstream (#652).

@@ -89,6 +89,28 @@ describe("the diverged-pull prompt (#636)", () => {
   });
 });
 
+describe("a pull git config wants as a merge commit (#740)", () => {
+  it("merges the upstream with a merge commit at once, without the diverged dialog", async () => {
+    const mergeBranch = vi.fn(async () => ({ kind: "Merged" as const }));
+    await renderApp(
+      layoutClient({
+        pullCurrentUpstream: async () => ({ kind: "NoFastForward", upstreamRef: "refs/remotes/origin/main" }),
+        getPullStrategy: async () => null,
+        mergeBranch,
+      }),
+    );
+    const pull = within(toolbar()).getByRole("button", { name: "Pull" });
+    await waitFor(() => expect(pull).not.toHaveAttribute("aria-disabled"));
+    fireEvent.click(pull);
+
+    await waitFor(() =>
+      expect(mergeBranch).toHaveBeenCalledWith("/repos/a", "refs/remotes/origin/main", { fastForward: "Never", squash: false }),
+    );
+    expect(mergeBranch).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog", { name: "Pull has diverged" })).toBeNull();
+  });
+});
+
 describe("the sidebar in a narrow window (#635)", () => {
   it("opens as a drawer from the toolbar and closes with Escape", async () => {
     setWindowWidth(800);

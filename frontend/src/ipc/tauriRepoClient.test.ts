@@ -668,6 +668,12 @@ describe("tauriRepoClient diff pane commands", () => {
     expect(invoke).toHaveBeenLastCalledWith("discard_all_unstaged", { repoPath: "/repo", paths: ["a.txt", "nested/"] });
     await tauriRepoClient.ignorePath("/repo", "*.log");
     expect(invoke).toHaveBeenLastCalledWith("ignore_path", { repoPath: "/repo", pattern: "*.log" });
+    await tauriRepoClient.ignorePaths("/repo", ["*.log", "/out/"]);
+    expect(invoke).toHaveBeenLastCalledWith("ignore_paths", { repoPath: "/repo", patterns: ["*.log", "/out/"] });
+    await tauriRepoClient.stagePaths("/repo", ["a.txt", "b.txt"]);
+    expect(invoke).toHaveBeenLastCalledWith("stage_paths", { repoPath: "/repo", paths: ["a.txt", "b.txt"] });
+    await tauriRepoClient.unstagePaths("/repo", ["a.txt", "b.txt"]);
+    expect(invoke).toHaveBeenLastCalledWith("unstage_paths", { repoPath: "/repo", paths: ["a.txt", "b.txt"] });
     await tauriRepoClient.getRootFiles("/repo");
     expect(invoke).toHaveBeenLastCalledWith("get_root_files", { repoPath: "/repo" });
     await tauriRepoClient.createRootFile("/repo", ".gitignore");

@@ -166,6 +166,15 @@ pub(super) fn with_path(prefix: &str, path: &str, suffix: &str) -> String {
     format!("{prefix}{}{suffix}", ellipsize_middle(path, budget))
 }
 
+/// A multi-path command's label (#528): `with_path` for one path, so it reads like the
+/// single-path command's, else the count ("Stage 3 files").
+pub(super) fn several(prefix: &str, paths: &[String], noun: &str) -> String {
+    match paths {
+        [path] => with_path(prefix, path, ""),
+        _ => format!("{prefix}{} {noun}", paths.len()),
+    }
+}
+
 pub(super) fn quoted(prefix: &str, message: &str) -> String {
     let summary = message.lines().next().unwrap_or("").trim();
     // prefix + “ + summary + ”

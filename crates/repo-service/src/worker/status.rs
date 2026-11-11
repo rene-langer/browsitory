@@ -210,6 +210,23 @@ pub(super) fn unstage_file(
     let _ = reply.send(git_core::stage::unstage_file(repo, &path).map_err(ErrorDto::from_error));
 }
 
+pub(super) fn stage_paths(
+    repo: &git2::Repository,
+    paths: Vec<String>,
+    reply: Sender<Result<(), ErrorDto>>,
+) {
+    let _ = reply.send(git_core::stage::stage_paths(repo, &paths).map_err(ErrorDto::from_error));
+}
+
+pub(super) fn unstage_paths(
+    repo: &git2::Repository,
+    paths: Vec<String>,
+    reply: Sender<Result<(), ErrorDto>>,
+) {
+    let _ =
+        reply.send(git_core::stage::unstage_paths(repo, &paths).map_err(ErrorDto::from_error));
+}
+
 pub(super) fn stage_hunk(
     repo: &git2::Repository,
     path: String,
@@ -353,6 +370,15 @@ pub(super) fn ignore_path(
     reply: Sender<Result<(), ErrorDto>>,
 ) {
     let _ = reply.send(git_core::stage::ignore_path(repo, &pattern).map_err(ErrorDto::from_error));
+}
+
+pub(super) fn ignore_paths(
+    repo: &git2::Repository,
+    patterns: Vec<String>,
+    reply: Sender<Result<(), ErrorDto>>,
+) {
+    let _ =
+        reply.send(git_core::stage::ignore_paths(repo, &patterns).map_err(ErrorDto::from_error));
 }
 
 /// The reply both commit and amend send: a hook failure is an outcome the UI renders, every
@@ -623,6 +649,16 @@ impl WorkerHandle {
         self.request(|tx| Command::UnstageFile { path, reply: tx })
     }
 
+    /// Stages `paths` as one undo step; on a failure none of them is staged (#528).
+    pub fn stage_paths(&self, paths: Vec<String>) -> Result<(), ErrorDto> {
+        self.request(|tx| Command::StagePaths { paths, reply: tx })
+    }
+
+    /// Unstages `paths` as one undo step; on a failure none of them is unstaged (#528).
+    pub fn unstage_paths(&self, paths: Vec<String>) -> Result<(), ErrorDto> {
+        self.request(|tx| Command::UnstagePaths { paths, reply: tx })
+    }
+
     pub fn stage_hunk(
         &self,
         path: String,
@@ -742,6 +778,11 @@ impl WorkerHandle {
 
     pub fn ignore_path(&self, pattern: String) -> Result<(), ErrorDto> {
         self.request(|tx| Command::IgnorePath { pattern, reply: tx })
+    }
+
+    /// Adds `patterns` to `.gitignore` in one write, one undo step (#528).
+    pub fn ignore_paths(&self, patterns: Vec<String>) -> Result<(), ErrorDto> {
+        self.request(|tx| Command::IgnorePaths { patterns, reply: tx })
     }
 
     /// Commits the index, running the commit hooks (`pre-commit` and `commit-msg` skipped with

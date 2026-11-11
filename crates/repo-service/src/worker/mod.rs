@@ -237,6 +237,16 @@ pub(crate) enum Command {
         path: String,
         reply: Sender<Result<(), ErrorDto>>,
     },
+    /// #528: several files staged as one undo step, all or nothing.
+    StagePaths {
+        paths: Vec<String>,
+        reply: Sender<Result<(), ErrorDto>>,
+    },
+    /// #528: several files unstaged as one undo step, all or nothing.
+    UnstagePaths {
+        paths: Vec<String>,
+        reply: Sender<Result<(), ErrorDto>>,
+    },
     StageHunk {
         path: String,
         old_start: u32,
@@ -315,6 +325,11 @@ pub(crate) enum Command {
     },
     IgnorePath {
         pattern: String,
+        reply: Sender<Result<(), ErrorDto>>,
+    },
+    /// #528: several patterns added to `.gitignore` in one write and one undo step.
+    IgnorePaths {
+        patterns: Vec<String>,
         reply: Sender<Result<(), ErrorDto>>,
     },
     /// Creates a missing `.gitignore` or `.gitattributes` at the work tree root, empty (#624).
