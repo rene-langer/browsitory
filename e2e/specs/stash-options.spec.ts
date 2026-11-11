@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { clickInPage } from "../support/dom";
 import { expandSidebarSection } from "../support/sidebar";
 import { gitIn } from "../support/git";
 
@@ -69,9 +70,9 @@ describe("Browsitory stash options", () => {
     await details.waitForExist();
     await details.$(`span*=${FILE}`).waitForExist();
 
-    const pop = await details.$("button=Pop");
-    await pop.waitForEnabled();
-    await browser.execute((el) => (el as HTMLElement).click(), pop);
+    // Pop is a `ReasonButton` (`aria-disabled` while blocked, which `waitForEnabled` doesn't
+    // see, #790): `clickInPage` waits until it can run.
+    await clickInPage('section[aria-label="Stash details"] button', "Pop");
     await browser.waitUntil(() => contents() === "stash me\n", {
       timeoutMsg: "pop did not restore the file",
     });

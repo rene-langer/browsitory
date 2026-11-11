@@ -17,7 +17,12 @@ use std::path::Path;
 
 #[cfg(test)]
 use super::no_step;
-use super::{Content, HeldFolder, Kind, Leaf, OnLink, OnMissing, Probe, Step, StepFn, Walk};
+use super::walk_types::{
+    next_temp_number, temp_name_units, Child, Held, HeldDir, ATTEMPTS, TEMP_PREFIX_LEN,
+};
+#[cfg(test)]
+use super::Step;
+use super::{Content, HeldFolder, Kind, Leaf, OnLink, OnMissing, Probe, StepFn, Walk};
 
 /// The folders from the work tree root down to the leaf's parent, each held open.
 pub(super) struct Beneath {
@@ -178,8 +183,6 @@ pub(super) fn symlink_at(target: &[u8], dir: RawFd, name: &OsStr) -> io::Result<
 }
 
 /// How often a walk retries one component that keeps changing under it before giving up.
-const ATTEMPTS: usize = 8;
-
 /// Walks `rel` (a plain relative path, see `plain_relative`) below `workdir` down to its last
 /// component's parent, holding each folder open. See the module docs.
 pub(super) fn walk(
@@ -208,74 +211,50 @@ fn walk_from(
     on_missing: OnMissing,
     step: StepFn<'_>,
 ) -> io::Result<Walk<Beneath>> {
-    let names: Vec<OsString> = rel
-        .components()
-        .map(|c| c.as_os_str().to_os_string())
-        .collect();
-    if names.is_empty() {
-        return Err(io::Error::from(io::ErrorKind::InvalidInput));
-    }
-    let mut dirs: Vec<OwnedFd> = vec![root];
-    for name in &names[..names.len() - 1] {
-        let mut next = None;
-        for _ in 0..ATTEMPTS {
-            let dir = dirs[dirs.len() - 1].as_raw_fd();
-            match open_at(
-                dir,
-                name,
-                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW,
-                0,
-            ) {
-                Ok(fd) => {
-                    step(Step::Opened(name));
-                    next = Some(fd);
-                    break;
-                }
-                Err(error) if errno(&error) == libc::ENOENT => match on_missing {
-                    OnMissing::Stop => return Ok(Walk::Missing),
-                    OnMissing::Create => match mkdir_at(dir, name) {
-                        Ok(()) => step(Step::Created(name)),
-                        Err(error) if errno(&error) == libc::EEXIST => {}
-                        Err(error) => return Err(error),
-                    },
-                },
-                // A link (`ELOOP`; `EMLINK` on FreeBSD) or not a folder (`ENOTDIR`).
-                Err(error)
-                    if matches!(errno(&error), libc::ELOOP | libc::ENOTDIR | libc::EMLINK) =>
-                {
-                    match stat_at(dir, name)? {
-                        Some(stat) if is_link(&stat) => match on_link {
-                            OnLink::Refuse => return Ok(Walk::Link),
-                            OnLink::Clear => {
-                                match unlink_at(dir, name, false) {
-                                    Ok(()) => step(Step::Cleared(name)),
-                                    Err(error) if errno(&error) == libc::ENOENT => {}
-                                    Err(error) => return Err(error),
-                                }
-                                if on_missing == OnMissing::Stop {
-                                    return Ok(Walk::Link);
-                                }
-                            }
-                        },
-                        // Swapped back to a folder, or gone: try again.
-                        Some(stat) if is_dir(&stat) => {}
-                        None => {}
-                        Some(_) => return Ok(Walk::NotDir),
-                    }
-                }
-                Err(error) => return Err(error),
+    let walked = super::walk_types::walk_from(root, rel, on_link, on_missing, step)?;
+    Ok(walked.map(|Held { dirs, names }| Beneath { dirs, names }))
+}
+
+impl HeldDir for OwnedFd {
+    fn open_child_dir(&self, name: &OsStr) -> io::Result<Child<OwnedFd>> {
+        let dir = self.as_raw_fd();
+        match open_at(
+            dir,
+            name,
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW,
+            0,
+        ) {
+            Ok(fd) => Ok(Child::Dir(fd)),
+            Err(error) if errno(&error) == libc::ENOENT => Ok(Child::Missing),
+            // A link (`ELOOP`; `EMLINK` on FreeBSD) or not a folder (`ENOTDIR`).
+            Err(error) if matches!(errno(&error), libc::ELOOP | libc::ENOTDIR | libc::EMLINK) => {
+                Ok(match stat_at(dir, name)? {
+                    Some(stat) if is_link(&stat) => Child::Link,
+                    // Swapped back to a folder, or gone: try again.
+                    Some(stat) if is_dir(&stat) => Child::Changed,
+                    None => Child::Changed,
+                    Some(_) => Child::NotDir,
+                })
             }
-        }
-        match next {
-            Some(fd) => dirs.push(fd),
-            None => {
-                return Err(io::Error::other(
-                    "the working tree kept changing while it was being written",
-                ))
-            }
+            Err(error) => Err(error),
         }
     }
-    Ok(Walk::Found(Beneath { dirs, names }))
+
+    fn create_child_dir(&self, name: &OsStr) -> io::Result<bool> {
+        match mkdir_at(self.as_raw_fd(), name) {
+            Ok(()) => Ok(true),
+            Err(error) if errno(&error) == libc::EEXIST => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn clear_link(&self, name: &OsStr) -> io::Result<bool> {
+        match unlink_at(self.as_raw_fd(), name, false) {
+            Ok(()) => Ok(true),
+            Err(error) if errno(&error) == libc::ENOENT => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
 }
 
 fn gone(error: &io::Error) -> bool {
@@ -460,25 +439,13 @@ fn on_disk_name(parent: RawFd, leaf: &OsStr) -> io::Result<OsString> {
 /// kept short so the name fits where `leaf` itself fits.
 fn temp_name(leaf: &OsStr, n: usize) -> OsString {
     let bytes = leaf.as_bytes();
-    let mut cut = bytes.len().min(TEMP_PREFIX_BYTES);
+    let mut cut = bytes.len().min(TEMP_PREFIX_LEN);
     // Not in the middle of a UTF-8 sequence.
     while cut < bytes.len() && cut > 0 && bytes[cut] & 0xC0 == 0x80 {
         cut -= 1;
     }
-    let mut name = b".".to_vec();
-    name.extend_from_slice(&bytes[..cut]);
-    name.extend_from_slice(format!(".browsitory-{}-{n}.tmp", std::process::id()).as_bytes());
+    let name = temp_name_units(&bytes[..cut], n, |part| part.as_bytes().to_vec());
     OsString::from(OsStr::from_bytes(&name))
-}
-
-/// At most this many bytes of the leaf's name go into its temporary file's name.
-const TEMP_PREFIX_BYTES: usize = 64;
-
-/// The next number for a temporary file's name, unique in this process.
-fn next_temp_number() -> usize {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static NEXT: AtomicUsize = AtomicUsize::new(0);
-    NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
 /// Creates a new, empty temporary file next to the leaf in `parent` (`O_EXCL`: never an
@@ -1711,5 +1678,100 @@ mod tests {
         let outside_f = std::fs::read_to_string(outside.path().join("f")).unwrap();
         eprintln!("{written} writes inside, outside f = {outside_f:?}");
         assert_eq!(outside_f, "OUTSIDE\n");
+    }
+
+    // ---- the `HeldDir` primitives the shared walk (`walk_types::walk_from`) runs on ----------
+
+    fn held(dir: &Path) -> OwnedFd {
+        File::open(dir).unwrap().into()
+    }
+
+    fn skip_as_root() -> bool {
+        // SAFETY: `geteuid` has no preconditions.
+        let root = unsafe { libc::geteuid() } == 0;
+        if root {
+            eprintln!("skipped: root ignores folder permissions");
+        }
+        root
+    }
+
+    #[test]
+    fn a_held_folder_tells_what_stands_at_a_name() {
+        let (dir, outside) = tree();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("link")).unwrap();
+        let root = held(dir.path());
+        assert!(matches!(
+            root.open_child_dir(OsStr::new("d")).unwrap(),
+            Child::Dir(_)
+        ));
+        assert!(matches!(
+            root.open_child_dir(OsStr::new("link")).unwrap(),
+            Child::Link
+        ));
+        assert!(matches!(
+            root.open_child_dir(OsStr::new("nothing")).unwrap(),
+            Child::Missing
+        ));
+        let d = held(&dir.path().join("d"));
+        assert!(matches!(
+            d.open_child_dir(OsStr::new("f")).unwrap(),
+            Child::NotDir
+        ));
+        assert_outside_untouched(outside.path());
+    }
+
+    #[test]
+    fn a_folder_that_cannot_be_opened_is_an_error_not_a_change() {
+        use std::os::unix::fs::PermissionsExt;
+        if skip_as_root() {
+            return;
+        }
+        let (dir, _outside) = tree();
+        let d = dir.path().join("d");
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let opened = held(dir.path()).open_child_dir(OsStr::new("d"));
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let error = opened.err().expect("an error");
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn creating_a_folder_says_whether_it_was_already_there() {
+        let (dir, _outside) = tree();
+        let root = held(dir.path());
+        assert!(root.create_child_dir(OsStr::new("new")).unwrap());
+        assert!(dir.path().join("new").is_dir());
+        assert!(!root.create_child_dir(OsStr::new("new")).unwrap());
+        assert!(!root.create_child_dir(OsStr::new("d")).unwrap());
+    }
+
+    #[test]
+    fn creating_a_folder_where_that_is_not_allowed_is_an_error() {
+        use std::os::unix::fs::PermissionsExt;
+        if skip_as_root() {
+            return;
+        }
+        let (dir, _outside) = tree();
+        let d = dir.path().join("d");
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let created = held(&d).create_child_dir(OsStr::new("new"));
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let error = created.expect_err("an error");
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(!d.join("new").exists());
+    }
+
+    #[test]
+    fn clearing_a_link_says_whether_it_removed_one() {
+        let (dir, outside) = tree();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("link")).unwrap();
+        let root = held(dir.path());
+        assert!(root.clear_link(OsStr::new("link")).unwrap());
+        assert!(std::fs::symlink_metadata(dir.path().join("link")).is_err());
+        assert!(!root.clear_link(OsStr::new("link")).unwrap());
+        // A folder is never removed as a link.
+        assert!(root.clear_link(OsStr::new("d")).is_err());
+        assert!(dir.path().join("d/f").is_file());
+        assert_outside_untouched(outside.path());
     }
 }

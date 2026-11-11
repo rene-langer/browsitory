@@ -54,7 +54,12 @@ use std::path::{Path, PathBuf};
 use super::reparse::{
     self, leaf_action, LeafAction, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
 };
-use super::{Content, HeldFolder, Kind, Leaf, OnLink, OnMissing, Probe, Step, StepFn, Walk};
+use super::walk_types::{
+    next_temp_number, temp_name_units, Child, Held, HeldDir, ATTEMPTS, TEMP_PREFIX_LEN,
+};
+#[cfg(test)]
+use super::Step;
+use super::{Content, HeldFolder, Kind, Leaf, OnLink, OnMissing, Probe, StepFn, Walk};
 
 const FILE_LIST_DIRECTORY: u32 = 0x0001;
 const FILE_READ_ATTRIBUTES: u32 = 0x0080;
@@ -810,7 +815,15 @@ enum Purpose {
 /// classifies it. `None` when missing. Shares delete: the handle is what any later act uses, so
 /// a rename of the name meanwhile changes nothing.
 fn open_leaf_at(at: &Beneath, name: &OsStr, purpose: Purpose) -> io::Result<Option<(File, Found)>> {
-    let parent = at.parent_file();
+    open_leaf_in(at.parent_file(), name, purpose)
+}
+
+/// [`open_leaf_at`] in the held folder `parent`.
+fn open_leaf_in(
+    parent: &File,
+    name: &OsStr,
+    purpose: Purpose,
+) -> io::Result<Option<(File, Found)>> {
     let open = |access| {
         nt_open(
             parent,
@@ -904,9 +917,6 @@ fn reopen_same(at: &Beneath, first: &File, reopen: bool, access: u32) -> io::Res
     Ok(Some(second))
 }
 
-/// How often a walk retries one component that keeps changing under it before giving up.
-const ATTEMPTS: usize = 8;
-
 /// Walks `rel` (a plain relative path) below `workdir` down to its last component's parent,
 /// holding each folder. See the module docs.
 pub(super) fn walk(
@@ -936,86 +946,53 @@ fn walk_from(
     on_missing: OnMissing,
     step: StepFn<'_>,
 ) -> io::Result<Walk<Beneath>> {
-    let names: Vec<OsString> = rel
-        .components()
-        .map(|c| c.as_os_str().to_os_string())
-        .collect();
-    if names.is_empty() {
-        return Err(io::Error::from(io::ErrorKind::InvalidInput));
-    }
-    let mut at = Beneath {
-        dirs: vec![root_dir],
-        names,
-    };
-    for k in 0..at.names.len() - 1 {
-        let name = at.names[k].clone();
-        let mut next = None;
-        for _ in 0..ATTEMPTS {
-            let dir = match nt_open(
-                at.parent_file(),
-                &name,
-                FILE_LIST_DIRECTORY,
-                FILE_SHARE_READ | FILE_SHARE_WRITE,
-                FILE_OPEN,
-                FILE_OPEN_FOR_BACKUP_INTENT | FILE_OPEN_REPARSE_POINT,
-                0,
-            ) {
-                Ok(dir) => dir,
-                Err(error) if missing(&error) => match on_missing {
-                    OnMissing::Stop => return Ok(Walk::Missing),
-                    OnMissing::Create => {
-                        match create_dir_in(at.parent_file(), &name) {
-                            Ok(()) => step(Step::Created(&name)),
-                            Err(error) if error.raw_os_error() == Some(ERROR_ALREADY_EXISTS) => {}
-                            Err(error) => return Err(error),
-                        }
-                        continue;
-                    }
-                },
-                Err(error) => return Err(error),
-            };
-            if !in_parent(&dir, at.parent_file())? {
-                return Err(redirected());
-            }
-            let info = attribute_tag(&dir)?;
-            match leaf_action(info.file_attributes, info.reparse_tag) {
-                LeafAction::Refuse => {
-                    drop(dir);
-                    match on_link {
-                        OnLink::Refuse => return Ok(Walk::Link),
-                        OnLink::Clear => {
-                            // Through its own handle, checked to be the link in the held parent.
-                            if let Some((link, Found::Link)) =
-                                open_leaf_at(&at, &name, Purpose::Delete)?
-                            {
-                                delete_by_handle(&link)?;
-                            }
-                            step(Step::Cleared(&name));
-                            if on_missing == OnMissing::Stop {
-                                return Ok(Walk::Link);
-                            }
-                        }
-                    }
-                }
-                // A plain folder, or one a file system filter resolves (a OneDrive folder).
-                _ if info.file_attributes & FILE_ATTRIBUTE_DIRECTORY != 0 => {
-                    step(Step::Opened(&name));
-                    next = Some(dir);
-                    break;
-                }
-                _ => return Ok(Walk::NotDir),
-            }
+    let walked = super::walk_types::walk_from(root_dir, rel, on_link, on_missing, step)?;
+    Ok(walked.map(|Held { dirs, names }| Beneath { dirs, names }))
+}
+
+impl HeldDir for File {
+    fn open_child_dir(&self, name: &OsStr) -> io::Result<Child<File>> {
+        let dir = match nt_open(
+            self,
+            name,
+            FILE_LIST_DIRECTORY,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            FILE_OPEN,
+            FILE_OPEN_FOR_BACKUP_INTENT | FILE_OPEN_REPARSE_POINT,
+            0,
+        ) {
+            Ok(dir) => dir,
+            Err(error) if missing(&error) => return Ok(Child::Missing),
+            Err(error) => return Err(error),
+        };
+        if !in_parent(&dir, self)? {
+            return Err(redirected());
         }
-        match next {
-            Some(dir) => at.dirs.push(dir),
-            None => {
-                return Err(io::Error::other(
-                    "the working tree kept changing while it was being written",
-                ))
-            }
+        let info = attribute_tag(&dir)?;
+        Ok(match leaf_action(info.file_attributes, info.reparse_tag) {
+            LeafAction::Refuse => Child::Link,
+            // A plain folder, or one a file system filter resolves (a OneDrive folder).
+            _ if info.file_attributes & FILE_ATTRIBUTE_DIRECTORY != 0 => Child::Dir(dir),
+            _ => Child::NotDir,
+        })
+    }
+
+    fn create_child_dir(&self, name: &OsStr) -> io::Result<bool> {
+        match create_dir_in(self, name) {
+            Ok(()) => Ok(true),
+            Err(error) if error.raw_os_error() == Some(ERROR_ALREADY_EXISTS) => Ok(false),
+            Err(error) => Err(error),
         }
     }
-    Ok(Walk::Found(at))
+
+    /// Through its own handle, checked to be the link in this folder. Reports
+    /// `Step::Cleared` even when no link was left to delete (#800).
+    fn clear_link(&self, name: &OsStr) -> io::Result<bool> {
+        if let Some((link, Found::Link)) = open_leaf_in(self, name, Purpose::Delete)? {
+            delete_by_handle(&link)?;
+        }
+        Ok(true)
+    }
 }
 
 fn unreadable(error: &io::Error) -> bool {
@@ -1189,13 +1166,6 @@ fn is_beneath(path: &Path, root: &Path) -> bool {
 const IN_USE_TRIES: usize = 3;
 const IN_USE_WAIT: std::time::Duration = std::time::Duration::from_millis(100);
 
-/// The next number for a temporary file's name, unique in this process.
-fn next_temp_number() -> usize {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static NEXT: AtomicUsize = AtomicUsize::new(0);
-    NEXT.fetch_add(1, Ordering::Relaxed)
-}
-
 fn file_in_use(rel: &Path) -> io::Error {
     io::Error::new(
         io::ErrorKind::ResourceBusy,
@@ -1277,19 +1247,14 @@ fn on_disk_name(leaf: &OsStr, path: &Path) -> OsString {
 fn temp_name(leaf: &OsStr, n: usize) -> OsString {
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
     let units: Vec<u16> = leaf.encode_wide().collect();
-    let mut cut = units.len().min(TEMP_PREFIX_UNITS);
+    let mut cut = units.len().min(TEMP_PREFIX_LEN);
     // Not between the two halves of a surrogate pair.
     if cut > 0 && cut < units.len() && (0xD800..0xDC00).contains(&units[cut - 1]) {
         cut -= 1;
     }
-    let mut name: Vec<u16> = ".".encode_utf16().collect();
-    name.extend_from_slice(&units[..cut]);
-    name.extend(format!(".browsitory-{}-{n}.tmp", std::process::id()).encode_utf16());
+    let name = temp_name_units(&units[..cut], n, |part| part.encode_utf16().collect());
     OsString::from_wide(&name)
 }
-
-/// At most this many UTF-16 units of the leaf's name go into its temporary file's name.
-const TEMP_PREFIX_UNITS: usize = 64;
 
 /// Creates a new, empty temporary file next to `at`'s leaf, in the held parent and checked to
 /// be there (deleted again through its handle when it isn't). Its handle can write, set
