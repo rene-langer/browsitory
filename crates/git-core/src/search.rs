@@ -1103,6 +1103,14 @@ mod tests {
     }
 
     #[test]
+    fn a_word_starting_with_a_colon_is_text_not_a_key() {
+        assert_eq!(
+            terms(":wq 12:30"),
+            vec![Text(":wq".into()), Text("12:30".into())]
+        );
+    }
+
+    #[test]
     fn every_key_parses_and_keys_ignore_case() {
         assert_eq!(
             terms(
