@@ -1259,10 +1259,42 @@ impl From<git_core::commit::CommitOutcome> for CommitOutcomeDto {
     }
 }
 
+/// What applying a patch file did (#747): `HookFailed` when `applypatch-msg` or
+/// `pre-applypatch` rejected the mail `subject` (nothing was applied), with the hook's output.
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "PatchApplyOutcome"))]
+#[serde(tag = "kind")]
+pub enum PatchApplyOutcomeDto {
+    Applied,
+    HookFailed {
+        hook: String,
+        output: String,
+        subject: String,
+    },
+}
+
+impl From<git_core::patch::PatchApplyOutcome> for PatchApplyOutcomeDto {
+    fn from(outcome: git_core::patch::PatchApplyOutcome) -> Self {
+        match outcome {
+            git_core::patch::PatchApplyOutcome::Applied => Self::Applied,
+            git_core::patch::PatchApplyOutcome::HookFailed {
+                hook,
+                output,
+                subject,
+            } => Self::HookFailed {
+                hook,
+                output,
+                subject,
+            },
+        }
+    }
+}
+
 /// Payload of the `hook-progress` event / `hookProgress` notification (commit/amend/Continue,
 /// checkout, merge and pick hooks; pushes and a pull's post-merge report `RunningHook` through
 /// the transfer progress instead).
-/// `source` (`"Commit" | "Checkout" | "Merge" | "Pick"`) tells the UI where to show it (#185).
+/// `source` (`"Commit" | "Checkout" | "Merge" | "Pick" | "Patch"`) tells the UI where to show it (#185).
 #[derive(Clone, Serialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[cfg_attr(any(test, feature = "ts"), ts(rename = "HookProgress"))]
@@ -3250,6 +3282,7 @@ mod ts_bindings {
             PatchContentDto,
             PatchApplyDto,
             PatchPreviewDto,
+            PatchApplyOutcomeDto,
             PatchPreviewPartDto,
             PatchMailDto,
             PatchPreviewFileDto,

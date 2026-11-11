@@ -312,11 +312,15 @@ pub(crate) enum Command {
         source: PatchSource,
         reply: Sender<Result<Vec<u8>, ErrorDto>>,
     },
-    /// #658: a patch file applied to the working tree, also staged, or as commits.
+    /// #658: a patch file applied to the working tree, also staged, or as commits. As commits it
+    /// runs `git am`'s hooks (#747), reported on `events` (`HookSource::Patch`) under
+    /// `operation_id`, which `cancel_transfer` stops.
     ApplyPatch {
         content: Vec<u8>,
         how: git_core::patch::PatchApply,
-        reply: Sender<Result<(), ErrorDto>>,
+        operation_id: cancel::OperationId,
+        events: Sender<HookEvent>,
+        reply: Sender<Result<git_core::patch::PatchApplyOutcome, ErrorDto>>,
     },
     /// #658: what a patch file holds and whether it applies; changes nothing.
     PreviewPatch {

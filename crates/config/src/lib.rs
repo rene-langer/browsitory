@@ -332,8 +332,12 @@ impl Default for UpdateSettings {
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct ConfigFile {
+    // Recent repositories, newest first, at most `MAX_RECENT_REPOS`; never a pinned one.
     #[serde(default)]
     recent_repos: Vec<PathBuf>,
+    // Pinned repositories (#766), in pin order: listed before `recent_repos`, no cap.
+    #[serde(default)]
+    pinned_repos: Vec<PathBuf>,
     #[serde(default)]
     active_repo: Option<PathBuf>,
     #[serde(default)]
@@ -385,23 +389,42 @@ fn config_file_path() -> Result<PathBuf, ConfigError> {
     Ok(dirs.config_dir().join("config.toml"))
 }
 
+/// The pinned repositories (#766) in pin order, then the recent ones, newest first.
 pub fn list_recent_repos() -> Result<Vec<PathBuf>, ConfigError> {
     list_recent_repos_at(&config_file_path()?)
 }
 
 /// Adds `path` to the front of the recent-repos list, de-duplicating it if already present
-/// and capping the list at 10 entries (oldest dropped).
+/// and capping the list at 10 entries (oldest dropped). A pinned `path` stays where it is.
 pub fn add_recent_repo(path: &Path) -> Result<(), ConfigError> {
     add_recent_repo_at(&config_file_path()?, path)
 }
 
-/// Removes `path` from the recent-repos list (#690); a path that isn't in it is no error.
+/// Removes `path` from the recent-repos list (#690), unpinning it too; a path that isn't in it
+/// is no error.
 pub fn remove_recent_repo(path: &Path) -> Result<(), ConfigError> {
     remove_recent_repo_at(&config_file_path()?, path)
 }
 
-/// The recent repositories whose folder is gone (#690): each listed path that isn't a
-/// directory now, in the list's order.
+/// The pinned repositories (#766), in the order they were pinned.
+pub fn list_pinned_repos() -> Result<Vec<PathBuf>, ConfigError> {
+    list_pinned_repos_at(&config_file_path()?)
+}
+
+/// Pins `path` (#766): it is listed first, after the repositories pinned before it, and no longer
+/// counts against the cap of 10 recent ones. Pinning a pinned path changes nothing.
+pub fn pin_recent_repo(path: &Path) -> Result<(), ConfigError> {
+    pin_recent_repo_at(&config_file_path()?, path)
+}
+
+/// Unpins `path` (#766): it becomes the newest recent repository (the oldest drops off past 10).
+/// A path that isn't pinned is no error and changes nothing.
+pub fn unpin_recent_repo(path: &Path) -> Result<(), ConfigError> {
+    unpin_recent_repo_at(&config_file_path()?, path)
+}
+
+/// The recent repositories, pinned ones included, whose folder is gone (#690): each listed path
+/// that isn't a directory now, in the list's order.
 pub fn list_missing_recent_repos() -> Result<Vec<PathBuf>, ConfigError> {
     list_missing_recent_repos_at(&config_file_path()?)
 }
@@ -431,11 +454,22 @@ pub fn scan_repos_in_root(root: &Path) -> Result<Vec<PathBuf>, ConfigError> {
 // implementation seam for tests, not part of the crate's intended public API surface —
 // `list_recent_repos`/`add_recent_repo` are the real entry points other crates use.
 pub fn list_recent_repos_at(config_file: &Path) -> Result<Vec<PathBuf>, ConfigError> {
-    Ok(read_config(config_file)?.recent_repos)
+    let config = read_config(config_file)?;
+    let recent: Vec<PathBuf> = config
+        .recent_repos
+        .into_iter()
+        .filter(|path| !config.pinned_repos.contains(path))
+        .collect();
+    let mut listed = config.pinned_repos;
+    listed.extend(recent);
+    Ok(listed)
 }
 
 pub fn add_recent_repo_at(config_file: &Path, path: &Path) -> Result<(), ConfigError> {
     let mut config = read_config(config_file)?;
+    if config.pinned_repos.iter().any(|p| p == path) {
+        return Ok(());
+    }
     config.recent_repos.retain(|p| p != path);
     config.recent_repos.insert(0, path.to_path_buf());
     config.recent_repos.truncate(MAX_RECENT_REPOS);
@@ -445,11 +479,38 @@ pub fn add_recent_repo_at(config_file: &Path, path: &Path) -> Result<(), ConfigE
 pub fn remove_recent_repo_at(config_file: &Path, path: &Path) -> Result<(), ConfigError> {
     let mut config = read_config(config_file)?;
     config.recent_repos.retain(|p| p != path);
+    config.pinned_repos.retain(|p| p != path);
+    write_config(config_file, &config)
+}
+
+pub fn list_pinned_repos_at(config_file: &Path) -> Result<Vec<PathBuf>, ConfigError> {
+    Ok(read_config(config_file)?.pinned_repos)
+}
+
+pub fn pin_recent_repo_at(config_file: &Path, path: &Path) -> Result<(), ConfigError> {
+    let mut config = read_config(config_file)?;
+    if config.pinned_repos.iter().any(|p| p == path) {
+        return Ok(());
+    }
+    config.recent_repos.retain(|p| p != path);
+    config.pinned_repos.push(path.to_path_buf());
+    write_config(config_file, &config)
+}
+
+pub fn unpin_recent_repo_at(config_file: &Path, path: &Path) -> Result<(), ConfigError> {
+    let mut config = read_config(config_file)?;
+    if !config.pinned_repos.iter().any(|p| p == path) {
+        return Ok(());
+    }
+    config.pinned_repos.retain(|p| p != path);
+    config.recent_repos.retain(|p| p != path);
+    config.recent_repos.insert(0, path.to_path_buf());
+    config.recent_repos.truncate(MAX_RECENT_REPOS);
     write_config(config_file, &config)
 }
 
 pub fn list_missing_recent_repos_at(config_file: &Path) -> Result<Vec<PathBuf>, ConfigError> {
-    let recent = read_config(config_file)?.recent_repos;
+    let recent = list_recent_repos_at(config_file)?;
     Ok(recent.into_iter().filter(|path| !path.is_dir()).collect())
 }
 

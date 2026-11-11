@@ -2,12 +2,14 @@
 //! applied. The extension host shows the save and open dialogs and does the file I/O.
 use repo_service::wire::ErrorDto;
 use repo_service::wire::{
-    CommitChangeRequestDto, PatchApplyDto, PatchContentDto, PatchPreviewDto, PatchSourceDto,
+    CommitChangeRequestDto, PatchApplyDto, PatchApplyOutcomeDto, PatchContentDto, PatchPreviewDto,
+    PatchSourceDto,
 };
 use serde::Deserialize;
 use serde_json::Value;
+use std::sync::{Arc, Mutex};
 
-use super::{worker_handle, Repos};
+use super::{hook_relay, worker_handle, Repos};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -44,10 +46,20 @@ pub(super) struct ApplyPatchParams {
     how: PatchApplyDto,
 }
 
-pub(super) fn apply_patch(params: ApplyPatchParams, repos: &Repos) -> Result<Value, ErrorDto> {
+/// As commits, `git am`'s hooks are relayed as `hookProgress` with `source: "Patch"` (#747).
+pub(super) fn apply_patch<W: std::io::Write + Send + 'static>(
+    params: ApplyPatchParams,
+    repos: &Repos,
+    out: &Arc<Mutex<W>>,
+) -> Result<Value, ErrorDto> {
     let bytes = params.content.into_bytes()?;
-    worker_handle(repos, &params.repo_path)?.apply_patch(bytes, params.how.into())?;
-    Ok(Value::Null)
+    let events = hook_relay(&params.repo_path, out);
+    let outcome = worker_handle(repos, &params.repo_path)?.apply_patch_reported(
+        bytes,
+        params.how.into(),
+        events,
+    )?;
+    serde_json::to_value(PatchApplyOutcomeDto::from(outcome)).map_err(ErrorDto::from_error)
 }
 
 #[derive(Deserialize)]

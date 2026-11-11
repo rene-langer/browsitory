@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import type { CommitChangeRequest, GraphCommit, PatchApply, PatchContent, PatchPreview, PatchSource, RepoClient } from "../ipc/RepoClient";
+import type { CommitChangeRequest, GraphCommit, PatchApply, PatchApplyOutcome, PatchContent, PatchPreview, PatchSource, RepoClient } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
 import { failureError, type RunMutationWithOutcome } from "./useMutationRunner";
 import { withoutDialog } from "./workspaceDialog";
@@ -16,7 +16,10 @@ export interface PatchActions {
   savePatch(source: PatchSource, suggestedName: string): Promise<void>;
   /** Asks for a patch file and opens its preview (#658), which applies it with `applyPatch`. */
   applyPatchFile(): Promise<void>;
-  /** Applies the previewed patch `how` the preview's buttons say, closing the preview. */
+  /**
+   * Applies the previewed patch `how` the preview's buttons say, closing the preview. A hook that
+   * rejects a mail (#747) opens the hook dialog with its output instead of a toast.
+   */
   applyPatch(content: PatchContent, preview: PatchPreview, how: PatchApply): Promise<void>;
   /**
    * Applies the patch files at `paths` (dropped on the window, #649) in order, each its own undo
@@ -119,7 +122,20 @@ export function usePatchActions(
   const applyPatch = useCallback(
     async (content: PatchContent, preview: PatchPreview, how: PatchApply) => {
       setState((prev) => ({ ...prev, patchOutcome: null, dialog: withoutDialog(prev.dialog, "applyPatch") }));
-      const ok = await runMutationWithOutcome(() => client.applyPatch(repoPath, content, how));
+      let outcome: PatchApplyOutcome | null = null;
+      const ok = await runMutationWithOutcome(async () => {
+        outcome = await client.applyPatch(repoPath, content, how);
+      });
+      const settled = outcome as PatchApplyOutcome | null;
+      if (settled?.kind === "HookFailed") {
+        const { hook, output, subject } = settled;
+        setState((prev) => ({
+          ...prev,
+          error: `The ${hook} hook failed on “${subject}”. Nothing was applied.`,
+          hookFailure: { hook, output, retry: { kind: "applyPatch" }, dialogOpen: true },
+        }));
+        return;
+      }
       if (ok) setState((prev) => ({ ...prev, patchOutcome: { message: applyPatchMessage(preview, how), undoable: true } }));
     },
     [client, repoPath, runMutationWithOutcome, setState],
@@ -136,7 +152,10 @@ export function usePatchActions(
           setState((prev) => ({ ...prev, ...failureError(err) }));
           return;
         }
-        const ok = await runMutationWithOutcome(() => client.applyPatch(repoPath, content, "WorkTree"));
+        // Applied to the working tree only, so no hook runs.
+        const ok = await runMutationWithOutcome(async () => {
+          await client.applyPatch(repoPath, content, "WorkTree");
+        });
         if (!ok) return;
         const message = `Applied ${fileName(path)} to the working tree`;
         setState((prev) => ({ ...prev, patchOutcome: { message, undoable: true } }));

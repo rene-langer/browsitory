@@ -15,11 +15,6 @@ use tempfile::TempDir;
 
 use test_support::git;
 
-fn git_ok(dir: &Path, args: &[&str]) {
-    let output = git(dir, args);
-    assert!(output.status.success(), "git {args:?}: {output:?}");
-}
-
 fn reopen(repo: &Repository) -> Repository {
     Repository::open(repo.workdir().unwrap()).unwrap()
 }
@@ -67,7 +62,7 @@ fn fixture() -> (TempDir, Repository, Ids) {
     common::write_file(dir.path(), "f", "main\n");
     common::commit_all(&repo, "main");
     let main = repo.head().unwrap().target().unwrap();
-    git_ok(dir.path(), &["checkout", "-q", "topic"]);
+    common::git_ok(dir.path(), &["checkout", "-q", "topic"]);
     let repo = reopen(&repo);
     (dir, repo, Ids { main, topic, t1 })
 }
@@ -139,7 +134,7 @@ fn head_info_reports_a_rebase_with_the_apply_backend() {
 fn head_info_reports_git_am() {
     let (dir, repo, ids) = fixture();
     let patches = TempDir::new().unwrap();
-    git_ok(
+    common::git_ok(
         dir.path(),
         &[
             "format-patch",
@@ -150,7 +145,7 @@ fn head_info_reports_git_am() {
             patches.path().to_str().unwrap(),
         ],
     );
-    git_ok(dir.path(), &["checkout", "-q", "main"]);
+    common::git_ok(dir.path(), &["checkout", "-q", "main"]);
     let mut files: Vec<String> = std::fs::read_dir(patches.path())
         .unwrap()
         .map(|entry| entry.unwrap().path().to_str().unwrap().to_string())
@@ -230,7 +225,7 @@ fn abort_merge_refuses_a_terminal_rebase_and_changes_nothing() {
 
     // git refuses `git merge --abort` here too, and the rebase is still git's to abort.
     assert!(!git(dir.path(), &["merge", "--abort"]).status.success());
-    git_ok(dir.path(), &["rebase", "--abort"]);
+    common::git_ok(dir.path(), &["rebase", "--abort"]);
     let repo = reopen(&repo);
     assert_eq!(
         repo.head().unwrap().name().ok(),
@@ -285,7 +280,7 @@ fn start_rebase_refuses_a_resolved_merge_in_progress() {
         "the merge must conflict: {output:?}"
     );
     common::write_file(dir.path(), "f", "topic\n");
-    git_ok(dir.path(), &["add", "f"]);
+    common::git_ok(dir.path(), &["add", "f"]);
     let repo = reopen(&repo);
     assert_eq!(repo.state(), RepositoryState::Merge);
 
@@ -307,9 +302,9 @@ fn start_rebase_refuses_a_paused_cherry_pick_or_revert_naming_it() {
         let main = ids.main.to_string();
         let output = if noun == "revert" {
             // On main, f changed again after "main", so reverting "main" conflicts.
-            git_ok(dir.path(), &["checkout", "-q", "main"]);
+            common::git_ok(dir.path(), &["checkout", "-q", "main"]);
             common::write_file(dir.path(), "f", "later\n");
-            git_ok(dir.path(), &["commit", "-qam", "later"]);
+            common::git_ok(dir.path(), &["commit", "-qam", "later"]);
             git(dir.path(), &["revert", "--no-edit", &main])
         } else {
             // topic's f differs from main's.
@@ -364,23 +359,23 @@ fn rebase_merges_stop() -> (TempDir, Repository) {
     let path = dir.path();
     common::write_file(path, "f", "base\n");
     common::write_file(path, "g", "base\n");
-    git_ok(path, &["add", "."]);
-    git_ok(path, &["commit", "-qm", "base"]);
-    git_ok(path, &["checkout", "-qb", "side"]);
+    common::git_ok(path, &["add", "."]);
+    common::git_ok(path, &["commit", "-qm", "base"]);
+    common::git_ok(path, &["checkout", "-qb", "side"]);
     common::write_file(path, "g", "side\n");
-    git_ok(path, &["commit", "-qam", "S"]);
-    git_ok(path, &["checkout", "-q", "main"]);
-    git_ok(path, &["checkout", "-qb", "topic"]);
+    common::git_ok(path, &["commit", "-qam", "S"]);
+    common::git_ok(path, &["checkout", "-q", "main"]);
+    common::git_ok(path, &["checkout", "-qb", "topic"]);
     common::write_file(path, "g", "topic\n");
-    git_ok(path, &["commit", "-qam", "A"]);
+    common::git_ok(path, &["commit", "-qam", "A"]);
     assert!(!git(path, &["merge", "side"]).status.success());
     common::write_file(path, "g", "merged\n");
-    git_ok(path, &["add", "g"]);
-    git_ok(path, &["commit", "-qm", "M"]);
-    git_ok(path, &["checkout", "-q", "main"]);
+    common::git_ok(path, &["add", "g"]);
+    common::git_ok(path, &["commit", "-qm", "M"]);
+    common::git_ok(path, &["checkout", "-q", "main"]);
     common::write_file(path, "f", "m\n");
-    git_ok(path, &["commit", "-qam", "main change"]);
-    git_ok(path, &["checkout", "-q", "topic"]);
+    common::git_ok(path, &["commit", "-qam", "main change"]);
+    common::git_ok(path, &["checkout", "-q", "topic"]);
     let output = git(path, &["rebase", "--rebase-merges", "main"]);
     assert!(
         !output.status.success(),
@@ -398,10 +393,10 @@ fn rebase_merges_stop() -> (TempDir, Repository) {
 fn empty_pick_stop() -> (TempDir, Repository) {
     let (dir, repo, _ids) = fixture();
     let path = dir.path();
-    git_ok(path, &["checkout", "-q", "main"]);
-    git_ok(path, &["checkout", "-qb", "t2", "main~1"]);
+    common::git_ok(path, &["checkout", "-q", "main"]);
+    common::git_ok(path, &["checkout", "-qb", "t2", "main~1"]);
     common::write_file(path, "f", "main\n");
-    git_ok(
+    common::git_ok(
         path,
         &[
             "-c",
@@ -508,7 +503,7 @@ fn start_merge_refuses_during_a_terminal_rebases_merge_step() {
     let (dir, repo) = rebase_merges_stop();
     // Resolved, so nothing is conflicted any more.
     common::write_file(dir.path(), "g", "merged\n");
-    git_ok(dir.path(), &["add", "g"]);
+    common::git_ok(dir.path(), &["add", "g"]);
     let repo = reopen(&repo);
 
     let error =
@@ -550,7 +545,7 @@ fn committing_a_terminal_rebases_merge_step_makes_the_merge_like_git_commit() {
     let (twin_dir, twin) = rebase_merges_stop();
     for dir in [ours_dir.path(), twin_dir.path()] {
         common::write_file(dir, "g", "merged\n");
-        git_ok(dir, &["add", "g"]);
+        common::git_ok(dir, &["add", "g"]);
     }
     let message = std::fs::read_to_string(ours.path().join("MERGE_MSG")).unwrap();
     let mut ours = reopen(&ours);
@@ -562,7 +557,7 @@ fn committing_a_terminal_rebases_merge_step_makes_the_merge_like_git_commit() {
         HookOptions::default(),
     )
     .unwrap();
-    git_ok(twin_dir.path(), &["commit", "--no-edit"]);
+    common::git_ok(twin_dir.path(), &["commit", "--no-edit"]);
 
     let head = ours.head().unwrap().peel_to_commit().unwrap();
     assert_eq!(head.parent_count(), 2);
@@ -621,7 +616,7 @@ fn committing_a_terminal_rebases_empty_pick_keeps_its_author_like_git_commit() {
         HookOptions::default(),
     )
     .unwrap();
-    git_ok(twin_dir.path(), &["commit", "--allow-empty", "--no-edit"]);
+    common::git_ok(twin_dir.path(), &["commit", "--allow-empty", "--no-edit"]);
 
     let twin = reopen(&twin);
     let head_author = |repo: &Repository| author(&repo.head().unwrap().peel_to_commit().unwrap());
@@ -644,7 +639,7 @@ fn the_branch_being_rebased_cant_be_deleted_renamed_or_checked_out_in_a_new_work
     let (dir, repo, ids) = terminal_rebase();
     let elsewhere = TempDir::new().unwrap();
     let linked_path = elsewhere.path().join("linked");
-    git_ok(
+    common::git_ok(
         dir.path(),
         &[
             "worktree",
@@ -701,7 +696,7 @@ fn another_worktree_cant_switch_to_the_branch_being_rebased() {
     let (dir, repo, ids) = terminal_rebase();
     let elsewhere = TempDir::new().unwrap();
     let linked_path = elsewhere.path().join("linked");
-    git_ok(
+    common::git_ok(
         dir.path(),
         &[
             "worktree",
@@ -735,8 +730,8 @@ fn undo_doesnt_check_out_the_branch_being_rebased_in_another_worktree() {
     let (dir, repo, _ids) = fixture();
     let elsewhere = TempDir::new().unwrap();
     let linked_path = elsewhere.path().join("linked");
-    git_ok(dir.path(), &["checkout", "-q", "main"]);
-    git_ok(
+    common::git_ok(dir.path(), &["checkout", "-q", "main"]);
+    common::git_ok(
         dir.path(),
         &[
             "worktree",
@@ -748,10 +743,10 @@ fn undo_doesnt_check_out_the_branch_being_rebased_in_another_worktree() {
     );
     let linked = Repository::open(&linked_path).unwrap();
     let on_topic = git_core::undo::capture(&linked, git_core::undo::SnapshotScope::Full).unwrap();
-    git_ok(&linked_path, &["checkout", "-q", "-b", "spare"]);
+    common::git_ok(&linked_path, &["checkout", "-q", "-b", "spare"]);
     let linked = Repository::open(&linked_path).unwrap();
     let on_spare = git_core::undo::capture(&linked, git_core::undo::SnapshotScope::Full).unwrap();
-    git_ok(dir.path(), &["checkout", "-q", "topic"]);
+    common::git_ok(dir.path(), &["checkout", "-q", "topic"]);
     assert!(!git(dir.path(), &["rebase", "main"]).status.success());
     drop(repo);
 
@@ -775,14 +770,14 @@ fn committing_a_revert_during_a_terminal_rebase_clears_it_like_git_commit() {
         let output = git(path, &["rebase", "-f", "-x", "false", &ids.t1.to_string()]);
         assert!(!output.status.success(), "the exec must stop: {output:?}");
         common::write_file(path, "f", "changed\n");
-        git_ok(path, &["commit", "-qam", "changed"]);
+        common::git_ok(path, &["commit", "-qam", "changed"]);
         let output = git(path, &["revert", "--no-edit", &ids.t1.to_string()]);
         assert!(
             !output.status.success(),
             "the revert must conflict: {output:?}"
         );
         common::write_file(path, "f", "resolved\n");
-        git_ok(path, &["add", "f"]);
+        common::git_ok(path, &["add", "f"]);
         let repo = reopen(&repo);
         assert!(repo.path().join("REVERT_HEAD").exists());
         (dir, repo)
@@ -799,7 +794,7 @@ fn committing_a_revert_during_a_terminal_rebase_clears_it_like_git_commit() {
         HookOptions::default(),
     )
     .unwrap();
-    git_ok(twin_dir.path(), &["commit", "--no-edit"]);
+    common::git_ok(twin_dir.path(), &["commit", "--no-edit"]);
 
     assert!(!ours.path().join("REVERT_HEAD").exists());
     assert_eq!(state_files(&ours), state_files(&reopen(&twin)));
@@ -821,7 +816,7 @@ fn reflog_restore_refuses_the_branch_being_rebased() {
     let repo = reopen(&repo);
     let elsewhere = TempDir::new().unwrap();
     let linked_path = elsewhere.path().join("linked");
-    git_ok(
+    common::git_ok(
         dir.path(),
         &[
             "worktree",

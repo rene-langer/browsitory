@@ -6,6 +6,7 @@ import type {
   CommitChangeRequest,
   HunkOptions,
   PatchApply,
+  PatchApplyOutcome,
   PatchContent,
   PatchPreview,
   PatchSource,
@@ -165,6 +166,9 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
     listRecentRepos: () => call<string[]>("list_recent_repos"),
     removeRecentRepo: (path: string) => call<void>("remove_recent_repo", { path }),
     listMissingRecentRepos: () => call<string[]>("list_missing_recent_repos"),
+    listPinnedRepos: () => call<string[]>("list_pinned_repos"),
+    pinRecentRepo: (path: string) => call<void>("pin_recent_repo", { path }),
+    unpinRecentRepo: (path: string) => call<void>("unpin_recent_repo", { path }),
     getAppVersion: () => call<string>("get_app_version"),
     getLastSeenVersion: () => call<string | null>("get_last_seen_version"),
     setLastSeenVersion: (version: string) =>
@@ -233,7 +237,7 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
       call<void>("apply_commit_change", { repoPath, change }),
     getPatch: (repoPath: string, source: PatchSource) => call<PatchContent>("get_patch", { repoPath, source }),
     applyPatch: (repoPath: string, content: PatchContent, how: PatchApply) =>
-      call<void>("apply_patch", { repoPath, content, how }),
+      call<PatchApplyOutcome>("apply_patch", { repoPath, content, how }),
     previewPatch: (repoPath: string, content: PatchContent) =>
       call<PatchPreview>("preview_patch", { repoPath, content }),
     savePatchFile: (suggestedName: string, content: PatchContent) =>

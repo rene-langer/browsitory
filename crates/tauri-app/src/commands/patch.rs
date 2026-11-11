@@ -1,9 +1,9 @@
 //! #448: revert or apply a commit's file or hunk in the working tree, save a patch, apply a
 //! patch file.
-use super::{off_runtime, repo_worker, AppState};
+use super::{hook_event_channel, off_runtime, repo_worker, AppState};
 use repo_service::wire::{
-    CommitChangeRequestDto, ErrorDto, PatchApplyDto, PatchContentDto, PatchPreviewDto,
-    PatchSourceDto,
+    CommitChangeRequestDto, ErrorDto, PatchApplyDto, PatchApplyOutcomeDto, PatchContentDto,
+    PatchPreviewDto, PatchSourceDto,
 };
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, State};
@@ -35,17 +35,23 @@ pub async fn get_patch(
     Ok(PatchContentDto::from_bytes(&bytes))
 }
 
+/// As commits, `git am`'s hooks are reported as `hook-progress` events with
+/// `source: "Patch"` (#747).
 #[tauri::command]
 pub async fn apply_patch(
     repo_path: String,
     content: PatchContentDto,
     how: PatchApplyDto,
+    app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<(), ErrorDto> {
+) -> Result<PatchApplyOutcomeDto, ErrorDto> {
     let bytes = content.into_bytes()?;
-    repo_worker(&state, &repo_path)?
-        .call(move |w| w.apply_patch(bytes, how.into()))
-        .await
+    let events = hook_event_channel(app, &repo_path);
+    Ok(PatchApplyOutcomeDto::from(
+        repo_worker(&state, &repo_path)?
+            .call(move |w| w.apply_patch_reported(bytes, how.into(), events))
+            .await?,
+    ))
 }
 
 #[tauri::command]

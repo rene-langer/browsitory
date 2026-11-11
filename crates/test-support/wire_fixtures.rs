@@ -207,7 +207,8 @@ pub fn hook_sources() -> Vec<HookSource> {
         Commit,
         Checkout,
         Merge,
-        Pick
+        Pick,
+        Patch
     })
 }
 
@@ -993,6 +994,28 @@ pub fn commit_outcomes() -> Cases<git_core::commit::CommitOutcome> {
 }
 
 /// Each source with `Started`, and one `Finished`.
+/// A patch file applied, and one a hook rejected (#747).
+pub fn patch_apply_outcomes() -> Cases<git_core::patch::PatchApplyOutcome> {
+    use git_core::patch::PatchApplyOutcome;
+    let cases = vec![
+        case("Applied", PatchApplyOutcome::Applied),
+        case(
+            "HookFailed",
+            PatchApplyOutcome::HookFailed {
+                hook: "applypatch-msg".to_string(),
+                output: "no sign-off\n".to_string(),
+                subject: "Fix the parser".to_string(),
+            },
+        ),
+    ];
+    assert_every_variant!(
+        cases.iter().map(|(_, outcome)| outcome),
+        PatchApplyOutcome::Applied,
+        PatchApplyOutcome::HookFailed { .. },
+    );
+    cases
+}
+
 pub fn hook_events() -> Cases<HookEvent> {
     let mut cases: Cases<_> = hook_sources()
         .into_iter()

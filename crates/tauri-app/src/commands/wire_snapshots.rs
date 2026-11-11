@@ -172,6 +172,11 @@ fn snapshots() -> Vec<(String, String)> {
         fixtures::commit_outcomes(),
         CommitOutcomeDto::from,
     );
+    s.add(
+        "PatchApplyOutcome",
+        fixtures::patch_apply_outcomes(),
+        repo_service::wire::PatchApplyOutcomeDto::from,
+    );
     s.add("HookProgress", fixtures::hook_events(), |event| {
         hook_progress_dto(fixtures::HOOK_REPO_PATH, event)
     });

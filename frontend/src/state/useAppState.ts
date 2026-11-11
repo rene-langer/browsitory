@@ -844,7 +844,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       }
       if (retry.kind === "continueSequence") return (await continueSequence(true)) !== null;
       // A pick's `prepare-commit-msg` can't be skipped; the dialog offers no retry for it.
-      if (retry.kind === "pick") return false;
+      if (retry.kind === "pick" || retry.kind === "applyPatch") return false;
       const push = retry.push;
       if (push.operation === "PushBranch") await pushCurrentBranch(push.remoteName, true);
       else if (push.operation === "ForcePushBranch") await forcePushCurrentBranch(push.remoteName, true);

@@ -17,9 +17,12 @@
 //! made here instead, as `git apply` makes them: each link the patch changes or removes must
 //! point where the patch says it did, checked with the rest before anything is written.
 
+use std::ffi::OsStr;
 use std::path::{Component, Path};
 
 use thiserror::Error;
+
+use crate::hooks::{self, HookInvocation, HookLookup, HookOptions};
 
 use crate::diff::{DiffOptions, HunkOptions};
 use crate::line_patch::{self, Direction, FileRef, HunkRef, PatchLine};
@@ -79,6 +82,18 @@ pub enum PatchError {
     OperationInProgress,
     #[error("Set your name and email for commits before applying a patch as commits.")]
     MissingIdentity,
+    /// "Apply as commits" (#747): `applypatch-msg` or `pre-applypatch` rejected the mail
+    /// `subject` (or couldn't start), so the whole patch was taken back. `output` is what the
+    /// user sees.
+    #[error("The {hook} hook failed on \"{subject}\". Nothing was applied.")]
+    HookFailed {
+        hook: String,
+        output: String,
+        subject: String,
+    },
+    /// A hook was cancelled; the whole patch was taken back.
+    #[error("{0}")]
+    Hook(#[from] hooks::HookError),
     #[error("{0}")]
     Sign(#[from] crate::signing::SignError),
     #[error("{0}")]
@@ -135,6 +150,38 @@ pub enum PatchApply {
     /// Each mail committed with its author, date and message (like `git am`); the committer is
     /// the current user.
     Commits,
+}
+
+/// What applying a patch file produced, as it crosses IPC (#747): a hook rejecting a mail is an
+/// expected outcome the UI renders, like `commit::CommitOutcome::HookFailed`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PatchApplyOutcome {
+    Applied,
+    /// See [`PatchError::HookFailed`]: nothing was applied.
+    HookFailed {
+        hook: String,
+        output: String,
+        subject: String,
+    },
+}
+
+impl PatchApplyOutcome {
+    /// `Ok` for a patch applied or rejected by a hook; any other failure stays an error.
+    pub fn from_result<T>(result: Result<T, PatchError>) -> Result<Self, PatchError> {
+        match result {
+            Ok(_) => Ok(PatchApplyOutcome::Applied),
+            Err(PatchError::HookFailed {
+                hook,
+                output,
+                subject,
+            }) => Ok(PatchApplyOutcome::HookFailed {
+                hook,
+                output,
+                subject,
+            }),
+            Err(error) => Err(error),
+        }
+    }
 }
 
 /// What a patch file holds and whether it applies (#658), read without changing anything.
@@ -312,11 +359,30 @@ pub fn apply_patch(repo: &git2::Repository, content: &[u8]) -> Result<(), PatchE
 ///
 /// Every part goes through the same checks as [`apply_patch`] before anything is written.
 /// "As commits" also needs every part to be a mail, no staged changes, no operation in
-/// progress and a name and email to commit with; it runs no hooks.
+/// progress and a name and email to commit with. It runs `git am`'s hooks with default options
+/// (see [`apply_patch_with`]).
 pub fn apply_patch_as(
     repo: &git2::Repository,
     content: &[u8],
     how: PatchApply,
+) -> Result<Vec<String>, PatchError> {
+    apply_patch_with(repo, content, how, HookOptions::default())
+}
+
+/// [`apply_patch_as`] with hook options (#747). As commits it runs the hooks `git am` runs, for
+/// each mail in turn: `applypatch-msg <message file>` before the mail is applied (it may
+/// rewrite the message, or reject the mail), then, once the mail is in the index,
+/// `pre-applypatch` (it may reject the mail; files it stages are committed). Both are skipped by
+/// `hooks.no_verify`. A rejection is [`PatchError::HookFailed`], a cancel
+/// [`PatchError::Hook`], and either takes the whole patch back like a mail that doesn't apply.
+/// `post-applypatch` runs once per commit, oldest first, only after the whole series landed (so
+/// none runs for commits that are taken back; `git am` runs it right after each commit); its
+/// result is ignored. Applying without committing runs no hooks.
+pub fn apply_patch_with(
+    repo: &git2::Repository,
+    content: &[u8],
+    how: PatchApply,
+    mut hooks: HookOptions<'_>,
 ) -> Result<Vec<String>, PatchError> {
     let target = match how {
         PatchApply::WorkTree => ApplyTarget::WorkTree,
@@ -362,10 +428,12 @@ pub fn apply_patch_as(
     };
     let mut commits = Vec::new();
     for (at, part) in parts.iter().enumerate() {
-        let result = apply_one(repo, part, target).and_then(|()| match &mails {
-            Some(mails) => commit_mail(repo, &mails[at]).map(|id| commits.push(id)),
-            None => Ok(()),
-        });
+        let result = match &mails {
+            Some(mails) => {
+                apply_mail(repo, part, &mails[at], &mut hooks).map(|id| commits.push(id))
+            }
+            None => apply_one(repo, part, target),
+        };
         if let Err(error) = result {
             if let Some(head) = &head {
                 head.restore(repo);
@@ -377,7 +445,110 @@ pub fn apply_patch_as(
             return Err(error);
         }
     }
+    if mails.is_some() {
+        for _ in &commits {
+            run_post_applypatch(repo, &mut hooks);
+        }
+    }
     Ok(commits)
+}
+
+/// One mail applied as a commit, with `git am`'s gate hooks around it (see
+/// [`apply_patch_with`]): `applypatch-msg`, the mail into the working tree and the index,
+/// `pre-applypatch`, the commit.
+fn apply_mail(
+    repo: &git2::Repository,
+    part: &[u8],
+    mail: &crate::patch_mail::Mail,
+    options: &mut HookOptions<'_>,
+) -> Result<String, PatchError> {
+    let message = run_applypatch_msg(repo, mail, options)?;
+    apply_one(repo, part, ApplyTarget::WorkTreeAndIndex)?;
+    let reload_index =
+        !options.no_verify && gate(repo, "pre-applypatch", &[], &mail.subject, options)?;
+    commit_mail(repo, mail, &message, reload_index)
+}
+
+/// The environment `git am`'s hooks get, as the commit hooks do.
+fn hook_env(index_path: &Path) -> [(&'static str, &OsStr); 2] {
+    [
+        ("GIT_INDEX_FILE", index_path.as_os_str()),
+        ("GIT_EDITOR", OsStr::new(":")),
+    ]
+}
+
+/// Runs gate hook `name` for the mail `subject`; `Ok(true)` when it ran (and succeeded). A
+/// failing hook, or one that can't start, is `HookFailed`.
+fn gate(
+    repo: &git2::Repository,
+    name: &str,
+    args: &[&str],
+    subject: &str,
+    options: &mut HookOptions<'_>,
+) -> Result<bool, PatchError> {
+    let index_path = repo.path().join("index");
+    let env = hook_env(&index_path);
+    let invocation = HookInvocation {
+        name,
+        args,
+        stdin: None,
+        env: &env,
+    };
+    let failed = |output: String| PatchError::HookFailed {
+        hook: name.to_string(),
+        output,
+        subject: subject.to_string(),
+    };
+    let outcome = match hooks::run_reported(repo, &invocation, options) {
+        Ok(outcome) => outcome,
+        Err(error @ hooks::HookError::Spawn { .. }) => {
+            return Err(failed(hooks::spawn_failure_output(&error)))
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if let Some(output) = hooks::failure_output(&outcome, options.timeout) {
+        return Err(failed(output));
+    }
+    Ok(matches!(outcome, hooks::HookOutcome::Ran(_)))
+}
+
+/// `applypatch-msg <git dir>/COMMIT_EDITMSG` with `mail`'s message, when installed (and not
+/// skipped by `no_verify`): the message, as the hook left the file.
+fn run_applypatch_msg(
+    repo: &git2::Repository,
+    mail: &crate::patch_mail::Mail,
+    options: &mut HookOptions<'_>,
+) -> Result<String, PatchError> {
+    let message = mail.message();
+    if options.no_verify
+        || !matches!(
+            hooks::find_hook(repo, "applypatch-msg")?,
+            HookLookup::Found(_)
+        )
+    {
+        return Ok(message);
+    }
+    let path = repo.path().join("COMMIT_EDITMSG");
+    std::fs::write(&path, &message)?;
+    let path_arg = path.to_string_lossy().into_owned();
+    gate(repo, "applypatch-msg", &[&path_arg], &mail.subject, options)?;
+    Ok(String::from_utf8_lossy(&std::fs::read(&path)?).into_owned())
+}
+
+/// `post-applypatch`; its failure (and a cancel) is ignored, the reporter logs it.
+fn run_post_applypatch(repo: &git2::Repository, options: &mut HookOptions<'_>) {
+    let index_path = repo.path().join("index");
+    let env = hook_env(&index_path);
+    let _ = hooks::run_reported(
+        repo,
+        &HookInvocation {
+            name: "post-applypatch",
+            args: &[],
+            stdin: None,
+            env: &env,
+        },
+        options,
+    );
 }
 
 /// What `content` holds, mail by mail, and whether it applies to the working tree (#658),
@@ -491,13 +662,19 @@ fn commit_mails(
     Ok(mails)
 }
 
-/// Commits the index as `mail` on HEAD: the mail's author and date (now, when it has none) and
-/// message, the current user as committer.
+/// Commits the index as `mail` on HEAD: the mail's author and date (now, when it has none),
+/// `message`, the current user as committer. `reload_index`: a hook ran and may have staged
+/// files, so the index is read from disk first.
 fn commit_mail(
     repo: &git2::Repository,
     mail: &crate::patch_mail::Mail,
+    message: &str,
+    reload_index: bool,
 ) -> Result<String, PatchError> {
     let mut index = repo.index()?;
+    if reload_index {
+        index.read(true)?;
+    }
     let tree = repo.find_tree(index.write_tree()?)?;
     let parent = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
     let author = match mail.time {
@@ -518,7 +695,7 @@ fn commit_mail(
         }),
         &author,
         &committer,
-        &mail.message(),
+        message,
         &tree,
         &parents,
     )?;

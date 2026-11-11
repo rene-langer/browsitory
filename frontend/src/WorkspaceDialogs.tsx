@@ -148,8 +148,9 @@ export function WorkspaceDialogs({
               dismissError();
               void retryWithCurrentMessage(retry);
             }
-            // A pick's failure offers no retry (`retryLabel` is null), so this never runs for it.
-            else if (retry.kind !== "pick") {
+            // A pick's or patch's failure offers no retry (`retryLabel` is null), so this never
+            // runs for them.
+            else if (retry.kind !== "pick" && retry.kind !== "applyPatch") {
               void announce(retrySuccessLabel(retry), retryWithCurrentMessage, { undoable: true })(retry);
             }
           }}

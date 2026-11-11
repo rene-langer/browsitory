@@ -10,6 +10,7 @@ Browsitory runs your repository's client-side git hooks the way git does:
 | `pre-push` | push a branch, force push, push tags, **Push to…**, delete a remote branch or a tag on a remote |
 | `post-checkout` | switch branches or check out a commit |
 | `post-merge` | after a merge commit, a fast-forward or a squash, or a pull with a fast-forward |
+| `applypatch-msg`, `pre-applypatch`, `post-applypatch` | apply a patch file with **Apply as commits** (see [Patches](patches.md#apply-a-patch-file)) |
 
 Hooks come from `core.hooksPath` (a relative path is relative to the repository root) or
 `.git/hooks`. As in git, this includes a `core.hooksPath` set in the repository's own config;
@@ -27,7 +28,9 @@ hook's output; **Commit without hooks**, **Amend without hooks** or **Push witho
 retries with those hooks skipped (`--no-verify`). A failing `prepare-commit-msg` cannot be
 skipped, so its dialog only has **Close**. Close the dialog and **Show hook output…** in the
 error banner brings it back. Your commit message stays in the box until a commit succeeds.
-Failures of `post-commit`, `post-checkout` and `post-merge` are ignored, as in git.
+A failing `applypatch-msg` or `pre-applypatch` stops **Apply as commits** and takes the whole
+patch file back; its dialog only has **Close**. Failures of `post-commit`, `post-checkout`,
+`post-merge` and `post-applypatch` are ignored, as in git.
 
 To skip hooks up front, tick **Skip hooks** under the commit message (shown only when a
 `pre-commit` or `commit-msg` hook, or while a merge waits to be committed a `pre-merge-commit`
@@ -39,7 +42,7 @@ While a commit hook runs, or `post-merge` after you commit a merge that had no c
 `post-commit` or `post-merge` stops the hook and keeps the commit, and **Skip hooks** doesn't skip
 `post-merge` (as with `git merge --no-verify`). While `post-checkout` runs after you switch
 branches or check out a commit, `post-merge` after a fast-forward or squash merge, or a
-cherry-pick's or revert's hooks, "Running post-checkout hook…" shows in a strip at the top of the
+cherry-pick's or revert's hooks, or the hooks of **Apply as commits**, "Running post-checkout hook…" shows in a strip at the top of the
 repository, with **Cancel**. Cancelling stops the hook and keeps the switch,
 merge or commit. A running `pre-push` shows in the repository toolbar with the push's progress, whose Cancel
 stops it; so
