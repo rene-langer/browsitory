@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import type { Trailer } from "../ipc/RepoClient";
 import type { UseAppStateResult } from "./useAppState";
 import type { PushToast, ToastAction } from "./useToasts";
@@ -35,6 +35,10 @@ export function useCommitFlow(
         ? "No remote configured."
         : null;
 
+  // Read at click time. `busy` and `branch` are set in layout effects, which run before the
+  // commit that shows a toast (or the newly checked-out branch) ends: a passive effect runs
+  // later, and a click in between found the workspace still busy (the Push did nothing) or the
+  // old branch still current (#816, as #769 for Undo).
   const live = useRef({ mounted: true, busy: false, branch: null as string | null });
   useEffect(() => {
     const state = live.current;
@@ -43,10 +47,10 @@ export function useCommitFlow(
       state.mounted = false;
     };
   }, []);
-  useEffect(() => {
+  useLayoutEffect(() => {
     live.current.busy = pending || transfer !== null;
   }, [pending, transfer]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     live.current.branch = branch;
   }, [branch]);
   const idle = () => live.current.mounted && !live.current.busy;
