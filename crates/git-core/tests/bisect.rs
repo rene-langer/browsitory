@@ -25,11 +25,6 @@ struct Ids {
 // The git CLI, isolated from the developer's config and gpg agent (#282).
 use test_support::git;
 
-fn git_ok(dir: &Path, args: &[&str]) {
-    let output = git(dir, args);
-    assert!(output.status.success(), "git {args:?}: {output:?}");
-}
-
 /// main: base (f="base\n"), "main" (f="main\n"), then n1..n5 (each adds `n<i>.txt`). Branches
 /// `feature` and `clean` start at base. Then `git bisect start`, and when `detached`,
 /// `git bisect bad` + `git bisect good <base>`, which detaches HEAD in the middle of main.
@@ -59,10 +54,10 @@ fn bisect_repo(detached: bool) -> (TempDir, Repository, Ids) {
         common::write_file(dir.path(), &format!("n{i}.txt"), &format!("{i}\n"));
         common::commit_all(&repo, &format!("n{i}"));
     }
-    git_ok(dir.path(), &["bisect", "start"]);
+    common::git_ok(dir.path(), &["bisect", "start"]);
     if detached {
-        git_ok(dir.path(), &["bisect", "bad"]);
-        git_ok(dir.path(), &["bisect", "good", &base.to_string()]);
+        common::git_ok(dir.path(), &["bisect", "bad"]);
+        common::git_ok(dir.path(), &["bisect", "good", &base.to_string()]);
         assert!(repo.head_detached().unwrap());
     }
     // A fresh handle: the git CLI rewrote the index this one has loaded.
@@ -145,11 +140,11 @@ fn cherry_pick_and_revert_run_during_a_bisect() {
     // git's twin runs both and keeps the bisect too.
     let (twin_dir, twin, twin_ids) = bisect_repo(true);
     let twin_before = bisect_log(&twin);
-    git_ok(
+    common::git_ok(
         twin_dir.path(),
         &["cherry-pick", &twin_ids.clean.to_string()],
     );
-    git_ok(twin_dir.path(), &["revert", "--no-edit", "HEAD"]);
+    common::git_ok(twin_dir.path(), &["revert", "--no-edit", "HEAD"]);
     assert_eq!(bisect_log(&twin), twin_before);
 }
 
@@ -198,7 +193,7 @@ fn a_sequence_runs_and_aborts_during_a_bisect() {
         ],
     );
     assert!(!output.status.success());
-    git_ok(twin_dir.path(), &["cherry-pick", "--abort"]);
+    common::git_ok(twin_dir.path(), &["cherry-pick", "--abort"]);
     assert_eq!(head(&twin), twin_original);
     assert_eq!(bisect_log(&twin), twin_before);
 }
@@ -212,7 +207,7 @@ fn a_sequence_continues_after_a_step_committed_by_hand_during_a_bisect() {
     let state = sequence_paused_during_a_bisect(&repo, &ids);
     common::write_file(dir.path(), "f", "resolved\n");
     stage(&repo, "f");
-    git_ok(dir.path(), &["commit", "--no-edit"]);
+    common::git_ok(dir.path(), &["commit", "--no-edit"]);
     let repo = reopen(&repo);
     assert_eq!(repo.state(), RepositoryState::Bisect);
 
@@ -259,7 +254,7 @@ fn a_conflicting_pick_during_a_bisect_can_be_aborted() {
         &["cherry-pick", &twin_ids.feature.to_string()],
     );
     assert!(!output.status.success());
-    git_ok(twin_dir.path(), &["cherry-pick", "--abort"]);
+    common::git_ok(twin_dir.path(), &["cherry-pick", "--abort"]);
     assert_eq!(bisect_log(&twin), twin_before);
 }
 
@@ -322,8 +317,8 @@ fn reset_and_amend_run_during_a_bisect() {
     // git's twin keeps the bisect too.
     let (twin_dir, twin, twin_ids) = bisect_repo(true);
     let twin_before = bisect_log(&twin);
-    git_ok(twin_dir.path(), &["commit", "--amend", "-m", "amended"]);
-    git_ok(
+    common::git_ok(twin_dir.path(), &["commit", "--amend", "-m", "amended"]);
+    common::git_ok(
         twin_dir.path(),
         &["reset", "--hard", &twin_ids.base.to_string()],
     );
@@ -410,7 +405,7 @@ fn aborting_a_merge_keeps_a_terminal_bisect() {
     let (twin_dir, twin, _) = bisect_repo(true);
     let twin_before = bisect_log(&twin);
     assert!(!git(twin_dir.path(), &["merge", "feature"]).status.success());
-    git_ok(twin_dir.path(), &["merge", "--abort"]);
+    common::git_ok(twin_dir.path(), &["merge", "--abort"]);
     assert_eq!(bisect_log(&twin), twin_before);
 }
 
@@ -428,7 +423,7 @@ fn a_rebase_during_a_bisect_is_paused_not_interrupted() {
         assert!(matches!(result, RebaseStepResult::Conflicted { .. }));
         common::write_file(dir.path(), "f", "resolved\n");
         stage(&repo, "f");
-        git_ok(dir.path(), &["commit", "--no-edit"]);
+        common::git_ok(dir.path(), &["commit", "--no-edit"]);
         let repo = reopen(&repo);
         assert_eq!(repo.state(), RepositoryState::Bisect);
         (dir, repo, state, tip)
@@ -471,7 +466,7 @@ fn finishing_a_rebase_keeps_a_terminal_bisect() {
     // git's twin keeps the bisect too.
     let (twin_dir, twin, _) = bisect_repo(false);
     let twin_before = bisect_log(&twin);
-    git_ok(twin_dir.path(), &["rebase", "clean"]);
+    common::git_ok(twin_dir.path(), &["rebase", "clean"]);
     assert_eq!(bisect_log(&twin), twin_before);
 }
 
@@ -499,7 +494,7 @@ fn continuing_a_rebase_keeps_a_terminal_bisect() {
         .status
         .success());
     common::write_file(twin_dir.path(), "f", "resolved\n");
-    git_ok(twin_dir.path(), &["add", "f"]);
+    common::git_ok(twin_dir.path(), &["add", "f"]);
     let output = test_support::git_command(twin_dir.path())
         .args(["rebase", "--continue"])
         .env("GIT_EDITOR", "true")
@@ -530,7 +525,7 @@ fn aborting_a_rebase_keeps_a_terminal_bisect() {
     assert!(!git(twin_dir.path(), &["rebase", "feature"])
         .status
         .success());
-    git_ok(twin_dir.path(), &["rebase", "--abort"]);
+    common::git_ok(twin_dir.path(), &["rebase", "--abort"]);
     assert_eq!(bisect_log(&twin), twin_before);
 }
 
@@ -587,8 +582,8 @@ fn a_terminal_bisect_is_reported_with_its_start() {
     assert_eq!(info.bisect, started_from_main);
 
     // Ended with `git bisect reset`: none.
-    git_ok(dir.path(), &["merge", "--abort"]);
-    git_ok(dir.path(), &["bisect", "reset"]);
+    common::git_ok(dir.path(), &["merge", "--abort"]);
+    common::git_ok(dir.path(), &["bisect", "reset"]);
     assert_eq!(head_info(&reopen(&repo)).unwrap().bisect, None);
 }
 
@@ -601,7 +596,7 @@ fn a_bisect_started_from_a_detached_head_names_the_commit() {
     let id = head(&repo);
     repo.set_head_detached(repo.head().unwrap().target().unwrap())
         .unwrap();
-    git_ok(dir.path(), &["bisect", "start"]);
+    common::git_ok(dir.path(), &["bisect", "start"]);
 
     let info = git_core::repo::head_info(&repo).unwrap();
 

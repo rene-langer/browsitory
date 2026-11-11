@@ -1056,10 +1056,6 @@ fn clean_merge_fixture() -> (tempfile::TempDir, git2::Repository) {
     (dir, repo)
 }
 
-fn head_id(repo: &git2::Repository) -> git2::Oid {
-    repo.head().unwrap().peel_to_commit().unwrap().id()
-}
-
 fn merge_heads(repo: &mut git2::Repository) -> Vec<git2::Oid> {
     let mut heads = Vec::new();
     repo.mergehead_foreach(|oid| {
@@ -1073,7 +1069,7 @@ fn merge_heads(repo: &mut git2::Repository) -> Vec<git2::Oid> {
 /// The clean-merge hook set for the merge `repo` shows now.
 fn clean_set(repo: &mut git2::Repository) -> CommitHookSet {
     CommitHookSet::CleanMerge {
-        head: head_id(repo),
+        head: common::head_id(repo),
         merge_heads: merge_heads(repo),
     }
 }
@@ -1109,7 +1105,7 @@ fn a_clean_merge_commit_runs_git_merges_hooks() {
 #[test]
 fn a_failing_pre_merge_commit_keeps_the_merge_staged() {
     let (_dir, mut repo) = clean_merge_fixture();
-    let before = head_id(&repo);
+    let before = common::head_id(&repo);
     common::install_hook(
         &hooks_dir(&repo).unwrap(),
         "pre-merge-commit",
@@ -1128,7 +1124,7 @@ fn a_failing_pre_merge_commit_keeps_the_merge_staged() {
         other => panic!("expected HookFailed, got {other:?}"),
     }
     assert_eq!(repo.state(), git2::RepositoryState::Merge);
-    assert_eq!(head_id(&repo), before);
+    assert_eq!(common::head_id(&repo), before);
     assert!(repo.path().join("MERGE_HEAD").exists());
 }
 
@@ -1291,7 +1287,7 @@ fn a_merge_restarted_during_pre_merge_commit_is_not_committed() {
         return;
     }
     let (_dir, mut repo, side2) = clean_merge_with_side2();
-    let before = head_id(&repo);
+    let before = common::head_id(&repo);
     let set = clean_set(&mut repo);
     common::install_hook(
         &hooks_dir(&repo).unwrap(),
@@ -1309,7 +1305,7 @@ fn a_merge_restarted_during_pre_merge_commit_is_not_committed() {
         error.to_string(),
         "The merge changed while its hooks ran. Nothing was committed; check the merge and commit again."
     );
-    assert_eq!(head_id(&repo), before);
+    assert_eq!(common::head_id(&repo), before);
     assert_eq!(repo.state(), git2::RepositoryState::Merge);
     assert_eq!(merge_heads(&mut repo), vec![side2]);
 }
@@ -1319,7 +1315,7 @@ fn commit_with_runs_pre_commit_when_the_expected_merge_is_not_the_current_one() 
     let (_dir, mut repo, side2) = clean_merge_with_side2();
     common::log_hooks(&repo, &ALL_COMMIT_HOOKS);
     let set = CommitHookSet::CleanMerge {
-        head: head_id(&repo),
+        head: common::head_id(&repo),
         merge_heads: vec![side2],
     };
 
@@ -1469,7 +1465,7 @@ fn a_leftover_merge_state_that_cannot_be_cleared_refuses_the_commit() {
         return;
     };
     commit_with(&mut repo, "Merge feature", set, HookOptions::default()).unwrap();
-    let merge_commit = head_id(&repo);
+    let merge_commit = common::head_id(&repo);
     drop(read_only);
     stage(dir.path(), &repo, "after.txt", "after\n");
     let Some(read_only) = common::ReadOnlyGitDir::new(&repo) else {
@@ -1483,5 +1479,5 @@ fn a_leftover_merge_state_that_cannot_be_cleared_refuses_the_commit() {
         matches!(error, CommitError::LeftoverMergeState),
         "{error:?}"
     );
-    assert_eq!(head_id(&repo), merge_commit);
+    assert_eq!(common::head_id(&repo), merge_commit);
 }

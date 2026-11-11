@@ -906,9 +906,7 @@ pub fn mark_resolved_with_pauses(
             }
             after_check();
             // Through the clean filters, also for a link kept as a file, as git does.
-            let mut writer = repo.blob_writer(Some(Path::new(path)))?;
-            std::io::Write::write_all(&mut writer, &bytes)?;
-            let id = writer.commit()?;
+            let id = crate::undo::filtered_blob::<MergeError>(repo, path, &bytes)?;
             index.remove_path(Path::new(path))?;
             index.add(&staged_entry(path, id, mode, &stat))?;
         }
