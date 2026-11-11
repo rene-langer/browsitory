@@ -13,19 +13,10 @@ import styles from "./RebasePlanner.module.css";
 import { BlockedReason } from "./primitives/BlockedReason";
 import { describedBy } from "../lib/ariaDescribedBy";
 import { shortRefName } from "../lib/shortRefName";
-import { usePointerDrag, type PointerDragOver } from "../state/usePointerDrag";
+import { scrollParent, usePointerDrag, type PointerDragOver } from "../state/usePointerDrag";
 
 /** The drop-target scope of the planner's rows (#744). */
 const PLAN_ROW = "rebase-plan-row";
-
-/** The nearest ancestor of `element` that scrolls vertically, for the drag's edge scrolling. */
-function scrollParent(element: HTMLElement | null): HTMLElement | null {
-  for (let node = element?.parentElement ?? null; node !== null; node = node.parentElement) {
-    const { overflowY } = getComputedStyle(node);
-    if (overflowY === "auto" || overflowY === "scroll") return node;
-  }
-  return null;
-}
 
 /**
  * The planner's title: "Rebase onto <branch>" when `onto` is a branch's full ref name (a branch

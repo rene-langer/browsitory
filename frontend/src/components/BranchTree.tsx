@@ -18,14 +18,28 @@ import { InlineError } from "./primitives/InlineError";
 import { Toolbar } from "./primitives/Toolbar";
 import { AddRemoteForm } from "./AddRemoteForm";
 import {
+  branchDropActions,
+  DROP_NEEDS_BRANCH,
+  type BranchDrop,
+  type RebaseTarget,
+} from "../lib/actions/branchActions";
+import { scrollParent, usePointerDrag } from "../state/usePointerDrag";
+import { branchDropKey, parseBranchDropKey } from "../lib/branchDropKey";
+import {
   addMenuItems,
+  branchDropMenuItems,
   localBranchMenuItems,
   remoteBranchMenuItems,
   remoteFolderMenuItems,
   rowMenuKey,
   type RowContextMenu,
 } from "./branchMenuItems";
-import { BranchTreeView, type BranchRename } from "./BranchTreeView";
+import {
+  BRANCH_DROP_SCOPE,
+  BranchTreeView,
+  type BranchRename,
+  type BranchTreeDrag,
+} from "./BranchTreeView";
 import { NewBranchForm } from "./NewBranchForm";
 import { SetUpstreamDialog } from "./SetUpstreamDialog";
 import { useRemoteBranchCache } from "./useRemoteBranchCache";
@@ -180,6 +194,9 @@ export function BranchTree({
   const [upstreamDialogOpen, setUpstreamDialogOpen] = useState(false);
   const [clearUpstreamConfirm, setClearUpstreamConfirm] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  // What the status region reads out about a branch drag (#744).
+  const [announcement, setAnnouncement] = useState("");
+  const treeRef = useRef<HTMLDivElement>(null);
   const remoteCache = useRemoteBranchCache({ remotes, listRemoteBranches: onListRemoteBranches, refreshGeneration });
   const copyToClipboard = useCopyToClipboard();
   // The menus' availability and labels come from the shared action rules (#509), like the palette's.
@@ -241,6 +258,68 @@ export function BranchTree({
       setRowMenu(null);
     } else openRowMenu(menu);
   };
+
+  // A branch dragged onto a branch (#744): what the drop would do comes from the menus' rules.
+  const refName = (ref: RebaseTarget) => (ref.kind === "local" ? ref.name : `${ref.remoteName}/${ref.branchName}`);
+  const currentBranch = branches.find((branch) => branch.isCurrent)?.name ?? null;
+  const dropAt = (source: RebaseTarget, key: string | undefined): { target: RebaseTarget; drop: BranchDrop } | null => {
+    const target = key === undefined ? null : parseBranchDropKey(key);
+    return target === null ? null : { target, drop: branchDropActions(blockers, branches, source, target) };
+  };
+  const { drag, startDrag } = usePointerDrag<RebaseTarget>({
+    scope: BRANCH_DROP_SCOPE,
+    autoScroll: () => scrollParent(treeRef.current),
+    onStart: (source) => {
+      setRowMenu(null);
+      const name = refName(source);
+      if (currentBranch === null) setAnnouncement(`Dragging ${name}. ${DROP_NEEDS_BRANCH}`);
+      else if (source.kind === "local" && source.name === currentBranch) {
+        setAnnouncement(`Dragging ${name}. Drop it on a branch to rebase onto it or merge it; Escape cancels.`);
+      } else setAnnouncement(`Dragging ${name}. Drop it on ${currentBranch} to merge or rebase; Escape cancels.`);
+    },
+    onCancel: () => setAnnouncement("Drag cancelled."),
+    onDrop: (source, over) => {
+      const hit = dropAt(source, over?.key);
+      if (hit === null || hit.drop.kind === "none") {
+        setAnnouncement("Drag cancelled.");
+        return;
+      }
+      if (hit.drop.kind === "refused") {
+        setAnnouncement(`Can't drop here. ${hit.drop.reason}`);
+        return;
+      }
+      setAnnouncement(
+        `Dropped ${refName(source)} on ${refName(hit.target)}: ${hit.drop.items.map((item) => item.label).join(", or ")}`,
+      );
+      setRowMenu({
+        kind: "branch-drop",
+        source,
+        target: hit.target,
+        x: drag?.x ?? 0,
+        y: drag?.y ?? 0,
+        returnFocusTo: over?.element,
+      });
+    },
+  });
+  const hovered = drag === null ? null : dropAt(drag.payload, drag.over?.key);
+  const treeDrag: BranchTreeDrag | null =
+    drag === null
+      ? null
+      : {
+          sourceKey: branchDropKey(drag.payload),
+          overKey: drag.over?.key ?? null,
+          overState:
+            hovered === null || hovered.drop.kind === "none" ? null : hovered.drop.kind === "menu" ? "on" : "refused",
+        };
+  // The label that follows the pointer: what the drop offers, or why it can't run.
+  const dragLabel =
+    drag === null
+      ? null
+      : hovered === null || hovered.drop.kind === "none"
+        ? refName(drag.payload)
+        : hovered.drop.kind === "menu"
+          ? hovered.drop.items.map((item) => item.label).join(" / ")
+          : hovered.drop.reason;
 
   const renameProblem = renaming !== null ? branchNameProblem(renameValue.trim()) : null;
 
@@ -326,28 +405,40 @@ export function BranchTree({
           onClose={onCloseAddRemoteDraft}
         />
 
-        <BranchTreeView
-          branches={branches}
-          remotes={remotes}
-          blockers={blockers}
-          upstream={upstream}
-          graphBranchSelection={graphBranchSelection}
-          onSetGraphBranchSelection={onSetGraphBranchSelection}
-          onClearGraphBranchSelection={onClearGraphBranchSelection}
-          graphRemoteBranchSelection={graphRemoteBranchSelection}
-          onSetGraphRemoteBranchSelection={onSetGraphRemoteBranchSelection}
-          remoteBranchesInGraph={remoteBranchesInGraph}
-          branchColors={branchColors}
-          remoteCache={remoteCache}
-          remoteHeaders={remoteHeaders}
-          rename={rename}
-          rowMenu={rowMenu}
-          onOpenRowMenu={openRowMenu}
-          onToggleRowMenu={toggleRowMenu}
-          onSwitchBranch={onSwitchBranch}
-          onCheckoutRemoteBranch={(remoteName, branchName) => void checkoutRemoteBranch(remoteName, branchName)}
-          onGoToBranch={onGoToBranch}
-        />
+        <p role="status" className={styles.srOnly}>
+          {announcement}
+        </p>
+        <div ref={treeRef}>
+          <BranchTreeView
+            branches={branches}
+            remotes={remotes}
+            blockers={blockers}
+            upstream={upstream}
+            graphBranchSelection={graphBranchSelection}
+            onSetGraphBranchSelection={onSetGraphBranchSelection}
+            onClearGraphBranchSelection={onClearGraphBranchSelection}
+            graphRemoteBranchSelection={graphRemoteBranchSelection}
+            onSetGraphRemoteBranchSelection={onSetGraphRemoteBranchSelection}
+            remoteBranchesInGraph={remoteBranchesInGraph}
+            branchColors={branchColors}
+            remoteCache={remoteCache}
+            remoteHeaders={remoteHeaders}
+            rename={rename}
+            rowMenu={rowMenu}
+            onOpenRowMenu={openRowMenu}
+            onToggleRowMenu={toggleRowMenu}
+            onSwitchBranch={onSwitchBranch}
+            onCheckoutRemoteBranch={(remoteName, branchName) => void checkoutRemoteBranch(remoteName, branchName)}
+            onGoToBranch={onGoToBranch}
+            drag={treeDrag}
+            onStartDrag={startDrag}
+          />
+        </div>
+        {drag !== null && dragLabel !== null && (
+          <div className={styles.dragLabel} style={{ left: drag.x + 12, top: drag.y + 12 }} aria-hidden="true">
+            {dragLabel}
+          </div>
+        )}
 
         {checkoutError !== null && <InlineError message={checkoutError} onDismiss={() => setCheckoutError(null)} />}
         {remoteCache.error !== null && <InlineError message={remoteCache.error} onDismiss={remoteCache.clearError} />}
@@ -414,6 +505,19 @@ export function BranchTree({
                   onCopy: copyToClipboard,
                   onDelete: (name) => void handleDeleteClick(name),
                 })}
+              />
+            ) : null;
+          })()}
+        {rowMenu !== null &&
+          rowMenu.kind === "branch-drop" &&
+          (() => {
+            // Re-checked at render: a refresh or a busy operation may have changed the answer.
+            const drop = branchDropActions(blockers, branches, rowMenu.source, rowMenu.target);
+            return drop.kind === "menu" ? (
+              <ContextMenu
+                key={rowMenuKey(rowMenu)}
+                {...menuProps(rowMenu)}
+                items={branchDropMenuItems(drop, { onMergeBranch, onRebaseOnto })}
               />
             ) : null;
           })()}

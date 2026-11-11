@@ -1,19 +1,39 @@
-import { useState, type CSSProperties, type KeyboardEvent, type RefObject } from "react";
+import { useEffect, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
 import { ChevronRight, Cloud, MoreHorizontal } from "lucide-react";
 import type { BranchInfo, RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
-import { branchActions, remoteBranchActions } from "../lib/actions/branchActions";
+import { branchActions, remoteBranchActions, type RebaseTarget } from "../lib/actions/branchActions";
 import { buildBranchTree, type BranchTreeNode } from "../lib/branchTree";
 import { coversEveryBranch } from "../lib/graphSelection";
 import { type BranchLaneColors, NO_BRANCH_LANE_COLORS } from "../lib/laneColors";
 import { isMenuKey, menuAnchor, rectAnchor } from "../lib/menuKeys";
 import type { OperationBlockers } from "../lib/operationStatus";
 import { loadPersistedOpen, persistOpen } from "../lib/persistedOpenState";
+import { dropTargetProps } from "../state/usePointerDrag";
+import { branchDropKey } from "../lib/branchDropKey";
 import type { RowContextMenu } from "./branchMenuItems";
 import { ListRow } from "./primitives/ListRow";
 import type { RemoteBranchCache } from "./useRemoteBranchCache";
 import styles from "./BranchTree.module.css";
 
 const LOCAL_FOLDER_KEY = "branchtree.local";
+
+/** The drop-target scope of the Branches section's rows and folder headers (#744). */
+export const BRANCH_DROP_SCOPE = "branch";
+/** How long a drag hovers a collapsed folder before it opens (#744). */
+export const FOLDER_OPEN_DELAY_MS = 600;
+
+/** What the tree shows of a branch drag (#744): the dragged row, the hovered one and its verdict. */
+export type BranchTreeDrag = {
+  sourceKey: string | null;
+  overKey: string | null;
+  /** `on`: the drop would offer something; `refused`: it can't run (the label says why). */
+  overState: "on" | "refused" | null;
+};
+
+/** A folder header's drop key: the drag opens the folder after hovering it a moment. */
+function folderDropProps(folderPath: string) {
+  return dropTargetProps(BRANCH_DROP_SCOPE, `folder:${folderPath}`);
+}
 
 /** Ahead/behind badge text for a local branch, or `null` when in sync or unknown. */
 function aheadBehind(branch: BranchInfo): { ahead: number; behind: number; label: string } | null {
@@ -80,11 +100,47 @@ type RowContext = {
   onGoToBranch?: (kind: "local" | "remote", name: string) => void;
   onOpenRowMenu: (menu: RowContextMenu) => void;
   onToggleRowMenu: (menu: RowContextMenu) => void;
+  drag: BranchTreeDrag | null;
+  onStartDrag?: (event: PointerEvent, source: RebaseTarget) => void;
 };
 
-function SubfolderHeader({ name, open, onToggle }: { name: string; open: boolean; onToggle: () => void }) {
+/** A row's drop-target, drag styling and drag start (#744). */
+function rowDragProps(ctx: RowContext, ref: RebaseTarget, disabled: boolean) {
+  const key = branchDropKey(ref);
+  const hovered = ctx.drag !== null && ctx.drag.overKey === key && ctx.drag.sourceKey !== key;
+  return {
+    dropTarget: { scope: BRANCH_DROP_SCOPE, key, position: hovered ? (ctx.drag?.overState ?? undefined) : undefined },
+    dragging: ctx.drag?.sourceKey === key,
+    onPointerDown:
+      disabled || ctx.onStartDrag === undefined
+        ? undefined
+        : (event: PointerEvent<HTMLLIElement>) => {
+            // The row's own controls (swatch, "…") keep their press.
+            if ((event.target as Element).closest("button, input, textarea, select") !== null) return;
+            ctx.onStartDrag?.(event, ref);
+          },
+  };
+}
+
+function SubfolderHeader({
+  name,
+  folderPath,
+  open,
+  onToggle,
+}: {
+  name: string;
+  folderPath: string;
+  open: boolean;
+  onToggle: () => void;
+}) {
   return (
-    <button type="button" className={styles.folderHeader} aria-expanded={open} onClick={onToggle}>
+    <button
+      type="button"
+      className={styles.folderHeader}
+      aria-expanded={open}
+      onClick={onToggle}
+      {...folderDropProps(folderPath)}
+    >
       <ChevronRight
         size={14}
         aria-hidden="true"
@@ -102,7 +158,12 @@ function LocalBranchNodes({ nodes, ctx }: { nodes: BranchTreeNode<BranchInfo>[];
       const open = ctx.isSubfolderOpen(folderPath);
       return (
         <li key={node.path} className={styles.folder}>
-          <SubfolderHeader name={node.name} open={open} onToggle={() => ctx.onToggleSubfolder(folderPath)} />
+          <SubfolderHeader
+            name={node.name}
+            folderPath={folderPath}
+            open={open}
+            onToggle={() => ctx.onToggleSubfolder(folderPath)}
+          />
           {open && (
             <ul className={styles.folderBody}>
               <LocalBranchNodes nodes={node.children} ctx={ctx} />
@@ -123,6 +184,7 @@ function LocalBranchRow({ branch, label, ctx }: { branch: BranchInfo; label: str
   const counts = aheadBehind(branch);
   return (
     <ListRow
+      {...rowDragProps(ctx, { kind: "local", name: branch.name }, isRenaming)}
       className={ctx.selectedRow === rowKey ? `${styles.treeRow} ${styles.selectedRow}` : styles.treeRow}
       onClick={
         isRenaming
@@ -238,7 +300,12 @@ function RemoteBranchNodes({
       const open = ctx.isSubfolderOpen(folderPath);
       return (
         <li key={node.path} className={styles.folder}>
-          <SubfolderHeader name={node.name} open={open} onToggle={() => ctx.onToggleSubfolder(folderPath)} />
+          <SubfolderHeader
+            name={node.name}
+            folderPath={folderPath}
+            open={open}
+            onToggle={() => ctx.onToggleSubfolder(folderPath)}
+          />
           {open && (
             <ul className={styles.folderBody}>
               <RemoteBranchNodes remoteName={remoteName} nodes={node.children} ctx={ctx} />
@@ -269,6 +336,7 @@ function RemoteBranchRow({
   const remoteShown = (ctx.graphRemoteBranchSelection ?? ctx.remoteBranchesInGraph).includes(`${remoteName}/${branchName}`);
   return (
     <ListRow
+      {...rowDragProps(ctx, { kind: "remote", remoteName, branchName }, false)}
       className={ctx.selectedRow === rowKey ? `${styles.treeRow} ${styles.selectedRow}` : styles.treeRow}
       onClick={() => {
         ctx.onSelectRow(rowKey);
@@ -355,6 +423,8 @@ export function BranchTreeView({
   onSwitchBranch,
   onCheckoutRemoteBranch,
   onGoToBranch,
+  drag = null,
+  onStartDrag,
 }: {
   branches: BranchInfo[];
   remotes: RemoteInfo[];
@@ -379,6 +449,10 @@ export function BranchTreeView({
   onSwitchBranch: (name: string) => void;
   onCheckoutRemoteBranch: (remoteName: string, branchName: string) => void;
   onGoToBranch?: (kind: "local" | "remote", name: string) => void;
+  /** A branch drag in progress (#744), owned by `BranchTree`; `null` while there is none. */
+  drag?: BranchTreeDrag | null;
+  /** A press on a row that may become a drag of that branch. */
+  onStartDrag?: (event: PointerEvent, source: RebaseTarget) => void;
 }) {
   const [localOpen, setLocalOpen] = useState(() => loadPersistedOpen(LOCAL_FOLDER_KEY, true));
   // Selection for a single row in the local/remote branch tree — a plain visual highlight, not a
@@ -400,6 +474,20 @@ export function BranchTreeView({
     setOpenSubfolders((prev) => ({ ...prev, [folderPath]: next }));
     persistOpen(`branchtree.folder.${folderPath}`, next);
   }
+
+  // A drag hovering a collapsed folder opens it after a moment (#744), for this session only.
+  const hoveredFolder = drag?.overKey?.startsWith("folder:") === true ? drag.overKey.slice("folder:".length) : null;
+  useEffect(() => {
+    if (hoveredFolder === null) return;
+    const timer = setTimeout(() => {
+      if (hoveredFolder === "local") setLocalOpen(true);
+      else if (hoveredFolder.startsWith("remote-folder/")) remoteCache.openForDrag(hoveredFolder.slice("remote-folder/".length));
+      else setOpenSubfolders((prev) => ({ ...prev, [hoveredFolder]: true }));
+    }, FOLDER_OPEN_DELAY_MS);
+    return () => clearTimeout(timer);
+    // Only a newly hovered folder restarts the wait.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hoveredFolder]);
 
   const toggleGraphBranch = (name: string) => {
     const shown = graphBranchSelection ?? branches.map((b) => b.name);
@@ -440,6 +528,8 @@ export function BranchTreeView({
     onGoToBranch,
     onOpenRowMenu,
     onToggleRowMenu,
+    drag,
+    onStartDrag,
   };
 
   return (
@@ -449,6 +539,7 @@ export function BranchTreeView({
           type="button"
           className={styles.folderHeader}
           aria-expanded={localOpen}
+          {...folderDropProps("local")}
           onClick={() => {
             const next = !localOpen;
             setLocalOpen(next);
@@ -489,6 +580,7 @@ export function BranchTreeView({
                 type="button"
                 className={styles.folderHeader}
                 aria-expanded={open}
+                {...folderDropProps(`remote-folder/${remote.name}`)}
                 aria-keyshortcuts="Shift+F10 ContextMenu"
                 onClick={() => remoteCache.toggle(remote.name)}
                 onKeyDown={(event) => {
