@@ -1442,9 +1442,7 @@ fn worktree_blob(
     let id = if mode == crate::undo::MODE_LINK {
         repo.blob(&bytes)?
     } else {
-        let mut writer = repo.blob_writer(Some(std::path::Path::new(path)))?;
-        std::io::Write::write_all(&mut writer, &bytes)?;
-        writer.commit()?
+        crate::undo::filtered_blob::<StashError>(repo, path, &bytes)?
     };
     Ok(Some((id, mode)))
 }

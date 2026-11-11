@@ -66,6 +66,32 @@ pub fn commit_all(repo: &Repository, message: &str) {
     .expect("commit");
 }
 
+/// Runs `git <args>` in `dir` (hermetic, see `test_support::git`) and fails the test with the
+/// command's output when git exits unsuccessfully.
+#[allow(dead_code)]
+pub fn git_ok(dir: &Path, args: &[&str]) {
+    let output = test_support::git(dir, args);
+    assert!(output.status.success(), "git {args:?}: {output:?}");
+}
+
+/// The commit `HEAD` points at. Callers comparing with commit ids as text use `.to_string()`.
+#[allow(dead_code)]
+pub fn head_id(repo: &Repository) -> Oid {
+    repo.head().unwrap().peel_to_commit().unwrap().id()
+}
+
+/// The paths in the work tree's index file (`dir/.git/index`), sorted.
+#[allow(dead_code)]
+pub fn index_paths(dir: &Path) -> Vec<String> {
+    let index = git2::Index::open(&dir.join(".git/index")).unwrap();
+    let mut paths: Vec<String> = index
+        .iter()
+        .map(|entry| String::from_utf8_lossy(&entry.path).into_owned())
+        .collect();
+    paths.sort();
+    paths
+}
+
 #[allow(dead_code)]
 pub fn write_file(dir: &Path, relative_path: &str, contents: &str) {
     let full_path = dir.join(relative_path);
