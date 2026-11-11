@@ -10,15 +10,6 @@ use git_core::patch::{
     CommitHunk, PatchError,
 };
 
-fn head_id(repo: &Repository) -> String {
-    repo.head()
-        .unwrap()
-        .peel_to_commit()
-        .unwrap()
-        .id()
-        .to_string()
-}
-
 fn lines(range: std::ops::Range<u32>) -> String {
     range.map(|i| format!("line {i}\n")).collect()
 }
@@ -33,7 +24,7 @@ fn two_hunk_commit() -> (tempfile::TempDir, Repository, String) {
         .replace("line 25\n", "line twenty-five\n");
     write_file(dir.path(), "f.txt", &changed);
     commit_all(&repo, "change two lines");
-    let id = head_id(&repo);
+    let id = common::head_id(&repo).to_string();
     (dir, repo, id)
 }
 
@@ -63,7 +54,7 @@ fn reverting_a_commit_file_lands_as_unstaged_changes() {
     assert_eq!(read(dir.path(), "f.txt"), lines(0..30));
     assert!(status_is_unstaged_only(&repo));
     // Nothing was committed.
-    assert_eq!(head_id(&repo), id);
+    assert_eq!(common::head_id(&repo).to_string(), id);
 }
 
 #[test]
@@ -172,7 +163,7 @@ fn applying_a_commit_file_from_another_branch_cherry_picks_it_into_the_working_t
     .unwrap();
     let text = read(dir.path(), "f.txt");
     assert!(text.contains("line five\n") && text.contains("line 25\n") && text.ends_with("tail\n"));
-    assert_eq!(head_id(&repo), base.id().to_string());
+    assert_eq!(common::head_id(&repo).to_string(), base.id().to_string());
 }
 
 #[test]
@@ -182,7 +173,7 @@ fn reverting_an_added_file_removes_it_and_applying_a_deleted_file_removes_it() {
     commit_all(&repo, "base");
     write_file(dir.path(), "added.txt", "a\nb\n");
     commit_all(&repo, "add");
-    let id = head_id(&repo);
+    let id = common::head_id(&repo).to_string();
     apply_commit_change(
         &repo,
         &id,
@@ -258,7 +249,7 @@ fn a_commit_patch_round_trips_through_apply_patch() {
     apply_commit_change(&repo, &id, "f.txt", None, None, true, ApplyTarget::WorkTree).unwrap();
     apply_patch(&repo, &patch).unwrap();
     assert!(read(dir.path(), "f.txt").contains("line twenty-five\n"));
-    assert_eq!(head_id(&repo), id);
+    assert_eq!(common::head_id(&repo).to_string(), id);
 }
 
 #[test]
@@ -266,14 +257,14 @@ fn a_series_applies_in_order_or_not_at_all() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "f.txt", "one\n");
     commit_all(&repo, "base");
-    let base = head_id(&repo);
+    let base = common::head_id(&repo).to_string();
     write_file(dir.path(), "f.txt", "two\n");
     commit_all(&repo, "second");
-    let second = head_id(&repo);
+    let second = common::head_id(&repo).to_string();
     write_file(dir.path(), "f.txt", "three\n");
     write_file(dir.path(), "g.txt", "g\n");
     commit_all(&repo, "third");
-    let third = head_id(&repo);
+    let third = common::head_id(&repo).to_string();
     let series = commits_patch(&repo, &[second.clone(), third.clone()]).unwrap();
     let text = String::from_utf8(series.clone()).unwrap();
     assert!(
@@ -311,7 +302,7 @@ fn a_file_patch_holds_only_that_file() {
     write_file(dir.path(), "a.txt", "A\n");
     write_file(dir.path(), "b.txt", "B\n");
     commit_all(&repo, "both");
-    let id = head_id(&repo);
+    let id = common::head_id(&repo).to_string();
     let text = String::from_utf8(commit_file_patch(&repo, &id, "a.txt", None).unwrap()).unwrap();
     assert!(
         text.contains("a/a.txt") && !text.contains("b.txt"),
@@ -351,7 +342,7 @@ fn a_binary_file_round_trips() {
     commit_all(&repo, "base");
     std::fs::write(dir.path().join("bin.dat"), [0u8, 9, 9, 9, 0, 255, 7]).unwrap();
     commit_all(&repo, "change binary");
-    let id = head_id(&repo);
+    let id = common::head_id(&repo).to_string();
     apply_commit_change(
         &repo,
         &id,
@@ -412,7 +403,7 @@ fn a_patch_never_writes_through_a_linked_folder() {
     commit_all(&repo, "base");
     write_file(dir.path(), "d/f.txt", "two\n");
     commit_all(&repo, "change");
-    let id = head_id(&repo);
+    let id = common::head_id(&repo).to_string();
     let outside = tempfile::TempDir::new().unwrap();
     std::fs::write(outside.path().join("f.txt"), "two\n").unwrap();
     common::replace_with_link(dir.path(), "d", outside.path());
@@ -488,7 +479,7 @@ fn a_hunk_at_the_end_of_a_file_without_a_final_newline_reverts_exactly() {
     commit_all(&repo, "base");
     write_file(dir.path(), "f.txt", &format!("{}LAST", lines(0..10)));
     commit_all(&repo, "change the last line");
-    let id = head_id(&repo);
+    let id = common::head_id(&repo).to_string();
     let last = hunk(&repo, &id, "f.txt", 0, 3);
 
     apply_commit_change(
@@ -517,7 +508,7 @@ fn a_commit_message_line_starting_with_from_is_not_a_new_mail() {
         &repo,
         "change f\n\nFrom now on f says two.\nFrom 0123456789 too.\n",
     );
-    let id = head_id(&repo);
+    let id = common::head_id(&repo).to_string();
     let patch = commits_patch(&repo, std::slice::from_ref(&id)).unwrap();
     assert!(
         String::from_utf8_lossy(&patch).contains("\nFrom now on f says two.\n"),
@@ -572,14 +563,14 @@ fn a_failed_series_puts_back_every_file_an_earlier_mail_changed() {
     write_file(dir.path(), "f.txt", "one\n");
     write_file(dir.path(), "h.txt", "one\n");
     commit_all(&repo, "base");
-    let base = head_id(&repo);
+    let base = common::head_id(&repo).to_string();
     write_file(dir.path(), "f.txt", "two\n");
     write_file(dir.path(), "h.txt", "two\n");
     commit_all(&repo, "both files");
-    let first = head_id(&repo);
+    let first = common::head_id(&repo).to_string();
     write_file(dir.path(), "g.txt", "g\n");
     commit_all(&repo, "add g");
-    let second = head_id(&repo);
+    let second = common::head_id(&repo).to_string();
     let series = commits_patch(&repo, &[first, second]).unwrap();
     let base_commit = repo
         .find_commit(git2::Oid::from_str(&base).unwrap())
@@ -605,13 +596,13 @@ fn a_series_can_delete_a_file_and_add_it_back() {
     write_file(dir.path(), "f.txt", "one\n");
     write_file(dir.path(), "g.txt", "old\n");
     commit_all(&repo, "base");
-    let base = head_id(&repo);
+    let base = common::head_id(&repo).to_string();
     std::fs::remove_file(dir.path().join("g.txt")).unwrap();
     commit_all(&repo, "delete g");
-    let first = head_id(&repo);
+    let first = common::head_id(&repo).to_string();
     write_file(dir.path(), "g.txt", "new\n");
     commit_all(&repo, "add g again");
-    let second = head_id(&repo);
+    let second = common::head_id(&repo).to_string();
     let series = commits_patch(&repo, &[first, second]).unwrap();
     let base_commit = repo
         .find_commit(git2::Oid::from_str(&base).unwrap())
@@ -660,17 +651,17 @@ fn failing_series(
     let (dir, repo) = init_repo();
     base(dir.path());
     commit_all(&repo, "base");
-    let base_id = head_id(&repo);
+    let base_id = common::head_id(&repo).to_string();
     first(dir.path());
     // Deletions too.
     let mut index = repo.index().unwrap();
     index.update_all(["*"].iter(), None).unwrap();
     index.write().unwrap();
     commit_all(&repo, "first");
-    let first_id = head_id(&repo);
+    let first_id = common::head_id(&repo).to_string();
     write_file(dir.path(), "g.txt", "g\n");
     commit_all(&repo, "add g");
-    let second_id = head_id(&repo);
+    let second_id = common::head_id(&repo).to_string();
     let series = commits_patch(&repo, &[first_id, second_id]).unwrap();
     {
         let base_commit = repo
@@ -770,10 +761,10 @@ mod links {
         write_file(dir.path(), "h.txt", "h\n");
         link(dir.path(), "l", "f.txt");
         commit_all(&repo, "base");
-        let base = head_id(&repo);
+        let base = common::head_id(&repo).to_string();
         change(dir.path());
         commit_everything(&repo, "change");
-        let id = head_id(&repo);
+        let id = common::head_id(&repo).to_string();
         let patch = commits_patch(&repo, std::slice::from_ref(&id)).unwrap();
         reset_to(&repo, &base);
         (dir, repo, id, patch)

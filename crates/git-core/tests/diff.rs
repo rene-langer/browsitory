@@ -368,10 +368,6 @@ fn loaded(bytes: &[u8]) -> FileSide {
     }
 }
 
-fn head_id(repo: &git2::Repository) -> String {
-    repo.head().unwrap().target().unwrap().to_string()
-}
-
 fn sides(repo: &git2::Repository, source: DiffSource, path: &str) -> (FileSide, FileSide) {
     let sides = file_sides(repo, &source, path, MAX_PREVIEW_BYTES).unwrap();
     (sides.old, sides.new)
@@ -382,10 +378,10 @@ fn file_sides_for_unstaged_staged_and_commit_sources() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "img.png", "v1");
     commit_all(&repo, "v1");
-    let v1 = head_id(&repo);
+    let v1 = common::head_id(&repo).to_string();
     write_file(dir.path(), "img.png", "v2");
     commit_all(&repo, "v2");
-    let v2 = head_id(&repo);
+    let v2 = common::head_id(&repo).to_string();
     write_file(dir.path(), "img.png", "v3");
     git_core::stage::stage_file(&repo, "img.png").unwrap();
     write_file(dir.path(), "img.png", "v4");
@@ -417,10 +413,10 @@ fn file_sides_for_range_sources_including_the_working_tree() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "img.png", "v1");
     commit_all(&repo, "v1");
-    let v1 = head_id(&repo);
+    let v1 = common::head_id(&repo).to_string();
     write_file(dir.path(), "img.png", "v2");
     commit_all(&repo, "v2");
-    let v2 = head_id(&repo);
+    let v2 = common::head_id(&repo).to_string();
     write_file(dir.path(), "img.png", "work");
 
     let range = |to: Option<&str>| DiffSource::Range {
@@ -457,14 +453,14 @@ fn file_sides_reports_added_deleted_and_renamed_files() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "a.png", "same");
     commit_all(&repo, "a");
-    let before = head_id(&repo);
+    let before = common::head_id(&repo).to_string();
     std::fs::rename(dir.path().join("a.png"), dir.path().join("b.png")).unwrap();
     let mut index = repo.index().unwrap();
     index.remove_path(Path::new("a.png")).unwrap();
     index.add_path(Path::new("b.png")).unwrap();
     index.write().unwrap();
     commit_all(&repo, "rename");
-    let id = head_id(&repo);
+    let id = common::head_id(&repo).to_string();
     assert_eq!(
         sides(
             &repo,
@@ -514,7 +510,7 @@ fn file_sides_rejects_paths_outside_the_repository() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "a.png", "x");
     commit_all(&repo, "a");
-    let id = head_id(&repo);
+    let id = common::head_id(&repo).to_string();
     for bad in [
         "../secret.png",
         "/etc/passwd",

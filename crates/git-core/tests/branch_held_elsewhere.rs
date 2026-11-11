@@ -20,11 +20,6 @@ use git_core::worktree::create_worktree;
 use tempfile::TempDir;
 use test_support::git;
 
-fn git_ok(dir: &Path, args: &[&str]) {
-    let output = git(dir, args);
-    assert!(output.status.success(), "git {args:?}: {output:?}");
-}
-
 fn git_refuses(dir: &Path, args: &[&str]) -> String {
     let output = git(dir, args);
     assert!(
@@ -72,7 +67,7 @@ fn fixture_on(linked_branch: &str) -> Fixture {
         .unwrap();
     let elsewhere = TempDir::new().unwrap();
     let linked_path = elsewhere.path().join("linked");
-    git_ok(
+    common::git_ok(
         dir.path(),
         &[
             "worktree",
@@ -99,9 +94,9 @@ fn fixture() -> Fixture {
 
 /// Starts a bisect in `dir` from its current branch; HEAD ends up detached on "2" or "3".
 fn bisect(dir: &Path, good: Oid) {
-    git_ok(dir, &["bisect", "start"]);
-    git_ok(dir, &["bisect", "bad"]);
-    git_ok(dir, &["bisect", "good", &good.to_string()]);
+    common::git_ok(dir, &["bisect", "start"]);
+    common::git_ok(dir, &["bisect", "bad"]);
+    common::git_ok(dir, &["bisect", "good", &good.to_string()]);
 }
 
 /// The folder `message` names ("branch '<branch>' is <how> in another worktree at '<folder>'",
@@ -198,7 +193,7 @@ fn a_branch_bisected_in_another_worktree_is_refused_like_git() {
     assert!(target(&f.repo, "refs/heads/renamed").is_none());
 
     // Once the bisect is reset, the branch is checked out there again, as before.
-    git_ok(&f.linked_path, &["bisect", "reset"]);
+    common::git_ok(&f.linked_path, &["bisect", "reset"]);
     let message = delete_branch(&f.repo, "topic", true)
         .unwrap_err()
         .to_string();
@@ -213,7 +208,7 @@ fn a_branch_bisected_in_another_worktree_is_refused_like_git() {
 fn a_bisect_whose_worktree_switched_away_blocks_only_moving_and_deleting() {
     let f = fixture();
     bisect(&f.linked_path, f.commits[0]);
-    git_ok(&f.linked_path, &["switch", "-q", "other"]);
+    common::git_ok(&f.linked_path, &["switch", "-q", "other"]);
     let main = f.dir.path();
     let three = f.commits[2].to_string();
     assert!(git_refuses(main, &["branch", "-f", "topic", &three]).contains("used by worktree"));
@@ -230,8 +225,8 @@ fn a_bisect_whose_worktree_switched_away_blocks_only_moving_and_deleting() {
     assert_held_at(&refused, "topic", "being bisected", &f.linked_path);
 
     // The twins and Browsitory both allow the rest.
-    git_ok(main, &["branch", "-m", "topic", "renamed"]);
-    git_ok(main, &["branch", "-m", "renamed", "topic"]);
+    common::git_ok(main, &["branch", "-m", "topic", "renamed"]);
+    common::git_ok(main, &["branch", "-m", "renamed", "topic"]);
     rename_branch(&f.repo, "topic", "renamed").unwrap();
     rename_branch(&f.repo, "renamed", "topic").unwrap();
     let added = f.elsewhere.path().join("added");
@@ -244,7 +239,7 @@ fn a_bisect_whose_worktree_switched_away_blocks_only_moving_and_deleting() {
 fn a_branch_bisected_in_this_worktree_is_refused_like_git() {
     let f = fixture_on("other");
     let main = f.dir.path();
-    git_ok(main, &["switch", "-q", "topic"]);
+    common::git_ok(main, &["switch", "-q", "topic"]);
     bisect(main, f.commits[0]);
     let three = f.commits[2].to_string();
     assert!(git_refuses(main, &["branch", "-f", "topic", &three]).contains("used by worktree"));
@@ -303,7 +298,7 @@ fn a_bisect_over_a_non_utf8_subject_still_holds_its_branch() {
     let output = hash.wait_with_output().unwrap();
     assert!(output.status.success(), "{output:?}");
     let latin1 = String::from_utf8(output.stdout).unwrap().trim().to_string();
-    git_ok(&f.linked_path, &["reset", "-q", "--hard", &latin1]);
+    common::git_ok(&f.linked_path, &["reset", "-q", "--hard", &latin1]);
     bisect(&f.linked_path, f.commits[0]);
     let linked = Repository::open(&f.linked_path).unwrap();
     let log = std::fs::read(linked.path().join("BISECT_LOG")).unwrap();
@@ -318,20 +313,20 @@ fn a_bisect_over_a_non_utf8_subject_still_holds_its_branch() {
         .to_string();
 
     assert_held_at(&message, "topic", "being bisected", &f.linked_path);
-    git_ok(&f.linked_path, &["bisect", "reset"]);
+    common::git_ok(&f.linked_path, &["bisect", "reset"]);
 }
 
 /// A bisect started on a detached HEAD (`BISECT_START` holds a commit id) holds no branch.
 #[test]
 fn a_bisect_started_on_a_detached_head_holds_no_branch() {
     let f = fixture();
-    git_ok(&f.linked_path, &["checkout", "-q", "--detach"]);
+    common::git_ok(&f.linked_path, &["checkout", "-q", "--detach"]);
     bisect(&f.linked_path, f.commits[0]);
-    git_ok(
+    common::git_ok(
         f.dir.path(),
         &["branch", "-f", "topic", &f.commits[2].to_string()],
     );
-    git_ok(
+    common::git_ok(
         f.dir.path(),
         &["branch", "-f", "topic", &f.commits[3].to_string()],
     );
@@ -349,7 +344,7 @@ fn a_branch_a_rebase_elsewhere_will_update_is_refused_like_git() {
     let f = fixture_on("other");
     let main = f.dir.path();
     // linked: other ("4") on top of topic ("4"... moved back to "3" so it is inside the range).
-    git_ok(main, &["branch", "-f", "topic", &f.commits[2].to_string()]);
+    common::git_ok(main, &["branch", "-f", "topic", &f.commits[2].to_string()]);
     let stopped = git(
         &f.linked_path,
         &[
@@ -381,8 +376,8 @@ fn a_branch_a_rebase_elsewhere_will_update_is_refused_like_git() {
     assert_held_at(&refused, "topic", "being rebased", &f.linked_path);
     assert_eq!(target(&f.repo, "refs/heads/topic"), Some(f.commits[2]));
 
-    git_ok(main, &["branch", "-m", "topic", "renamed"]);
-    git_ok(main, &["branch", "-m", "renamed", "topic"]);
+    common::git_ok(main, &["branch", "-m", "topic", "renamed"]);
+    common::git_ok(main, &["branch", "-m", "renamed", "topic"]);
     rename_branch(&f.repo, "topic", "renamed").unwrap();
     rename_branch(&f.repo, "renamed", "topic").unwrap();
     switch_branch(&f.repo, "topic").unwrap();
@@ -488,7 +483,7 @@ fn a_worktree_whose_folder_is_gone_names_git_worktree_prune() {
         );
     });
 
-    git_ok(f.dir.path(), &["worktree", "prune"]);
+    common::git_ok(f.dir.path(), &["worktree", "prune"]);
     restore_reflog_entry(&f.repo, "refs/heads/topic", &three).unwrap();
     assert_eq!(target(&f.repo, "refs/heads/topic"), Some(f.commits[2]));
 }
@@ -508,12 +503,12 @@ fn recorded_folder(f: &Fixture) -> PathBuf {
 #[test]
 fn a_locked_worktree_whose_folder_is_gone_says_it_is_locked() {
     let f = fixture();
-    git_ok(
+    common::git_ok(
         f.dir.path(),
         &["worktree", "lock", f.linked_path.to_str().unwrap()],
     );
     std::fs::rename(&f.linked_path, f.elsewhere.path().join("unmounted")).unwrap();
-    git_ok(f.dir.path(), &["worktree", "prune"]);
+    common::git_ok(f.dir.path(), &["worktree", "prune"]);
     let three = f.commits[2].to_string();
     assert!(git_refuses(f.dir.path(), &["branch", "-f", "topic", &three]).contains("used by"));
     let recorded = recorded_folder(&f);
@@ -553,7 +548,7 @@ fn a_folder_that_lost_its_git_file_names_git_worktree_prune() {
          prune to remove that worktree, then try again."
     );
 
-    git_ok(f.dir.path(), &["worktree", "prune"]);
+    common::git_ok(f.dir.path(), &["worktree", "prune"]);
     restore_reflog_entry(&f.repo, "refs/heads/topic", &three).unwrap();
 }
 
@@ -563,7 +558,7 @@ fn a_folder_that_lost_its_git_file_names_git_worktree_prune() {
 fn a_worktree_without_its_gitdir_file_holds_nothing() {
     let f = fixture();
     std::fs::remove_file(f.repo.path().join("worktrees/linked/gitdir")).unwrap();
-    git_ok(
+    common::git_ok(
         f.dir.path(),
         &["branch", "-f", "topic", &f.commits[3].to_string()],
     );
@@ -610,7 +605,7 @@ fn switch_works_in_a_linked_worktree_of_a_bare_repository() {
     common::commit_all(&source_repo, "one");
     let parent = TempDir::new().unwrap();
     let bare = parent.path().join("bare.git");
-    git_ok(
+    common::git_ok(
         parent.path(),
         &[
             "clone",
@@ -620,15 +615,15 @@ fn switch_works_in_a_linked_worktree_of_a_bare_repository() {
             "bare.git",
         ],
     );
-    git_ok(&bare, &["branch", "spare", "main"]);
-    git_ok(&bare, &["branch", "taken", "main"]);
+    common::git_ok(&bare, &["branch", "spare", "main"]);
+    common::git_ok(&bare, &["branch", "taken", "main"]);
     let first = parent.path().join("first");
     let second = parent.path().join("second");
-    git_ok(
+    common::git_ok(
         &bare,
         &["worktree", "add", "-q", first.to_str().unwrap(), "main"],
     );
-    git_ok(
+    common::git_ok(
         &bare,
         &["worktree", "add", "-q", second.to_str().unwrap(), "taken"],
     );
@@ -647,19 +642,19 @@ fn switch_works_in_a_linked_worktree_of_a_bare_repository() {
 fn terminal_cherry_pick(f: &Fixture) -> Oid {
     let linked = f.linked_path.as_path();
     common::write_file(linked, "x.txt", "x");
-    git_ok(linked, &["add", "x.txt"]);
-    git_ok(linked, &["commit", "-qm", "x"]);
+    common::git_ok(linked, &["add", "x.txt"]);
+    common::git_ok(linked, &["commit", "-qm", "x"]);
     common::write_file(linked, "n.txt", "5");
-    git_ok(linked, &["commit", "-qam", "five"]);
+    common::git_ok(linked, &["commit", "-qam", "five"]);
     let picks =
         String::from_utf8(git(linked, &["rev-list", "--reverse", "-2", "HEAD"]).stdout).unwrap();
     let picks: Vec<&str> = picks.lines().collect();
-    git_ok(
+    common::git_ok(
         linked,
         &["reset", "-q", "--hard", &f.commits[3].to_string()],
     );
     common::write_file(linked, "n.txt", "conflict");
-    git_ok(linked, &["commit", "-qam", "conflict"]);
+    common::git_ok(linked, &["commit", "-qam", "conflict"]);
     let linked_repo = Repository::open(linked).unwrap();
     let start = linked_repo.head().unwrap().target().unwrap();
     let output = git(linked, &["cherry-pick", picks[0], picks[1]]);
@@ -714,10 +709,10 @@ fn a_branch_with_a_terminal_cherry_pick_in_another_worktree_is_refused_like_git(
     assert_eq!(target(&f.repo, "refs/heads/topic"), Some(tip));
 
     // Renaming is allowed, and the terminal sequence still aborts onto the renamed branch.
-    git_ok(main, &["branch", "-m", "topic", "renamed"]);
-    git_ok(main, &["branch", "-m", "renamed", "topic"]);
+    common::git_ok(main, &["branch", "-m", "topic", "renamed"]);
+    common::git_ok(main, &["branch", "-m", "renamed", "topic"]);
     rename_branch(&f.repo, "topic", "renamed").unwrap();
-    git_ok(&f.linked_path, &["cherry-pick", "--abort"]);
+    common::git_ok(&f.linked_path, &["cherry-pick", "--abort"]);
     let linked = Repository::open(&f.linked_path).unwrap();
     assert_eq!(
         linked.head().unwrap().name().ok(),
@@ -821,13 +816,13 @@ fn a_branch_a_browsitory_sequence_runs_on_in_another_worktree_is_refused() {
 
     // HEAD off the branch, on another one or detached: the sequence no longer touches it.
     std::fs::write(&file, encode(&valid)).unwrap();
-    git_ok(&f.linked_path, &["switch", "-q", "other"]);
+    common::git_ok(&f.linked_path, &["switch", "-q", "other"]);
     rename_branch(&f.repo, "topic", "renamed").unwrap();
     rename_branch(&f.repo, "renamed", "topic").unwrap();
     let message = delete_branch(&f.repo, "other", true)
         .unwrap_err()
         .to_string();
     assert_held_at(&message, "other", "checked out", &f.linked_path);
-    git_ok(&f.linked_path, &["switch", "-q", "--detach"]);
+    common::git_ok(&f.linked_path, &["switch", "-q", "--detach"]);
     rename_branch(&f.repo, "topic", "renamed").unwrap();
 }
