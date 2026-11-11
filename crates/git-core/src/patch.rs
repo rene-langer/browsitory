@@ -436,17 +436,16 @@ fn preview_files(diff: &git2::Diff) -> Result<Vec<PreviewFile>, PatchError> {
             git2::Delta::Copied => PreviewStatus::Copied,
             _ => PreviewStatus::Modified,
         };
-        let path = match status {
-            PreviewStatus::Deleted => path_of(delta.old_file()),
-            _ => path_of(delta.new_file()),
-        };
+        // libgit2 gives a deletion's new side the old path.
+        let path = path_of(delta.new_file());
         let old_path = match status {
             PreviewStatus::Renamed | PreviewStatus::Copied => Some(path_of(delta.old_file())),
             _ => None,
         };
         let binary = delta.flags().is_binary();
+        // A binary file's patch has no lines: 0 and 0.
         let (additions, deletions) = match git2::Patch::from_diff(diff, at)? {
-            Some(patch) if !binary => {
+            Some(patch) => {
                 let (_, additions, deletions) = patch.line_stats()?;
                 (additions, deletions)
             }
@@ -478,25 +477,13 @@ fn commit_mails(
     if repo.state() != git2::RepositoryState::Clean {
         return Err(PatchError::OperationInProgress);
     }
-    match repo.signature() {
-        Ok(_) => {}
-        Err(e) if e.code() == git2::ErrorCode::NotFound => return Err(PatchError::MissingIdentity),
-        Err(e) => return Err(e.into()),
-    }
+    repo.signature().map_err(|_| PatchError::MissingIdentity)?;
     let index = repo.index()?;
     if index.has_conflicts() {
         return Err(PatchError::OperationInProgress);
     }
-    let head_tree = match repo.head() {
-        Ok(head) => Some(head.peel_to_tree()?),
-        Err(e)
-            if e.code() == git2::ErrorCode::UnbornBranch
-                || e.code() == git2::ErrorCode::NotFound =>
-        {
-            None
-        }
-        Err(e) => return Err(e.into()),
-    };
+    // No HEAD commit (an unborn branch): everything in the index is staged.
+    let head_tree = repo.head().ok().map(|h| h.peel_to_tree()).transpose()?;
     let staged = repo.diff_tree_to_index(head_tree.as_ref(), Some(&index), None)?;
     if staged.deltas().len() > 0 {
         return Err(PatchError::StagedChanges);
@@ -835,10 +822,9 @@ fn prepare(
 /// the index with a bare "does not match index"; this names the file and what to do. An
 /// addition is left to the existing-file check above.
 fn refuse_unstaged(repo: &git2::Repository, diff: &git2::Diff) -> Result<(), PatchError> {
-    let unstaged = git2::Status::WT_MODIFIED
-        | git2::Status::WT_DELETED
-        | git2::Status::WT_TYPECHANGE
-        | git2::Status::WT_RENAMED;
+    // (`status_file` detects no renames; a link in place of a file is refused by `guard` first.)
+    let unstaged =
+        git2::Status::WT_MODIFIED | git2::Status::WT_DELETED | git2::Status::WT_TYPECHANGE;
     for delta in diff.deltas() {
         // A link's own check (`check_links`) compares it with the index.
         if delta.status() == git2::Delta::Added || is_link(&delta) {

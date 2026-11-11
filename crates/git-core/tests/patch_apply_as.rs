@@ -355,10 +355,11 @@ fn a_preview_names_deletions_renames_and_binary_files() {
     commit_all(&repo, "base");
     let patch = "diff --git a/gone.txt b/gone.txt\ndeleted file mode 100644\n--- a/gone.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-bye\n\
 diff --git a/old.txt b/new.txt\nsimilarity index 100%\nrename from old.txt\nrename to new.txt\n\
-diff --git a/logo.png b/logo.png\nnew file mode 100644\nindex 0000000..1111111\nBinary files /dev/null and b/logo.png differ\n";
+diff --git a/logo.png b/logo.png\nnew file mode 100644\nindex 0000000..1111111\nBinary files /dev/null and b/logo.png differ\n\
+diff --git a/old.txt b/copy.txt\nsimilarity index 100%\ncopy from old.txt\ncopy to copy.txt\n";
     let preview = preview_patch(&repo, patch.as_bytes()).unwrap();
     let files = &preview.parts[0].files;
-    assert_eq!(files.len(), 3, "{files:?}");
+    assert_eq!(files.len(), 4, "{files:?}");
     assert_eq!(files[0].path, "gone.txt");
     assert_eq!(
         (files[0].status, files[0].deletions, files[0].additions),
@@ -371,6 +372,9 @@ diff --git a/logo.png b/logo.png\nnew file mode 100644\nindex 0000000..1111111\n
     assert!(files[2].binary);
     assert!(!files[0].binary);
     assert_eq!(files[0].old_path, None);
+    assert_eq!(files[3].path, "copy.txt");
+    assert_eq!(files[3].status, PreviewStatus::Copied);
+    assert_eq!(files[3].old_path.as_deref(), Some("old.txt"));
 }
 
 #[test]
