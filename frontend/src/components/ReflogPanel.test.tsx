@@ -55,12 +55,15 @@ describe("ReflogPanel", () => {
     expect(within(selector).getByRole("option", { name: "HEAD" })).toBeInTheDocument();
     expect(within(selector).getByRole("option", { name: "refs/heads/main" })).toBeInTheDocument();
     expect(within(selector).queryByRole("option", { name: "refs/remotes/origin/main" })).not.toBeInTheDocument();
-    expect(screen.getByText(`Old ID: ${entry.oldId}`)).toBeInTheDocument();
-    expect(screen.getByText(`New ID: ${entry.newId}`)).toBeInTheDocument();
-    expect(screen.getByText("Ada Lovelace <ada@example.com>")).toBeInTheDocument();
-    expect(screen.getByText(new Date(entry.timestamp * 1000).toLocaleString())).toBeInTheDocument();
+    // #775: two lines, with the full IDs, email, time and summary in the tooltip.
     expect(screen.getByText(entry.message)).toBeInTheDocument();
-    expect(screen.getByText(entry.summary!)).toBeInTheDocument();
+    expect(screen.getByText(`1111111 → 2222222 · Ada Lovelace · ${formatShortDate(entry.timestamp)}`)).toBeInTheDocument();
+    const details = screen.getByTitle(/^Old ID: /).getAttribute("title")!;
+    expect(details).toContain(`Old ID: ${entry.oldId}`);
+    expect(details).toContain(`New ID: ${entry.newId}`);
+    expect(details).toContain("Ada Lovelace <ada@example.com>");
+    expect(details).toContain(new Date(entry.timestamp * 1000).toLocaleString());
+    expect(details).toContain(entry.summary!);
     expect(screen.getByRole("button", { name: `Restore refs/heads/main to ${entry.newId}` })).toBeEnabled();
   });
 
@@ -100,8 +103,8 @@ describe("ReflogPanel", () => {
     };
     renderPanel({ entries: [entry, olderEntry] });
 
-    expect(screen.getByText(`Old ID: ${entry.oldId}`)).toBeInTheDocument();
-    expect(screen.getByText(`Old ID: ${olderEntry.oldId}`)).toBeInTheDocument();
+    expect(screen.getByTitle(new RegExp(`^Old ID: ${entry.oldId}\n`))).toBeInTheDocument();
+    expect(screen.getByTitle(new RegExp(`^Old ID: ${olderEntry.oldId}\n`))).toBeInTheDocument();
     expect(screen.getByRole("button", { name: `Restore refs/heads/main to ${entry.newId}` })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: `Restore refs/heads/main to ${olderEntry.newId}` })).toBeInTheDocument();
   });
