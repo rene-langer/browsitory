@@ -92,6 +92,8 @@ export function SplitView({
   leftId,
   request,
   onLeftStateChange,
+  leftRegion,
+  rightRegion,
 }: {
   left: ReactNode;
   right: ReactNode;
@@ -108,6 +110,12 @@ export function SplitView({
   request?: SplitViewRequest;
   /** Reports how the left pane shows, for a toggle's `aria-expanded`. */
   onLeftStateChange?: (state: SplitViewLeftState) => void;
+  /**
+   * Names the left or right pane as a landmark region, which F6 moves between (`data-pane`,
+   * #670). A nested SplitView names its own panes instead of the right one that holds it.
+   */
+  leftRegion?: string;
+  rightRegion?: string;
 }) {
   const [width, setWidth] = useState(() =>
     loadWidth(storageKey, defaultWidth, minWidth, maxWidth, collapsible),
@@ -299,6 +307,9 @@ export function SplitView({
         id={leftId}
         className={overlay ? `${styles.left} ${styles.overlay}` : styles.left}
         hidden={shownWidth === 0}
+        role={leftRegion === undefined ? undefined : "region"}
+        aria-label={leftRegion}
+        data-pane={leftRegion === undefined ? undefined : ""}
         data-overlay={overlay ? "true" : undefined}
         tabIndex={overlay ? -1 : undefined}
         onKeyDown={
@@ -329,7 +340,12 @@ export function SplitView({
         onKeyDown={handleKeyDown}
         onDoubleClick={handleDoubleClick}
       />
-      <div className={styles.right}>
+      <div
+        className={styles.right}
+        role={rightRegion === undefined ? undefined : "region"}
+        aria-label={rightRegion}
+        data-pane={rightRegion === undefined ? undefined : ""}
+      >
         <div className={styles.rightInner}>
           <ReportRequiredWidth.Provider value={setNestedRequiredWidth}>{right}</ReportRequiredWidth.Provider>
         </div>

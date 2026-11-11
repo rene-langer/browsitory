@@ -1,7 +1,7 @@
 # Undo and redo
 
-**Ctrl/Cmd+Z** undoes the last Git operation in the active repository and
-**Ctrl/Cmd+Shift+Z** (or Ctrl+Y) redoes it. The undo/redo buttons next to Fetch/Pull/Push, the
+**Ctrl+Z** (**⌘Z** on macOS) undoes the last Git operation in the active repository and
+**Ctrl+Shift+Z** or Ctrl+Y (**⇧⌘Z**) redoes it. The undo/redo buttons next to Fetch/Pull/Push, the
 command palette, and the toast's Undo/Redo button do the same; each names the operation it
 will act on. Undo covers staging, commits, amend, reset, branch and tag changes, checkout,
 cherry-pick, revert, merge, rebase, pull, every discard and restoring a file from a commit
@@ -52,7 +52,7 @@ action waits about a second for it instead of 10; a quick run of actions waits o
 Undo, Redo, discards and **Reset hard** still wait about a second each before they say so.
 
 Typing in a text field keeps that field's own undo. In the VSCode extension, use the toolbar
-buttons or the command palette if Ctrl/Cmd+Z is taken by VSCode.
+buttons or the command palette if Ctrl+Z is taken by VSCode.
 
 Tools that show all refs (`git log --all`, gitk) show a "browsitory undo anchor" commit; it
 keeps undoable objects from being garbage-collected.

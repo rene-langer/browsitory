@@ -1,4 +1,5 @@
 import { USER_GUIDE_URL } from "./lib/links";
+import { ariaKeyShortcuts, shortcutLabel } from "./lib/keybindings";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Moon, Settings, Sparkles, Sun } from "lucide-react";
 import { CommandsButton } from "./components/CommandsButton";
@@ -294,8 +295,8 @@ function AppContent({
           disabled: !canReopenClosedRepo,
           title: canReopenClosedRepo ? undefined : "No closed tab to reopen",
           group: "reopen",
-          shortcut: "Ctrl/Cmd+Shift+T",
-          ariaKeyShortcuts: "Control+Shift+T Meta+Shift+T",
+          shortcut: shortcutLabel("reopen-closed-tab"),
+          ariaKeyShortcuts: ariaKeyShortcuts("reopen-closed-tab"),
         },
       ];
     },

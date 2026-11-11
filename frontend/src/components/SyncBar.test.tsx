@@ -126,7 +126,7 @@ describe("SyncBar", () => {
     const props = renderBar({ upstream: null });
     const push = screen.getByRole("button", { name: "Push" });
     expect(push).not.toHaveAttribute("aria-disabled");
-    expect(push).toHaveAttribute("title", "Push this branch to a remote and set its upstream…");
+    expect(push).toHaveAttribute("title", "Push this branch to a remote and set its upstream… (Ctrl+Shift+K)");
     fireEvent.click(push);
     expect(props.onPublish).toHaveBeenCalled();
     expect(props.onPush).not.toHaveBeenCalled();
@@ -134,13 +134,13 @@ describe("SyncBar", () => {
 
   it("names the push target, or says Push will ask when push.default does not choose one", () => {
     renderBar({ upstream: { ...upstream, localBranch: "fx", remoteBranch: "feature-x", pushBranch: "feature-x" } });
-    expect(screen.getByRole("button", { name: "Push" })).toHaveAttribute("title", "Push to origin/feature-x");
+    expect(screen.getByRole("button", { name: "Push" })).toHaveAttribute("title", "Push to origin/feature-x (Ctrl+Shift+K)");
   });
 
   it("asks where to push when push.default does not choose a target", () => {
     const props = renderBar({ upstream: { ...upstream, localBranch: "fx", remoteBranch: "feature-x", pushBranch: null } });
     const push = screen.getByRole("button", { name: "Push" });
-    expect(push).toHaveAttribute("title", "Choose where to push fx on origin…");
+    expect(push).toHaveAttribute("title", "Choose where to push fx on origin… (Ctrl+Shift+K)");
     fireEvent.click(push);
     expect(props.onPush).toHaveBeenCalledWith("origin");
   });

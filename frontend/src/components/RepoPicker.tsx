@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { RepoClient, Workspace } from "../ipc/RepoClient";
+import { shortcutLabel } from "../lib/keybindings";
 import { repoNameOf } from "../lib/repoName";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { InlineError } from "./primitives/InlineError";
@@ -8,11 +9,6 @@ import { Panel } from "./primitives/Panel";
 import { Toolbar } from "./primitives/Toolbar";
 import { WorkspaceEditor } from "./WorkspaceEditor";
 import styles from "./RepoPicker.module.css";
-
-function isApplePlatform(): boolean {
-  if (typeof navigator === "undefined") return false;
-  return /mac|iphone|ipad/i.test(`${navigator.platform ?? ""} ${navigator.userAgent ?? ""}`);
-}
 
 export function RepoPicker({
   client,
@@ -109,7 +105,7 @@ export function RepoPicker({
         </Toolbar>
         {error !== null && <InlineError message={error} onDismiss={() => setError(null)} />}
         <p className={styles.hint}>
-          Tip: press <kbd>{isApplePlatform() ? "⌘K" : "Ctrl+K"}</kbd> once a repository is open to search every command.
+          Tip: press <kbd>{shortcutLabel("palette")}</kbd> once a repository is open to search every command.
         </p>
         {recentRepos.length === 0 ? (
           <>

@@ -9,8 +9,8 @@ on the focused tab, or **Close tab** in the command palette. While a push,
 fetch, or similar operation is running in the active tab, that tab can't be
 closed until it finishes.
 To bring a closed tab back, use **Reopen closed tab** in the command palette or in a
-tab's menu (right-click), or press **Ctrl/Cmd+Shift+T** where the host doesn't use that
-key. It returns to its old place and workspace group and becomes the active tab;
+tab's menu (right-click), or press **Ctrl+Shift+T** (**⇧⌘T** on macOS) where the host doesn't
+use that key. It returns to its old place and workspace group and becomes the active tab;
 repeat it to go further back (up to ten tabs, until you quit). A repository that
 can no longer be opened is skipped, with a message saying why.
 A dot after a tab's name means its repository has uncommitted changes: staged,
@@ -37,6 +37,10 @@ When many tabs are open, the **⌄** button at the end of the tab bar (next to
 where it applies. Type to filter by name, folder name or path, move with
 **↑**/**↓**, and press **Enter** or click to switch; **Esc** closes the list. In
 the command palette, **Switch to tab…** does the same for the other open tabs.
+From anywhere in the window, **Ctrl+Tab** and **Ctrl+Shift+Tab** (**⌃⇥** and **⌃⇧⇥** on
+macOS) switch to the next and previous tab, and **Ctrl+1** … **Ctrl+8** (**⌘1** … **⌘8**) to
+the first eight tabs, **Ctrl+9** (**⌘9**) to the last, where the host doesn't take those keys
+(see [Keyboard shortcuts](command-palette.md#keyboard-shortcuts)).
 If two tabs show the same repository through different paths (for example a
 subfolder, a symbolic link, or the **Open** button of a worktree), they share its
 actions: one runs after the other, never both at once. They also share one
