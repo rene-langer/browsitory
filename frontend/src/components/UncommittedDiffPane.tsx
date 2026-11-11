@@ -4,7 +4,7 @@ import { UncommittedFileViewer } from "./UncommittedFileViewer";
 import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
 import { NO_HEAD_INFO, type DiscardRequest, type SelectionActionKind } from "./diffPaneShared";
 import { stashBlockReason } from "../lib/operationStatus";
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import type { GraphCommit, HeadInfo, HunkOptions, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
 import { useWorkspaceActions } from "../state/useWorkspaceActions";
@@ -31,6 +31,9 @@ import {
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { isMenuKey } from "../lib/menuKeys";
 import { stageAllPaths, stageModifiedPaths, untrackedPaths } from "../lib/stagePaths";
+import { useFileListLayout, writeFileListLayout } from "../lib/fileListLayoutPreference";
+import { buildFileTree, filesUnder, visibleFiles, type FileTreeNode } from "../lib/fileTree";
+import { ChevronDown, ChevronRight, Minus, Plus } from "lucide-react";
 
 // The change lists' keys (#449): arrows/j/k move (on to the other group past either end, #639),
 // Shift extends, Ctrl/Cmd+A selects the group, Escape keeps only the current file, `s` stages or
@@ -183,21 +186,74 @@ export function UncommittedDiffPane({
   // current file's diff is ever fetched (#639).
   const staleness = (key: string) => (diffVersion[key] ?? 0) + refreshGeneration;
 
-  const stagedEntries = status.filter((entry) => entry.staged);
-  // Conflicts head Changes, in a group of their own (#665).
-  const conflictEntries = status.filter((entry) => !entry.staged && entry.kind === "Conflicted");
-  const unstagedEntries = [...conflictEntries, ...status.filter((entry) => !entry.staged && entry.kind !== "Conflicted")];
-  const stagedCount = stagedEntries.length;
+  // The path filter and the flat | tree layout (#729). The filter is a case-insensitive part of
+  // the path; while it hides files, the bulk actions act on the shown ones only and say so.
+  const layout = useFileListLayout();
+  const [filterText, setFilterText] = useState("");
+  const needle = filterText.trim().toLowerCase();
+  const filtering = needle !== "";
+  const matchesFilter = (path: string) => !filtering || path.toLowerCase().includes(needle);
+  const shownStatus = filtering ? status.filter((entry) => matchesFilter(entry.path)) : status;
+  // Collapsed folders of the tree, by `${staged}:${folder path}`; kept while the pane is open.
+  const [collapsedFolders, setCollapsedFolders] = useState<ReadonlySet<string>>(new Set());
+  const isCollapsed = (staged: boolean) => (path: string) => collapsedFolders.has(`${staged}:${path}`);
+  const toggleFolder = (staged: boolean, path: string, collapse: boolean) => {
+    const key = `${staged}:${path}`;
+    if (collapsedFolders.has(key) === collapse) return;
+    setCollapsedFolders((prev) => {
+      const next = new Set(prev);
+      if (collapse) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  };
+  /** A new filter: the selection keeps only the files it still shows. */
+  const changeFilter = (value: string) => {
+    setFilterText(value);
+    const next = value.trim().toLowerCase();
+    if (next === "") return;
+    setSelection((prev) => {
+      const paths = new Set([...prev.paths].filter((path) => path.toLowerCase().includes(next)));
+      if (paths.size === prev.paths.size) return prev;
+      if (paths.size === 0) return EMPTY_FILE_SELECTION;
+      const anchor = prev.anchor !== null && paths.has(prev.anchor) ? prev.anchor : [...paths][0];
+      return { staged: prev.staged, paths, anchor };
+    });
+  };
+
+  // The files the filter shows, per group. Conflicts head Changes, in a group of their own
+  // (#665), and stay a flat list above the tree.
+  const shownStaged = shownStatus.filter((entry) => entry.staged);
+  const shownConflicts = shownStatus.filter((entry) => !entry.staged && entry.kind === "Conflicted");
+  const shownOtherChanges = shownStatus.filter((entry) => !entry.staged && entry.kind !== "Conflicted");
+  const shownUnstagedCount = shownConflicts.length + shownOtherChanges.length;
+  const treeLayout = layout === "tree";
+  const toTree = (entries: StatusEntry[]) => buildFileTree(entries.map((entry) => ({ path: entry.path, value: entry })));
+  const stagedTree = treeLayout ? toTree(shownStaged) : null;
+  const changesTree = treeLayout ? toTree(shownOtherChanges) : null;
+  // The rows on screen in list order (a collapsed folder's files left out): what the keys,
+  // the selection and the viewer's current file go through.
+  const stagedEntries = stagedTree === null ? shownStaged : visibleFiles(stagedTree, isCollapsed(true));
+  const conflictEntries = shownConflicts;
+  const unstagedEntries = [
+    ...conflictEntries,
+    ...(changesTree === null ? shownOtherChanges : visibleFiles(changesTree, isCollapsed(false))),
+  ];
+  const allStagedCount = status.filter((entry) => entry.staged).length;
+  const allUnstagedCount = status.length - allStagedCount;
+  const stagedCount = allStagedCount;
   const conflictCount = status.filter((entry) => entry.kind === "Conflicted").length;
   // Both bulk actions skip conflicts (see `lib/stagePaths`). "Stage modified" (#621) also skips
   // untracked files; it is shown only when the group holds both kinds, as otherwise it would do
-  // what "Stage all" does.
-  const allStagePaths = stageAllPaths(status);
-  const modifiedStagePaths = stageModifiedPaths(status);
+  // what "Stage all" does. Both act on the shown files.
+  const allStagePaths = stageAllPaths(shownStatus);
+  const modifiedStagePaths = stageModifiedPaths(shownStatus);
   // "Delete untracked…" (#622) deletes exactly these: tracked changes and conflicts stay.
   const deletableUntrackedPaths = untrackedPaths(status);
-  const untrackedCount = deletableUntrackedPaths.length;
-  const showStageModified = untrackedCount > 0 && unstagedEntries.some((entry) => entry.kind !== "New");
+  const shownUntrackedPaths = untrackedPaths(shownStatus);
+  const untrackedCount = shownUntrackedPaths.length;
+  const showStageModified =
+    untrackedCount > 0 && shownStatus.some((entry) => !entry.staged && entry.kind !== "New");
 
   // List order: Changes, then Staged.
   const allEntries = [...unstagedEntries, ...stagedEntries];
@@ -441,7 +497,23 @@ export function UncommittedDiffPane({
     }
   };
 
-  const discardableEntries = unstagedEntries.filter((entry) => entry.kind !== "Conflicted");
+  // Every unstaged file but conflicts, shown or not: the palette's "Discard all…" acts on all.
+  const discardableEntries = status.filter((entry) => !entry.staged && entry.kind !== "Conflicted");
+  const shownDiscardablePaths = shownOtherChanges.map((entry) => entry.path);
+  // "Discard all…" (or "Discard n shown…" under a filter, #729): its files that still exist.
+  const discardAllEntries =
+    discardRequest?.kind === "all"
+      ? discardRequest.paths === undefined
+        ? discardableEntries
+        : discardableEntries.filter((entry) => discardRequest.paths?.includes(entry.path))
+      : [];
+  // "Delete untracked…" (or "Delete n untracked shown…"): its files that still exist.
+  const deleteUntrackedPaths =
+    discardRequest?.kind === "untracked"
+      ? discardRequest.paths === undefined
+        ? deletableUntrackedPaths
+        : deletableUntrackedPaths.filter((path) => discardRequest.paths?.includes(path))
+      : [];
   // The selection's discard also follows the selection's own busy rule.
   const discardFilesBlockedReason = discardBlockedReason ?? selectionBusyReason;
 
@@ -460,9 +532,9 @@ export function UncommittedDiffPane({
   const requestTargetGone =
     discardRequest !== null &&
     (discardRequest.kind === "all"
-      ? discardableEntries.length === 0
+      ? discardAllEntries.length === 0
       : discardRequest.kind === "untracked"
-        ? deletableUntrackedPaths.length === 0
+        ? deleteUntrackedPaths.length === 0
         : discardRequest.kind === "files"
           ? discardFilesEntries.length === 0
           : discardFileEntry === undefined);
@@ -492,7 +564,7 @@ export function UncommittedDiffPane({
   };
 
   const handleUnstageAll = () => {
-    onUnstageAllFiles(stagedEntries.map((entry) => entry.path));
+    onUnstageAllFiles(shownStaged.map((entry) => entry.path));
   };
 
   const stashReason = stashBlockReason({ status, rebaseProgress, headInfo });
@@ -559,7 +631,7 @@ export function UncommittedDiffPane({
     </div>
   );
 
-  const renderRow = (entry: StatusEntry, index: number) => {
+  const renderRow = (entry: StatusEntry, index: number, name?: string) => {
     const key = entryKey(entry);
     const summary = isEntrySelected(entry) ? (entry.staged ? stagedSummary : unstagedSummary) : null;
     return (
@@ -580,8 +652,73 @@ export function UncommittedDiffPane({
         rowRef={(el) => {
           rowRefs.current[key] = el;
         }}
+        name={name}
       />
     );
+  };
+
+  // A folder of the tree layout (#729): a toggle (Left and Right collapse and expand it too), its
+  // file count and a Stage or Unstage for every file in it. Its rows indent under it.
+  const renderTreeNodes = (nodes: FileTreeNode<StatusEntry>[], staged: boolean): ReactNode[] => {
+    const entries = groupEntries(staged);
+    return nodes.map((node) => {
+      if (node.kind === "leaf") {
+        return renderRow(node.value, entries.indexOf(node.value), node.name);
+      }
+      const collapsed = isCollapsed(staged)(node.path);
+      const files = filesUnder(node);
+      const headingId = `${rowIdPrefix}-${staged ? "staged" : "unstaged"}-folder-${node.path}`;
+      const paths = staged ? files.map((entry) => entry.path) : stageAllPaths(files);
+      return (
+        <li key={`folder:${node.path}`} role="group" aria-labelledby={headingId} className={styles.folder}>
+          <div className={styles.folderRow}>
+            <button
+              id={headingId}
+              type="button"
+              className={styles.folderToggle}
+              aria-expanded={!collapsed}
+              title={node.path}
+              onClick={() => toggleFolder(staged, node.path, !collapsed)}
+              onKeyDown={(event) => {
+                if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+                event.preventDefault();
+                event.stopPropagation();
+                toggleFolder(staged, node.path, event.key === "ArrowLeft");
+              }}
+            >
+              {collapsed ? <ChevronRight size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+              {node.name}
+            </button>
+            <span className={styles.folderCount} aria-hidden="true">
+              {files.length}
+            </span>
+            <button
+              type="button"
+              className={styles.stageToggle}
+              aria-label={`${staged ? "Unstage" : "Stage"} folder ${node.path}`}
+              title={staged ? "Unstage the folder's files" : "Stage the folder's files (conflicts are left out)"}
+              disabled={paths.length === 0}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (staged) onUnstageAllFiles(paths);
+                else onStageAllFiles(paths);
+              }}
+            >
+              {staged ? <Minus size={14} aria-hidden="true" /> : <Plus size={14} aria-hidden="true" />}
+            </button>
+          </div>
+          {!collapsed && (
+            <ul role="none" className={styles.fileList}>
+              {renderTreeNodes(node.children, staged)}
+            </ul>
+          )}
+        </li>
+      );
+    });
+  };
+  const renderChanges = (staged: boolean, entries: StatusEntry[], offset: number) => {
+    const tree = staged ? stagedTree : changesTree;
+    return tree === null ? entries.map((entry, index) => renderRow(entry, offset + index)) : renderTreeNodes(tree, staged);
   };
 
   // j/k in the viewer: the next or previous file in list order, focus staying in the diff.
@@ -602,8 +739,10 @@ export function UncommittedDiffPane({
     return (
       <div className={styles.group}>
         {summary !== null && renderSelectionBar(summary)}
-        {entries.length === 0 ? (
-          <p className={styles.emptyGroup}>{staged ? "Nothing staged yet." : "No unstaged changes."}</p>
+        {(staged ? shownStaged.length : shownUnstagedCount) === 0 ? (
+          <p className={styles.emptyGroup}>
+            {filtering ? "No file matches the filter." : staged ? "Nothing staged yet." : "No unstaged changes."}
+          </p>
         ) : (
           <ul
             ref={(el) => {
@@ -625,22 +764,22 @@ export function UncommittedDiffPane({
                     Conflicts ({conflictEntries.length}) · resolve these first
                   </span>
                   <ul role="none" className={styles.fileList}>
-                    {conflictEntries.map(renderRow)}
+                    {conflictEntries.map((entry, index) => renderRow(entry, index))}
                   </ul>
                 </li>
-                {entries.length > conflictEntries.length && (
+                {shownOtherChanges.length > 0 && (
                   <li role="group" aria-labelledby={`${rowIdPrefix}-other-changes`} className={styles.subgroup}>
                     <span id={`${rowIdPrefix}-other-changes`} className={styles.subgroupHeading}>
                       Other changes
                     </span>
                     <ul role="none" className={styles.fileList}>
-                      {entries.slice(conflictEntries.length).map((entry, index) => renderRow(entry, conflictEntries.length + index))}
+                      {renderChanges(false, entries.slice(conflictEntries.length), conflictEntries.length)}
                     </ul>
                   </li>
                 )}
               </>
             ) : (
-              entries.map(renderRow)
+              renderChanges(staged, entries, 0)
             )}
           </ul>
         )}
@@ -653,7 +792,7 @@ export function UncommittedDiffPane({
       <span aria-live="polite" aria-atomic="true" className={styles.srOnly} data-testid="file-selection-announcement">
         {selectionAnnouncement}
       </span>
-      {allEntries.length === 0 && statusLoaded && (
+      {status.length === 0 && statusLoaded && (
         // Nothing to list (#665): say the tree is clean, or how a new repository gets its first
         // commit, instead of an empty pane.
         <div className={styles.emptyState} role="status">
@@ -670,10 +809,37 @@ export function UncommittedDiffPane({
           )}
         </div>
       )}
-      {allEntries.length > 0 && (
+      {status.length > 0 && (
         <div className={styles.fileGroups}>
+          <div className={styles.fileListBar}>
+            <input
+              type="search"
+              className={styles.fileFilter}
+              aria-label="Filter files"
+              placeholder="Filter files by path"
+              value={filterText}
+              onChange={(event) => changeFilter(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && filterText !== "") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  changeFilter("");
+                }
+              }}
+            />
+            <div className={styles.layoutToggle} role="group" aria-label="File list layout">
+              <button type="button" aria-pressed={!treeLayout} onClick={() => writeFileListLayout("flat")}>
+                Flat
+              </button>
+              <button type="button" aria-pressed={treeLayout} onClick={() => writeFileListLayout("tree")}>
+                Tree
+              </button>
+            </div>
+          </div>
           <div className={styles.groupHeading}>
-            <span>Changes ({unstagedEntries.length})</span>
+            <span>
+              {filtering ? `Changes (${shownUnstagedCount} of ${allUnstagedCount})` : `Changes (${allUnstagedCount})`}
+            </span>
             {conflictCount > 0 && (
               <span className={styles.conflictBadge}>
                 {conflictCount} conflict{conflictCount === 1 ? "" : "s"}
@@ -685,9 +851,15 @@ export function UncommittedDiffPane({
               type="button"
               onClick={handleStageAll}
               disabled={allStagePaths.length === 0}
-              title={showStageModified ? "Stage every change, untracked files included (conflicts are left out)" : undefined}
+              title={
+                filtering
+                  ? "Stage the changes the filter shows, untracked files included (conflicts are left out)"
+                  : showStageModified
+                    ? "Stage every change, untracked files included (conflicts are left out)"
+                    : undefined
+              }
             >
-              Stage all
+              {filtering ? `Stage ${allStagePaths.length} shown` : "Stage all"}
             </button>
             {showStageModified && (
               <button
@@ -700,36 +872,43 @@ export function UncommittedDiffPane({
                     : `Stage the changes to tracked files only; "Stage all" also stages the ${untrackedCount} untracked file${untrackedCount === 1 ? "" : "s"}`
                 }
               >
-                Stage modified
+                {filtering ? `Stage ${modifiedStagePaths.length} modified shown` : "Stage modified"}
               </button>
             )}
             <button
               type="button"
-              onClick={() => setDiscardRequest({ kind: "all" })}
-              disabled={discardableEntries.length === 0}
+              onClick={() =>
+                setDiscardRequest(filtering ? { kind: "all", paths: shownDiscardablePaths } : { kind: "all" })
+              }
+              disabled={(filtering ? shownDiscardablePaths.length : discardableEntries.length) === 0}
             >
-              Discard all…
+              {filtering ? `Discard ${shownDiscardablePaths.length} shown…` : "Discard all…"}
             </button>
             {untrackedCount > 0 && (
               <button
                 type="button"
-                onClick={() => setDiscardRequest({ kind: "untracked" })}
-                title={`Delete the ${untrackedCount} untracked ${untrackedCount === 1 ? "file" : "files"} and keep the changes to tracked files`}
+                onClick={() =>
+                  setDiscardRequest(filtering ? { kind: "untracked", paths: shownUntrackedPaths } : { kind: "untracked" })
+                }
+                title={`Delete the ${untrackedCount} untracked ${untrackedCount === 1 ? "file" : "files"}${filtering ? " the filter shows" : ""} and keep the changes to tracked files`}
               >
-                Delete untracked…
+                {filtering ? `Delete ${untrackedCount} untracked shown…` : "Delete untracked…"}
               </button>
             )}
           </div>
           {renderGroup(false)}
           <div className={styles.groupHeading}>
-            <span>Staged ({stagedEntries.length})</span>
-            <button type="button" onClick={handleUnstageAll} disabled={stagedEntries.length === 0}>
-              Unstage all
+            <span>
+              {filtering ? `Staged (${shownStaged.length} of ${allStagedCount})` : `Staged (${allStagedCount})`}
+            </span>
+            <button type="button" onClick={handleUnstageAll} disabled={shownStaged.length === 0}>
+              {filtering ? `Unstage ${shownStaged.length} shown` : "Unstage all"}
             </button>
             {patchActions !== undefined && (
               <button
                 type="button"
-                disabled={stagedEntries.length === 0}
+                disabled={allStagedCount === 0}
+                title={filtering ? "Saves every staged change, the ones the filter hides too" : undefined}
                 onClick={() => patchActions.onSavePatch({ kind: "Staged" }, "staged.patch")}
               >
                 Save as patch…
@@ -763,42 +942,64 @@ export function UncommittedDiffPane({
           />
         </>
       )}
-      {discardRequest?.kind === "all" && discardableEntries.length > 0 && (
+      {discardRequest?.kind === "all" && discardAllEntries.length > 0 && (
         <ConfirmDialog
-          ariaLabel="Discard all changes"
-          message={discardAllConfirmMessage(discardableEntries, true)}
-          confirmLabel="Discard all"
+          ariaLabel={discardRequest.paths === undefined ? "Discard all changes" : "Discard shown changes"}
+          message={
+            discardRequest.paths === undefined ? (
+              discardAllConfirmMessage(discardAllEntries, true)
+            ) : (
+              // Under a filter (#729) the dialog names exactly the files it discards.
+              <>
+                <p>{discardAllConfirmMessage(discardAllEntries)}</p>
+                <ul aria-label="Files to discard" className={styles.confirmFileList}>
+                  {discardAllEntries.map((entry) => (
+                    <li key={entry.path}>{entry.path}</li>
+                  ))}
+                </ul>
+              </>
+            )
+          }
+          confirmLabel={
+            discardRequest.paths === undefined
+              ? "Discard all"
+              : `Discard ${discardAllEntries.length} ${discardAllEntries.length === 1 ? "file" : "files"}`
+          }
           confirmReason={discardBlockedReason}
           onConfirm={() => {
             if (discardBlockedReason !== null) return;
             setDiscardRequest(null);
-            onDiscardAllUnstaged(discardableEntries.map((e) => e.path));
+            onDiscardAllUnstaged(discardAllEntries.map((e) => e.path));
           }}
           onCancel={() => setDiscardRequest(null)}
         />
       )}
-      {discardRequest?.kind === "untracked" && untrackedCount > 0 && (
+      {discardRequest?.kind === "untracked" && deleteUntrackedPaths.length > 0 && (
         <ConfirmDialog
           ariaLabel="Delete untracked files"
           message={
             <>
-              <p>{deleteUntrackedConfirmMessage(deletableUntrackedPaths)}</p>
-              <ul aria-label="Untracked files to delete">
-                {deletableUntrackedPaths.slice(0, DELETE_UNTRACKED_PREVIEW).map((path) => (
+              <p>{deleteUntrackedConfirmMessage(deleteUntrackedPaths)}</p>
+              {/* Under a filter (#729) every file it deletes is listed. */}
+              <ul aria-label="Untracked files to delete" className={styles.confirmFileList}>
+                {(discardRequest.paths === undefined
+                  ? deleteUntrackedPaths.slice(0, DELETE_UNTRACKED_PREVIEW)
+                  : deleteUntrackedPaths
+                ).map((path) => (
                   <li key={path}>{path}</li>
                 ))}
-                {untrackedCount > DELETE_UNTRACKED_PREVIEW && (
-                  <li>and {untrackedCount - DELETE_UNTRACKED_PREVIEW} more</li>
+                {discardRequest.paths === undefined && deleteUntrackedPaths.length > DELETE_UNTRACKED_PREVIEW && (
+                  <li>and {deleteUntrackedPaths.length - DELETE_UNTRACKED_PREVIEW} more</li>
                 )}
               </ul>
             </>
           }
-          confirmLabel={`Delete ${untrackedCount} ${untrackedCount === 1 ? "file" : "files"}`}
+          confirmLabel={`Delete ${deleteUntrackedPaths.length} ${deleteUntrackedPaths.length === 1 ? "file" : "files"}`}
           confirmReason={discardBlockedReason}
           onConfirm={() => {
             if (discardBlockedReason !== null) return;
             setDiscardRequest(null);
-            onDeleteUntracked(deletableUntrackedPaths);
+            onDeleteUntracked(deleteUntrackedPaths);
           }}
           onCancel={() => setDiscardRequest(null)}
         />
