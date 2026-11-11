@@ -21,7 +21,7 @@ pub enum StashError {
     StagedChanges,
     #[error("Applying this stash would overwrite local changes to the same files. Commit, stash or discard them first.")]
     WouldOverwrite,
-    #[error("The stash's staged changes conflict with the current files. Apply it without \"Restore staged changes\".")]
+    #[error("The stash's staged changes conflict with the current files. Use \"Apply as unstaged\" or \"Pop as unstaged\" instead.")]
     IndexConflict,
     #[error("No stash with id {0}.")]
     NotAStash(String),
@@ -41,11 +41,11 @@ pub enum StashError {
     FolderIsNowAFile { path: String, parent: String },
     #[error("This stash can't be applied here because a directory was replaced by a symbolic link; use git stash apply from a terminal.")]
     SymlinkReplacedByDirectory,
-    /// The stash holds an untracked file where the worktree now has a folder (the stash also
-    /// holds that folder's deletion). libgit2 checks untracked files out first, so it can't
-    /// apply it: it would leave the file as `d~Stashed changes` and report success (#186).
-    #[error("This stash can't be applied here because a file replaced a folder; use git stash apply from a terminal.")]
-    FileReplacedFolder,
+    /// The stash holds the untracked file `0` (it replaced a folder of that name), but the
+    /// stash's tracked changes, merged with HEAD, keep files in that folder or a file at that
+    /// path (HEAD changed them since). Nothing is written (#186, #229).
+    #[error("This stash can't be applied here: its untracked file '{0}' needs the folder '{0}' gone, but the folder still holds tracked files. Commit or move them first; the stash is kept.")]
+    FileReplacedFolder(String),
     /// The stash holds an untracked file where the worktree now has a folder the stash knows
     /// nothing about (it appeared after stashing).
     #[error("The untracked file '{0}' in this stash would overwrite the folder '{0}'; move the folder first.")]
@@ -202,6 +202,26 @@ pub struct StashEntry {
     pub index: usize,
     pub message: String,
     pub commit_id: String,
+    /// The branch the stash was made on, from git's message (`WIP on <branch>: …`, `On
+    /// <branch>: …`); `None` for a message in another form. A detached HEAD is `(no branch)`.
+    pub branch: Option<String>,
+    /// When the stash was made: its commit's time, seconds since the epoch.
+    pub timestamp: i64,
+    /// How many files it holds: tracked changes against the commit it was made on, plus
+    /// untracked files.
+    pub file_count: usize,
+    /// It recorded staged changes (its index commit differs from its base), so "Restore staged
+    /// changes" makes a difference when applying it (#657).
+    pub has_staged_changes: bool,
+}
+
+/// The branch in git's stash message: `WIP on <branch>: …` or `On <branch>: …`.
+fn stash_branch(message: &str) -> Option<String> {
+    let rest = message
+        .strip_prefix("WIP on ")
+        .or_else(|| message.strip_prefix("On "))?;
+    let (branch, _) = rest.split_once(": ")?;
+    (!branch.is_empty()).then(|| branch.to_string())
 }
 
 /// Saves a stash with `opts`.
@@ -512,6 +532,21 @@ fn save_path_limited_stash(
             Some(0o040000) | None => continue,
             Some(_) => "a file",
         };
+        // #207: a folder that replaced a file and holds only untracked files the stash takes
+        // goes whole into the stash (its files as untracked files, the file's deletion as a
+        // tracked change), so the revert deletes nothing the stash doesn't hold. Pop applies the
+        // deletion before the files (`apply_in_order`). git's `stash push -u -- d` records no
+        // deletion, and its pop fails. A symbolic link or submodule stays refused.
+        if opts.include_untracked && was == "a file" {
+            if let Some(files) = stashable_folder(repo, &workdir, path)? {
+                for file in files {
+                    if !untracked.contains(&file) {
+                        untracked.push(file);
+                    }
+                }
+                continue;
+            }
+        }
         return Err(StashError::DirectoryReplacedNonDirectory {
             path: path.clone(),
             was,
@@ -716,6 +751,50 @@ fn save_path_limited_stash(
         }
     }
     Ok(())
+}
+
+/// The files below the folder `path` when it holds nothing but untracked files and links a stash
+/// with untracked files takes (#207); `None` when it holds anything else: an ignored file or
+/// folder, a nested repository, a tracked or unreadable entry, or something that is neither a
+/// file, a link nor a folder. Then reverting `path` to HEAD's file would delete what the stash
+/// doesn't hold. git's `stash push -u -- d` saves the stash and then stops half-way there
+/// ("could not write file 'd'… directory not empty"), with the index changed.
+fn stashable_folder(
+    repo: &Repository,
+    workdir: &std::path::Path,
+    path: &str,
+) -> Result<Option<Vec<String>>, StashError> {
+    let mut files = Vec::new();
+    let mut folders = vec![path.to_string()];
+    while let Some(folder) = folders.pop() {
+        let mut names = Vec::new();
+        for entry in std::fs::read_dir(workdir.join(&folder))? {
+            let entry = entry?;
+            let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+                return Ok(None);
+            };
+            names.push((name, entry.file_type()?));
+        }
+        names.sort_by(|a, b| a.0.cmp(&b.0));
+        for (name, kind) in names {
+            let rel = format!("{folder}/{name}");
+            if name == ".git" || repo.is_path_ignored(&rel)? {
+                return Ok(None);
+            }
+            if kind.is_dir() {
+                folders.push(rel);
+            } else if kind.is_file() || kind.is_symlink() {
+                if repo.status_file(std::path::Path::new(&rel))? != git2::Status::WT_NEW {
+                    return Ok(None);
+                }
+                files.push(rel);
+            } else {
+                return Ok(None);
+            }
+        }
+    }
+    files.sort();
+    Ok(Some(files))
 }
 
 /// `paths` plus the other side of every staged rename one of them names (or a folder of them
@@ -1382,14 +1461,43 @@ pub fn list_stashes(repo: &mut Repository) -> Result<Vec<StashEntry>, StashError
     let mut entries = Vec::new();
     // `stash_foreach` requires `&mut self` despite being read-only — a libgit2 API constraint,
     // not a design choice (see the design spec's "&mut Repository wrinkle" note).
+    let mut listed = Vec::new();
     repo.stash_foreach(|index, message, oid| {
-        entries.push(StashEntry {
-            index,
-            message: message.to_string(),
-            commit_id: oid.to_string(),
-        });
+        listed.push((index, message.to_string(), *oid));
         true
     })?;
+    for (index, message, id) in listed {
+        let commit = repo.find_commit(id)?;
+        let tree = commit.tree()?;
+        let base = commit.parent(0).ok().map(|base| base.tree()).transpose()?;
+        let has_staged_changes = match (&base, commit.parent(1)) {
+            (Some(base), Ok(index_commit)) => index_commit.tree_id() != base.id(),
+            _ => false,
+        };
+        let mut file_count = repo
+            .diff_tree_to_tree(base.as_ref(), Some(&tree), None)?
+            .deltas()
+            .len();
+        if let Ok(untracked) = commit.parent(2) {
+            untracked
+                .tree()?
+                .walk(git2::TreeWalkMode::PreOrder, |_, entry| {
+                    if entry.kind() != Some(git2::ObjectType::Tree) {
+                        file_count += 1;
+                    }
+                    git2::TreeWalkResult::Ok
+                })?;
+        }
+        entries.push(StashEntry {
+            index,
+            branch: stash_branch(&message),
+            message,
+            commit_id: id.to_string(),
+            timestamp: commit.time().seconds(),
+            file_count,
+            has_staged_changes,
+        });
+    }
     Ok(entries)
 }
 
@@ -1443,8 +1551,14 @@ pub fn apply_stash(
             .collect();
         crate::worktree_guard::refuse_linked_folders::<StashError>(repo, &incoming)?;
     }
-    refuse_untracked_file_over_folder(repo, index)?;
-    refuse_untracked_below_tracked_file(repo, index)?;
+    // A stash whose untracked files need a tracked path out of the way first (a file that
+    // replaced a folder, or files in a folder that replaced a file, #229) is applied in git's
+    // order by Browsitory itself; libgit2 checks the untracked files out first and can't.
+    let swapped_folder = untracked_file_over_folder(repo, index)?;
+    let below_file = untracked_below_tracked_file(repo, index)?;
+    if swapped_folder || below_file.is_some() {
+        return apply_in_order(repo, index, restore_index, below_file);
+    }
     if let Some((merged, untracked)) = file_folder_merge(repo, index, restore_index)? {
         return apply_with_file_folder_conflict(repo, merged, untracked);
     }
@@ -1614,26 +1728,26 @@ fn is_checkout_conflict(error: &git2::Error) -> bool {
     error.code() == ErrorCode::Conflict && error.class() == ErrorClass::Checkout
 }
 
-/// Refuses when `stash@{index}` holds an untracked file where the worktree has a real folder;
-/// nothing is written. `FileReplacedFolder` when the stash itself recorded the swap (its base has
-/// the folder, its worktree tree doesn't): libgit2 checks the untracked files out before the
-/// tracked changes (git does it the other way round), so it can't put the file back, and it would
-/// report success with the file left as `<name>~Stashed changes` (#186); `git stash apply` can.
-/// Otherwise the folder is new since the stash: `UntrackedOverFolder`.
-fn refuse_untracked_file_over_folder(repo: &Repository, index: usize) -> Result<(), StashError> {
+/// Whether `stash@{index}` holds an untracked file where the worktree has a real folder and the
+/// stash itself recorded that swap (its base has the folder, its worktree tree doesn't): then
+/// `true`, and [`apply_in_order`] applies it. libgit2 checks the untracked files out before the
+/// tracked changes (git does it the other way round), so it can't put the file back, and it
+/// would report success with the file left as `<name>~Stashed changes` (#186). A folder that is
+/// new since the stash is refused (`UntrackedOverFolder`); nothing is written.
+fn untracked_file_over_folder(repo: &Repository, index: usize) -> Result<bool, StashError> {
     let Some(workdir) = repo.workdir() else {
-        return Ok(());
+        return Ok(false);
     };
     let Some(id) = repo
         .reflog("refs/stash")
         .ok()
         .and_then(|reflog| reflog.get(index).map(|entry| entry.id_new()))
     else {
-        return Ok(());
+        return Ok(false);
     };
     let stash = repo.find_commit(id)?;
     let Ok(untracked) = stash.parent(2) else {
-        return Ok(());
+        return Ok(false);
     };
     let mut blocked = None;
     untracked
@@ -1662,42 +1776,45 @@ fn refuse_untracked_file_over_folder(repo: &Repository, index: usize) -> Result<
             }
         })?;
     let Some(path) = blocked else {
-        return Ok(());
+        return Ok(false);
     };
     let is_folder = |tree: &git2::Tree| {
         tree.get_path(std::path::Path::new(&path))
             .is_ok_and(|entry| entry.kind() == Some(git2::ObjectType::Tree))
     };
     if is_folder(&stash.parent(0)?.tree()?) && !is_folder(&stash.tree()?) {
-        Err(StashError::FileReplacedFolder)
+        Ok(true)
     } else {
         Err(StashError::UntrackedOverFolder(path))
     }
 }
 
-/// Refuses when `stash@{index}` holds an untracked file below a path the repository index has
-/// as a file (`UntrackedBelowTrackedFile`); nothing is written and the stash is kept. libgit2
-/// merges the untracked tree against the index (`merge_index_and_tree(NULL, repo_index,
-/// untracked_tree)`, stash.c), so `d/x` over the indexed file `d` is a directory/file conflict
-/// it checks out as `d~Updated upstream` while reporting success, and a pop would drop the
-/// stash (#206). Typically the stash itself recorded the swap (the untracked `d/x` with the
-/// file `d` deleted); the deletion is applied only after the untracked files. libgit2's merge
-/// compares exact case. Where names fold (`try_folds_case`: the repository sets
+/// The first untracked file of `stash@{index}` below a path the repository index has as a file,
+/// with that path (`(untracked, file)`). libgit2 merges the untracked tree against the index
+/// (`merge_index_and_tree(NULL, repo_index, untracked_tree)`, stash.c), so `d/x` over the
+/// indexed file `d` is a directory/file conflict it checks out as `d~Updated upstream` while
+/// reporting success, and a pop would drop the stash (#206). Typically the stash itself recorded
+/// the swap (the untracked `d/x` with the file `d` deleted): [`apply_in_order`] applies the
+/// deletion first, and refuses (`UntrackedBelowTrackedFile`) when the stash's tracked changes
+/// keep `d`, writing nothing. libgit2's merge compares exact case. Where names fold (`try_folds_case`: the repository sets
 /// `core.ignorecase`, or always on macOS and Windows, like the case-collision walker) paths
-/// compare as `fold_name` folds them, so `d/x` is refused over the indexed file `D` too (#234). On a case-insensitive
+/// compare as `fold_name` folds them, so `d/x` is found over the indexed file `D` too (#234). On a case-insensitive
 /// drive `d` is `D` and `git stash pop` refuses as well. On a case-sensitive drive with
 /// `core.ignorecase` set, git would pop it; Browsitory refuses on purpose, since the setting may
 /// be right (a Linux casefold folder or a vfat mount folds names too).
-fn refuse_untracked_below_tracked_file(repo: &Repository, index: usize) -> Result<(), StashError> {
+fn untracked_below_tracked_file(
+    repo: &Repository,
+    index: usize,
+) -> Result<Option<(String, String)>, StashError> {
     let Some(id) = repo
         .reflog("refs/stash")
         .ok()
         .and_then(|reflog| reflog.get(index).map(|entry| entry.id_new()))
     else {
-        return Ok(());
+        return Ok(None);
     };
     let Ok(untracked) = repo.find_commit(id)?.parent(2) else {
-        return Ok(());
+        return Ok(None);
     };
     let ignore_case = crate::worktree_guard::try_folds_case(repo)?;
     let fold = |path: &[u8]| {
@@ -1747,10 +1864,261 @@ fn refuse_untracked_below_tracked_file(repo: &Repository, index: usize) -> Resul
                 Err(error)
             }
         })?;
-    match blocked {
-        Some((untracked, file)) => Err(StashError::UntrackedBelowTrackedFile { untracked, file }),
-        None => Ok(()),
+    Ok(blocked)
+}
+
+/// `path` as the stash's file/folder checks compare it: folded where names fold (see
+/// [`untracked_below_tracked_file`]).
+fn compare_key(ignore_case: bool, path: &[u8]) -> String {
+    let folded = if ignore_case {
+        crate::worktree_guard::fold_name(path)
+    } else {
+        path.to_vec()
+    };
+    String::from_utf8_lossy(&folded).into_owned()
+}
+
+/// Applies `stash@{index}`, whose untracked files need a tracked path out of the way first, in
+/// git's order (#229): the tracked changes before the untracked files. libgit2's apply checks the
+/// untracked files out first, against the index, so it can't bring back a file that replaced a
+/// folder (`d` with `d/f` deleted, #186) or files in a folder that replaced a file (`d/x` with
+/// `d` deleted, #206).
+///
+/// Merges as libgit2's `git_stash_apply` does, with HEAD's tree for the index (both refuse
+/// unless they match, `StagedChanges`): the stash's worktree tree onto HEAD against its base,
+/// and the index to leave behind, its index tree with `restore_index` (a conflict there is
+/// `IndexConflict`), else HEAD's plus the files the stash added. Then one safe checkout writes
+/// the merge and the untracked files together: a checkout removes before it writes, so `d`'s
+/// folder (or file) is gone before `d` (or `d/x`) is written. A local change or an entry the
+/// stash doesn't hold in the way refuses the checkout (`WouldOverwrite`), and a checkout that
+/// stops part-way is rolled back (#321), as for libgit2's apply.
+///
+/// Refused before anything is written: an untracked file below a path the merge keeps as a file
+/// (`UntrackedBelowTrackedFile`; the file was committed after stashing, or HEAD changed it), an
+/// untracked file at a path the merge keeps or below which it keeps files (`FileReplacedFolder`,
+/// HEAD changed a file of the folder), and a file and a folder of one name in the merge
+/// (`FileFolderConflict`). `below_file` is the untracked file and indexed file
+/// [`untracked_below_tracked_file`] found, reported when the index differs from HEAD.
+fn apply_in_order(
+    repo: &mut Repository,
+    index: usize,
+    restore_index: bool,
+    below_file: Option<(String, String)>,
+) -> Result<StashApplyOutcome, StashError> {
+    let repo: &Repository = repo;
+    let Some(id) = repo
+        .reflog("refs/stash")
+        .ok()
+        .and_then(|reflog| reflog.get(index).map(|entry| entry.id_new()))
+    else {
+        return Err(StashError::StashListChanged);
+    };
+    let stash = repo.find_commit(id)?;
+    let head_tree = repo.head()?.peel_to_tree()?;
+    let mut repo_index = repo.index()?;
+    if repo
+        .diff_tree_to_index(Some(&head_tree), Some(&repo_index), None)?
+        .deltas()
+        .len()
+        > 0
+    {
+        return Err(match below_file {
+            Some((untracked, file)) => StashError::UntrackedBelowTrackedFile { untracked, file },
+            None => StashError::StagedChanges,
+        });
     }
+    let base = stash.parent(0)?.tree()?;
+    let stash_tree = stash.tree()?;
+    let modified = repo.merge_trees(&base, &head_tree, &stash_tree, None)?;
+    if let Some(conflict) = crate::file_folder::find_file_folder_conflict(&modified) {
+        return Err(conflict.into());
+    }
+    crate::worktree_guard::refuse_case_pair_brought_in::<StashError>(
+        repo,
+        &crate::worktree_guard::GuardSource::Index(&modified),
+        Some(&head_tree),
+    )?;
+    let index_commit = stash.parent(1)?;
+    let index_tree = index_commit.tree()?;
+    let unstashed = if restore_index {
+        if index_tree.id() == base.id() {
+            None
+        } else {
+            let index_base = index_commit.parent(0)?.tree()?;
+            let unstashed = repo.merge_trees(&index_base, &head_tree, &index_tree, None)?;
+            if unstashed.has_conflicts()
+                || crate::file_folder::find_file_folder_conflict(&unstashed).is_some()
+            {
+                return Err(StashError::IndexConflict);
+            }
+            crate::worktree_guard::refuse_case_pair_brought_in::<StashError>(
+                repo,
+                &crate::worktree_guard::GuardSource::Index(&unstashed),
+                Some(&head_tree),
+            )?;
+            Some(unstashed)
+        }
+    } else {
+        // libgit2's `stage_new_files`: the base plus the files the stash added, with their
+        // stashed (worktree) content, merged onto HEAD.
+        let mut adds = git2::Index::new()?;
+        adds.read_tree(&base)?;
+        let mut added = false;
+        let mut stashed = git2::Index::new()?;
+        stashed.read_tree(&stash_tree)?;
+        for entry in stashed.iter() {
+            if base
+                .get_path(&crate::worktree_guard::path_from_bytes(&entry.path))
+                .is_err()
+            {
+                adds.add(&entry)?;
+                added = true;
+            }
+        }
+        if added {
+            let adds_tree = repo.find_tree(adds.write_tree_to(repo)?)?;
+            Some(repo.merge_trees(&base, &head_tree, &adds_tree, None)?)
+        } else {
+            None
+        }
+    };
+
+    let mut untracked_files = git2::Index::new()?;
+    untracked_files.read_tree(&stash.parent(2)?.tree()?)?;
+    let ignore_case = crate::worktree_guard::try_folds_case(repo)?;
+    // Folded path → the merge's own spelling; the first in index order when two fold together.
+    let mut merged = std::collections::HashMap::new();
+    for entry in modified.iter() {
+        merged
+            .entry(compare_key(ignore_case, &entry.path))
+            .or_insert(entry.path);
+    }
+    let merged_folders: std::collections::HashSet<String> = merged
+        .keys()
+        .flat_map(|path| {
+            path.match_indices('/')
+                .map(|(slash, _)| path[..slash].to_string())
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    for entry in untracked_files.iter() {
+        let untracked = String::from_utf8_lossy(&entry.path).into_owned();
+        let key = compare_key(ignore_case, &entry.path);
+        if merged.contains_key(&key) || merged_folders.contains(&key) {
+            return Err(StashError::FileReplacedFolder(untracked));
+        }
+        if let Some(file) = key
+            .match_indices('/')
+            .find_map(|(slash, _)| merged.get(&key[..slash]))
+        {
+            return Err(StashError::UntrackedBelowTrackedFile {
+                untracked,
+                file: String::from_utf8_lossy(file).into_owned(),
+            });
+        }
+    }
+
+    // libgit2's safe checkout doesn't refuse a folder in the way of a file that holds entries
+    // HEAD doesn't have: it fails writing the file ("Is a directory"). Refuse first.
+    if let Some(workdir) = repo.workdir() {
+        for entry in untracked_files.iter() {
+            let path = String::from_utf8_lossy(&entry.path).into_owned();
+            if !folder_holds_only(&workdir.join(&path), &path, &head_tree)? {
+                return Err(StashError::UntrackedOverFolder(path));
+            }
+        }
+    }
+    let original: Vec<git2::IndexEntry> = repo_index.iter().collect();
+    let cached: Vec<git2::IndexEntry> = repo_index.iter().collect();
+    let written = crate::partial_checkout::Written::default();
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout
+        .safe()
+        .our_label("Updated upstream")
+        .their_label("Stashed changes");
+    written.record(repo, &mut checkout);
+    written.expect_conflicts(repo, &modified);
+    repo_index.clear()?;
+    for entry in modified.iter().chain(untracked_files.iter()) {
+        repo_index.add(&entry)?;
+    }
+    if let Err(error) = repo.checkout_index(Some(&mut repo_index), Some(&mut checkout)) {
+        let restored = crate::partial_checkout::roll_back(repo, &written);
+        // Put the index back as it was (the checkout didn't write it).
+        repo_index.read(true)?;
+        return Err(if is_checkout_conflict(&error) {
+            StashError::WouldOverwrite
+        } else {
+            crate::partial_checkout::report(repo, restored, crate::HeldDuring::RolledBack, error)
+        });
+    }
+    // The index left behind: the merge with its conflicts when there are any (libgit2 checks
+    // that out as the index), else the unstashed index, else the index as it was (HEAD's).
+    // Entries that didn't change keep their cached file stats.
+    let keep: std::collections::HashMap<Vec<u8>, &git2::IndexEntry> = cached
+        .iter()
+        .map(|entry| (entry.path.clone(), entry))
+        .collect();
+    let conflicted = modified.has_conflicts();
+    let next: Vec<git2::IndexEntry> = if conflicted {
+        modified.iter().collect()
+    } else if let Some(unstashed) = &unstashed {
+        unstashed.iter().collect()
+    } else {
+        original
+    };
+    repo_index.clear()?;
+    for entry in next {
+        match keep.get(&entry.path) {
+            Some(old)
+                if old.id == entry.id
+                    && old.mode == entry.mode
+                    && (entry.flags >> 12) & 0x3 == 0 =>
+            {
+                repo_index.add(old)?
+            }
+            _ => repo_index.add(&entry)?,
+        }
+    }
+    repo_index.write()?;
+    if conflicted {
+        Ok(StashApplyOutcome::Conflicted {
+            files: crate::file_folder::conflicted_files(&repo_index)?,
+        })
+    } else {
+        Ok(StashApplyOutcome::Applied)
+    }
+}
+
+/// Whether `full` (the worktree path of `rel`) is no real folder, or a folder holding only files
+/// and links `tree` has (which a checkout that deletes them may remove), and folders of those.
+fn folder_holds_only(
+    full: &std::path::Path,
+    rel: &str,
+    tree: &git2::Tree<'_>,
+) -> Result<bool, StashError> {
+    if !std::fs::symlink_metadata(full).is_ok_and(|meta| meta.is_dir()) {
+        return Ok(true);
+    }
+    for entry in std::fs::read_dir(full)? {
+        let entry = entry?;
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            return Ok(false);
+        };
+        let child = format!("{rel}/{name}");
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            if name == ".git" || !folder_holds_only(&entry.path(), &child, tree)? {
+                return Ok(false);
+            }
+        } else if !tree
+            .get_path(std::path::Path::new(&child))
+            .is_ok_and(|found| found.kind() == Some(git2::ObjectType::Blob))
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// Applies `stash@{index}` and drops it only when it applied cleanly; a conflicted apply keeps
@@ -1822,6 +2190,25 @@ mod tests {
         assert!(!in_the_way(Conflict, Index));
         assert!(!in_the_way(GenericError, Checkout));
         assert!(!in_the_way(GenericError, Os));
+    }
+
+    #[test]
+    fn the_branch_comes_from_gits_stash_message() {
+        assert_eq!(
+            stash_branch("WIP on main: abc1234 Add").as_deref(),
+            Some("main")
+        );
+        assert_eq!(
+            stash_branch("On feat/x: my: note").as_deref(),
+            Some("feat/x")
+        );
+        assert_eq!(
+            stash_branch("WIP on (no branch): abc1234 Add").as_deref(),
+            Some("(no branch)")
+        );
+        assert_eq!(stash_branch("autostash"), None);
+        assert_eq!(stash_branch("On : x"), None);
+        assert_eq!(stash_branch("On main"), None);
     }
 
     #[test]

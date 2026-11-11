@@ -42,6 +42,48 @@ fn list_stashes_reports_the_most_recently_saved_stash_first() {
 }
 
 #[test]
+fn list_stashes_reports_branch_time_file_count_and_staged_changes() {
+    // #657: "On main · 2 days ago · 3 files", and whether "Apply as unstaged" differs.
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a\n");
+    write_file(dir.path(), "b.txt", "b\n");
+    commit_all(&repo, "initial commit");
+    write_file(dir.path(), "a.txt", "a2\n");
+    write_file(dir.path(), "new.txt", "untracked\n");
+    git_core::stash::save_stash(
+        &mut repo,
+        &with(|o| o.message = Some("unstaged work".into())),
+    )
+    .unwrap();
+    write_file(dir.path(), "b.txt", "b2\n");
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("b.txt")).unwrap();
+    index.write().unwrap();
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+
+    let stashes = git_core::stash::list_stashes(&mut repo).unwrap();
+
+    let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+    assert_eq!(stashes[0].branch.as_deref(), Some(branch.as_str()));
+    assert!(stashes[0]
+        .message
+        .starts_with(&format!("WIP on {branch}: ")));
+    assert_eq!(stashes[0].file_count, 1);
+    assert!(stashes[0].has_staged_changes);
+    assert_eq!(stashes[1].message, format!("On {branch}: unstaged work"));
+    assert_eq!(stashes[1].branch.as_deref(), Some(branch.as_str()));
+    assert_eq!(stashes[1].file_count, 2);
+    assert!(!stashes[1].has_staged_changes);
+    let time = repo
+        .find_commit(git2::Oid::from_str(&stashes[1].commit_id).unwrap())
+        .unwrap()
+        .time()
+        .seconds();
+    assert_eq!(stashes[1].timestamp, time);
+    assert!(stashes[1].timestamp > 1_600_000_000);
+}
+
+#[test]
 fn apply_stash_restores_the_stashed_changes() {
     let (dir, mut repo) = init_repo();
     write_file(dir.path(), "file.txt", "v1");
@@ -1182,48 +1224,116 @@ fn path_limited_stash_of_a_file_that_replaced_a_folder_stashes_the_folders_delet
     assert_eq!(read(dir.path(), "d"), "now a file\n");
 }
 
-/// libgit2 checks a stash's untracked files out before its tracked changes, so it can't bring a
-/// file back where the stash also deletes the folder of that name: its "Applied" left the file
-/// as `d~Stashed changes` and the pop dropped the stash (#186).
-fn assert_file_over_folder_apply_refused(
-    repo: &mut git2::Repository,
-    dir: &std::path::Path,
-    error: StashError,
-) {
-    assert!(matches!(error, StashError::FileReplacedFolder), "{error:?}");
-    assert_eq!(
-        error.to_string(),
-        "This stash can't be applied here because a file replaced a folder; use git stash apply from a terminal."
-    );
-    assert_eq!(git_core::stash::list_stashes(repo).unwrap().len(), 1);
-    assert_folder_back(dir);
-    assert!(git_core::status::status(repo).unwrap().is_empty());
-}
-
 #[test]
-fn applying_or_popping_a_stashed_file_that_replaced_a_folder_is_a_clear_error() {
+fn applying_or_popping_a_stashed_file_that_replaced_a_folder_brings_the_file_back() {
+    // #229: libgit2 checks a stash's untracked files out before its tracked changes, so it
+    // couldn't bring a file back where the stash also deletes the folder of that name (its
+    // "Applied" left the file as `d~Stashed changes`, #186). Browsitory applies it in git's order.
     for opts in [
         with(|o| o.paths = vec!["d".into()]),
         StashOptions::default(),
     ] {
+        for restore_index in [false, true] {
+            let (dir, mut repo) = folder_replaced_by_file();
+            git_core::stash::save_stash(&mut repo, &opts).unwrap();
+            assert_folder_back(dir.path());
+
+            let outcome = git_core::stash::apply_stash(&mut repo, 0, None, restore_index).unwrap();
+            assert_eq!(outcome, StashApplyOutcome::Applied, "{opts:?}");
+            assert_eq!(read(dir.path(), "d"), "now a file\n");
+            assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
+            // As after `git stash apply`: `d/f` deleted (unstaged), `d` untracked.
+            let status = git(dir.path(), &["status", "--porcelain"]);
+            assert_eq!(
+                String::from_utf8_lossy(&status.stdout),
+                " D d/f\n?? d\n",
+                "{opts:?}"
+            );
+        }
         let (dir, mut repo) = folder_replaced_by_file();
         git_core::stash::save_stash(&mut repo, &opts).unwrap();
-        assert_folder_back(dir.path());
-
-        let error = git_core::stash::apply_stash(&mut repo, 0, None, false).unwrap_err();
-        assert_file_over_folder_apply_refused(&mut repo, dir.path(), error);
-        let error = git_core::stash::pop_stash(&mut repo, 0, None, true).unwrap_err();
-        assert_file_over_folder_apply_refused(&mut repo, dir.path(), error);
-
-        // The stash is intact: git applies it.
-        let output = git(dir.path(), &["stash", "pop"]);
-        assert!(
-            output.status.success(),
-            "{opts:?}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        let outcome = git_core::stash::pop_stash(&mut repo, 0, None, true).unwrap();
+        assert_eq!(outcome, StashApplyOutcome::Applied);
         assert_eq!(read(dir.path(), "d"), "now a file\n");
+        assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
     }
+}
+
+#[test]
+fn a_stashed_file_that_replaced_a_folder_is_refused_while_the_folder_holds_another_file() {
+    // An untracked file in the folder the stash knows nothing about stays: the apply refuses to
+    // remove it, and nothing is written.
+    let (dir, mut repo) = folder_replaced_by_file();
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+    write_file(dir.path(), "d/new", "mine\n");
+    let status_before = git_core::status::status(&repo).unwrap();
+
+    let error = git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap_err();
+
+    assert!(
+        matches!(error, StashError::UntrackedOverFolder(ref path) if path == "d"),
+        "{error:?}"
+    );
+    assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
+    assert_eq!(git_core::status::status(&repo).unwrap(), status_before);
+    assert_eq!(read(dir.path(), "d/new"), "mine\n");
+    assert_eq!(read(dir.path(), "d/f"), "f\n");
+}
+
+#[test]
+fn a_stashed_file_that_replaced_a_folder_keeps_an_ignored_file_or_a_local_edit_in_the_folder() {
+    // An ignored file is never stashed, and a local edit to the folder's file isn't in the stash:
+    // removing the folder would lose either. Refused, nothing written.
+    for ignored in [true, false] {
+        let (dir, mut repo) = folder_replaced_by_file();
+        git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+        if ignored {
+            write_file(dir.path(), ".git/info/exclude", "*.o\n");
+            write_file(dir.path(), "d/x.o", "build\n");
+        } else {
+            write_file(dir.path(), "d/f", "local edit\n");
+        }
+        let status_before = git_core::status::status(&repo).unwrap();
+
+        let error = git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap_err();
+
+        if ignored {
+            assert!(
+                matches!(error, StashError::UntrackedOverFolder(_)),
+                "{error:?}"
+            );
+            assert_eq!(read(dir.path(), "d/x.o"), "build\n");
+        } else {
+            assert!(matches!(error, StashError::WouldOverwrite), "{error:?}");
+            assert_eq!(read(dir.path(), "d/f"), "local edit\n");
+        }
+        assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
+        assert_eq!(git_core::status::status(&repo).unwrap(), status_before);
+    }
+}
+
+#[test]
+fn a_stashed_file_that_replaced_a_folder_is_refused_when_head_changed_the_folder() {
+    // HEAD edited `d/f` after the stash: the merge keeps it (a modify/delete conflict), so the
+    // untracked `d` can't be written. Refused before anything is written.
+    let (dir, mut repo) = folder_replaced_by_file();
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+    write_file(dir.path(), "d/f", "changed in HEAD\n");
+    commit_all(&repo, "change d/f");
+    let status_before = git_core::status::status(&repo).unwrap();
+
+    let error = git_core::stash::apply_stash(&mut repo, 0, None, false).unwrap_err();
+
+    assert!(
+        matches!(error, StashError::FileReplacedFolder(ref path) if path == "d"),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "This stash can't be applied here: its untracked file 'd' needs the folder 'd' gone, but the folder still holds tracked files. Commit or move them first; the stash is kept."
+    );
+    assert_eq!(git_core::status::status(&repo).unwrap(), status_before);
+    assert_eq!(read(dir.path(), "d/f"), "changed in HEAD\n");
 }
 
 /// Stashing without untracked files would reset `tracked` and delete the untracked `untracked`
@@ -1857,22 +1967,190 @@ fn assert_untracked_below_tracked_file_refused(
 }
 
 #[test]
-fn applying_or_popping_a_stash_whose_folder_replaced_a_tracked_file_is_refused() {
-    let (dir, mut repo) = file_replaced_by_folder();
-    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
-    assert_eq!(top_level(dir.path()), ["d"]);
-
+fn applying_or_popping_a_stash_whose_folder_replaced_a_tracked_file_brings_the_folder_back() {
+    // #229: the stash deletes the file `d` and holds the untracked `d/x`. libgit2 merges the
+    // untracked files against the index, which still has `d` (#206); Browsitory applies the
+    // deletion first. git can't pop it (below).
     for restore_index in [false, true] {
-        let error = git_core::stash::apply_stash(&mut repo, 0, None, restore_index).unwrap_err();
-        assert_untracked_below_tracked_file_refused(&mut repo, dir.path(), error, "f\n");
-        let error = git_core::stash::pop_stash(&mut repo, 0, None, restore_index).unwrap_err();
-        assert_untracked_below_tracked_file_refused(&mut repo, dir.path(), error, "f\n");
+        for pop in [false, true] {
+            let (dir, mut repo) = file_replaced_by_folder();
+            git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+            assert_eq!(top_level(dir.path()), ["d"]);
+            assert_eq!(read(dir.path(), "d"), "f\n");
+
+            let outcome = if pop {
+                git_core::stash::pop_stash(&mut repo, 0, None, restore_index)
+            } else {
+                git_core::stash::apply_stash(&mut repo, 0, None, restore_index)
+            }
+            .unwrap();
+
+            assert_eq!(outcome, StashApplyOutcome::Applied);
+            assert_eq!(top_level(dir.path()), ["d"]);
+            assert_eq!(read(dir.path(), "d/x"), "x\n");
+            let status = git(dir.path(), &["status", "--porcelain", "-uall"]);
+            assert_eq!(String::from_utf8_lossy(&status.stdout), " D d\n?? d/x\n");
+            assert_eq!(
+                git_core::stash::list_stashes(&mut repo).unwrap().len(),
+                usize::from(!pop)
+            );
+        }
     }
 
-    // git can't pop it either.
+    // git can't pop it.
     let (twin, _twin_repo) = file_replaced_by_folder();
     assert!(git_stash_push(twin.path(), true));
     assert!(!git(twin.path(), &["stash", "pop"]).status.success());
+}
+
+#[test]
+fn stash_file_on_a_folder_that_replaced_a_file_stashes_the_folder_and_pops_it_back() {
+    // #207: HEAD has the file `d`, the worktree the folder `d/` with the untracked `d/x`.
+    // Stashing only `d` (with untracked files) was refused as `DirectoryReplacedNonDirectory`.
+    // Now the stash records the deletion of `d` and the untracked `d/x`; the revert puts `d`
+    // back. Picking `d` takes the files in the folder, as git's pathspec does.
+    for picked in [
+        vec!["d".to_string()],
+        vec!["d".to_string(), "d/x".to_string()],
+    ] {
+        for keep_index in [false, true] {
+            let (dir, mut repo) = file_replaced_by_folder();
+            write_file(dir.path(), "other", "left alone\n");
+
+            git_core::stash::save_stash(
+                &mut repo,
+                &with(|o| {
+                    o.paths = picked.clone();
+                    o.keep_index = keep_index;
+                }),
+            )
+            .unwrap();
+
+            assert_eq!(read(dir.path(), "d"), "f\n", "{picked:?}");
+            assert_eq!(read(dir.path(), "other"), "left alone\n");
+            let stash = stash_commit(&mut repo, 0);
+            assert_eq!(untracked_files_of(&repo, stash), ["d/x"]);
+            assert!(repo
+                .find_commit(stash)
+                .unwrap()
+                .tree()
+                .unwrap()
+                .get_path(std::path::Path::new("d"))
+                .is_err());
+            let status = git(dir.path(), &["status", "--porcelain", "-uall"]);
+            assert_eq!(String::from_utf8_lossy(&status.stdout), "?? other\n");
+
+            assert_eq!(
+                git_core::stash::pop_stash(&mut repo, 0, None, true).unwrap(),
+                StashApplyOutcome::Applied
+            );
+            assert_eq!(read(dir.path(), "d/x"), "x\n");
+            let status = git(dir.path(), &["status", "--porcelain", "-uall"]);
+            assert_eq!(
+                String::from_utf8_lossy(&status.stdout),
+                " D d\n?? d/x\n?? other\n"
+            );
+        }
+    }
+}
+
+#[test]
+fn git_stashes_a_folder_that_replaced_a_file_without_its_deletion_and_cannot_pop_it() {
+    // What git 2.x does with the shape of #207: `git stash push -u -- d` records only `d/x`
+    // (its worktree tree is HEAD's, so the deletion of `d` is lost), puts `d` back, and its own
+    // pop then fails ("cannot create directory at 'd': File exists"). Browsitory records the
+    // deletion and pops it (see above).
+    let (dir, _repo) = file_replaced_by_folder();
+    assert!(git(dir.path(), &["stash", "push", "-u", "--", "d"])
+        .status
+        .success());
+    let diff = git(
+        dir.path(),
+        &["diff", "--name-only", "stash@{0}^1", "stash@{0}"],
+    );
+    assert_eq!(String::from_utf8_lossy(&diff.stdout), "");
+    assert_eq!(read(dir.path(), "d"), "f\n");
+    assert!(!git(dir.path(), &["stash", "pop"]).status.success());
+}
+
+#[test]
+fn stash_file_on_a_folder_that_replaced_a_file_is_refused_while_the_folder_holds_more() {
+    // Anything in the folder the stash doesn't take would be deleted by the revert: an ignored
+    // file, a nested repository, or untracked files with Include untracked off. git saves the
+    // stash and then stops half-way ("could not write file 'd'… directory not empty").
+    type Setup = fn(&std::path::Path);
+    let cases: [(&str, Setup, bool); 3] = [
+        (
+            "ignored",
+            |dir| {
+                write_file(dir, ".git/info/exclude", "*.o\n");
+                write_file(dir, "d/y.o", "build\n");
+            },
+            true,
+        ),
+        (
+            "repository",
+            |dir| {
+                git2::Repository::init(dir.join("d/nested")).unwrap();
+            },
+            true,
+        ),
+        ("untracked left out", |_| {}, false),
+    ];
+    for (name, setup, include_untracked) in cases {
+        let (dir, mut repo) = file_replaced_by_folder();
+        setup(dir.path());
+        let status_before = git_core::status::status(&repo).unwrap();
+
+        let error = git_core::stash::save_stash(
+            &mut repo,
+            &with(|o| {
+                o.paths = vec!["d".into()];
+                o.include_untracked = include_untracked;
+            }),
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(
+                error,
+                StashError::DirectoryReplacedNonDirectory { ref path, .. } if path == "d"
+            ),
+            "{name}: {error:?}"
+        );
+        assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+        assert_eq!(git_core::status::status(&repo).unwrap(), status_before);
+        assert_eq!(read(dir.path(), "d/x"), "x\n");
+    }
+}
+
+#[test]
+fn a_stash_whose_folder_replaced_a_file_is_refused_when_head_changed_the_file() {
+    // HEAD edited `d` after the stash: the merge keeps it (a modify/delete conflict), so `d/x`
+    // can't be written. Refused, nothing written.
+    let (dir, mut repo) = file_replaced_by_folder();
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+    write_file(dir.path(), "d", "changed\n");
+    commit_all(&repo, "change d");
+
+    let error = git_core::stash::apply_stash(&mut repo, 0, None, false).unwrap_err();
+
+    assert_untracked_below_tracked_file_refused(&mut repo, dir.path(), error, "changed\n");
+}
+
+#[test]
+fn a_stash_whose_folder_replaced_a_file_is_refused_over_a_local_edit_of_the_file() {
+    let (dir, mut repo) = file_replaced_by_folder();
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+    write_file(dir.path(), "d", "local edit\n");
+    let status_before = git_core::status::status(&repo).unwrap();
+
+    let error = git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap_err();
+
+    assert!(matches!(error, StashError::WouldOverwrite), "{error:?}");
+    assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
+    assert_eq!(read(dir.path(), "d"), "local edit\n");
+    assert_eq!(git_core::status::status(&repo).unwrap(), status_before);
 }
 
 #[test]
@@ -1933,58 +2211,37 @@ fn file_replaced_by_case_variant_folder(
 }
 
 #[test]
-fn a_case_only_variant_of_a_tracked_file_blocks_a_stashed_folder_when_ignorecase_is_on() {
+fn a_stashed_folder_replacing_a_case_only_variant_of_a_file_applies_when_names_fold() {
     // On a case-insensitive drive the untracked `d/x` needs the folder `d`, where the index has
-    // the file `D`: libgit2's merge compares exact case and misses it (#234).
-    let (dir, mut repo) = file_replaced_by_case_variant_folder(true);
-    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
-    assert_eq!(top_level(dir.path()), ["D"]);
-
+    // the file `D` (#234). The stash deletes `D`, and Browsitory applies that first (#229).
     for restore_index in [false, true] {
-        for pop in [false, true] {
-            let error = if pop {
-                git_core::stash::pop_stash(&mut repo, 0, None, restore_index)
-            } else {
-                git_core::stash::apply_stash(&mut repo, 0, None, restore_index)
-            }
-            .unwrap_err();
-            assert!(
-                matches!(
-                    error,
-                    StashError::UntrackedBelowTrackedFile { ref untracked, ref file }
-                        if untracked == "d/x" && file == "D"
-                ),
-                "{error:?}"
-            );
-            assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
-            assert_eq!(top_level(dir.path()), ["D"]);
-            assert_eq!(read(dir.path(), "D"), "f\n");
-            assert!(git_core::status::status(&repo).unwrap().is_empty());
-        }
+        let (dir, mut repo) = file_replaced_by_case_variant_folder(true);
+        git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+        assert_eq!(top_level(dir.path()), ["D"]);
+
+        let outcome = git_core::stash::pop_stash(&mut repo, 0, None, restore_index).unwrap();
+
+        assert_eq!(outcome, StashApplyOutcome::Applied);
+        assert_eq!(top_level(dir.path()), ["d"]);
+        assert_eq!(read(dir.path(), "d/x"), "x\n");
+        assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
     }
 }
 
 #[cfg(any(target_os = "macos", windows))]
 #[test]
-fn a_case_only_variant_blocks_a_stashed_folder_on_macos_and_windows_even_if_ignorecase_is_off() {
+fn a_stashed_folder_replacing_a_case_only_variant_applies_on_macos_and_windows_with_ignorecase_off()
+{
     // A repository copied from elsewhere can carry a wrong `core.ignorecase = false`; the drive
-    // still folds case, so `d` is `D` (#234).
+    // still folds case, so `d` is `D` (#234), and the deletion of `D` goes first (#229).
     let (dir, mut repo) = file_replaced_by_case_variant_folder(false);
     git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
 
-    let error = git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap_err();
+    let outcome = git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap();
 
-    assert!(
-        matches!(
-            error,
-            StashError::UntrackedBelowTrackedFile { ref untracked, ref file }
-                if untracked == "d/x" && file == "D"
-        ),
-        "{error:?}"
-    );
-    assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
-    assert_eq!(top_level(dir.path()), ["D"]);
-    assert_eq!(read(dir.path(), "D"), "f\n");
+    assert_eq!(outcome, StashApplyOutcome::Applied);
+    assert_eq!(read(dir.path(), "d/x"), "x\n");
+    assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
 }
 
 #[cfg(target_os = "linux")]
@@ -2417,26 +2674,29 @@ fn an_untracked_folder_holding_only_ignored_files_keeps_the_whole_stash() {
 }
 
 #[test]
-fn a_swap_next_to_ignored_files_in_an_untracked_folder_is_refused_as_on_the_path_limited_route() {
-    // Keeping `node_modules/` needs the path-limited route, which can't stash the folder that
-    // replaced the file `d`: it refuses, and nothing is written.
+fn a_swap_next_to_ignored_files_in_an_untracked_folder_stashes_on_the_path_limited_route() {
+    // Keeping `node_modules/` needs the path-limited route. The folder that replaced the file
+    // `d` holds only the untracked `d/x`, so that route stashes it too (#207): the file's
+    // deletion and `d/x`; Pop brings both back (#229).
     let (dir, mut repo) = swap_next_to_an_untracked_package(true);
-    let status_before = git_core::status::status(&repo).unwrap();
 
-    let error = git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap_err();
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
 
-    assert!(
-        matches!(error, StashError::DirectoryReplacedNonDirectory { ref path, .. } if path == "d"),
-        "{error:?}"
-    );
-    assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
-    assert_eq!(git_core::status::status(&repo).unwrap(), status_before);
-    assert_eq!(read(dir.path(), "d/x"), "x\n");
-    assert_eq!(read(dir.path(), "newpkg/index.js"), "source\n");
+    assert_eq!(read(dir.path(), "d"), "f\n");
+    assert!(!dir.path().join("newpkg/index.js").exists());
     assert_eq!(
         read(dir.path(), "newpkg/node_modules/pkg/i.js"),
         "dependency\n"
     );
+    let stash = stash_commit(&mut repo, 0);
+    assert_eq!(untracked_files_of(&repo, stash), ["d/x", "newpkg/index.js"]);
+
+    assert_eq!(
+        git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap(),
+        StashApplyOutcome::Applied
+    );
+    assert_eq!(read(dir.path(), "d/x"), "x\n");
+    assert_eq!(read(dir.path(), "newpkg/index.js"), "source\n");
 }
 
 #[test]
@@ -2825,28 +3085,25 @@ fn stashing_a_file_removed_from_the_index_puts_its_entry_back() {
 }
 
 #[test]
-fn stash_all_with_a_file_removed_from_the_index_refuses_a_folder_that_replaced_a_file() {
-    // Known limitation of the #247 route: the path-limited stash refuses a folder that replaced
-    // a tracked file, which libgit2's whole stash would have stashed. Nothing is written.
+fn stash_all_with_a_file_removed_from_the_index_stashes_a_folder_that_replaced_a_file() {
+    // The #247 route is the path-limited stash, which now takes a folder that replaced a tracked
+    // file when it holds only untracked files (#207), as libgit2's whole stash would.
     let (dir, mut repo) = removed_paths(&["f", "t"], &["f"], &["f"]);
     std::fs::remove_file(dir.path().join("t")).unwrap();
     write_file(dir.path(), "t/x", "x\n");
-    let status_before = git_core::status::status(&repo).unwrap();
 
-    let error = git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap_err();
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
 
-    assert!(
-        matches!(error, StashError::DirectoryReplacedNonDirectory { ref path, .. } if path == "t"),
-        "{error:?}"
-    );
-    assert_nothing_stashed(
-        &mut repo,
-        &error,
-        "Can't stash 't': it was a file and is now a directory. Commit or move its contents first.",
-        &status_before,
+    assert!(std::fs::symlink_metadata(dir.path().join("t"))
+        .unwrap()
+        .is_file());
+    assert_eq!(
+        git_core::stash::pop_stash(&mut repo, 0, None, true).unwrap(),
+        StashApplyOutcome::Applied
     );
     assert_eq!(read(dir.path(), "f"), "local\n");
     assert_eq!(read(dir.path(), "t/x"), "x\n");
+    assert!(dir.path().join("t").is_dir());
 }
 
 /// A merge stopped on a conflict in `c` (status `UU c`); HEAD also has `f` = "head\n". With

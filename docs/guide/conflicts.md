@@ -46,9 +46,9 @@ then writes the folder's files and moves the file aside as a conflict: `c~HEAD` 
 is yours (`c~Updated upstream` for a stash apply), or `c~<branch>` (`c~<commit> (<subject>)`
 for a cherry-pick or rebase step, `c~parent of <commit> (<subject>)` for a revert,
 `c~Stashed changes` for a stash) when it comes in. Keep the moved file under a name of your
-choice, or delete it, then mark it resolved. A stash apply with
-**Restore staged changes** refuses instead and changes nothing, as `git stash apply --index`
-does; apply it without that option.
+choice, or delete it, then mark it resolved. If the stash's staged changes meet such a file
+and folder, **Apply** and **Pop** (which restore them as staged) refuse instead and change
+nothing, as `git stash apply --index` does; use **Apply as unstaged** or **Pop as unstaged**.
 
 If the conflicted file is read-only, **Save resolution**, **Use ours (whole file)** and **Use
 theirs (whole file)** change nothing and say so: "'f.txt' is read-only. Make it writable, then
