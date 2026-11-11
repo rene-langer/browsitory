@@ -102,7 +102,7 @@ export async function clickInPage(
             return partial ? actual.includes(wanted) : actual === wanted;
           });
           if (!target) return false;
-          if (click) (target as HTMLElement).click();
+          (target as HTMLElement).click();
           return true;
         },
         selector,
