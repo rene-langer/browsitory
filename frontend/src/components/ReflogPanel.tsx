@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { formatShortDate } from "../lib/formatDate";
+import { shortRefName } from "../lib/shortRefName";
 import { History } from "lucide-react";
 import type { ReflogEntry } from "../ipc/RepoClient";
 import { AccordionSection } from "./primitives/AccordionSection";
@@ -53,14 +54,14 @@ export function ReflogPanel({
         >
           <option value="" disabled>Select a reference</option>
           {selectableReferences.map((reference) => (
-            <option key={reference} value={reference}>{reference}</option>
+            <option key={reference} value={reference}>{shortRefName(reference)}</option>
           ))}
         </select>
       </label>
       {selectedReference === null ? (
         <p className={styles.empty}>Select a reference above to see its reflog.</p>
       ) : entries.length === 0 ? (
-        <p className={styles.empty}>No reflog entries for {selectedReference}.</p>
+        <p className={styles.empty}>No reflog entries for {shortRefName(selectedReference)}.</p>
       ) : (
         <ul
           ref={setListElement}
@@ -93,10 +94,10 @@ export function ReflogPanel({
                   type="button"
                   className={styles.restoreButton}
                   disabled={operationDisabled}
-                  aria-label={`Restore ${entry.reference} to ${entry.newId}`}
+                  aria-label={`Restore ${shortRefName(entry.reference)} to ${entry.newId}`}
                   onClick={() => setRestoreConfirmation(entry)}
                 >
-                  Restore {entry.reference}
+                  Restore {shortRefName(entry.reference)}
                 </button>
               </ListRow>
             );
@@ -104,8 +105,8 @@ export function ReflogPanel({
         </ul>
       )}
       {restoreConfirmation !== null && (
-        <dialog open aria-label={`Restore ${restoreConfirmation.reference}`}>
-          <p>Restore {restoreConfirmation.reference} to {restoreConfirmation.newId}?</p>
+        <dialog open aria-label={`Restore ${shortRefName(restoreConfirmation.reference)}`}>
+          <p>Restore {shortRefName(restoreConfirmation.reference)} to {restoreConfirmation.newId}?</p>
           <p>Your files and staged changes stay as they are.</p>
           <Toolbar>
             <button
