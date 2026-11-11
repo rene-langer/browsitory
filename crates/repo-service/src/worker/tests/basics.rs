@@ -352,3 +352,54 @@ fn get_commit_graph_pages_with_a_cursor() {
     assert_eq!(second.next_cursor, None);
     assert!(!second.stale);
 }
+
+#[test]
+fn a_running_worker_is_alive() {
+    let (dir, _repo) = init_repo();
+
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+
+    assert!(worker.handle().is_alive());
+}
+
+#[test]
+fn the_read_handle_answers_with_a_commits_files_and_message() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a\n");
+    write_file(dir.path(), "b.txt", "b\n");
+    commit_all(&repo, "Add two files\n\nWith a body.\n");
+    let head = repo.head().unwrap().target().unwrap().to_string();
+
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let reads = worker.handle().reads();
+
+    assert_eq!(
+        reads.get_commit_files(head.clone()).unwrap(),
+        vec!["a.txt".to_string(), "b.txt".to_string()]
+    );
+    assert_eq!(
+        reads.get_commit_message(head).unwrap(),
+        "Add two files\n\nWith a body.\n"
+    );
+}
+
+#[test]
+fn the_read_handle_lists_a_remotes_branches() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "hello");
+    commit_all(&repo, "initial commit");
+    let head = repo.head().unwrap().target().unwrap();
+    repo.reference("refs/remotes/origin/main", head, false, "test")
+        .unwrap();
+    repo.reference("refs/remotes/origin/feature", head, false, "test")
+        .unwrap();
+
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let branches = worker
+        .handle()
+        .reads()
+        .list_remote_branches("origin".to_string())
+        .unwrap();
+
+    assert_eq!(branches, vec!["feature".to_string(), "main".to_string()]);
+}
