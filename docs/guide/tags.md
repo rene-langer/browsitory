@@ -47,3 +47,4 @@ delete the local tag. The Tags panel remains the keyboard path for pushing and d
 ![The Tags section](assets/tags.png)
 
 <!-- CI proof: docs-only change (throwaway, do not merge). -->
+<!-- push 1 -->
