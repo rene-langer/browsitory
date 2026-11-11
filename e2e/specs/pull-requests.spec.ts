@@ -105,7 +105,7 @@ describe("Browsitory pull requests", () => {
     try {
       await githubSection.waitForExist();
     } catch (error) {
-      throw new Error(`${String(error)}\npage: ${await pageDiagnostics()}`);
+      throw new Error(`${String(error)}\npage: ${await pageDiagnostics("section[aria-label='Pull requests'] button[aria-expanded]")}`);
     }
     const bitbucketSection = await $("section[aria-label='Bitbucket: acme/widget (bb-origin)']");
     await expect(bitbucketSection).toBeExisting();

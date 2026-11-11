@@ -117,14 +117,30 @@ export async function clickInPage(
  * What the page shows, for a failure message: the alerts' text, the sidebar sections and the
  * page's text (truncated). Never throws.
  */
-export async function pageDiagnostics(): Promise<string> {
+export async function pageDiagnostics(probe?: string): Promise<string> {
   try {
-    return await browser.execute(() => {
+    return await browser.execute((probeSelector: string | null) => {
+      const describe = (el: Element | null) =>
+        el === null ? null : `${el.tagName.toLowerCase()}.${(el.getAttribute("class") ?? "").replace(/ /g, ".")} "${(el.textContent ?? "").slice(0, 60)}"`;
+      let hit: unknown = null;
+      if (probeSelector !== null) {
+        const target = document.querySelector(probeSelector);
+        if (target !== null) {
+          // As WebDriver's click does: into view first, then the element at its centre.
+          target.scrollIntoView({ block: "center", inline: "center" });
+          const rect = target.getBoundingClientRect();
+          const x = rect.left + rect.width / 2;
+          const y = rect.top + rect.height / 2;
+          hit = { rect: [rect.left, rect.top, rect.width, rect.height], target: describe(target), atPoint: describe(document.elementFromPoint(x, y)) };
+        } else hit = "probe not found";
+      }
       const alerts = Array.from(document.querySelectorAll("[role='alert']")).map((el) => el.textContent ?? "");
       const sections = Array.from(document.querySelectorAll("section[aria-label]")).map((el) => el.getAttribute("aria-label"));
       return JSON.stringify(
         {
           size: [window.innerWidth, window.innerHeight],
+          scroll: [document.documentElement.scrollHeight, document.body.scrollHeight],
+          hit,
           alerts,
           sections,
           text: (document.body.innerText ?? "").slice(0, 3000),
@@ -132,7 +148,7 @@ export async function pageDiagnostics(): Promise<string> {
         null,
         1,
       );
-    });
+    }, probe ?? null);
   } catch (error) {
     return `no diagnostics: ${String(error)}`;
   }

@@ -71,7 +71,7 @@ describe("Browsitory reflog recovery", () => {
         timeoutMsg: "expected the newer commit to leave the refreshed graph",
       });
     } catch (error) {
-      throw new Error(`${String(error)}\npage: ${await pageDiagnostics()}`);
+      throw new Error(`${String(error)}\npage: ${await pageDiagnostics("dialog[open] button")}`);
     }
   });
 });
