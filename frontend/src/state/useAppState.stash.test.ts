@@ -6,7 +6,7 @@ import { TEST_REPO_PATH, transferClient } from "./useAppStateTestClient";
 
 describe("useAppState", () => {
   it("refresh also populates stashes", async () => {
-    const stash: StashEntry = { index: 0, message: "WIP on main: abc1234 msg", commitId: "s1" };
+    const stash: StashEntry = { index: 0, message: "WIP on main: abc1234 msg", commitId: "s1", branch: "main", timestamp: 1700000000, fileCount: 1, hasStagedChanges: false };
     const client: RepoClient = transferClient({
       listStashes: async () => [stash],
     });
@@ -26,7 +26,7 @@ describe("useAppState", () => {
         listStashesCalls += 1;
         return listStashesCalls === 1
           ? []
-          : [{ index: 0, message: "WIP on main: abc1234 msg", commitId: "s1" }];
+          : [{ index: 0, message: "WIP on main: abc1234 msg", commitId: "s1", branch: "main", timestamp: 1700000000, fileCount: 1, hasStagedChanges: false }];
       },
       saveStash: async () => {
         saveStashCalls += 1;
@@ -40,14 +40,14 @@ describe("useAppState", () => {
 
     expect(saveStashCalls).toBe(1);
     expect(result.current.state.stashes).toEqual([
-      { index: 0, message: "WIP on main: abc1234 msg", commitId: "s1" },
+      { index: 0, message: "WIP on main: abc1234 msg", commitId: "s1", branch: "main", timestamp: 1700000000, fileCount: 1, hasStagedChanges: false },
     ]);
   });
 
   it("applyStash calls client.applyStash with the given index", async () => {
     let applyStashArg: number | null = null;
     const client: RepoClient = transferClient({
-      listStashes: async () => [{ index: 0, message: "WIP", commitId: "s0" }],
+      listStashes: async () => [{ index: 0, message: "WIP", commitId: "s0", branch: null, timestamp: 1700000000, fileCount: 1, hasStagedChanges: false }],
       applyStash: async (_repoPath: string, index: number, commitId: string) => {
         applyStashArg = index;
         expect(commitId).toBe("s0");
@@ -66,7 +66,7 @@ describe("useAppState", () => {
   it("dropStash calls client.dropStash with the given index", async () => {
     let dropStashArg: number | null = null;
     const client: RepoClient = transferClient({
-      listStashes: async () => [{ index: 0, message: "WIP", commitId: "s0" }],
+      listStashes: async () => [{ index: 0, message: "WIP", commitId: "s0", branch: null, timestamp: 1700000000, fileCount: 1, hasStagedChanges: false }],
       dropStash: async (_repoPath: string, index: number, commitId: string) => {
         dropStashArg = index;
         expect(commitId).toBe("s0");
@@ -82,7 +82,7 @@ describe("useAppState", () => {
   });
 
   it("dropStash removes the stash from state before the backend call resolves, restores it on failure", async () => {
-    const stashA: StashEntry = { index: 0, message: "WIP", commitId: "abc" };
+    const stashA: StashEntry = { index: 0, message: "WIP", commitId: "abc", branch: null, timestamp: 1700000000, fileCount: 1, hasStagedChanges: false };
     const client = transferClient({
       listStashes: async () => [stashA],
       dropStash: async () => {
@@ -99,7 +99,7 @@ describe("useAppState", () => {
   });
 
   it("dropStash clears the selected row optimistically when dropping the currently-selected stash", async () => {
-    const stashA: StashEntry = { index: 0, message: "WIP", commitId: "abc" };
+    const stashA: StashEntry = { index: 0, message: "WIP", commitId: "abc", branch: null, timestamp: 1700000000, fileCount: 1, hasStagedChanges: false };
     let resolveDrop: (() => void) | null = null;
     const client = transferClient({
       listStashes: async () => [stashA],
@@ -125,7 +125,7 @@ describe("useAppState", () => {
   });
 
   it("dropStash resets selectedRow to uncommitted when dropping the currently selected stash", async () => {
-    const stash: StashEntry = { index: 0, message: "WIP on main: abc1234 msg", commitId: "s1" };
+    const stash: StashEntry = { index: 0, message: "WIP on main: abc1234 msg", commitId: "s1", branch: "main", timestamp: 1700000000, fileCount: 1, hasStagedChanges: false };
     let listStashesCalls = 0;
     const client: RepoClient = transferClient({
       listStashes: async () => {
@@ -146,7 +146,7 @@ describe("useAppState", () => {
   });
 
   it("dropStash leaves selectedRow untouched when dropping a stash that isn't selected", async () => {
-    const stash: StashEntry = { index: 0, message: "WIP on main: abc1234 msg", commitId: "s1" };
+    const stash: StashEntry = { index: 0, message: "WIP on main: abc1234 msg", commitId: "s1", branch: "main", timestamp: 1700000000, fileCount: 1, hasStagedChanges: false };
     const client: RepoClient = transferClient({
       listStashes: async () => [stash],
       dropStash: async () => {},

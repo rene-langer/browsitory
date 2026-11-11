@@ -596,6 +596,14 @@ export interface StashEntry {
   index: number;
   message: string;
   commitId: string;
+  /** The branch it was made on, from git's message; `null` for a message in another form. */
+  branch: string | null;
+  /** When it was made, seconds since the epoch. */
+  timestamp: number;
+  /** Tracked changes plus untracked files. */
+  fileCount: number;
+  /** It recorded staged changes, so "Restore staged changes" makes a difference (#657). */
+  hasStagedChanges: boolean;
 }
 
 export interface GraphCommit {

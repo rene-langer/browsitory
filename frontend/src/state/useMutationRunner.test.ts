@@ -44,7 +44,6 @@ const BASE_STATE: AppState = {
   identityRequired: null,
   pullOutcome: null,
   mergeOutcome: null,
-  stashRestoreIndex: true,
   stashOutcome: null,
   transfer: null,
   error: null,

@@ -101,6 +101,7 @@ SequenceProgress/CherryPick key-order
 SequenceProgress/Revert key-order
 SignatureInput/plain key-order
 StashApplyOutcome/Conflicted key-order
+StashEntry/no-branch key-order
 StashEntry/plain key-order
 StashSwitchOutcome/Conflicted key-order
 StatusEntry/Conflicted key-order

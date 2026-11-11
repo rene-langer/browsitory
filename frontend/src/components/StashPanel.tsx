@@ -10,17 +10,21 @@ import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { ListRow } from "./primitives/ListRow";
 import styles from "./StashPanel.module.css";
 import { menuItem } from "../lib/actions/action";
-import { stashActions, type StashBlockers } from "../lib/actions/stashActions";
+import { stashActions, stashDetails, stashTitle, type StashBlockers } from "../lib/actions/stashActions";
+import { formatAbsoluteDate } from "../lib/formatDate";
 
 // `returnFocusTo`: the "…" button or row it was opened from by the pointer (WebKit focuses
 // neither); `undefined` for a key, so `ContextMenu` returns focus to what had it (as BranchTree).
 type StashMenu = { stash: StashEntry; x: number; y: number; returnFocusTo?: HTMLElement };
 
 /**
- * The Stashes sidebar section. Each row shows the stash message across the full width, with
- * Apply, Pop and Drop… in a menu (the "…" button, right-click, the Menu key or Shift+F10), the
- * same pattern as the Branches rows: three inline buttons left the message a few characters
- * wide in a 260px sidebar and wrapped onto several lines (#339).
+ * The Stashes sidebar section. Each row shows the stash's name across the full width with "On
+ * main · 2 days ago · 3 files" below it (#657), and Apply, Pop and Drop… in a menu (the "…"
+ * button, right-click, the Menu key or Shift+F10), the same pattern as the Branches rows: three
+ * inline buttons left the message a few characters wide in a 260px sidebar and wrapped onto
+ * several lines (#339). Apply and Pop restore staged changes as staged; a stash that recorded
+ * staged changes also offers "Apply as unstaged" and "Pop as unstaged" (#657, which replaced a
+ * list-wide "Restore staged changes" checkbox).
  */
 export function StashPanel({
   stashes,
@@ -28,20 +32,16 @@ export function StashPanel({
   onApplyStash,
   onPopStash,
   onDropStash,
-  restoreIndex,
-  onSetRestoreIndex,
   blockers,
   revealRequest,
 }: {
   stashes: StashEntry[];
   onSelectRow: (row: SelectedRow) => void;
-  onApplyStash: (index: number) => void;
-  onPopStash: (index: number) => void;
+  // `restoreIndex`: false for "Apply/Pop as unstaged".
+  onApplyStash: (index: number, restoreIndex: boolean) => void;
+  onPopStash: (index: number, restoreIndex: boolean) => void;
   // A promise settles when the drop has finished, failed or been refused.
   onDropStash: (index: number) => void | Promise<unknown>;
-  // "Restore staged changes" for Apply and Pop (shared with the stash view).
-  restoreIndex: boolean;
-  onSetRestoreIndex: (on: boolean) => void;
   // Why Apply/Pop and Drop can't run now (`stashBlockers`, shared with the stash view and the
   // palette, #509), shown as the disabled items' titles (issue #31/UX-003). Drop is blocked only
   // by an action in flight or a transfer: dropping a stash while resolving a paused merge, rebase
@@ -102,8 +102,10 @@ export function StashPanel({
   const menuItems = (stash: StashEntry): ContextMenuItem[] => {
     const actions = stashActions(blockers, stash);
     return [
-      menuItem(actions.apply, () => onApplyStash(stash.index)),
-      menuItem(actions.pop, () => onPopStash(stash.index)),
+      menuItem(actions.apply, () => onApplyStash(stash.index, true)),
+      ...(actions.applyUnstaged === null ? [] : [menuItem(actions.applyUnstaged, () => onApplyStash(stash.index, false))]),
+      menuItem(actions.pop, () => onPopStash(stash.index, true)),
+      ...(actions.popUnstaged === null ? [] : [menuItem(actions.popUnstaged, () => onPopStash(stash.index, false))]),
       {
         ...menuItem(actions.drop, () => {
           setDroppedCommitId(null);
@@ -135,54 +137,51 @@ export function StashPanel({
         </p>
       ) : (
         <>
-          <label className={styles.restoreIndex}>
-            <input
-              type="checkbox"
-              checked={restoreIndex}
-              onChange={(event) => onSetRestoreIndex(event.target.checked)}
-            />
-            Restore staged changes
-          </label>
           <ul
             ref={(element) => {
               bodyRef.current = element;
             }}
             className={styles.list}
           >
-            {stashes.map((stash) => (
-              <ListRow
-                key={stash.commitId}
-                onClick={() => onSelectRow({ commitId: stash.commitId })}
-                onOpenMenu={(anchor, trigger) => openMenu({ stash, ...anchor, returnFocusTo: trigger })}
-              >
-                <Archive size={14} aria-hidden="true" className={styles.rowIcon} />
-                <span className={styles.message} title={stash.message}>
-                  {stash.message}
-                </span>
-                <button
-                  type="button"
-                  className={styles.iconButton}
-                  aria-label={`Actions for ${stash.message}`}
-                  aria-haspopup="menu"
-                  aria-expanded={menu?.stash.commitId === stash.commitId}
-                  data-menu-key={stash.commitId}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    const trigger = event.currentTarget;
-                    if (menu?.stash.commitId === stash.commitId) {
-                      // A second click closes it; focus stays on the button (WebKit may not have
-                      // focused it on the click).
-                      trigger.focus({ preventScroll: true });
-                      setMenu(null);
-                    } else {
-                      openMenu({ stash, ...rectAnchor(trigger), returnFocusTo: trigger });
-                    }
-                  }}
+            {stashes.map((stash) => {
+              const title = stashTitle(stash);
+              const details = stashDetails(stash);
+              return (
+                <ListRow
+                  key={stash.commitId}
+                  onClick={() => onSelectRow({ commitId: stash.commitId })}
+                  onOpenMenu={(anchor, trigger) => openMenu({ stash, ...anchor, returnFocusTo: trigger })}
                 >
-                  <MoreHorizontal size={14} aria-hidden="true" />
-                </button>
-              </ListRow>
-            ))}
+                  <Archive size={14} aria-hidden="true" className={styles.rowIcon} />
+                  <span className={styles.text} title={`${stash.message}\n${formatAbsoluteDate(stash.timestamp)}`}>
+                    <span className={styles.message}>{title}</span>
+                    <span className={styles.details}>{details}</span>
+                  </span>
+                  <button
+                    type="button"
+                    className={styles.iconButton}
+                    aria-label={`Actions for ${title}`}
+                    aria-haspopup="menu"
+                    aria-expanded={menu?.stash.commitId === stash.commitId}
+                    data-menu-key={stash.commitId}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      const trigger = event.currentTarget;
+                      if (menu?.stash.commitId === stash.commitId) {
+                        // A second click closes it; focus stays on the button (WebKit may not have
+                        // focused it on the click).
+                        trigger.focus({ preventScroll: true });
+                        setMenu(null);
+                      } else {
+                        openMenu({ stash, ...rectAnchor(trigger), returnFocusTo: trigger });
+                      }
+                    }}
+                  >
+                    <MoreHorizontal size={14} aria-hidden="true" />
+                  </button>
+                </ListRow>
+              );
+            })}
           </ul>
         </>
       )}
@@ -200,10 +199,10 @@ export function StashPanel({
       )}
       {dropStash !== undefined && (
         <ConfirmDialog
-          ariaLabel={`Drop stash ${dropStash.message}`}
+          ariaLabel={`Drop stash ${stashTitle(dropStash)}`}
           message={
             <>
-              <p>Drop "{dropStash.message}"? This cannot be undone.</p>
+              <p>Drop "{stashTitle(dropStash)}"? This cannot be undone.</p>
               {/* #521: the repository can become busy while the confirmation is open. */}
               {dropDisabledReason !== null && <p className={formStyles.blocked}>{dropDisabledReason}</p>}
             </>

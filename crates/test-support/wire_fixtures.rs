@@ -1651,14 +1651,32 @@ pub fn pull_outcomes() -> Cases<git_core::remote::PullOutcome> {
 }
 
 pub fn stash_entries() -> Cases<git_core::stash::StashEntry> {
-    vec![case(
-        "plain",
-        git_core::stash::StashEntry {
-            index: 0,
-            message: "WIP on main: Add".to_string(),
-            commit_id: "1515151515151515151515151515151515151515".to_string(),
-        },
-    )]
+    vec![
+        case(
+            "plain",
+            git_core::stash::StashEntry {
+                index: 0,
+                message: "WIP on main: Add".to_string(),
+                commit_id: "1515151515151515151515151515151515151515".to_string(),
+                branch: Some("main".to_string()),
+                timestamp: 1_700_000_000,
+                file_count: 3,
+                has_staged_changes: true,
+            },
+        ),
+        case(
+            "no-branch",
+            git_core::stash::StashEntry {
+                index: 1,
+                message: "autostash".to_string(),
+                commit_id: "1616161616161616161616161616161616161616".to_string(),
+                branch: None,
+                timestamp: 1_700_000_000,
+                file_count: 1,
+                has_staged_changes: false,
+            },
+        ),
+    ]
 }
 
 pub fn stash_apply_outcomes() -> Cases<git_core::stash::StashApplyOutcome> {

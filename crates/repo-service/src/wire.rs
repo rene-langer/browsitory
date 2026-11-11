@@ -495,6 +495,10 @@ pub struct StashEntryDto {
     pub index: usize,
     pub message: String,
     pub commit_id: String,
+    pub branch: Option<String>,
+    pub timestamp: i64,
+    pub file_count: usize,
+    pub has_staged_changes: bool,
 }
 
 impl From<git_core::stash::StashEntry> for StashEntryDto {
@@ -503,6 +507,10 @@ impl From<git_core::stash::StashEntry> for StashEntryDto {
             index: s.index,
             message: s.message,
             commit_id: s.commit_id,
+            branch: s.branch,
+            timestamp: s.timestamp,
+            file_count: s.file_count,
+            has_staged_changes: s.has_staged_changes,
         }
     }
 }

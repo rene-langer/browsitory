@@ -106,11 +106,9 @@ export function WorkspaceSidebar({
         <StashPanel
           stashes={appState.state.stashes}
           onSelectRow={selectRowClosingCompare}
-          onApplyStash={appState.applyStash}
-          onPopStash={appState.popStash}
+          onApplyStash={(index, restoreIndex) => void appState.applyStash(index, restoreIndex)}
+          onPopStash={(index, restoreIndex) => void appState.popStash(index, restoreIndex)}
           onDropStash={dropStash}
-          restoreIndex={appState.state.stashRestoreIndex}
-          onSetRestoreIndex={appState.setStashRestoreIndex}
           blockers={storedStashBlockers}
           revealRequest={sectionRevealRequest(revealRequest, "stash")}
         />

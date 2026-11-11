@@ -166,8 +166,6 @@ export interface AppState {
   identityRequired: "commit" | "amend" | null;
   // The last "Merge into current branch" result, for its toast.
   mergeOutcome: { branchName: string; outcome: MergeOutcome } | null;
-  // "Restore staged changes" for stash Apply/Pop; session-only, default on.
-  stashRestoreIndex: boolean;
   // The last stash Apply/Pop result, for its toast.
   stashOutcome: { action: "apply" | "pop"; outcome: StashApplyOutcome } | null;
   transfer: TransferProgress | null;
@@ -322,7 +320,6 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     stashSwitchOutcome: null,
     identityRequired: null,
     mergeOutcome: null,
-    stashRestoreIndex: true,
     stashOutcome: null,
     transfer: null,
     transferSubject: null,
@@ -627,7 +624,6 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     runOptimisticMutation,
     setState,
     state.stashes,
-    state.stashRestoreIndex,
   );
 
   const mergeRebase = useMergeRebaseActions(client, repoPath, runMutation, setState);

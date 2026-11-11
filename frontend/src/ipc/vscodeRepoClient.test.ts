@@ -1104,7 +1104,7 @@ describe("vscodeRepoClient", () => {
     await expect(savePromise).resolves.toBeNull();
 
     const listPromise = vscodeRepoClient.listStashes("/repo");
-    respond(2, [{ index: 0, message: "WIP", commitId: "abc123" }]);
+    respond(2, [{ index: 0, message: "WIP", commitId: "abc123", branch: null, timestamp: 1700000000, fileCount: 1, hasStagedChanges: false }]);
     await expect(listPromise).resolves.toHaveLength(1);
 
     const applyPromise = vscodeRepoClient.applyStash("/repo", 0, "abc123", true);
