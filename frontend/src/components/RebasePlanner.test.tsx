@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RebasePlanCommit, RepoClient } from "../ipc/RepoClient";
 import { RebasePlanner } from "./RebasePlanner";
 import { fakeRepoClient } from "../test/fakeRepoClient";
@@ -620,5 +620,126 @@ describe("RebasePlanner", () => {
     const rows = within(screen.getByRole("list")).getAllByRole("listitem");
     expect(rows.map((row) => row.textContent?.slice(0, 7))).toEqual(["bbb2222", "aaa1111", "ccc3333"]);
     expect(select).toHaveFocus();
+  });
+
+  // #744: dragging a row by its handle. jsdom has no layout, so each test says which row is under
+  // the pointer and where it sits.
+  describe("dragging rows", () => {
+    const originalElementFromPoint = document.elementFromPoint;
+    afterEach(() => {
+      document.elementFromPoint = originalElementFromPoint;
+    });
+
+    function rowOf(text: string): HTMLElement {
+      return screen.getByText(text).closest("li") as HTMLElement;
+    }
+
+    function rowOrder(): (string | undefined)[] {
+      return within(screen.getByRole("list"))
+        .getAllByRole("listitem")
+        .map((row) => row.textContent?.slice(0, 7));
+    }
+
+    // Drags the handle of the row named `source` over `target`, into its upper or lower half.
+    function dragOver(source: string, target: string, half: "upper" | "lower") {
+      const targetRow = rowOf(target);
+      targetRow.getBoundingClientRect = () =>
+        ({ top: 100, bottom: 120, height: 20, left: 0, right: 100, width: 100, x: 0, y: 100 }) as DOMRect;
+      document.elementFromPoint = vi.fn(() => targetRow);
+      const handle = within(rowOf(source)).getByTitle("Drag to move");
+      fireEvent.pointerDown(handle, { clientX: 5, clientY: 5, button: 0 });
+      fireEvent.pointerMove(window, { clientX: 5, clientY: half === "upper" ? 105 : 115 });
+    }
+
+    async function renderThree(onStartRebase = vi.fn()) {
+      render(
+        <RebasePlanner
+          repoPath={TEST_REPO_PATH}
+          client={fakeClient({ commitsSince: async () => threeCommits })}
+          onto="base"
+          onStartRebase={onStartRebase}
+          onCancel={vi.fn()}
+        />,
+      );
+      await screen.findByText(/add a/);
+    }
+
+    it("moves a row below the row it is dropped on, and announces where it went", async () => {
+      const onStartRebase = vi.fn();
+      await renderThree(onStartRebase);
+
+      dragOver("aaa1111 add a", "ccc3333 add c", "lower");
+      expect(rowOf("ccc3333 add c")).toHaveAttribute("data-drop-position", "after");
+      expect(rowOf("aaa1111 add a")).toHaveAttribute("data-dragging", "true");
+      fireEvent.pointerUp(window, { clientX: 5, clientY: 115 });
+
+      expect(rowOrder()).toEqual(["bbb2222", "ccc3333", "aaa1111"]);
+      expect(screen.getByRole("status")).toHaveTextContent("Moved aaa1111 add a to position 3 of 3.");
+      expect(rowOf("ccc3333 add c")).not.toHaveAttribute("data-drop-position");
+      fireEvent.click(screen.getByText("Start rebase"));
+      await waitFor(() => expect(onStartRebase).toHaveBeenCalled());
+      const [, plan] = onStartRebase.mock.calls[0];
+      expect(plan.map((entry: { commitId: string }) => entry.commitId)).toEqual(["bbb", "ccc", "aaa"]);
+    });
+
+    it("moves a row above the row it is dropped on", async () => {
+      await renderThree();
+      dragOver("ccc3333 add c", "bbb2222 add b", "upper");
+      expect(rowOf("bbb2222 add b")).toHaveAttribute("data-drop-position", "before");
+      fireEvent.pointerUp(window, { clientX: 5, clientY: 105 });
+      expect(rowOrder()).toEqual(["aaa1111", "ccc3333", "bbb2222"]);
+      expect(screen.getByRole("status")).toHaveTextContent("Moved ccc3333 add c to position 2 of 3.");
+    });
+
+    it("says so when a row is dropped where it already is", async () => {
+      await renderThree();
+      dragOver("aaa1111 add a", "bbb2222 add b", "upper");
+      fireEvent.pointerUp(window, { clientX: 5, clientY: 105 });
+      expect(rowOrder()).toEqual(["aaa1111", "bbb2222", "ccc3333"]);
+      expect(screen.getByRole("status")).toHaveTextContent("aaa1111 add a stays at position 1 of 3.");
+    });
+
+    it("cancels with Escape and leaves the order alone", async () => {
+      await renderThree();
+      dragOver("aaa1111 add a", "ccc3333 add c", "lower");
+      fireEvent.keyDown(window, { key: "Escape" });
+      fireEvent.pointerUp(window, { clientX: 5, clientY: 115 });
+      expect(rowOrder()).toEqual(["aaa1111", "bbb2222", "ccc3333"]);
+      expect(screen.getByRole("status")).toHaveTextContent("Move cancelled.");
+      expect(rowOf("ccc3333 add c")).not.toHaveAttribute("data-drop-position");
+    });
+
+    it("does nothing when released outside the rows", async () => {
+      await renderThree();
+      document.elementFromPoint = vi.fn(() => document.body);
+      fireEvent.pointerDown(within(rowOf("aaa1111 add a")).getByTitle("Drag to move"), {
+        clientX: 5,
+        clientY: 5,
+        button: 0,
+      });
+      fireEvent.pointerMove(window, { clientX: 5, clientY: 300 });
+      fireEvent.pointerUp(window, { clientX: 5, clientY: 300 });
+      expect(rowOrder()).toEqual(["aaa1111", "bbb2222", "ccc3333"]);
+      expect(screen.getByRole("status")).toHaveTextContent("Move cancelled.");
+    });
+
+    it("announces where the drag started, and its handle is hidden from assistive technology", async () => {
+      await renderThree();
+      const handle = within(rowOf("bbb2222 add b")).getByTitle("Drag to move");
+      expect(handle).toHaveAttribute("aria-hidden", "true");
+      dragOver("bbb2222 add b", "ccc3333 add c", "lower");
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "Moving bbb2222 add b. Release over a row to place it; Escape cancels.",
+      );
+    });
+
+    it("announces a move made with the buttons or Alt+arrow keys too", async () => {
+      await renderThree();
+      fireEvent.click(screen.getByRole("button", { name: "Move down: aaa1111 add a" }));
+      expect(screen.getByRole("status")).toHaveTextContent("Moved aaa1111 add a to position 2 of 3.");
+      const select = screen.getByRole("combobox", { name: "Action for aaa1111 add a" });
+      fireEvent.keyDown(select, { key: "ArrowDown", altKey: true });
+      expect(screen.getByRole("status")).toHaveTextContent("Moved aaa1111 add a to position 3 of 3.");
+    });
   });
 });
