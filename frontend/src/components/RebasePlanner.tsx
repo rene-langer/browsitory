@@ -13,6 +13,19 @@ import styles from "./RebasePlanner.module.css";
 import { BlockedReason } from "./primitives/BlockedReason";
 import { describedBy } from "../lib/ariaDescribedBy";
 import { shortRefName } from "../lib/shortRefName";
+import { usePointerDrag, type PointerDragOver } from "../state/usePointerDrag";
+
+/** The drop-target scope of the planner's rows (#744). */
+const PLAN_ROW = "rebase-plan-row";
+
+/** The nearest ancestor of `element` that scrolls vertically, for the drag's edge scrolling. */
+function scrollParent(element: HTMLElement | null): HTMLElement | null {
+  for (let node = element?.parentElement ?? null; node !== null; node = node.parentElement) {
+    const { overflowY } = getComputedStyle(node);
+    if (overflowY === "auto" || overflowY === "scroll") return node;
+  }
+  return null;
+}
 
 /**
  * The planner's title: "Rebase onto <branch>" when `onto` is a branch's full ref name (a branch
@@ -198,6 +211,9 @@ export function RebasePlanner({
   // The control that moved a row: a keyed reorder can take its node out of the document, which
   // drops focus, so it is focused again after the render.
   const refocus = useRef<HTMLElement | null>(null);
+  // What the status region reads out: a move's result, a drag's start or cancel (#744).
+  const [announcement, setAnnouncement] = useState("");
+  const listRef = useRef<HTMLUListElement>(null);
 
   useLayoutEffect(() => {
     const element = refocus.current;
@@ -241,16 +257,59 @@ export function RebasePlanner({
     setAttempt((n) => n + 1);
   };
 
+  const rowName = (row: Row) => `${row.commit.shortId} ${row.commit.summary}`;
+
+  // Moves the row at `from` to `to` and says where it went (#744: keyboard moves too).
+  const moveRowTo = (from: number, to: number, control?: HTMLElement) => {
+    const name = rowName(rows[from]);
+    if (to === from) {
+      setAnnouncement(`${name} stays at position ${from + 1} of ${rows.length}.`);
+      return;
+    }
+    const next = [...rows];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    refocus.current = control ?? null;
+    changeRows(next);
+    setAnnouncement(`Moved ${name} to position ${to + 1} of ${rows.length}.`);
+  };
+
   const moveRow = (index: number, direction: -1 | 1, control?: HTMLElement) => {
     const target = index + direction;
     if (target < 0 || target >= rows.length) {
       return;
     }
-    const next = [...rows];
-    [next[index], next[target]] = [next[target], next[index]];
-    refocus.current = control ?? null;
-    changeRows(next);
+    moveRowTo(index, target, control);
   };
+
+  // Where a row dragged from `from` lands when dropped on `over`: before or after that row.
+  const dropIndex = (from: number, over: PointerDragOver): number | null => {
+    const overIndex = rows.findIndex((row) => row.commit.id === over.key);
+    if (overIndex < 0) return null;
+    const insertAt = overIndex + (over.position === "after" ? 1 : 0);
+    return insertAt > from ? insertAt - 1 : insertAt;
+  };
+
+  const { drag, startDrag } = usePointerDrag<string>({
+    scope: PLAN_ROW,
+    autoScroll: () => scrollParent(listRef.current),
+    onStart: (id) => {
+      const row = rows.find((candidate) => candidate.commit.id === id);
+      if (row !== undefined) {
+        setAnnouncement(`Moving ${rowName(row)}. Release over a row to place it; Escape cancels.`);
+      }
+    },
+    onCancel: () => setAnnouncement("Move cancelled."),
+    onDrop: (id, over) => {
+      const from = rows.findIndex((row) => row.commit.id === id);
+      const to = from < 0 || over === null ? null : dropIndex(from, over);
+      if (to === null) {
+        setAnnouncement("Move cancelled.");
+        return;
+      }
+      moveRowTo(from, to);
+    },
+  });
 
   // Alt+Up/Down moves the row holding the focused control; plain arrows stay with the control.
   const onRowKeyDown = (index: number, event: KeyboardEvent<HTMLElement>) => {
@@ -352,17 +411,36 @@ export function RebasePlanner({
       )}
       {rows.length > 0 && (
         <p className={styles.caption}>
-          Oldest commit first: the rebase replays them from top to bottom. Alt+Up and Alt+Down move
-          the row you are in.
+          Oldest commit first: the rebase replays them from top to bottom. Drag a row by its handle,
+          or press Alt+Up and Alt+Down to move the row you are in.
         </p>
       )}
-      <ul className={styles.list}>
+      <p role="status" className={styles.srOnly}>
+        {announcement}
+      </p>
+      <ul className={styles.list} ref={listRef}>
         {rows.map((row, index) => {
-          const name = `${row.commit.shortId} ${row.commit.summary}`;
+          const name = rowName(row);
           const combined = combinedMessageAt(index);
+          const dragged = drag?.payload === row.commit.id;
+          // The drop line shows on the hovered row, unless dropping there wouldn't move anything.
+          const position =
+            drag !== null && !dragged && drag.over?.key === row.commit.id ? drag.over.position : undefined;
           return (
-            <ListRow key={row.commit.id}>
+            <ListRow
+              key={row.commit.id}
+              dropTarget={{ scope: PLAN_ROW, key: row.commit.id, position }}
+              dragging={dragged}
+            >
               <div className={styles.rowKeys} onKeyDown={(event) => onRowKeyDown(index, event)}>
+                {/* The pointer's way to move a row; the Move buttons and Alt+arrows are the
+                    keyboard's, so the handle stays out of the tab order and the tree. */}
+                <span
+                  className={styles.grip}
+                  aria-hidden="true"
+                  title="Drag to move"
+                  onPointerDown={(event) => startDrag(event, row.commit.id)}
+                />
                 <span>{name}</span>
                 <button
                   aria-label={`Move up: ${name}`}
@@ -447,6 +525,11 @@ export function RebasePlanner({
         </button>
         <button onClick={onCancel}>Cancel</button>
       </Toolbar>
+      {drag !== null && (
+        <div className={styles.dragLabel} style={{ left: drag.x + 12, top: drag.y + 12 }} aria-hidden="true">
+          {rows.find((row) => row.commit.id === drag.payload)?.commit.shortId}
+        </div>
+      )}
     </Panel>
   );
 }

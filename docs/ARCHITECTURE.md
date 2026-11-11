@@ -254,6 +254,19 @@ tab that unmounts mid-transfer hands it to the next mount of its workspace
 (`useRemoteTransferActions`). The rebase planner (`rebaseOnto`/`rebasePreset`) predates
 the rule and still has its own fields.
 
+### Drag and drop inside the app
+
+Dragging inside the page (#744) uses pointer events through one hook,
+`frontend/src/state/usePointerDrag.ts`, not the HTML5 drag API. The desktop app keeps Tauri's
+native file-drop handler on for dropped folders and patches (#649), and with it on, WebView2 on
+Windows delivers no HTML5 drag events inside the page; pointer events work the same there, in
+WebKitGTK and in the VSCode webview. A press turns into a drag after 4 px. The listeners sit on
+`window`, so a source row that a windowed list unmounts mid-drag doesn't end it. The target is
+the element under the pointer (`elementFromPoint`) carrying `dropTargetProps(scope, key)`, so
+each drag sees only its own targets. Escape or `pointercancel` cancels, and the click that ends a
+drag is swallowed. A drag is never the only way: the rebase planner's rows also move with
+**Move up**/**Move down** and Alt+Up/Down, and every move is announced in a status region.
+
 ## git2 API gotchas
 
 - `StatusEntry::path()`, `Signature::name()`/`email()`, and `Reference::shorthand()` return
