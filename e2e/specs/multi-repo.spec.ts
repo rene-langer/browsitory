@@ -13,7 +13,7 @@ describe("Browsitory multi-repo tabs", () => {
 
     await browser.execute((el) => (el as HTMLElement).click(), await $('button[aria-label="Open another repository"]'));
 
-    const secondRepoRow = await $(`li*=${E2E_SECOND_REPO_PATH}`);
+    const secondRepoRow = await $(`button*=${E2E_SECOND_REPO_PATH}`);
     await secondRepoRow.waitForExist();
     await browser.execute((el) => (el as HTMLElement).click(), secondRepoRow);
 
@@ -153,7 +153,7 @@ describe("Browsitory multi-repo tabs", () => {
     });
 
     await browser.execute((el) => (el as HTMLElement).click(), await $('button[aria-label="Open another repository"]'));
-    const secondRepoRow = await $(`li*=${E2E_SECOND_REPO_PATH}`);
+    const secondRepoRow = await $(`button*=${E2E_SECOND_REPO_PATH}`);
     await secondRepoRow.waitForExist();
     await browser.execute((el) => (el as HTMLElement).click(), secondRepoRow);
     await browser.waitUntil(async () => (await (await $$('[role="tab"]')).length) === 2, {
