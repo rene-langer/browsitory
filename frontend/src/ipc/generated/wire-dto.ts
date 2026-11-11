@@ -259,6 +259,10 @@ export type RepoAlias = { repoPath: string, alias: string, };
 
 export type RepoErrorPayload = { kind: ErrorKind, message: string, };
 
+export type RepoWatch = { repoPath: string, kind: RepoWatchKind, };
+
+export type RepoWatchKind = "Changed" | "Stopped";
+
 export type ResetMode = "soft" | "mixed" | "hard";
 
 export type SearchPage = { commits: Array<GraphCommit>, nextCursor: string | null, scanned: number, };

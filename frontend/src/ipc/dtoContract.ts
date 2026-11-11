@@ -86,6 +86,8 @@ export type DtoContract = [
   Expect<Equal<Hand.HistoryEditKind, Wire.HistoryEditKind>>,
   Expect<Equal<Hand.HistoryEditTarget, Wire.HistoryEditTarget>>,
   Expect<Equal<Hand.HookProgress, Wire.HookProgress>>,
+  Expect<Equal<Hand.RepoWatch, Wire.RepoWatch>>,
+  Expect<Equal<Hand.RepoWatchKind, Wire.RepoWatchKind>>,
   Expect<Equal<Hand.HookSource, Wire.HookSource>>,
   Expect<Equal<Hand.MarkResolvedOutcome, Wire.MarkResolvedOutcome>>,
   Expect<Equal<Hand.MergeOptions, Wire.MergeOptions>>,

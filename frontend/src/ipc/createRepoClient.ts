@@ -97,7 +97,8 @@ export type BackendCall = <T>(method: string, params?: Record<string, unknown>) 
  *   own commands (`supportsCloneAndInit: false`), which `runHostGitCommand` runs there (#680).
  * - `listOpenRepos`: the Tauri command answers a `[entries, activePath]` tuple, the sidecar an
  *   object.
- * - the two progress subscriptions: Tauri events on the desktop, JSON-RPC notifications in VSCode.
+ * - the two progress subscriptions and the repository watchers' reports: Tauri events on the
+ *   desktop, JSON-RPC notifications in VSCode.
  * - file drops (#649): the desktop webview's drag and drop events and `readPatchFile`; none in
  *   VSCode, which handles drops on its windows itself.
  * - `logFrontendError`: the desktop app writes through its log plugin and has no command for it.
@@ -113,6 +114,7 @@ export type TransportSpecific =
   | "listOpenRepos"
   | "subscribeTransferProgress"
   | "subscribeHookProgress"
+  | "subscribeRepoWatch"
   | "subscribeFileDrops"
   | "readPatchFile"
   | "subscribeHostRequests"
@@ -132,6 +134,8 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
     closeRepo: (repoPath: string) => call<void>("close_repo", { repoPath }),
     getStatus: (repoPath: string) => call<StatusEntry[]>("get_status", { repoPath }),
     getChangeStamp: (repoPath: string) => call<string>("get_change_stamp", { repoPath }),
+    watchRepo: (repoPath: string) => call<boolean>("watch_repo", { repoPath }),
+    unwatchRepo: (repoPath: string) => call<void>("unwatch_repo", { repoPath }),
     getCommitGraph: (repoPath: string, limit: number, selection: GraphSelection) =>
       call<GraphCommit[]>("get_commit_graph", { repoPath, limit, selection }),
     locateCommit: (repoPath: string, revision: string, selection: GraphSelection) =>

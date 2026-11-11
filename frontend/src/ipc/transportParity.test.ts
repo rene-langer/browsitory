@@ -49,6 +49,7 @@ const ARGS = Array.from({ length: 8 }, (_, index) => ({ [`arg${index}`]: index }
 const SUBSCRIPTIONS = [
   "subscribeTransferProgress",
   "subscribeHookProgress",
+  "subscribeRepoWatch",
   "subscribeFileDrops",
   "subscribeHostRequests",
 ] as const satisfies readonly Method[];

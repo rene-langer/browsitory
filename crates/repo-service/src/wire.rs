@@ -1266,6 +1266,27 @@ pub fn hook_progress_dto(repo_path: &str, event: HookEvent) -> HookProgressDto {
     }
 }
 
+/// Payload of the `repo-watch` event / `repoWatch` notification (#756): the watcher of the
+/// repository the frontend watches as `repo_path` saw a change (`Changed`), or stopped
+/// (`Stopped`) and the frontend should poll instead.
+#[derive(Clone, Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "RepoWatch"))]
+#[serde(rename_all = "camelCase")]
+pub struct RepoWatchDto {
+    pub repo_path: String,
+    pub kind: crate::watch::WatchEvent,
+}
+
+/// The payload of a watcher event for `repo_path`: the desktop app's `repo-watch` event and the
+/// sidecar's `repoWatch` notification.
+pub fn repo_watch_dto(repo_path: &str, event: crate::watch::WatchEvent) -> RepoWatchDto {
+    RepoWatchDto {
+        repo_path: repo_path.to_string(),
+        kind: event,
+    }
+}
+
 #[derive(Serialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[cfg_attr(any(test, feature = "ts"), ts(rename = "PickOutcome"))]
@@ -3114,6 +3135,8 @@ mod ts_bindings {
             CommitOutcomeDto,
             HookProgressDto,
             HookProgressPhaseDto,
+            crate::watch::WatchEvent,
+            RepoWatchDto,
             PickOutcomeDto,
             UndoStateDto,
             SignatureStatusDto,

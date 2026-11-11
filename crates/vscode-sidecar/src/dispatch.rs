@@ -31,6 +31,7 @@ mod tag;
 mod tools;
 mod tree;
 mod undo;
+mod watch;
 mod worktree;
 
 use branch::*;
@@ -53,6 +54,7 @@ use tag::*;
 use tools::*;
 use tree::*;
 use undo::*;
+use watch::*;
 use worktree::*;
 
 /// Shared, thread-safe handle to the sidecar's open repositories: one worker per repository,
@@ -138,6 +140,8 @@ macro_rules! call_handler {
 methods!(|params, repos, stdout| {
     "open_repo" => open_repo(OpenRepoParams, repos),
     "close_repo" => close_repo(RepoPathParams, repos),
+    "watch_repo" => watch_repo(RepoPathParams, stdout),
+    "unwatch_repo" => unwatch_repo(RepoPathParams),
     "get_status" => get_status(RepoPathParams, repos),
     "get_change_stamp" => get_change_stamp(RepoPathParams, repos),
     "get_commit_graph" => get_commit_graph(GetCommitGraphParams, repos),

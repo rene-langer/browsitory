@@ -420,6 +420,27 @@ describe("tauriRepoClient transfer progress subscription", () => {
     });
   });
 
+  it("forwards repo-watch events and unregisters (#756)", async () => {
+    const unlisten = vi.fn();
+    let watchListener: ((event: { payload: unknown }) => void) | undefined;
+    vi.mocked(listen).mockImplementation(async (event, listener) => {
+      if (event === "repo-watch") watchListener = listener as typeof watchListener;
+      return unlisten;
+    });
+    const received = vi.fn();
+
+    const unsubscribe = tauriRepoClient.subscribeRepoWatch(received);
+    await vi.waitFor(() => expect(watchListener).toBeDefined());
+    const payload = { repoPath: "/r", kind: "Stopped" };
+    watchListener?.({ payload });
+    expect(received).toHaveBeenCalledWith(payload);
+
+    await vi.waitFor(() => {
+      unsubscribe();
+      expect(unlisten).toHaveBeenCalled();
+    });
+  });
+
   it("invokes cancel_transfer without waiting for the transfer listeners", async () => {
     // Unlike fetch/push/pull this starts no transfer, so it must not be gated on the listener
     // handshake — a cancel that waited for listeners that never resolve could never be sent.
