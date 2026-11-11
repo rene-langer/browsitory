@@ -232,8 +232,17 @@ where
             Command::ApplyPatch {
                 content,
                 how,
+                operation_id,
+                events,
                 reply,
-            } => patch::apply_patch(&self.repo, content, how, reply),
+            } => patch::apply_patch(
+                &self.repo,
+                content,
+                how,
+                remote::TransferOp::new(operation_id),
+                events,
+                reply,
+            ),
             Command::PreviewPatch { content, reply } => {
                 patch::preview_patch(&self.repo, content, reply)
             }
