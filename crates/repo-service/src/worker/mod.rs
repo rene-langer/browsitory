@@ -1135,12 +1135,20 @@ impl ReadHandle {
             .map_err(|_| ErrorDto::worker_stopped_before_replying())?
     }
 
-    /// A read lane request: `send` for the methods of `ReadHandle`.
+    /// A read lane request: `send` for the methods of `ReadHandle`, whose commands must all be
+    /// `Lane::Read` (checked in debug builds, so the worker tests check every method they reach).
     pub(crate) fn read<T>(
         &self,
         build: impl FnOnce(Sender<Result<T, ErrorDto>>) -> Command,
     ) -> Result<T, ErrorDto> {
-        self.send(build)
+        self.send(|reply| {
+            let command = build(reply);
+            debug_assert!(
+                policy::of(&command).lane == policy::Lane::Read,
+                "a ReadHandle method sends a main-lane command"
+            );
+            command
+        })
     }
 }
 

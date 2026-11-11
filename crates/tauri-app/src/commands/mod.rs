@@ -486,8 +486,8 @@ pub(crate) struct RepoWorker {
 impl RepoWorker {
     /// Runs `f` (one or more worker round trips) on the blocking pool and awaits its result.
     ///
-    /// Waits for the repository's gate first, so a repository holds at most one blocking-pool
-    /// thread (#181). Each queued call used to hold its own thread until the serial worker got
+    /// Waits for the repository's gate first, so a repository's calls hold at most one
+    /// blocking-pool thread (#181; its reads hold one more, see `read`). Each queued call used to hold its own thread until the serial worker got
     /// to it: a long hook plus repeated refreshes could fill Tokio's pool (512 threads), and every
     /// other repository's commands then queued behind them. The worker runs one command at a
     /// time, so waiting at the gate instead of in its queue loses little; waiting calls are
@@ -522,7 +522,7 @@ impl RepoWorker {
         F: FnOnce(&ReadHandle) -> Result<T, ErrorDto> + Send + 'static,
         T: Send + 'static,
     {
-        let turn = Arc::clone(&self.gates.main).lock_owned().await;
+        let turn = Arc::clone(&self.gates.read).lock_owned().await;
         let reads = self.handle.reads();
         off_runtime(move || {
             let _turn = turn;
