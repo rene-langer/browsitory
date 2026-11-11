@@ -76,28 +76,27 @@ describe("WorktreePanel", () => {
     expect(screen.getByText("/repos/project-feature")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Remove /repos/project" }),
-    ).toBeDisabled();
+    ).toHaveAttribute("aria-disabled", "true");
     expect(
       screen.getByRole("button", { name: "Remove /repos/project-feature" }),
     ).toBeEnabled();
   });
 
   // Disabled buttons went inert with no explanation — issue #31/UX-003.
-  it("explains why its controls are disabled via their title", () => {
+  it("explains why its controls are disabled", () => {
     renderPanel({ operationDisabled: true, operationDisabledReason: "A merge is in progress." });
 
     expect(screen.getByRole("button", { name: "Create worktree" })).toHaveAttribute(
       "title",
       "A merge is in progress.",
     );
-    expect(screen.getByRole("button", { name: "Open /repos/project" })).toHaveAttribute(
-      "title",
-      "A merge is in progress.",
-    );
-    expect(screen.getByRole("button", { name: "Prune worktrees" })).toHaveAttribute(
-      "title",
-      "A merge is in progress.",
-    );
+    // #748: the reason is the button's description, not only its title.
+    const open = screen.getByRole("button", { name: "Open /repos/project" });
+    expect(open).toHaveAttribute("aria-disabled", "true");
+    expect(open).toHaveAccessibleDescription("A merge is in progress.");
+    const prune = screen.getByRole("button", { name: "Prune worktrees" });
+    expect(prune).toHaveAttribute("aria-disabled", "true");
+    expect(prune).toHaveAccessibleDescription("A merge is in progress.");
   });
 
   it("forwards the name, path, branch, and start point supplied by the creation form", async () => {

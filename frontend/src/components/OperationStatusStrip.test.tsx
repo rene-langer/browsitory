@@ -109,8 +109,8 @@ describe("OperationStatusStrip", () => {
     const strip = screen.getByRole("status", { name: "Operation status" });
     expect(strip).toHaveTextContent("Cherry-picking 2/5");
     const cont = within(strip).getByRole("button", { name: "Continue" });
-    expect(cont).toBeDisabled();
-    expect(cont).toHaveAttribute("title", "Resolve 1 conflict to continue");
+    expect(cont).toHaveAttribute("aria-disabled", "true");
+    expect(cont).toHaveAccessibleDescription("Resolve 1 conflict to continue");
     fireEvent.click(within(strip).getByRole("button", { name: "Abort cherry-pick" }));
     expect(onAbortSequence).toHaveBeenCalled();
     expect(onAbortMerge).not.toHaveBeenCalled();
@@ -153,8 +153,8 @@ describe("OperationStatusStrip", () => {
         onAbortSequence={noop}
       />,
     );
-    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Abort cherry-pick" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Continue" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "Abort cherry-pick" })).toHaveAttribute("aria-disabled", "true");
   });
 
   describe("a stored rebase", () => {

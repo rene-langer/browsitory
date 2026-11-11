@@ -146,8 +146,8 @@ describe("CommitTreeBrowser", () => {
     const { onRestoreFileVersion } = renderBrowser({ restoreBlockedReason: "A merge is in progress." });
     fireEvent.click(await screen.findByRole("button", { name: /README\.txt/ }));
     const restore = await screen.findByRole("button", { name: "Restore…" });
-    expect(restore).toBeDisabled();
-    expect(restore).toHaveAttribute("title", "A merge is in progress.");
+    expect(restore).toHaveAttribute("aria-disabled", "true");
+    expect(restore).toHaveAccessibleDescription("A merge is in progress.");
     fireEvent.click(restore);
     expect(onRestoreFileVersion).not.toHaveBeenCalled();
   });
