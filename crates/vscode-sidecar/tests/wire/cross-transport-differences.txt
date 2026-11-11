@@ -94,6 +94,8 @@ RemoteInfo/HttpsToken key-order
 RemoteInfo/SshAgent key-order
 RemoteInfo/no-auth key-order
 RepoAlias/plain key-order
+RepoWatch/Changed key-order
+RepoWatch/Stopped key-order
 SearchPage/more key-order
 SequenceOutcome/Completed key-order
 SequenceOutcome/Conflicted key-order

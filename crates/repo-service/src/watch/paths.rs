@@ -114,13 +114,18 @@ pub(super) fn is_watched_git_folder(relative: &Path) -> bool {
     let Some(parts) = parts(relative) else {
         return false;
     };
-    match parts.as_slice() {
-        [] | ["refs", ..] => true,
-        ["rebase-merge"] | ["rebase-apply"] | ["sequencer"] | ["info"] => true,
-        ["logs"] | ["logs", "refs"] => true,
-        ["worktrees"] | ["worktrees", _] => true,
-        _ => false,
-    }
+    matches!(
+        parts.as_slice(),
+        [] | ["refs", ..]
+            | ["rebase-merge"]
+            | ["rebase-apply"]
+            | ["sequencer"]
+            | ["info"]
+            | ["logs"]
+            | ["logs", "refs"]
+            | ["worktrees"]
+            | ["worktrees", _]
+    )
 }
 
 /// Whether a change at `relative` in the work tree changes which files git ignores, so the
