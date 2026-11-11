@@ -9,10 +9,13 @@ clone or create a repository, the key for the [command palette](command-palette.
 **User guide** button that opens this guide in your browser. **Dismiss** closes the welcome; it
 also goes away once you open a repository, and doesn't come back.
 
-**Recent repositories.** Up to ten repositories you opened, newest first. The **×** at the end
-of a row takes it off the list (the folder stays where it is); opening the repository again
-puts it back. A repository whose folder is gone (moved, deleted, or on a drive that isn't
-connected) is marked **Folder not found**. Type in **Filter repositories and workspaces** to
+**Recent repositories.** Up to ten repositories you opened, newest first. The pin button at the
+end of a row pins the repository: pinned repositories come first, in the order you pinned them,
+stay there however many others you open, and don't count against the ten. Click the pin again
+to unpin it; it then goes back on top of the recent ones. The **×** takes a repository off the
+list, pinned or not (the folder stays where it is); opening the repository again puts it back.
+A repository whose folder is gone (moved, deleted, or on a drive that isn't connected) is marked
+**Folder not found**; a pinned one stays pinned until you unpin or remove it. Type in **Filter repositories and workspaces** to
 show only the recent repositories and workspaces whose name or path contains the text.
 
 Browsitory reopens the tabs you had open last time. To open another repository next to them,

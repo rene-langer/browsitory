@@ -62,7 +62,16 @@ applied). Then choose:
 - **Apply as commits**: each mail becomes a commit on the current branch with the mail's author,
   date and message, and you as the committer (signed when your Git configuration signs commits).
   Only for `git format-patch` mails, and only with nothing staged and no merge, rebase,
-  cherry-pick or revert in progress. Commit hooks don't run.
+  cherry-pick or revert in progress. It runs the hooks `git am` runs, not the commit hooks:
+  `applypatch-msg` before each mail is applied (it gets the mail's message in a file, and may
+  rewrite it or reject the mail), `pre-applypatch` once the mail's changes are staged and before
+  its commit (it may reject the mail; files it stages are part of the commit), and
+  `post-applypatch` for each commit. Unlike `git am`, which runs `post-applypatch` right after
+  each commit, Browsitory runs it once the whole file is applied, once per commit in order (so it
+  sees the last commit as HEAD each time), and not at all when the file is taken back. If
+  `applypatch-msg` or `pre-applypatch` rejects a mail, the whole file is taken back as described
+  below and a dialog shows the hook's output. While a hook runs, it shows in the strip at the
+  top of the repository with **Cancel**; cancelling takes the whole file back too.
 
 A file with several mails is applied in order, all or nothing: when one of them doesn't apply,
 the changes of the ones before it are put back too (and with **Apply as commits**, their commits
