@@ -270,3 +270,29 @@ fn hard_reset_with_a_file_open_in_another_program_says_so_and_finishes_when_trie
     assert_eq!(common::read(dir.path(), "z.txt"), "1\n");
     assert!(repo.statuses(None).unwrap().is_empty());
 }
+
+/// git writes the index first and moves the ref last (#796): a mixed or hard reset whose index
+/// can't be written (another git command holds `index.lock`) fails with HEAD and the branch still
+/// at the old commit, so nothing that sees HEAD at the target can find the old index under it.
+#[test]
+fn a_reset_that_cannot_write_the_index_leaves_head_where_it_was() {
+    for mode in [ResetMode::Mixed, ResetMode::Hard] {
+        let (_dir, repo, first) = three_commits();
+        let main = repo.head().unwrap().name().unwrap().to_string();
+        let tip = repo.head().unwrap().target().unwrap();
+        let lock = repo.path().join("index.lock");
+        std::fs::write(&lock, "").unwrap();
+
+        let result = reset_to(&repo, &first.to_string(), mode);
+
+        assert!(result.is_err(), "{mode:?}: {result:?}");
+        assert_eq!(
+            repo.find_reference(&main).unwrap().target(),
+            Some(tip),
+            "{mode:?}"
+        );
+        assert_eq!(repo.head().unwrap().target(), Some(tip), "{mode:?}");
+        // The lock is the other command's; the reset leaves it alone.
+        assert!(lock.exists(), "{mode:?}");
+    }
+}
