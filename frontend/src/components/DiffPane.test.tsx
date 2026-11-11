@@ -2173,6 +2173,36 @@ describe("DiffPane stash view", () => {
     expect(actions.onDrop).not.toHaveBeenCalled();
   });
 
+  // #772: the confirmation's reason is tied to its button, and shown once.
+  it("ties the open Drop confirmation's reason to its button (#772)", async () => {
+    const reason = "Another action is in progress.";
+    const client = fakeClient({
+      getStashFiles: vi.fn(async () => ({ tracked: ["a.txt"], untracked: [], untrackedCommitId: null })),
+      getCommitDiff: vi.fn(async () => []),
+      getBlame: async () => [],
+    });
+    const actions = stashActions();
+    const props = (current: StashActions) => ({
+      repoPath: TEST_REPO_PATH,
+      client,
+      selectedRow: { commitId: "s0" },
+      status: [],
+      mergeMessage: null,
+      rebaseProgress: null,
+      ...noopHandlers,
+      stashes: [stash],
+      stashActions: current,
+    });
+    const { rerender } = render(<DiffPane {...props(actions)} />);
+    const section = await screen.findByRole("region", { name: "Stash details" });
+    fireEvent.click(within(section).getByRole("button", { name: "Drop…" }));
+    rerender(<DiffPane {...props({ ...actions, blockers: { apply: null, drop: reason } })} />);
+    const dialog = screen.getByRole("dialog", { name: "Drop stash wip", hidden: true });
+    const confirm = within(dialog).getByRole("button", { name: "Drop stash", hidden: true });
+    expect(describedByText(confirm)).toBe(reason);
+    expect(within(dialog).getAllByText(reason)).toHaveLength(1);
+  });
+
   it("shows a load failure with Retry", async () => {
     let fail = true;
     const client = fakeClient({
