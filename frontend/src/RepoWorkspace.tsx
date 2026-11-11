@@ -24,6 +24,8 @@ import {
   subscribeLastFetch,
 } from "./lib/autoFetch";
 import { useAutoFetch } from "./state/useAutoFetch";
+import { useExternalChanges } from "./state/useExternalChanges";
+import { useScrollMemory } from "./state/useScrollMemory";
 import { useFetchSettingsContext } from "./state/useFetchSettings";
 import { useAppState } from "./state/useAppState";
 import { useFileHistory } from "./state/useFileHistory";
@@ -91,8 +93,9 @@ export function RepoWorkspace({
   openRepos: OpenRepo[];
   onSwitchRepoTab: (path: string) => void;
   onCloseRepoTab: (path: string) => void;
-  // `App`'s per-repo commit-message drafts (see `useCommitDrafts`): this workspace unmounts
-  // whenever its tab isn't active, so `CommitBox`'s own state can't outlive a tab switch.
+  // `App`'s per-repo commit-message drafts (see `useCommitDrafts`): `App` unmounts the
+  // workspaces of tabs not shown for a while (#642), so `CommitBox`'s own state can't be relied
+  // on to outlive a tab switch.
   getCommitDraft: (repoPath: string) => CommitDraft | undefined;
   onCommitDraftChange: (repoPath: string, draft: CommitDraft) => void;
   appCommands?: AppCommands;
@@ -352,12 +355,21 @@ export function RepoWorkspace({
   useAutoFetch({
     client,
     repoPath,
-    minutes: autoFetchMinutes,
+    // Only the shown tab fetches; a tab kept mounted in the background (#642) waits.
+    minutes: active ? autoFetchMinutes : 0,
     prune: appState.state.fetchPrune,
     busy: pending || transfer !== null,
     refresh: appState.refresh,
     notify: pushToast,
     openCredentials,
+  });
+  // A tab switched back to shows its lists where they were (#642).
+  useScrollMemory(workspaceElement, active);
+  // Changes made outside the app show without a manual refresh (#650).
+  useExternalChanges({
+    active,
+    busy: discardDropBlockedReason !== null,
+    checkForChanges: appState.checkForChanges,
   });
   const {
     terminalAbortRequest,
@@ -678,22 +690,25 @@ export function RepoWorkspace({
   // Closing this tab while a transfer/merge/rebase is in progress would orphan it mid-operation
   // — report busy status up so `App`'s `RepoTabs` can disable this tab's close button, the same
   // rule that already disables every other mutating action while this is true.
+  // A tab in the background (#642) counts only while something of it runs: a paused merge or
+  // rebase lives on disk, so closing that tab loses nothing, as when it was unmounted.
+  const reportedBusy = active ? repositoryOperationDisabled : discardDropBlockedReason !== null;
   useEffect(() => {
-    onBusyChange(repoPath, repositoryOperationDisabled);
-  }, [repoPath, repositoryOperationDisabled, onBusyChange]);
-  // Only the active tab's workspace is mounted (PERF-001), so switching away mid-operation
-  // unmounts this component before its "no longer busy" report can ever fire — which would leave
-  // the backgrounded tab's close button disabled for good. Clear it on the way out: the worker
+    onBusyChange(repoPath, reportedBusy);
+  }, [repoPath, reportedBusy, onBusyChange]);
+  // `App` unmounts a background tab's workspace once enough other tabs were shown since (#642),
+  // possibly mid-operation, before its "no longer busy" report can ever fire — which would leave
+  // that tab's close button disabled for good. Clear it on the way out: the worker
   // finishes its current command and exits cleanly, and every paused operation lives on disk
   // (`MERGE_HEAD`, `sequence.json`, `rebase.json`), so `refresh()` re-reads it on remount.
   useEffect(() => () => onBusyChange(repoPath, false), [repoPath, onBusyChange]);
 
   return (
-    // `data-active-repo` marks which workspace is the visible one. `App` only ever mounts the
-    // active tab's `RepoWorkspace` now (PERF-001), so in practice exactly one of these exists at
-    // a time — but the attribute (and the `active` prop it mirrors) stays: tests find the visible
-    // workspace by it, and this component's own internal gates (`active &&` below) still need a
-    // real boolean rather than an assumption that they're always mounted-implies-active.
+    // `data-active-repo` marks which workspace is the visible one. `App` keeps the workspaces of
+    // the last few shown tabs mounted (#642), hidden with `display: none` while another tab is
+    // shown, so their selection, scroll position and open panels survive a tab switch. `active`
+    // gates everything that listens globally (shortcuts, palette and drop requests, focus
+    // checks, automatic fetch), so a hidden workspace never reacts.
     <CurrentDiffContext.Provider value={currentDiff}>
     <WorkspaceActionsContext.Provider value={workspaceActions}>
     <CopyToClipboardContext.Provider value={clipboard.copy}>

@@ -311,6 +311,19 @@ describe("vscodeRepoClient", () => {
     await expect(promise).resolves.toEqual(["/repos/a"]);
   });
 
+  it("runs VSCode's Git: Clone and Git: Initialize Repository through the extension host (#680)", async () => {
+    expect(vscodeRepoClient.supportsHostGitCommands).toBe(true);
+    const clone = vscodeRepoClient.runHostGitCommand("clone");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "run_vscode_git_command",
+      params: { command: "clone" },
+    });
+    respond(1, null);
+    await expect(clone).resolves.toBeNull();
+  });
+
   it("wires listOpenRepos", async () => {
     const promise = vscodeRepoClient.listOpenRepos();
     respond(1, { entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" });

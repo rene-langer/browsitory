@@ -125,6 +125,6 @@ In the VSCode extension, everything opens in VSCode itself: **Open in editor** o
 at the line, **Open in diff tool** opens VSCode's diff view, **Open in merge tool** opens
 VSCode's merge editor (Browsitory can't tell when you are done there, so it shows no
 **Mark resolved** notice: save the result, then stage the file from VSCode's merge editor or
-Source Control view; Browsitory picks the change up on its next refresh), **Open terminal here** opens an integrated terminal, and
+Source Control view; Browsitory picks the change up by itself within a few seconds), **Open terminal here** opens an integrated terminal, and
 **Reveal** uses "Reveal in File Explorer/Finder". The editor and terminal settings and your git
 tools are not used there.

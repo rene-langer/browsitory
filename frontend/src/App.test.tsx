@@ -544,7 +544,7 @@ describe("App", () => {
     expect(client.closeRepo).toHaveBeenCalledWith("/repos/b");
   });
 
-  it("unmounts an inactive repo's workspace instead of hiding it with CSS (PERF-001)", async () => {
+  it("doesn't mount the workspace of a tab never shown (PERF-001)", async () => {
     const client = fakeClient({
       listOpenRepos: async () => ({
         entries: [
@@ -567,7 +567,7 @@ describe("App", () => {
     await screen.findByRole("tab", { name: "a" });
     expect(screen.getByRole("tab", { name: "b" })).toBeInTheDocument();
 
-    // Both tabs exist in the tab strip, but only the active repo's workspace (b) is mounted —
+    // Both tabs exist in the tab strip, but only the shown repo's workspace (b) is mounted —
     // the audit's own evidence for this finding was three open repos producing three copies of
     // section headings like "Branches" in the DOM; the fix renders exactly one.
     await waitFor(() => expect(screen.queryAllByText("Branches")).toHaveLength(1));
@@ -598,7 +598,7 @@ describe("App", () => {
     });
 
     fireEvent.click(screen.getByRole("tab", { name: "b" }));
-    // b's workspace replaced a's (PERF-001 unmounts inactive tabs), with its own empty draft.
+    // b's workspace is shown instead of a's, with its own empty draft.
     await waitFor(() => expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true"));
     expect(screen.getByRole("textbox", { name: "Commit message" })).toHaveValue("");
 
@@ -607,13 +607,11 @@ describe("App", () => {
     expect(screen.getByRole("textbox", { name: "Commit message" })).toHaveValue("wip: half-typed");
   });
 
-  it("re-enables a tab's close button once it is switched away from mid-operation", async () => {
+  it("keeps a background tab's close button disabled while its action runs, until it unloads (#642)", async () => {
+    const paths = ["a", "b", "c", "d", "e"];
     const client = fakeClient({
       listOpenRepos: async () => ({
-        entries: [
-          { path: "/repos/a", workspaceId: null },
-          { path: "/repos/b", workspaceId: null },
-        ],
+        entries: paths.map((name) => ({ path: `/repos/${name}`, workspaceId: null })),
         activePath: "/repos/a",
       }),
       openRepo: async () => {},
@@ -638,9 +636,51 @@ describe("App", () => {
     fireEvent.click(stash);
     await waitFor(() => expect(closeA()).toBeDisabled());
 
+    // Still mounted in the background, still stashing.
     fireEvent.click(screen.getByRole("tab", { name: "b" }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true"));
+    expect(closeA()).toBeDisabled();
 
+    // Four other tabs shown since: a's workspace unloads, and with it the busy report.
+    for (const name of ["c", "d", "e"]) {
+      fireEvent.click(screen.getByRole("tab", { name }));
+      await waitFor(() => expect(screen.getByRole("tab", { name })).toHaveAttribute("aria-selected", "true"));
+    }
     await waitFor(() => expect(closeA()).toBeEnabled());
+  });
+
+  it("keeps a tab's view when switching away and back, without reading it again (#642)", async () => {
+    const getCommitGraph = vi.fn(async (_path: string, _limit: number, _selection: unknown) => []);
+    const client = fakeClient({
+      listOpenRepos: async () => ({
+        entries: [
+          { path: "/repos/a", workspaceId: null },
+          { path: "/repos/b", workspaceId: null },
+        ],
+        activePath: "/repos/a",
+      }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph,
+      listBranches: async () => [],
+      listStashes: async () => [],
+    });
+
+    const { container } = render(<App client={client} />);
+    await screen.findByRole("tab", { name: "a" });
+    await waitFor(() => expect(getCommitGraph).toHaveBeenCalledWith("/repos/a", expect.anything(), expect.anything()));
+    fireEvent.click(screen.getByRole("tab", { name: "b" }));
+    await waitFor(() => expect(getCommitGraph).toHaveBeenCalledWith("/repos/b", expect.anything(), expect.anything()));
+    const workspaceA = container.querySelector('[data-active-repo="false"]');
+    expect(workspaceA).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: "a" }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "a" })).toHaveAttribute("aria-selected", "true"));
+    // The same workspace element is shown again; the unchanged stamp means no second read.
+    await waitFor(() => expect(workspaceA).toHaveAttribute("data-active-repo", "true"));
+    const readsOfA = () => getCommitGraph.mock.calls.filter(([path]) => path === "/repos/a").length;
+    expect(readsOfA()).toBe(1);
   });
 
   it("switching away from a tab mid-rebase does not keep its close button disabled", async () => {
@@ -3244,16 +3284,106 @@ describe("App release notes on a new version", () => {
     );
   });
 
-  it("on a fresh install shows the newest release that has notes", async () => {
+  it("on a fresh install welcomes instead of showing release notes, until dismissed (#688)", async () => {
+    const setLastSeenVersion = vi.fn(async () => {});
+    const openExternalUrl = vi.fn(async () => {});
+    await withReleaseNotes([notes("0.5.0", "Notes for 0.5.0")], async () => {
+      render(
+        <App
+          client={fakeClient({
+            getAppVersion: async () => "0.5.0",
+            getLastSeenVersion: async () => null,
+            setLastSeenVersion,
+            openExternalUrl,
+          })}
+        />,
+      );
+      const welcome = await screen.findByRole("region", { name: "Welcome to Browsitory" });
+      expect(screen.queryByRole("dialog", { name: "Release notes" })).toBeNull();
+      expect(within(welcome).getByRole("button", { name: "Open folder" })).toBeInTheDocument();
+      fireEvent.click(within(welcome).getByRole("button", { name: "User guide" }));
+      expect(openExternalUrl).toHaveBeenCalledOnce();
+      expect(setLastSeenVersion).not.toHaveBeenCalled();
+
+      fireEvent.click(within(welcome).getByRole("button", { name: "Dismiss" }));
+      expect(screen.queryByRole("region", { name: "Welcome to Browsitory" })).toBeNull();
+      await waitFor(() => expect(setLastSeenVersion).toHaveBeenCalledWith("0.5.0"));
+      expect(screen.getByRole("button", { name: "Open folder" })).toBeInTheDocument();
+    });
+  });
+
+  it("ends the welcome and records the version once a repository opens (#688)", async () => {
+    const setLastSeenVersion = vi.fn(async () => {});
+    render(
+      <App
+        client={fakeClient({
+          getAppVersion: async () => "0.5.0",
+          getLastSeenVersion: async () => null,
+          setLastSeenVersion,
+          listRecentRepos: async () => ["/repos/a"],
+          openRepo: async () => {},
+          persistOpenRepos: async () => {},
+        })}
+      />,
+    );
+    await screen.findByRole("region", { name: "Welcome to Browsitory" });
+    fireEvent.click(await screen.findByText("/repos/a"));
+    await waitFor(() => expect(setLastSeenVersion).toHaveBeenCalledWith("0.5.0"));
+  });
+
+  it("in VSCode, the picker's Clone… and New repository… run VSCode's Git commands (#680)", async () => {
+    const runHostGitCommand = vi.fn(async () => {});
+    render(<App toolHost="vscode" client={fakeClient({ supportsHostGitCommands: true, runHostGitCommand })} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Clone…" }));
+    fireEvent.click(screen.getByRole("button", { name: "New repository…" }));
+    expect(runHostGitCommand.mock.calls).toEqual([["clone"], ["init"]]);
+  });
+
+  it("shows a failed VSCode Git command in the app's error banner (#680)", async () => {
+    const runHostGitCommand = vi.fn(async () => {
+      throw new Error("command 'git.clone' not found");
+    });
+    render(<App toolHost="vscode" client={fakeClient({ supportsHostGitCommands: true, runHostGitCommand })} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Clone…" }));
+    expect(await screen.findByText("command 'git.clone' not found")).toBeInTheDocument();
+  });
+
+  it("with an unknown last-seen version shows the newest release that has notes", async () => {
     await withReleaseNotes(
       [internalOnly("0.5.0"), notes("0.4.0", "Notes for 0.4.0"), notes("0.3.0", "Notes for 0.3.0")],
       async () => {
-        render(<App client={fakeClient({ getAppVersion: async () => "0.5.0", getLastSeenVersion: async () => null })} />);
+        render(
+          <App client={fakeClient({ getAppVersion: async () => "0.5.0", getLastSeenVersion: async () => "0.0.1" })} />,
+        );
         const dialog = await screen.findByRole("dialog", { name: "Release notes" });
         expect(within(dialog).getByText("Notes for 0.4.0")).toBeInTheDocument();
         expect(within(dialog).queryByText("Notes for 0.3.0")).toBeNull();
       },
     );
+  });
+
+  it("in VSCode announces an update with a toast that opens the notes, and records it (#680)", async () => {
+    const setLastSeenVersion = vi.fn(async () => {});
+    await withReleaseNotes([notes("0.5.0", "Notes for 0.5.0"), notes("0.4.0", "Notes for 0.4.0")], async () => {
+      render(
+        <App
+          toolHost="vscode"
+          client={fakeClient({
+            getAppVersion: async () => "0.5.0",
+            getLastSeenVersion: async () => "0.4.0",
+            setLastSeenVersion,
+          })}
+        />,
+      );
+      expect(await screen.findByText("Browsitory was updated to 0.5.0")).toBeInTheDocument();
+      await waitFor(() => expect(setLastSeenVersion).toHaveBeenCalledWith("0.5.0"));
+      expect(screen.queryByRole("dialog", { name: "Release notes" })).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "What’s new" }));
+      const dialog = await screen.findByRole("dialog", { name: "Release notes" });
+      expect(within(dialog).getByText("Notes for 0.5.0")).toBeInTheDocument();
+      expect(within(dialog).queryByText("Notes for 0.4.0")).toBeNull();
+    });
   });
 
   it("records the new version without opening when the new releases have nothing for users", async () => {

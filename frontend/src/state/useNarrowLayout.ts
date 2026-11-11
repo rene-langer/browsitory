@@ -14,7 +14,8 @@ export function useNarrowLayout(element: HTMLElement | null = null): boolean {
     if (element !== null && typeof ResizeObserver !== "undefined") {
       const observer = new ResizeObserver((entries) => {
         const entry = entries[entries.length - 1];
-        if (entry !== undefined) setNarrow(entry.contentRect.width < NARROW_BREAKPOINT);
+        // No width at all: the workspace of a tab in the background (#642), hidden, not narrow.
+        if (entry !== undefined && entry.contentRect.width > 0) setNarrow(entry.contentRect.width < NARROW_BREAKPOINT);
       });
       observer.observe(element);
       return () => observer.disconnect();
