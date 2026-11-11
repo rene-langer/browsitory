@@ -78,6 +78,22 @@ attempt; a synchronous spawn failure moves to `failed`, rejects that request, an
 later user retry rather than scheduling background restarts. Panel closure and extension
 deactivation dispose the webview listener and bridge, kill a live child, and drain pending ids.
 
+**Host requests and notifications (#677, #678, #679).** The extension host asks the webview to
+open repositories, show a file's or lines' history, or run a global shortcut with an id-less
+`hostRequest` notification (`extension/src/hostRequests.ts`; `RepoClient.subscribeHostRequests`
+on the frontend). It holds them until the webview sends `hostReady`, which `useHostRequests`
+causes once the restored tabs are open, so a request's tab isn't replaced by the restore. The
+webview also sends `webviewFocus`, which sets the `browsitory.webviewFocused` context key. Both
+are handled in `extension.ts` and never reach the bridge or the sidecar. VSCode hands every key
+pressed in a webview to its own keybindings, even when the page prevents the default, so the
+global shortcuts VSCode binds itself (`vscodeKeybinding` in `frontend/src/lib/keybindings.ts`)
+are contributed as hidden `browsitory.shortcut.<id>` commands with keybindings for
+`activeWebviewPanelId == 'browsitory' && browsitory.webviewFocused`. The webview leaves those
+keys alone in VSCode (`data-host="vscode"`) and runs the shortcut when the request arrives.
+`frontend/src/lib/vscodeKeybindings.ts` derives the contributions from `GLOBAL_SHORTCUTS`, and
+its test keeps `extension/package.json` equal to them. A `WebviewPanelSerializer` brings the
+panel back after a reload.
+
 ## Why Tauri + a web frontend, not egui again
 
 A prior pass (see git history on this branch before 2026-08-11) used `egui` for a

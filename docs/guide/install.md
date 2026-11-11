@@ -47,7 +47,30 @@ macOS (Intel or Apple silicon) or Windows x64. It doesn't run in vscode.dev or i
   `code --install-extension browsitory-<version>-<platform>.vsix` (or use **Extensions: Install
   from VSIX…**). A `.vsix` install doesn't update itself.
 
-Then run **Browsitory: Open** from VSCode's Command Palette and pick a repository folder.
+Then run **Browsitory: Open** from VSCode's Command Palette. It opens the repository of the file
+in the active editor, or else, the first time, your workspace folders' repositories, each in a
+tab, next to the tabs you had open last time. With none of those, pick a repository folder.
+Browsitory opens in the active editor group and comes back after you reload the window.
+
+### Browsitory in the VSCode menus
+
+- **Open in Browsitory**: right-click a folder in the Explorer, or choose it in the **…** menu of a
+  Git repository in the Source Control view, to open that repository's tab.
+- **Show File History in Browsitory**: right-click a file in the Explorer, an editor's tab, or
+  inside an editor (also in the Command Palette) to see the file's [history](file-history.md).
+- **Show Line History in Browsitory**: select lines in an editor and right-click them to see
+  the [history of those lines](file-history.md#history-of-lines). The line numbers count in the
+  last commit (HEAD), so in a file with uncommitted changes above the selection the history may
+  be of other lines.
+
+### Keyboard shortcuts in VSCode
+
+VSCode uses some of Browsitory's keys itself (F5 starts debugging, Ctrl+W closes the editor,
+Ctrl+K starts a key chord). While Browsitory has the focus, the extension's own keybindings run
+those keys in Browsitory instead: the command palette, Refresh, Fetch, F6 between panes, the
+sidebar, the tab keys and Back/Forward (see [Keyboard shortcuts](command-palette.md#keyboard-shortcuts)).
+Everywhere else they keep doing what VSCode does. To change them, open VSCode's **Keyboard
+Shortcuts** and search for "Browsitory".
 
 In VSCode, a few things work the VSCode way: files open in VSCode's editor, diffs in its diff
 view, conflicts in its merge editor and terminals in its integrated terminal (see

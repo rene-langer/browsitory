@@ -1,7 +1,10 @@
 # File history
 
 Click **History** in a file's header — in the working tree (any tracked file) or in a commit's
-file list — or run **File history of current file** from the command palette. The commit list
+file list — or run **File history of current file** from the command palette. In VSCode,
+**Show File History in Browsitory** and **Show Line History in Browsitory** in the Explorer's
+and the editor's menus open it for a file or the selected lines (see
+[Install](install.md#browsitory-in-the-vscode-menus)). The commit list
 is replaced by the commits that changed that file, newest first, starting from the checked-out
 commit (HEAD). The graph's branch selection (see [Which branches the graph shows](history.md#which-branches-the-graph-shows)) does not apply here.
 
