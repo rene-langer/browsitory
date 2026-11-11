@@ -112,3 +112,28 @@ export async function clickInPage(
     { timeout, timeoutMsg: `${describeTarget(selector, text, contains)} never became clickable (present, enabled and rendered)` },
   );
 }
+
+/**
+ * What the page shows, for a failure message: the alerts' text, the sidebar sections and the
+ * page's text (truncated). Never throws.
+ */
+export async function pageDiagnostics(): Promise<string> {
+  try {
+    return await browser.execute(() => {
+      const alerts = Array.from(document.querySelectorAll("[role='alert']")).map((el) => el.textContent ?? "");
+      const sections = Array.from(document.querySelectorAll("section[aria-label]")).map((el) => el.getAttribute("aria-label"));
+      return JSON.stringify(
+        {
+          size: [window.innerWidth, window.innerHeight],
+          alerts,
+          sections,
+          text: (document.body.innerText ?? "").slice(0, 3000),
+        },
+        null,
+        1,
+      );
+    });
+  } catch (error) {
+    return `no diagnostics: ${String(error)}`;
+  }
+}

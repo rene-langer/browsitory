@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { pageDiagnostics } from "../support/dom";
 import { expandSidebarSection } from "../support/sidebar";
 import { git } from "../support/git";
 
@@ -65,9 +66,12 @@ describe("Browsitory reflog recovery", () => {
       async () => await graphHasSummary(FIRST_SUMMARY),
       { timeoutMsg: "expected the restored commit in the refreshed graph" },
     );
-    await browser.waitUntil(
-      async () => !(await graphHasSummary(SECOND_SUMMARY)),
-      { timeoutMsg: "expected the newer commit to leave the refreshed graph" },
-    );
+    try {
+      await browser.waitUntil(async () => !(await graphHasSummary(SECOND_SUMMARY)), {
+        timeoutMsg: "expected the newer commit to leave the refreshed graph",
+      });
+    } catch (error) {
+      throw new Error(`${String(error)}\npage: ${await pageDiagnostics()}`);
+    }
   });
 });

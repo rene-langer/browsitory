@@ -1,5 +1,5 @@
 import { expect } from "@wdio/globals";
-import { waitUntilGoneInPage } from "../support/dom";
+import { pageDiagnostics, waitUntilGoneInPage } from "../support/dom";
 import { ForgeFixtureClient } from "../support/forgeFixtureServer";
 import { ADD_REMOTE_NAME_INPUT, expandSidebarSection } from "../support/sidebar";
 
@@ -102,7 +102,11 @@ describe("Browsitory pull requests", () => {
     // `aria-label` on the section, composed as "{provider}: {owner}/{name} ({remoteName})" (see
     // `PullRequestPanel.tsx`'s `sectionLabel`) — selectors below match that new label text.
     const githubSection = await $("section[aria-label='GitHub: acme/widget (gh-origin)']");
-    await githubSection.waitForExist();
+    try {
+      await githubSection.waitForExist();
+    } catch (error) {
+      throw new Error(`${String(error)}\npage: ${await pageDiagnostics()}`);
+    }
     const bitbucketSection = await $("section[aria-label='Bitbucket: acme/widget (bb-origin)']");
     await expect(bitbucketSection).toBeExisting();
 
