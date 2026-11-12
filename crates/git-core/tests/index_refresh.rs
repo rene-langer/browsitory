@@ -89,6 +89,13 @@ fn after_a_refresh_the_next_read_does_not_hash_the_touched_file_again() {
         return;
     }
     let (dir, repo) = committed_repo();
+    // Taking the read permission away changes the file's ctime, which would make it stat-dirty
+    // again on its own; with `core.trustctime` off only the times a refresh records count.
+    repo.config()
+        .unwrap()
+        .set_bool("core.trustctime", false)
+        .unwrap();
+    let repo = Repository::open(dir.path()).unwrap();
     backdate(dir.path(), "a.txt");
     status_refreshing_index(&repo).unwrap();
     let file = dir.path().join("a.txt");
