@@ -149,10 +149,13 @@ describe("workspace renders (#844)", () => {
     expect(counts).toEqual({ branchTreeView: 0, buildBranchTree: 0, commitGraph: 0, diffPane: 0 });
   });
 
-  it("selecting a branch in the sidebar renders the tree without building it again", async () => {
+  it("hiding a branch from the graph renders the tree without building it again", async () => {
     await openWorkspace();
     resetCounts();
-    fireEvent.click(screen.getByText("topic-1"));
+    fireEvent.click(screen.getByRole("button", { name: "Show team-1/topic-1 in graph" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Show team-1/topic-1 in graph" })).toHaveAttribute("aria-pressed", "false"),
+    );
     await settle();
     expect(counts.branchTreeView).toBeGreaterThan(0);
     expect(counts.buildBranchTree).toBe(0);
