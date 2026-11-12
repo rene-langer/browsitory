@@ -66,7 +66,8 @@ describe("clampAppearance — date format", () => {
     expect(clampAppearance({ ...defaults, dateFormat: "System" }).dateFormat).toBe("System");
     expect(clampAppearance({ ...defaults, dateFormat: "Iso" }).dateFormat).toBe("Iso");
     expect(clampAppearance({ ...defaults, dateFormat: "Relative" } as never).dateFormat).toBe("Iso");
-    const { dateFormat: _omitted, ...withoutDateFormat } = defaults;
+    const withoutDateFormat: Partial<typeof defaults> = { ...defaults };
+    delete withoutDateFormat.dateFormat;
     expect(clampAppearance(withoutDateFormat as never).dateFormat).toBe("Iso");
   });
 });
