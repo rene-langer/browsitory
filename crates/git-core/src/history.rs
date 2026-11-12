@@ -114,15 +114,16 @@ fn head_commit(repo: &Repository) -> Result<Option<Oid>, git2::Error> {
 /// The order of the walk from `start`: a graph's or history's sorted already, or sorted now.
 pub(crate) fn history_order(
     repo: &Repository,
-    cache: &WalkCache,
+    cache: &mut WalkCache,
     key: &WalkKey,
     start: Oid,
 ) -> Result<Arc<[Oid]>, git2::Error> {
-    match cache.cached_order(key) {
-        Some(order) => Ok(order),
-        None => Ok(walk_order(repo, &[start], false, &|| false)?
-            .expect("a walk that is never cancelled finishes")),
+    if let Some(order) = cache.cached_order(key) {
+        return Ok(order);
     }
+    cache.stats.walks += 1;
+    Ok(walk_order(repo, &[start], false, &|| false)?
+        .expect("a walk that is never cancelled finishes"))
 }
 
 /// What a kept history walk is for: the walk from one start commit (with the repository and

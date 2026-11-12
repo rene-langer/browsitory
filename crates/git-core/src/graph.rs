@@ -170,7 +170,8 @@ impl WalkKey {
 /// How often a [`WalkCache`] did the work it saves: for tests and measurements.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WalkCacheStats {
-    /// Full walks sorted (`TOPOLOGICAL | TIME`).
+    /// Full walks sorted (`TOPOLOGICAL | TIME`), for the graph, search and file and line
+    /// history alike.
     pub walks: usize,
     /// Times every tag was peeled for the badges.
     pub decorations: usize,
