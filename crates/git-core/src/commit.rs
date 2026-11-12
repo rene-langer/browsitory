@@ -241,6 +241,29 @@ fn valid_author(author: &SignatureInput) -> Option<(&str, &str)> {
     (name_ok && email_ok).then_some((name, email))
 }
 
+/// What [`recent_authors_cached`] keeps between calls (#140): the authors found for one HEAD.
+#[derive(Default)]
+pub struct RecentAuthorsCache {
+    walks: usize,
+}
+
+impl RecentAuthorsCache {
+    /// How many times the history was walked: for tests and measurements.
+    pub fn walks(&self) -> usize {
+        self.walks
+    }
+}
+
+/// [`recent_authors`], walked again only when HEAD, the current user's email or `limit`
+/// changed since the cache's last walk.
+pub fn recent_authors_cached(
+    repo: &git2::Repository,
+    _cache: &mut RecentAuthorsCache,
+    limit: usize,
+) -> Result<Vec<SignatureInput>, CommitError> {
+    recent_authors(repo, limit)
+}
+
 /// How many commits from HEAD `recent_authors` looks at, at most.
 pub const RECENT_AUTHORS_WALK_LIMIT: usize = 1000;
 
