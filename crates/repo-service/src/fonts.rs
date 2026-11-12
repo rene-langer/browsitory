@@ -10,7 +10,14 @@ pub struct FontFamily {
 
 /// The font families installed on this computer, as [`families_of`] lists them.
 pub fn installed_font_families() -> Vec<FontFamily> {
-    Vec::new()
+    let mut db = fontdb::Database::new();
+    db.load_system_fonts();
+    // A face's first family name is its English one, which CSS matches on every platform.
+    families_of(db.faces().filter_map(|face| {
+        face.families
+            .first()
+            .map(|(name, _)| (name.as_str(), face.monospaced))
+    }))
 }
 
 /// One entry per family name of `faces` (each face's family name, and whether that face is
@@ -18,8 +25,26 @@ pub fn installed_font_families() -> Vec<FontFamily> {
 /// names and names starting with `.` (macOS's hidden system fonts, which CSS can't name) are
 /// left out. Sorted by name, ignoring case, then exactly, so the order is stable.
 pub fn families_of<'a>(faces: impl IntoIterator<Item = (&'a str, bool)>) -> Vec<FontFamily> {
-    let _ = faces.into_iter();
-    Vec::new()
+    let mut families = std::collections::BTreeMap::<&str, bool>::new();
+    for (name, monospaced) in faces {
+        let name = name.trim();
+        if name.is_empty() || name.starts_with('.') {
+            continue;
+        }
+        families
+            .entry(name)
+            .and_modify(|monospace| *monospace &= monospaced)
+            .or_insert(monospaced);
+    }
+    let mut families: Vec<FontFamily> = families
+        .into_iter()
+        .map(|(name, monospace)| FontFamily {
+            name: name.to_string(),
+            monospace,
+        })
+        .collect();
+    families.sort_by_cached_key(|family| (family.name.to_lowercase(), family.name.clone()));
+    families
 }
 
 #[cfg(test)]

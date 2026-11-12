@@ -1,7 +1,7 @@
 use repo_service::wire::ErrorDto;
 use repo_service::wire::{
     AppearanceSettingsDto, CommitMessageSettingsDto, DiffSettingsDto, FetchSettingsDto,
-    UpdateSettingsDto,
+    FontFamilyDto, UpdateSettingsDto,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -68,6 +68,15 @@ pub(super) fn set_appearance_settings(
 ) -> Result<Value, ErrorDto> {
     config::set_appearance_settings(&params.settings.into()).map_err(ErrorDto::from_error)?;
     Ok(Value::Null)
+}
+
+/// The installed font families for the code font suggestions (#858).
+pub(super) fn list_font_families() -> Result<Value, ErrorDto> {
+    let families: Vec<FontFamilyDto> = repo_service::fonts::installed_font_families()
+        .into_iter()
+        .map(FontFamilyDto::from)
+        .collect();
+    serde_json::to_value(families).map_err(ErrorDto::from_error)
 }
 
 #[derive(Deserialize)]
