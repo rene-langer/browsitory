@@ -76,7 +76,9 @@ you here.
     staged rename that changes only the case of a name (`Old` to `old`: "Can't stash 'old': it
     differs from 'Old' only in case."); commit it or undo it first. On macOS this includes names
     the drive treats as the same (`Straße` and `Strasse`, `Café` and `CAFÉ`), on Windows `Café`
-    and `CAFÉ`. If the repository holds two files whose names differ only in case (`A` and `a`,
+    and `CAFÉ`. A macOS rename between two encodings of the same accented letter (`é` as one
+    character or as `e` plus an accent, which look identical) is refused the same way, with
+    "…differs from 'Café' only in how its accented letters are encoded…". If the repository holds two files whose names differ only in case (`A` and `a`,
     committed on a case-sensitive drive), **Stash all** refuses there too, and so does **Stash
     file…** on either of them ("Can't stash: 'a' and 'A' differ only in case, and stashing would
     remove one of them…"); stashing other files on their own still works.

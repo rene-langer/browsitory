@@ -118,6 +118,7 @@ pub fn shared_wire_cases(s: &mut impl WireCases) {
         fixtures::appearance_settings(),
         AppearanceSettingsDto::from,
     );
+    s.add("FontFamily", fixtures::font_families(), FontFamilyDto::from);
     s.add(
         "UpdateSettings",
         fixtures::update_settings(),

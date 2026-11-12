@@ -451,6 +451,38 @@ fn mark_resolved_does_not_block_on_a_fifo() {
     );
 }
 
+/// #212: the file is checked as it streams in, in pieces; a marker line is found wherever it
+/// falls, including across the boundary of two pieces, and with a CRLF ending.
+#[test]
+fn mark_resolved_finds_a_marker_line_anywhere_in_a_big_file() {
+    let (dir, repo) = make_conflicted_repo();
+    for marker in ["<<<<<<< ours\n", ">>>>>>>\r\n", "<<<<<<<"] {
+        for start in (65_528..65_540).chain([1 << 20]) {
+            let mut text = "a".repeat(start - 1);
+            text.push('\n');
+            text.push_str(marker);
+            write_file(dir.path(), "shared.txt", &text);
+            let outcome = git_core::merge::mark_resolved(&repo, "shared.txt", false).unwrap();
+            assert_eq!(
+                outcome,
+                git_core::merge::MarkResolvedOutcome::MarkersRemain,
+                "{marker:?} at byte {start}"
+            );
+        }
+    }
+    // Not a marker: seven `<` then another character, or a NUL in the first 8,000 bytes.
+    for text in [
+        format!("{}\n<<<<<<<x\n", "a".repeat(65_534)),
+        format!("\0{}\n<<<<<<< ours\n", "a".repeat(70_000)),
+    ] {
+        let (dir, repo) = make_conflicted_repo();
+        write_file(dir.path(), "shared.txt", &text);
+        let outcome = git_core::merge::mark_resolved(&repo, "shared.txt", false).unwrap();
+        assert_eq!(outcome, git_core::merge::MarkResolvedOutcome::Resolved);
+        assert_eq!(staged(&repo, "shared.txt").1, text.as_bytes());
+    }
+}
+
 #[test]
 fn mark_resolved_with_force_stages_despite_markers() {
     let (_dir, repo) = make_conflicted_repo();

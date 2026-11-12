@@ -22,7 +22,7 @@ use super::walk_types::{
 };
 #[cfg(test)]
 use super::Step;
-use super::{Content, HeldFolder, Kind, Leaf, OnLink, OnMissing, Probe, StepFn, Walk};
+use super::{Content, HeldFolder, Kind, Leaf, OnLink, OnMissing, Opened, Probe, StepFn, Walk};
 
 /// The folders from the work tree root down to the leaf's parent, each held open.
 pub(super) struct Beneath {
@@ -573,6 +573,14 @@ pub(super) fn read(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<O
     read_leaf(&at, u64::MAX)
 }
 
+/// See `worktree_guard::open_leaf_beneath`.
+pub(super) fn open(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<Option<Opened>> {
+    let Walk::Found(at) = walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, step)? else {
+        return Ok(None);
+    };
+    open_leaf(&at)
+}
+
 /// A folder held open by its descriptor (see `worktree_guard::HeldFolder`).
 pub(super) struct Folder(OwnedFd);
 
@@ -677,13 +685,18 @@ pub(super) fn probe(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<
 /// Reads the leaf of `at` (see [`read`]); a file over `limit` bytes is
 /// `worktree_guard::TooLarge`.
 fn read_leaf(at: &Beneath, limit: u64) -> io::Result<Option<Leaf>> {
+    open_leaf(at)?.map(|opened| opened.read(limit)).transpose()
+}
+
+/// Opens the leaf of `at` (see [`open`]): a link's target, or a regular file's descriptor.
+fn open_leaf(at: &Beneath) -> io::Result<Option<Opened>> {
     let stat = match stat_at(at.parent(), at.leaf())? {
         None => return Ok(None),
         Some(stat) => stat,
     };
     if is_link(&stat) {
         return match readlink_at(at.parent(), at.leaf()) {
-            Ok(target) => Ok(Some(Leaf::Link {
+            Ok(target) => Ok(Some(Opened::Link {
                 target,
                 stat: file_stat(&stat),
             })),
@@ -709,9 +722,8 @@ fn read_leaf(at: &Beneath, limit: u64) -> io::Result<Option<Leaf>> {
     if file_type(&opened) != libc::S_IFREG {
         return Ok(None);
     }
-    let bytes = super::read_capped(File::from(fd), limit)?;
-    Ok(Some(Leaf::File {
-        bytes,
+    Ok(Some(Opened::File {
+        file: File::from(fd),
         executable: opened.st_mode & 0o111 != 0,
         stat: file_stat(&opened),
     }))

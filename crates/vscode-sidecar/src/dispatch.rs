@@ -200,6 +200,7 @@ methods!(|params, repos, stdout| {
     "set_fetch_settings" => set_fetch_settings(SetFetchSettingsParams),
     "get_appearance_settings" => get_appearance_settings(),
     "set_appearance_settings" => set_appearance_settings(SetAppearanceSettingsParams),
+    "list_font_families" => list_font_families(),
     "get_update_settings" => get_update_settings(),
     "set_update_settings" => set_update_settings(SetUpdateSettingsParams),
     "mark_resolved" => mark_resolved(MarkResolvedParams, repos),

@@ -52,6 +52,8 @@ FetchSettings/every-10 {"autoFetchMinutes":10}
 AppearanceSettings/default {"codeFont":null,"codeFontSize":null,"uiSize":"Normal","tabSize":4,"dateFormat":"Iso"}
 AppearanceSettings/set {"codeFont":"Example Mono","codeFontSize":15,"uiSize":"Large","tabSize":8,"dateFormat":"System"}
 AppearanceSettings/small {"codeFont":null,"codeFontSize":null,"uiSize":"Small","tabSize":4,"dateFormat":"Iso"}
+FontFamily/monospace {"name":"Example Mono","monospace":true}
+FontFamily/proportional {"name":"Example Sans","monospace":false}
 UpdateSettings/on {"checkAutomatically":true}
 UpdateSettings/off {"checkAutomatically":false}
 GitTools/diff-tool-System {"diffTool":{"name":"meld","command":"meld \"$LOCAL\" \"$REMOTE\"","source":"System","viaMergeTool":true,"problem":"not found on PATH"},"mergeTool":null}

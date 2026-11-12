@@ -102,16 +102,20 @@ What the tool compares:
 - a compare: the left side against the right side (or the working tree file)
 
 A missing side (a new or deleted file) is an empty file. The other sides are temporary copies,
-removed when the tool closes. They hold the bytes exactly as git stores them: line-ending
-conversion (`core.autocrlf`, `text`/`eol` attributes), `ident` and filter drivers (Git LFS, …)
-are not applied, so with `core.autocrlf=true` on Windows every line can look changed against the
-working tree file. The VSCode diff and merge editors show the same stored bytes.
+removed when the tool closes. They hold the file as `git checkout` would write it: with the
+line-ending conversion of `core.autocrlf` and the `text`/`eol` attributes, and `ident`
+expanded, so a side matches the working tree file line for line. Filter drivers such as Git LFS
+are not run, so an LFS file shows its pointer text. The VSCode diff and merge editors show the
+same contents.
 
 ## Resolving with a merge tool
 
 **Open in merge tool** on a conflicted file opens your tool with your version (`LOCAL`), the
 incoming version (`REMOTE`), their common ancestor (`BASE`) and the working tree file
-(`MERGED`) to save the result to. Other actions keep working while the tool is open. When it
+(`MERGED`) to save the result to. When both sides added the file (there is no ancestor),
+`BASE` is empty, except for `p4merge`, which gets git's virtual base as with `git mergetool`:
+your version without the lines the incoming version doesn't share (empty when less than half of
+it is shared). Other actions keep working while the tool is open. When it
 closes, the file shows "The merge tool finished." or, when the tool reported no resolution, "The
 merge tool closed without resolving the conflict." With `mergetool.<name>.trustExitCode` set,
 the tool's exit code decides; otherwise any change to the file counts as finished. Both notices

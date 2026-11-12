@@ -239,7 +239,7 @@ describe("ReflogPanel — date format", () => {
     localStorage.removeItem("sidebar-reflog");
     render(
       <AppearanceSettingsContext.Provider
-        value={{ settings: { ...DEFAULT_APPEARANCE_SETTINGS, dateFormat: "System" }, update: vi.fn(), error: null, dismissError: vi.fn() }}
+        value={{ settings: { ...DEFAULT_APPEARANCE_SETTINGS, dateFormat: "System" }, update: vi.fn(), error: null, dismissError: vi.fn(), listFontFamilies: async () => [] }}
       >
         <ReflogPanel
           references={["HEAD", "refs/heads/main"]}

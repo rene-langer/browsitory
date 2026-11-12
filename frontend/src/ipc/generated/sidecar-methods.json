@@ -93,6 +93,7 @@
   "ignore_paths",
   "init_submodule",
   "list_branches",
+  "list_font_families",
   "list_missing_recent_repos",
   "list_open_repos",
   "list_pinned_repos",
