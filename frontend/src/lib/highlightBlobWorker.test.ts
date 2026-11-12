@@ -25,8 +25,8 @@ class StartedWorker {
   postMessage(message: HighlightRequest) {
     this.posted.push(message);
   }
-  addEventListener(type: string, listener: (event: unknown) => void) {
-    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+  addEventListener(type: string, listener: (event: never) => void) {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener as (event: unknown) => void]);
   }
   terminate() {
     this.terminated = true;

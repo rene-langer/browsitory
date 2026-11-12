@@ -7,6 +7,12 @@ import { excludeGrammarsPlugin } from './vite.grammars.ts'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), thirdPartyNoticesPlugin(), excludeGrammarsPlugin()],
+  // The syntax highlighting worker (#843): a module worker, so its grammars stay separate chunks
+  // that load on first use; the grammar check covers its build too.
+  worker: {
+    format: 'es',
+    plugins: () => [excludeGrammarsPlugin()],
+  },
   server: {
     fs: {
       // Vite's default (this folder) plus the user guide, which src/lib/searchSyntax.test.ts

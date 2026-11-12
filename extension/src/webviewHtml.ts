@@ -30,7 +30,10 @@ export function renderWebviewHtml(webview: Webview, assets: WebviewAssets): stri
     "; " +
     "script-src 'nonce-" +
     nonce +
-    "';";
+    "'; " +
+    // Syntax highlighting runs in a Web Worker (#843). A webview can start one only from a
+    // blob: URL: the frontend fetches its worker file (connect-src) and wraps it in a blob.
+    "worker-src blob:;";
 
   return [
     "<!doctype html>",

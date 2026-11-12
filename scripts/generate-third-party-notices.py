@@ -13,8 +13,8 @@ and in every VSCode extension package. It has three parts:
 3. The npm packages bundled into the shipped JavaScript: the production trees of `frontend/`
    and `extension/` (`pnpm licenses list --prod`), without `@types/*` type-only packages,
    with the licence files from each package.
-4. The TextMate grammars the syntax highlighting bundles: highlight.ts's Shiki languages plus
-   the grammars they import, minus frontend/src/lib/excludedGrammars.ts, with their upstream
+4. The TextMate grammars the syntax highlighting bundles: highlightTokenizer.ts's Shiki languages
+   plus the grammars they import, minus frontend/src/lib/excludedGrammars.ts, with their upstream
    licence texts from tm-grammars' NOTICE (frontend devDependency, pinned to the release
    @shikijs/langs was built from; checked). A grammar under a licence outside the policy fails
    unless GRAMMAR_EXCEPTIONS names it.
@@ -281,7 +281,7 @@ def run_pnpm_licenses(project: str) -> dict:
 # --- Syntax highlighting grammars (Shiki, tm-grammars) ---------------------------------------
 
 FRONTEND = ROOT / "frontend"
-HIGHLIGHT_TS = FRONTEND / "src" / "lib" / "highlight.ts"
+HIGHLIGHT_TS = FRONTEND / "src" / "lib" / "highlightTokenizer.ts"
 EXCLUDED_GRAMMARS_TS = FRONTEND / "src" / "lib" / "excludedGrammars.ts"
 GRAMMAR_NOTICE_DIR = ROOT / "scripts" / "notices" / "grammars"
 
@@ -325,8 +325,8 @@ def grammar_imports(module_source: str) -> list[str]:
 
 
 def loader_roots(highlight_source: str) -> list[str]:
-    """The grammar modules highlight.ts's LOADERS import. Fails unless every LOADERS entry was
-    read, so a reformatted loader can't silently drop a grammar from the notices."""
+    """The grammar modules highlightTokenizer.ts's LOADERS import. Fails unless every LOADERS
+    entry was read, so a reformatted loader can't silently drop a grammar from the notices."""
     block = re.search(r"const LOADERS\b[^\n]*?=\s*\{(.*?)\n\};", highlight_source, re.DOTALL)
     if block is None:
         raise NoticesError(f"no LOADERS object found in {HIGHLIGHT_TS.relative_to(ROOT)}")
@@ -341,8 +341,8 @@ def loader_roots(highlight_source: str) -> list[str]:
 
 
 def shipped_grammars(highlight_source: str, read_module, excluded: set[str]) -> set[str]:
-    """Every grammar the app bundles: highlight.ts's loaders plus what they import, without the
-    excluded ones (vite.grammars.ts cuts those imports)."""
+    """Every grammar the app bundles: highlightTokenizer.ts's loaders plus what they import,
+    without the excluded ones (vite.grammars.ts cuts those imports)."""
     roots = loader_roots(highlight_source)
     if not roots:
         raise NoticesError(f"no shiki/langs imports found in {HIGHLIGHT_TS.relative_to(ROOT)}")
