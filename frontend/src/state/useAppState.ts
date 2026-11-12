@@ -29,6 +29,7 @@ import { failureError, useMutationRunner, withoutStaleErrorHint } from "./useMut
 import { errorAfterOwnSuccess, forgettingStaleOwnErrors, useOwnError } from "./ownError";
 import { readFetchPrune } from "../lib/fetchPrune";
 import { MERGE_PAGE_SIZE, type MergeExpansion, withExpandedMerges } from "../lib/mergeExpansion";
+import { applyGraphRefresh } from "../lib/graphRefresh";
 import {
   initialNavigationHistory,
   moveToEntry,
@@ -391,6 +392,10 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
   // What the next page of history continues (#685): the selection the rows were read with and
   // the last page's cursor (`null`: no more history).
   const graphPaging = useRef<{ selection: GraphSelection; cursor: string | null } | null>(null);
+  // The graph rows loaded, with the walk and the badges' version they came from (#835): a
+  // refresh after the refs moved sends them, so the worker sends only what is new. `null` when
+  // they can't be continued (a failed read, a page with other badges than the rows before it).
+  const graphLoaded = useRef<{ walk: string; badges: string; rows: GraphCommit[] } | null>(null);
   const readAll = useCallback(async (full: boolean) => {
     const tracking = changeStamp.current;
     tracking.running += 1;
@@ -413,6 +418,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       const known = historyKey.current;
       const keepHistory = !full && base !== null && known !== null && known.base === base && known.limit === limit;
       const graphSelection = toGraphSelection({ local, remote }, collapseMerges);
+      // The Refresh command reads every row again; any other refresh continues the loaded rows.
+      const continuing = full || graphLoaded.current?.walk === "" ? null : graphLoaded.current;
       const repositoryReads = Promise.all([
         client.listWorktrees(repoPath),
         client.listSubmodules(repoPath),
@@ -428,7 +435,13 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       const historyReads = keepHistory
         ? null
         : Promise.all([
-            client.getCommitGraph(repoPath, limit, graphSelection, null),
+            continuing === null
+              ? client.getCommitGraph(repoPath, limit, graphSelection, null)
+              : client.getCommitGraph(repoPath, GRAPH_PAGE_SIZE, graphSelection, null, {
+                  walk: continuing.walk,
+                  badges: continuing.badges,
+                  rows: continuing.rows.length,
+                }),
             client.listBranches(repoPath),
             client.listTags(repoPath),
             client.getCurrentUpstream(repoPath),
@@ -445,6 +458,9 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       let history: {
         graphRows: GraphCommit[];
         graphCursor: string | null;
+        graphWalk: string;
+        graphBadges: string;
+        rowsLimit: number;
         branches: BranchInfo[];
         tags: TagInfo[];
         upstream: UpstreamInfo | null;
@@ -453,8 +469,11 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         reloaded: Record<string, MergeExpansion>;
       } | null = null;
       if (historyRead !== null) {
-        const [{ commits: graphRows, nextCursor: graphCursor }, branches, tags, upstream, remoteUpstreams] =
-          historyRead;
+        const [page, branches, tags, upstream, remoteUpstreams] = historyRead;
+        const graphRows = continuing === null ? page.commits : applyGraphRefresh(continuing.rows, page);
+        const graphCursor = page.nextCursor;
+        // A continued refresh has as many rows as the answer made, however many were asked for.
+        const rowsLimit = continuing === null ? limit : graphRows.length;
         // An expanded merge stays expanded while it is a merge row of the graph (#617).
         const expandable = new Set(graphRows.filter((row) => row.mergedCount !== undefined).map((row) => row.id));
         for (const mergeId of [...mergeLimits.current.keys()]) {
@@ -468,7 +487,19 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
             ]),
           ),
         );
-        history = { graphRows, graphCursor, branches, tags, upstream, remoteUpstreams, expandable, reloaded };
+        history = {
+          graphRows,
+          graphCursor,
+          graphWalk: page.walk,
+          graphBadges: page.badges,
+          rowsLimit,
+          branches,
+          tags,
+          upstream,
+          remoteUpstreams,
+          expandable,
+          reloaded,
+        };
       }
       const reference = selectedReflogReference.current;
       const selectedReference = reference !== null && reflogRefs.includes(reference)
@@ -487,8 +518,10 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       order.refreshApplied = ticket;
       tracking.stamp = stamp;
       if (history !== null) {
-        historyKey.current = { base, limit };
+        historyKey.current = { base, limit: history.rowsLimit };
+        graphLimit.current = history.rowsLimit;
         graphPaging.current = { selection: graphSelection, cursor: history.graphCursor };
+        graphLoaded.current = { walk: history.graphWalk, badges: history.graphBadges, rows: history.graphRows };
       }
       const undoIsNewest = ticket > order.undoApplied;
       if (undoIsNewest) order.undoApplied = ticket;
@@ -512,7 +545,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
             graphRows,
             collapseMerges,
             expandedMerges,
-            graphLimit: limit,
+            graphLimit: history.rowsLimit,
             hasMoreHistory: history.graphCursor !== null,
             graphSelection: { local, remote },
             branches: history.branches,
@@ -563,6 +596,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       refreshError.set(failure.error);
       historyKey.current = null;
       graphPaging.current = null;
+      graphLoaded.current = null;
       // Kept even though the reads failed: the next check must not retry (and show the same
       // error) every few seconds. The next change, or Refresh, reloads. When the combined read
       // itself failed, the stamp alone; optional, a failed read only means one more refresh.
@@ -671,6 +705,11 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
           }
           if (historyKey.current !== null) historyKey.current = { ...historyKey.current, limit: graphLimit.current };
           paging.cursor = page.nextCursor;
+          const loaded = graphLoaded.current;
+          graphLoaded.current =
+            loaded !== null && loaded.walk === page.walk && loaded.badges === page.badges
+              ? { ...loaded, rows: [...loaded.rows, ...page.commits] }
+              : null;
           const limit = graphLimit.current;
           setState((prev) => {
             const graphRows = [...prev.graphRows, ...page.commits];

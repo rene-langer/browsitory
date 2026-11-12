@@ -1048,7 +1048,15 @@ certificate.
   format (`graph::walk_fingerprint`). A cursor of another walk answers `stale: true` with no
   commits rather than an error, and the frontend reads the history again from the start.
   `useAppState.loadMoreHistory` appends the next page in the tab's read queue (after a running
-  refresh, never alongside one); a refresh that reads the history again reads as many rows as
+  refresh, never alongside one). The worker keeps each walk's order and the ref badges in a
+  `graph::WalkCache` (#835), so later pages, "Go to" and search pages slice the cached order.
+  A refresh that reads the history again sends the rows it has as `loaded` (the `walk` and
+  `badges` version of their pages and how many there are, #835); when the cache still holds
+  that walk and those badges, `graph::graph_refresh_cached` answers only the rows new to the
+  client plus a `refresh` layout (`New` rows from `commits`, `Kept` runs of the loaded rows) and
+  the new badges of kept rows whose refs changed; rows a reset or a deleted branch took out of
+  the walk drop out. `lib/graphRefresh.ts` rebuilds the rows. Otherwise (another worker, the
+  Refresh command, a page whose badges differ from the rows before it) it reads as many rows as
   are loaded (`graphLimit`). `CommitGraph` renders only the rows in view
   (`components/useVirtualRows.ts`: one row height, measured from the first row; padding on the
   list for the others; `aria-setsize`/`aria-posinset` on the rows) and asks for the next page
