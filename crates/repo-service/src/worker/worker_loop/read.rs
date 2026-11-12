@@ -35,6 +35,8 @@ pub(super) struct ReadState<'a> {
     pub(super) clean_merge: &'a Option<merge::CleanMerge>,
     // The branches' ahead/behind counts (#112).
     pub(super) ahead_behind: &'a mut git_core::ahead_behind::AheadBehindCache,
+    // The co-author suggestions for the current HEAD (#140).
+    pub(super) recent_authors: &'a mut git_core::commit::RecentAuthorsCache,
 }
 
 /// What a transfer borrows from the worker loop: the repository, and the queue it serves reads
@@ -234,7 +236,9 @@ pub(super) fn dispatch(
             source,
             reply,
         } => tools::file_sides(repo, path, source, reply),
-        Command::ListRecentAuthors { reply } => history::recent_authors(repo, reply),
+        Command::ListRecentAuthors { reply } => {
+            history::recent_authors(repo, state.recent_authors, reply)
+        }
         Command::CheckMergeTarget { path, reply } => tools::check_merge_target(repo, path, reply),
         Command::ReadFileVersion {
             path,
@@ -286,6 +290,7 @@ mod tests {
             rebase_memory: gate::RebaseMemory::default(),
         };
         let mut ahead_behind = git_core::ahead_behind::AheadBehindCache::default();
+        let mut recent_authors = git_core::commit::RecentAuthorsCache::default();
         let clean_merge: Option<merge::CleanMerge> = None;
         let search_generation = SearchGeneration::default();
         let mut walk_cache = git_core::graph::WalkCache::default();
@@ -296,6 +301,7 @@ mod tests {
             operations: &operations,
             clean_merge: &clean_merge,
             ahead_behind: &mut ahead_behind,
+            recent_authors: &mut recent_authors,
         };
         for ((name, command), _) in table() {
             if matches!(command, Command::PanicNow) {
