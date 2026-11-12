@@ -65,3 +65,77 @@ fn recent_authors_only_look_at_the_newest_commits() {
         [("Bob", "bob@x.org")]
     );
 }
+
+// ---- Cached per HEAD (#140) ----
+
+use git_core::commit::{recent_authors_cached, RecentAuthorsCache};
+
+#[test]
+fn cached_authors_equal_the_uncached_ones_and_walk_once_per_head() {
+    let (dir, repo) = common::init_repo();
+    commit_as(&repo, dir.path(), "Ada", "ada@x.org", "1");
+    commit_as(&repo, dir.path(), "Bob", "bob@x.org", "2");
+    let mut cache = RecentAuthorsCache::default();
+
+    let first = recent_authors_cached(&repo, &mut cache, 20).unwrap();
+    let again = recent_authors_cached(&repo, &mut cache, 20).unwrap();
+
+    assert_eq!(first, recent_authors(&repo, 20).unwrap());
+    assert_eq!(again, first);
+    assert_eq!(cache.walks(), 1);
+}
+
+#[test]
+fn a_moved_head_walks_again() {
+    let (dir, repo) = common::init_repo();
+    commit_as(&repo, dir.path(), "Ada", "ada@x.org", "1");
+    let mut cache = RecentAuthorsCache::default();
+    recent_authors_cached(&repo, &mut cache, 20).unwrap();
+
+    commit_as(&repo, dir.path(), "Cy", "cy@x.org", "2");
+    let moved = recent_authors_cached(&repo, &mut cache, 20).unwrap();
+
+    assert_eq!(pairs(&moved), [("Cy", "cy@x.org"), ("Ada", "ada@x.org")]);
+    assert_eq!(cache.walks(), 2);
+}
+
+#[test]
+fn another_user_email_or_limit_walks_again() {
+    let (dir, repo) = common::init_repo();
+    commit_as(&repo, dir.path(), "Ada", "ada@x.org", "1");
+    commit_as(&repo, dir.path(), "Bob", "bob@x.org", "2");
+    let mut cache = RecentAuthorsCache::default();
+    recent_authors_cached(&repo, &mut cache, 20).unwrap();
+
+    let one = recent_authors_cached(&repo, &mut cache, 1).unwrap();
+    assert_eq!(pairs(&one), [("Bob", "bob@x.org")]);
+    repo.config()
+        .unwrap()
+        .set_str("user.email", "bob@x.org")
+        .unwrap();
+    let as_bob = recent_authors_cached(&repo, &mut cache, 20).unwrap();
+
+    assert_eq!(pairs(&as_bob), [("Ada", "ada@x.org")]);
+    assert_eq!(cache.walks(), 3);
+}
+
+#[test]
+fn an_unborn_head_has_no_cached_authors() {
+    let (_dir, repo) = common::init_repo();
+    let mut cache = RecentAuthorsCache::default();
+    assert!(recent_authors_cached(&repo, &mut cache, 20)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn a_broken_head_is_an_error_not_an_empty_list() {
+    let (dir, repo) = common::init_repo();
+    commit_as(&repo, dir.path(), "Ada", "ada@x.org", "1");
+    let branch = repo.head().unwrap().name().unwrap().to_string();
+    drop(repo);
+    std::fs::write(dir.path().join(".git").join(&branch), "not an id\n").unwrap();
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    let mut cache = RecentAuthorsCache::default();
+    assert!(recent_authors_cached(&repo, &mut cache, 20).is_err());
+}
