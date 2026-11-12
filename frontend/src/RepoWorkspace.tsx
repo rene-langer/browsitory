@@ -1,3 +1,4 @@
+import { useStableValue } from "./lib/useStableValue";
 import { useCommitGraphLayout } from "./lib/useCommitGraphLayout";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CommitDraft } from "./components/CommitBox";
@@ -731,6 +732,10 @@ export function RepoWorkspace({
     onSelectionChange: setFileSelection,
   };
 
+  // One value for as long as nothing in it changed (#844): its consumers (the diff panes, the
+  // commit dock) skip the workspace's other updates.
+  const stableWorkspaceActions = useStableValue(workspaceActions);
+
   // Patch files dropped on the window (#649), applied like "Apply patch…": behind the repository
   // guard, whose reason a warning names instead.
   const { applyPatchFiles } = appState;
@@ -768,7 +773,7 @@ export function RepoWorkspace({
     // checks, automatic fetch), so a hidden workspace never reacts.
     <CurrentDiffContext.Provider value={currentDiff}>
     <MergeEditorContext.Provider value={mergeEditor}>
-    <WorkspaceActionsContext.Provider value={workspaceActions}>
+    <WorkspaceActionsContext.Provider value={stableWorkspaceActions}>
     <CopyToClipboardContext.Provider value={clipboard.copy}>
     <CommitDragContext.Provider value={commitDrag}>
     <div

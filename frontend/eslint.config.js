@@ -20,6 +20,8 @@ export default defineConfig([
     },
     rules: {
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      // `stableMemo` (src/lib/stableMemo.tsx) wraps a component like `memo` does (#844).
+      'react-refresh/only-export-components': ['error', { allowConstantExport: true, extraHOCs: ['stableMemo'] }],
     },
   },
   {

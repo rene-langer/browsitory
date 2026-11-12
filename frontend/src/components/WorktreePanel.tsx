@@ -1,3 +1,4 @@
+import { stableMemo } from "../lib/stableMemo";
 import { useId, useState } from "react";
 import { FolderGit2, GitFork } from "lucide-react";
 import type { BranchInfo, WorktreeInfo } from "../ipc/RepoClient";
@@ -14,7 +15,7 @@ import styles from "./WorktreePanel.module.css";
 import { pruneWorktreesAction, worktreeActions } from "../lib/actions/worktreeActions";
 import type { OperationBlockers } from "../lib/operationStatus";
 
-export function WorktreePanel({
+function WorktreePanelContent({
   worktrees,
   branches,
   onOpenWorktree,
@@ -201,3 +202,6 @@ export function WorktreePanel({
     </AccordionSection>
   );
 }
+
+/** Renders again only when its data changed (#844): its branch suggestions list every branch. */
+export const WorktreePanel = stableMemo(WorktreePanelContent, "WorktreePanel");
