@@ -51,9 +51,12 @@ function placeOf(text: HTMLElement) {
   };
 }
 
-/** The panes a line's text appears in, with that pane's line number. */
+/**
+ * The panes a line's text appears in, with that pane's line number. A result field's own text
+ * (#878) is left out: its lines are shown, numbered, under it.
+ */
 function linesOf(text: string): [string | null, number | null][] {
-  return screen.getAllByText(text).map((element) => {
+  return screen.getAllByText(text, { ignore: "script, style, textarea" }).map((element) => {
     const place = placeOf(element);
     return [place.pane, place.line];
   });
@@ -126,11 +129,11 @@ describe("ConflictResolutionPane three-pane view (#875)", () => {
     expect(numbersIn(cellOf(first, "theirs"))).toEqual([3]);
     expect(cellOf(first, "ours").parentElement).toBe(cellOf(first, "theirs").parentElement);
     expect(cellOf(first, "result").parentElement).toBe(cellOf(first, "ours").parentElement);
-    // After it the panes line up again, each counting its own lines; an unchosen block has no
-    // lines in the result yet.
+    // After it the panes line up again, each counting its own lines; an unchosen block's result
+    // holds git's conflict markers (#878).
     expect(linesOf("c")).toEqual([
       ["ours", 6],
-      ["result", 3],
+      ["result", 12],
       ["theirs", 4],
     ]);
     const rows = new Set(screen.getAllByText("c").map((text) => placeOf(text).row));
@@ -138,7 +141,7 @@ describe("ConflictResolutionPane three-pane view (#875)", () => {
     expect(numbersIn(cellOf(second, "theirs"))).toEqual([5, 6]);
     expect(linesOf("d")).toEqual([
       ["ours", 7],
-      ["result", 4],
+      ["result", 20],
       ["theirs", 7],
     ]);
   });
@@ -196,20 +199,20 @@ describe("ConflictResolutionPane three-pane view (#875)", () => {
     expect(screen.getAllByRole("button", { name: /unchanged lines/ })).toHaveLength(1);
     expect(linesOf("same 3")).toEqual([
       ["ours", 4],
-      ["result", 3],
+      ["result", 9],
       ["theirs", 4],
     ]);
     expect(screen.queryByText("same 6")).not.toBeInTheDocument();
     expect(linesOf("same 10")).toEqual([
       ["ours", 11],
-      ["result", 10],
+      ["result", 16],
       ["theirs", 11],
     ]);
 
     fireEvent.click(expand);
     expect(linesOf("same 6")).toEqual([
       ["ours", 7],
-      ["result", 6],
+      ["result", 12],
       ["theirs", 7],
     ]);
     expect(screen.queryByRole("button", { name: /unchanged lines/ })).not.toBeInTheDocument();
@@ -278,7 +281,7 @@ describe("ConflictResolutionPane three-pane view (#875)", () => {
     expect(first.querySelector('[data-pane="base"]')).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Show base" }));
     expect(cellOf(first, "base")).toBeInTheDocument();
-    expect(within(first).getByText("x")).toBeInTheDocument();
+    expect(within(cellOf(first, "base")).getByText("x")).toBeInTheDocument();
     fireEvent.click(within(first).getByRole("button", { name: "Accept base" }));
     expect(within(first).getByLabelText("Result")).toHaveValue("x\n");
 
@@ -385,8 +388,10 @@ describe("ConflictResolutionPane three-pane view (#875)", () => {
     await waitFor(() => expect(highlighted(cellOf(block, "theirs"))).toBe(true), { timeout: 15000 });
     expect(highlighted(cellOf(block, "ours"))).toBe(true);
     expect(cellOf(block, "theirs")).toHaveTextContent("const theirs = 2;");
-    // The unchanged line in all three panes; only the block's result field stays plain.
-    const cells = [...document.querySelectorAll("[data-pane]")].filter((cell) => cell.querySelector("textarea") === null);
+    // The unchanged line in all three panes; only the block's result stays plain.
+    const cells = [...document.querySelectorAll("[data-pane]")].filter(
+      (cell) => cell.getAttribute("data-pane") !== "result" || cell.closest('section[aria-label^="Conflict"]') === null,
+    );
     expect(cells.map((cell) => cell.getAttribute("data-pane"))).toEqual(["ours", "result", "theirs", "ours", "theirs"]);
     for (const cell of cells) expect(highlighted(cell)).toBe(true);
     unmount();
@@ -425,7 +430,9 @@ describe("ConflictResolutionPane take-side arrows (#876)", () => {
     expect(screen.getByRole("status")).toHaveTextContent("1 of 2 resolved");
     expect(arrow(second, "theirs")).toBeDisabled();
     // The other block is untouched.
-    expect(within(screen.getByRole("region", { name: "Conflict 1 of 2" })).getByLabelText("Result")).toHaveValue("");
+    expect(within(screen.getByRole("region", { name: "Conflict 1 of 2" })).getByLabelText("Result")).toHaveValue(
+      "<<<<<<< ours\no1\no2\no3\n||||||| base\nx\n=======\nt1\n>>>>>>> theirs\n",
+    );
   });
 
   it("appends the second side taken: ours then theirs, or theirs then ours", async () => {
@@ -463,7 +470,7 @@ describe("ConflictResolutionPane take-side arrows (#876)", () => {
     expect(screen.getByRole("status")).toHaveTextContent("1 of 2 resolved");
 
     fireEvent.click(within(first).getByRole("button", { name: "Reset" }));
-    expect(within(first).getByLabelText("Result")).toHaveValue("");
+    expect(within(first).getByLabelText("Result")).toHaveValue("<<<<<<< ours\no1\no2\no3\n||||||| base\nx\n=======\nt1\n>>>>>>> theirs\n");
     expect(within(first).getByText("Not chosen")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("0 of 2 resolved");
     expect(arrow(first, "ours")).toBeEnabled();
@@ -533,7 +540,7 @@ describe("ConflictResolutionPane base pane (#877)", () => {
     expect(cellOf(first, "base")).toHaveTextContent("x");
     // No separate base strip above the block's panes any more: its base is in the row.
     expect(cellOf(first, "base").parentElement).toBe(cellOf(first, "ours").parentElement);
-    expect(screen.getAllByText("x")).toHaveLength(1);
+    expect(screen.getAllByText("x").map((text) => placeOf(text).pane)).toEqual(["base", "result"]);
 
     fireEvent.click(toggle);
     expect(headers()).toEqual(["ours", "result", "theirs"]);
@@ -556,7 +563,7 @@ describe("ConflictResolutionPane base pane (#877)", () => {
     expect(linesOf("c")).toEqual([
       ["base", 4],
       ["ours", 6],
-      ["result", 3],
+      ["result", 12],
       ["theirs", 4],
     ]);
     expect(new Set(screen.getAllByText("c").map((text) => placeOf(text).row)).size).toBe(1);
@@ -564,7 +571,7 @@ describe("ConflictResolutionPane base pane (#877)", () => {
     expect(linesOf("d")).toEqual([
       ["base", 6],
       ["ours", 7],
-      ["result", 4],
+      ["result", 20],
       ["theirs", 7],
     ]);
   });
@@ -581,7 +588,7 @@ describe("ConflictResolutionPane base pane (#877)", () => {
     expect(linesOf("same 10")).toEqual([
       ["base", 10],
       ["ours", 11],
-      ["result", 10],
+      ["result", 16],
       ["theirs", 11],
     ]);
   });
