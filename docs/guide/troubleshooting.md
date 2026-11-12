@@ -20,6 +20,15 @@ moved, the log says why and the old folder is left as it was.
 
 Report problems on [GitHub](https://github.com/rene-langer/browsitory/issues).
 
+## "Couldn't show …"
+
+If a bug stops Browsitory from drawing a repository's tab, the tab shows "Couldn't show" with the
+repository's name and the error instead of going blank. The other tabs and the rest of the window
+keep working. **Reload tab** reads the repository again (your commit message draft stays),
+**Close tab** closes it, and **Copy details** copies the version and the error for a bug report.
+If the window itself can't be drawn, it shows "Browsitory couldn't show this window" with
+**Reload**, which opens your repositories again. Either way the error also goes to the log.
+
 ## An invalid `core.ignorecase`
 
 If the repository's `core.ignorecase` setting holds something other than true or false,
