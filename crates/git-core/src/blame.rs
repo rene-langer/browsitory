@@ -305,3 +305,54 @@ fn split_unchanged(hunks: &[Hunk], mut lines: Lines) -> (Lines, Lines) {
     }
     (passed, kept)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_common_tail_under_a_block_is_kept() {
+        assert_eq!(
+            trim_common_tail(b"a\nsame\n", b"b\nsame\n"),
+            (&b"a\nsame\n"[..], &b"b\nsame\n"[..])
+        );
+    }
+
+    #[test]
+    fn whole_common_blocks_are_trimmed_back_to_the_first_newline_in_them() {
+        // 410 lines of 5 bytes: two 1 KiB blocks of it are common to both versions.
+        let tail = "line\n".repeat(410);
+        let old = format!("A\n{tail}");
+        let new = format!("B\nB\n{tail}");
+
+        let (old, new) = trim_common_tail(old.as_bytes(), new.as_bytes());
+
+        // The trimmed part starts 2 bytes into the tail, at "ne\n": its first newline is kept.
+        assert_eq!(old, b"A\nline\n");
+        assert_eq!(new, b"B\nB\nline\n");
+    }
+
+    #[test]
+    fn a_tail_that_differs_in_its_last_block_is_kept() {
+        let tail = "line\n".repeat(410);
+        let old = format!("A\n{tail}x");
+        let new = format!("B\n{tail}y");
+
+        let (trimmed_old, trimmed_new) = trim_common_tail(old.as_bytes(), new.as_bytes());
+
+        assert_eq!(trimmed_old, old.as_bytes());
+        assert_eq!(trimmed_new, new.as_bytes());
+    }
+
+    #[test]
+    fn a_common_block_without_a_newline_is_trimmed_whole() {
+        let tail = "x".repeat(1024);
+        let old = format!("A\n{tail}");
+        let new = format!("B\n{tail}");
+
+        assert_eq!(
+            trim_common_tail(old.as_bytes(), new.as_bytes()),
+            (&b"A\n"[..], &b"B\n"[..])
+        );
+    }
+}
