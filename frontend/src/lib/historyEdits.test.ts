@@ -54,6 +54,7 @@ describe("historyEditChecks", () => {
       MoveUp: { ok: true, onto: "B" },
       MoveDown: { ok: true, onto: "A" },
       Drop: { ok: true, onto: "B" },
+      Edit: { ok: true, onto: "B" },
     });
   });
 

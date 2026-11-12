@@ -663,6 +663,7 @@ fn head_info_dto_serializes_a_paused_rebase() {
             "currentStep": 1,
             "totalSteps": 2,
             "health": { "kind": "Paused" },
+            "editing": null,
         })
     );
 }
