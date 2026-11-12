@@ -25,10 +25,11 @@ export interface FileHistoryState {
   /** A line history's entries are `LineHistoryEntry`s. */
   entries: Array<FileHistoryEntry | LineHistoryEntry>;
   limit: number;
-  // True when the last load filled its limit, so older changes probably exist.
+  /** The last load filled its limit and the history didn't end there: "Load more" applies. */
   hasMore: boolean;
   /** A line history whose walk stopped at the backend's commit cap. */
   truncated: boolean;
+  /** A load is in flight. With entries shown, it is still searching older commits (#860). */
   loading: boolean;
   error: DescribedError | null;
 }
@@ -83,30 +84,43 @@ export function useFileHistory(
         };
       });
       try {
-        let entries: Array<FileHistoryEntry | LineHistoryEntry>;
-        let truncated = false;
-        if (target.kind === "file") {
-          entries = await client.getFileHistory(repoPath, path, limit);
-        } else {
-          const lines = await client.getLineHistory(repoPath, target.revision, path, target.startLine, target.endLine, limit);
-          entries = lines.entries;
-          truncated = lines.truncated;
+        // The backend walks for a bounded time per call and keeps the walk where it stopped
+        // (#860): ask again with the same limit until the page is full or the history ended,
+        // showing what was found so far. A newer load or `close` bumps the generation and
+        // stops it.
+        for (;;) {
+          let entries: Array<FileHistoryEntry | LineHistoryEntry>;
+          let truncated = false;
+          let complete: boolean;
+          if (target.kind === "file") {
+            const page = await client.getFileHistory(repoPath, path, limit);
+            entries = page.entries;
+            complete = page.complete;
+          } else {
+            const lines = await client.getLineHistory(repoPath, target.revision, path, target.startLine, target.endLine, limit);
+            entries = lines.entries;
+            truncated = lines.truncated;
+            complete = lines.complete;
+          }
+          if (gen !== generation.current) return;
+          const done = complete || entries.length >= limit;
+          setHistory({
+            target,
+            path,
+            limit,
+            entries,
+            hasMore: !complete && entries.length >= limit,
+            truncated,
+            loading: !done,
+            error: null,
+          });
+          if (selectFirst.current && entries.length > 0) {
+            selectFirst.current = false;
+            selectRow({ commitId: entries[0].commit.id });
+          }
+          if (done) break;
         }
-        if (gen !== generation.current) return;
-        setHistory({
-          target,
-          path,
-          limit,
-          entries,
-          hasMore: !truncated && entries.length >= limit,
-          truncated,
-          loading: false,
-          error: null,
-        });
-        if (selectFirst.current) {
-          selectFirst.current = false;
-          if (entries.length > 0) selectRow({ commitId: entries[0].commit.id });
-        }
+        selectFirst.current = false;
       } catch (err: unknown) {
         if (gen !== generation.current) return;
         selectFirst.current = false;

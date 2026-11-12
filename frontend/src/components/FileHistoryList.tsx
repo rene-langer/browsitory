@@ -130,7 +130,12 @@ export function FileHistoryList({
           Stopped after a long stretch of history; older changes to these lines may be missing.
         </p>
       )}
-      {history.hasMore && (
+      {history.loading && history.entries.length > 0 && history.error === null && (
+        <p className={graphStyles.loadMore} role="status">
+          Searching older commits… ({history.entries.length} {history.entries.length === 1 ? "change" : "changes"} so far)
+        </p>
+      )}
+      {history.hasMore && !history.loading && (
         <div className={graphStyles.loadMore}>
           <span>Showing latest {history.entries.length} changes</span>
           <button type="button" onClick={onLoadMore}>
