@@ -3567,7 +3567,9 @@ describe("App release notes on a new version", () => {
       await waitFor(() => expect(setLastSeenVersion).toHaveBeenCalledWith("0.5.0"));
       expect(screen.queryByRole("dialog", { name: "What’s new" })).toBeNull();
 
-      fireEvent.click(screen.getByRole("button", { name: "What’s new" }));
+      // The toast's button: the header's button of the same name (#681) opens every release.
+      const toasts = screen.getByRole("status", { name: "Notifications" });
+      fireEvent.click(within(toasts).getByRole("button", { name: "What’s new" }));
       const dialog = await screen.findByRole("dialog", { name: "What’s new" });
       expect(within(dialog).getByText("Notes for 0.5.0")).toBeInTheDocument();
       expect(within(dialog).queryByText("Notes for 0.4.0")).toBeNull();
