@@ -455,4 +455,33 @@ mod tests {
         assert_eq!(find_raw_entry(b"10064x f\0", b"f"), None);
         assert_eq!(find_raw_entry(b"", b"f"), Some(None));
     }
+
+    /// Modes are read as libgit2 reads them: octal digits, leading zeros allowed, at most
+    /// 0o177777; an empty or larger mode makes the tree corrupted.
+    #[test]
+    fn modes_parse_as_libgit2_parses_them() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        let blob = repo.blob(b"x\n").unwrap();
+        let tree_of = |mode: &str| {
+            let mut raw = format!("{mode} f\0").into_bytes();
+            raw.extend_from_slice(blob.as_bytes());
+            repo.odb().unwrap().write(ObjectType::Tree, &raw).unwrap()
+        };
+
+        for mode in ["0100644", "177777"] {
+            let tree = tree_of(mode);
+            let theirs = repo.find_tree(tree).unwrap();
+            let ours = tree_entry(&repo, tree, "f").unwrap().unwrap();
+            let theirs = theirs.get_name("f").unwrap();
+            assert_eq!(ours.mode, theirs.filemode(), "{mode:?}");
+            assert_eq!(Some(ours.kind), theirs.kind(), "{mode:?}");
+        }
+
+        for mode in ["", "100648", "200000", "1777777", "100000000000644"] {
+            let tree = tree_of(mode);
+            assert!(repo.find_tree(tree).is_err(), "libgit2 accepts {mode:?}");
+            assert!(tree_entry(&repo, tree, "f").is_err(), "{mode:?}");
+        }
+    }
 }
