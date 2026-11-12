@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GraphCommit } from "../ipc/RepoClient";
-import { assignLanes, graphLaneCount, isSquashableRange } from "./commitGraphLayout";
+import { assignLanes, graphLaneCount, isSquashableRange, layoutLanes, type LaneLayout } from "./commitGraphLayout";
 
 function commit(id: string, parentIds: string[]): GraphCommit {
   return {
@@ -216,5 +216,140 @@ describe("graphLaneCount", () => {
     const layouts = assignLanes(linearCommits(200_000));
 
     expect(graphLaneCount(layouts)).toBe(1);
+  });
+});
+
+// A history in reverse-topological order (newest first), as `graph_log` returns it: commits are
+// created oldest first, each on top of one or two existing ones (a fork, a merge, a new root now
+// and then), and listed in reverse creation order. Seeded, so a failure reproduces.
+function randomHistory(seed: number, count: number): GraphCommit[] {
+  let state = seed;
+  const random = () => {
+    state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+    return state / 2_147_483_648;
+  };
+  const created: GraphCommit[] = [];
+  let tips: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const id = `s${seed}c${i}`;
+    let parents: string[] = [];
+    if (created.length > 0 && random() > 0.03) {
+      const first = random() < 0.7 && tips.length > 0 ? tips[Math.floor(random() * tips.length)] : created[Math.floor(random() * created.length)].id;
+      parents = [first];
+      if (random() < 0.25) {
+        const other = created[Math.max(0, created.length - 1 - Math.floor(random() * 40))].id;
+        if (other !== first) parents.push(other);
+      }
+    }
+    created.push(commit(id, parents));
+    tips = tips.filter((tip) => !parents.includes(tip));
+    tips.push(id);
+    if (tips.length > 6) tips = tips.slice(-6);
+  }
+  return created.reverse();
+}
+
+/** Lays `commits` out page by page, as infinite scroll loads them, checking every prefix. */
+function layOutInPages(commits: GraphCommit[], pageSize: number, merged?: ReadonlySet<string>): LaneLayout[] {
+  const results: LaneLayout[] = [];
+  let previous: LaneLayout | null = null;
+  for (let end = pageSize; end < commits.length + pageSize; end += pageSize) {
+    previous = layoutLanes(commits.slice(0, Math.min(end, commits.length)), merged, previous);
+    results.push(previous);
+  }
+  return results;
+}
+
+describe("layoutLanes (#837)", () => {
+  it("lays out each appended page to exactly what a full layout of the prefix gives", () => {
+    // Every prefix of a short history, and pages of several sizes of longer ones.
+    const cases: [number, number, number][] = [
+      [1, 80, 1],
+      [2, 80, 1],
+      ...[3, 4, 5, 6].flatMap((seed) => [7, 50, 300].map((pageSize): [number, number, number] => [seed, 500, pageSize])),
+    ];
+    for (const [seed, length, pageSize] of cases) {
+      const commits = randomHistory(seed, length);
+      {
+        const results = layOutInPages(commits, pageSize);
+        results.forEach((result, page) => {
+          const prefix = commits.slice(0, Math.min((page + 1) * pageSize, commits.length));
+          const full = assignLanes(prefix);
+          // As JSON: the same structure, compared far faster than a deep equal of every prefix.
+          expect(JSON.stringify(result.layouts), `seed ${seed}, pages of ${pageSize}, page ${page}`).toBe(JSON.stringify(full));
+          expect(result.laneCount).toBe(graphLaneCount(full));
+          expect(result.indexById.get(prefix[prefix.length - 1].id)).toBe(prefix.length - 1);
+          expect(result.indexById.size).toBe(prefix.length);
+        });
+      }
+    }
+  });
+
+  it("matches the full layout with an expanded merge's commits too", () => {
+    const commits = randomHistory(9, 400);
+    const merged = new Set(commits.filter((_, index) => index % 13 === 5).map((c) => c.id));
+    layOutInPages(commits, 37, merged).forEach((result, page) => {
+      const prefix = commits.slice(0, Math.min((page + 1) * 37, commits.length));
+      expect(result.layouts).toEqual(assignLanes(prefix, merged));
+    });
+  });
+
+  it("lays out only the appended page when no earlier row waits for its commits", () => {
+    const count = 3_000;
+    const commits = Array.from({ length: count }, (_, i) => commit(`c${count - i}`, i + 1 < count ? [`c${count - i - 1}`] : []));
+    const results = layOutInPages(commits, 300);
+    expect(results.map((result) => result.rowsLaidOut)).toEqual(Array.from({ length: 10 }, () => 300));
+  });
+
+  it("lays out again from shortly before a row whose merge parent the new page brings", () => {
+    // 1,000 rows of a main line; row 290 merges a side commit that only the second page lists.
+    const count = 1_000;
+    const ids = Array.from({ length: count }, (_, i) => `m${count - i}`);
+    const commits = ids.map((id, i) => commit(id, i + 1 < count ? [ids[i + 1]] : []));
+    commits[290] = commit(ids[290], [ids[291], "side"]);
+    commits.splice(310, 0, commit("side", [ids[400]]));
+    const [first, second] = layOutInPages(commits, 300);
+    expect(first.layouts[290].hiddenParentIds).toEqual(["side"]);
+    expect(second.layouts).toEqual(assignLanes(commits.slice(0, 600)));
+    expect(second.layouts[290].hiddenParentIds).toEqual([]);
+    // From the checkpoint at or before row 290, not from row 0.
+    expect(second.rowsLaidOut).toBeLessThan(600);
+    expect(second.rowsLaidOut).toBeGreaterThanOrEqual(310);
+  });
+
+  it("lays out from scratch when the list isn't an extension of the previous one", () => {
+    const commits = randomHistory(11, 200);
+    const previous = layoutLanes(commits.slice(0, 100), undefined, null);
+    const other = randomHistory(12, 150);
+    const result = layoutLanes(other, undefined, previous);
+    expect(result.layouts).toEqual(assignLanes(other));
+    expect(result.rowsLaidOut).toBe(150);
+    // A different expanded-merge set also starts over.
+    const again = layoutLanes(commits.slice(0, 150), new Set([commits[3].id]), layoutLanes(commits.slice(0, 100), undefined, null));
+    expect(again.layouts).toEqual(assignLanes(commits.slice(0, 150), new Set([commits[3].id])));
+    expect(again.rowsLaidOut).toBe(150);
+  });
+
+  it("leaves the previous result as it was", () => {
+    const commits = randomHistory(13, 300);
+    const first = layoutLanes(commits.slice(0, 100), undefined, null);
+    const snapshot = JSON.stringify(first.layouts);
+    const firstLength = first.layouts.length;
+    layoutLanes(commits.slice(0, 300), undefined, first);
+    expect(first.layouts).toHaveLength(firstLength);
+    expect(JSON.stringify(first.layouts)).toBe(snapshot);
+    expect(first.laneCount).toBe(graphLaneCount(assignLanes(commits.slice(0, 100))));
+  });
+
+  it("shares one pass-through list between consecutive rows whose lanes don't change", () => {
+    // A side branch running beside the main line for 50 rows: every main-line row between its
+    // tip and its fork point passes the same lane through.
+    const main = Array.from({ length: 60 }, (_, i) => `m${60 - i}`);
+    const commits = [commit("side", [main[55]]), ...main.map((id, i) => commit(id, i + 1 < main.length ? [main[i + 1]] : []))];
+    const { layouts } = layoutLanes(commits, undefined, null);
+    expect(layouts[2].passThroughLanes).toEqual(layouts[3].passThroughLanes);
+    expect(layouts[2].passThroughLanes.length).toBeGreaterThan(0);
+    expect(layouts[3].passThroughLanes).toBe(layouts[2].passThroughLanes);
+    expect(layouts[40].passThroughLanes).toBe(layouts[2].passThroughLanes);
   });
 });

@@ -139,3 +139,25 @@ export function isSquashableRange(
   }
   return true;
 }
+
+/** Stub for the test-first commit (#837): a full layout every time; the implementation follows. */
+export interface LaneLayout {
+  layouts: CommitLayout[];
+  laneCount: number;
+  indexById: Map<string, number>;
+  rowsLaidOut: number;
+}
+
+export function layoutLanes(
+  commits: GraphCommit[],
+  merged: ReadonlySet<string> = NO_COMMITS,
+  _previous: LaneLayout | null = null,
+): LaneLayout {
+  const layouts = assignLanes(commits, merged);
+  return {
+    layouts,
+    laneCount: graphLaneCount(layouts),
+    indexById: new Map(commits.map((commit, index) => [commit.id, index])),
+    rowsLaidOut: commits.length,
+  };
+}
