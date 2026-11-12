@@ -106,4 +106,23 @@ describe("useStableValue (#844)", () => {
     rerender({ present: false });
     expect(result.current).not.toBe(before);
   });
+
+  it("with a depth of 1, wraps the top-level functions and compares nested objects by identity", () => {
+    // `stableMemo`'s props: a nested object is never copied, even when it changes identity in
+    // every render (a test's fake client built per render is a Proxy whose methods a copy would lose).
+    const makeClient = () =>
+      new Proxy({} as { read: () => string }, { get: (_target, key) => (key === "read" ? () => "read" : undefined) });
+    const { result, rerender } = renderHook(({ client }) => useStableValue({ client, onGo: () => 1 }, 1), {
+      initialProps: { client: makeClient() },
+    });
+    const onGo = result.current.onGo;
+    const next = makeClient();
+    rerender({ client: next });
+    expect(result.current.client).toBe(next);
+    expect(result.current.client.read()).toBe("read");
+    expect(result.current.onGo).toBe(onGo);
+    const before = result.current;
+    rerender({ client: next });
+    expect(result.current).toBe(before);
+  });
 });
