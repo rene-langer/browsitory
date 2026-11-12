@@ -289,7 +289,9 @@ fn an_intent_to_add_entry_keeps_its_mark() {
 }
 
 /// The scratch index gets the repository's case handling: in a case-sensitive repository two
-/// files that differ only in case stay two files.
+/// files that differ only in case stay two files. Linux only: macOS and Windows file systems are
+/// case-insensitive by default, where the two names are one file.
+#[cfg(target_os = "linux")]
 #[test]
 fn case_sensitive_repositories_keep_files_that_differ_only_in_case_apart() {
     let (dir, repo) = init_repo();
