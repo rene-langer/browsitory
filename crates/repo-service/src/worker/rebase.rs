@@ -270,6 +270,13 @@ impl WorkerHandle {
         self.rebase_continue_reporting(message, std::sync::mpsc::channel().0)
     }
 
+    /// Folds the staged changes into `commit_id` (#883).
+    #[allow(dead_code)]
+    pub fn fold_staged(&self, commit_id: String) -> Result<RebaseStepResult, ErrorDto> {
+        let _ = commit_id;
+        Err("not implemented".into())
+    }
+
     #[allow(dead_code)]
     pub fn abort_rebase(&self) -> Result<RebaseAbort, ErrorDto> {
         self.request(|tx| Command::AbortRebase { reply: tx })
