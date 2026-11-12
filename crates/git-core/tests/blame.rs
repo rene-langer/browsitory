@@ -412,3 +412,93 @@ fn blame_reads_only_the_files_path_not_the_whole_tree() {
 
     assert_eq!(owners(&lines), expect(&[(c1, "a"), (c2, "B")]));
 }
+
+/// A commit reached through a short and a long path is examined only after every child on
+/// both has passed it its lines (the walk is topological).
+#[test]
+fn a_commit_reached_by_paths_of_different_lengths_gets_the_lines_of_both() {
+    let (_dir, repo) = init_repo();
+    let base = commit_tree(&repo, &[("f.txt", "a\nb\nc\n", REGULAR)], &[], "base");
+    let edit = commit_tree(&repo, &[("f.txt", "a\nB\nc\n", REGULAR)], &[base], "edit");
+    let other = commit_tree(&repo, &[("f.txt", "a\nB\nC\n", REGULAR)], &[edit], "other");
+    // The merge takes `c` back from `base` directly; `a` reaches `base` through `edit`.
+    let merge = commit_tree(
+        &repo,
+        &[("f.txt", "a\nB\nc\n", REGULAR)],
+        &[other, base],
+        "merge",
+    );
+    set_head(&repo, merge);
+
+    let lines = git_core::blame::blame_file(&repo, "HEAD", "f.txt").unwrap();
+
+    assert_eq!(
+        owners(&lines),
+        expect(&[(base, "a"), (edit, "B"), (base, "c")])
+    );
+    assert_matches_git(&repo, "HEAD", "f.txt", &lines);
+}
+
+/// Two renames merged: the parent holds the lines under two paths at once, and each keeps
+/// its own path's history.
+#[test]
+fn lines_reaching_one_commit_under_two_paths_keep_their_own_paths() {
+    let (_dir, repo) = init_repo();
+    let older = commit_tree(
+        &repo,
+        &[
+            ("f.txt", "a\nb\nc\nd\ne\n", REGULAR),
+            ("g.txt", "1\n2\n3\nX\n5\n", REGULAR),
+        ],
+        &[],
+        "older",
+    );
+    let both = commit_tree(
+        &repo,
+        &[
+            ("f.txt", "A\nb\nc\nd\ne\n", REGULAR),
+            ("g.txt", "1\n2\n3\n4\n5\n", REGULAR),
+        ],
+        &[older],
+        "both",
+    );
+    let rename_f = commit_tree(
+        &repo,
+        &[
+            ("h.txt", "A\nb\nc\nd\ne\n", REGULAR),
+            ("g.txt", "1\n2\n3\n4\n5\n", REGULAR),
+        ],
+        &[both],
+        "rename f",
+    );
+    let rename_g = commit_tree(
+        &repo,
+        &[
+            ("f.txt", "A\nb\nc\nd\ne\n", REGULAR),
+            ("h.txt", "1\n2\n3\n4\n5\n", REGULAR),
+        ],
+        &[both],
+        "rename g",
+    );
+    let merge = commit_tree(
+        &repo,
+        &[("h.txt", "A\nb\nc\n4\n5\n", REGULAR)],
+        &[rename_f, rename_g],
+        "merge",
+    );
+    set_head(&repo, merge);
+
+    let lines = git_core::blame::blame_file(&repo, "HEAD", "h.txt").unwrap();
+
+    assert_eq!(
+        owners(&lines),
+        expect(&[
+            (both, "A"),
+            (older, "b"),
+            (older, "c"),
+            (both, "4"),
+            (older, "5")
+        ])
+    );
+    assert_matches_git(&repo, "HEAD", "h.txt", &lines);
+}
