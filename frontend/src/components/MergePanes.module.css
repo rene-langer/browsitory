@@ -64,22 +64,12 @@
   display: flex;
 }
 
-.number,
-.gutter {
+.number {
   flex: 0 0 var(--merge-gutter);
   text-align: right;
   padding-right: 1ch;
   color: var(--color-text-muted);
   user-select: none;
-}
-
-.gutter {
-  display: flex;
-  flex-direction: column;
-  font-family: var(--font-mono);
-  line-height: var(--merge-line-height);
-  /* Level with the result field's first line (its border and padding). */
-  padding-top: calc(1px + var(--space-1));
 }
 
 .text {
@@ -112,29 +102,71 @@
   background: var(--color-surface);
 }
 
-.resultLines {
-  display: flex;
+/* An editable run of the result (#878): a text field laid over its numbered lines, its own
+   text transparent, so the lines (marked by origin, highlighted) show through and wrap exactly
+   as the side panes' lines do. While it has the focus it keeps one more line, for the caret
+   after the last line break. */
+.editable {
+  position: relative;
   flex: 1 1 auto;
+  min-height: calc(var(--merge-line-height) * 1em);
+  border-radius: var(--radius-sm);
 }
 
-/* Not wrapped, so its lines stay level with the line numbers next to it. */
-.result {
-  flex: 1 1 auto;
-  min-width: 0;
-  box-sizing: border-box;
+.editable:focus-within {
+  padding-bottom: calc(var(--merge-line-height) * 1em);
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 1px;
+}
+
+.input {
+  position: absolute;
+  inset: 0 0 0 var(--merge-gutter);
+  width: auto;
   margin: 0;
-  padding: var(--space-1) var(--space-2);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
   font-family: var(--font-mono);
   font-size: inherit;
   line-height: var(--merge-line-height);
   tab-size: var(--tab-size);
-  white-space: pre;
-  overflow-x: auto;
-  resize: vertical;
-  color: var(--color-text);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: hidden;
+  resize: none;
+  color: transparent;
+  caret-color: var(--color-text);
+  background: transparent;
+  outline: none;
+}
+
+/* Where each result line came from (#878): a side taken, typed, or still in conflict. A bar on
+   the line's edge and a faint tint, both by origin. */
+.line[data-origin] {
+  --origin: transparent;
+  background: color-mix(in srgb, var(--origin) 12%, transparent);
+  box-shadow: inset 3px 0 var(--origin);
+}
+
+.line[data-origin="ours"] {
+  --origin: var(--color-lane-3);
+}
+
+.line[data-origin="theirs"] {
+  --origin: var(--color-lane-4);
+}
+
+.line[data-origin="base"] {
+  --origin: var(--color-lane-6);
+}
+
+.line[data-origin="edited"] {
+  --origin: var(--color-warning-text);
+}
+
+.line[data-origin="conflict"] {
+  --origin: var(--color-danger-text);
 }
 
 .placeholder {

@@ -25,7 +25,20 @@ A conflicted file opens the **Resolve conflict** pane:
   the theirs pane (**Take theirs**) puts those lines into the result; taking the other side
   then adds its lines after them, the same as **Ours then theirs** or **Theirs then ours**.
   Over the base or a result you typed, an arrow replaces it with that side. An arrow is
-  disabled while its side is in the result; **Reset** undoes it. **Blocks** shows each conflicting block on its own, our lines and
+  disabled while its side is in the result; **Reset** undoes it.
+
+  In the three panes the whole result is editable, the unchanged lines too (a collapsed run
+  once you show it): click into the middle pane and type. A block without a choice shows git's
+  conflict markers there (`<<<<<<< ours`, `||||||| base`, `=======`, `>>>>>>> theirs`); delete
+  the markers and keep the lines you want, or take a side. Each result line is marked with
+  where it came from: our lines, their lines, the base, typed lines, or a conflict still to
+  resolve. Typing into a resolved block marks it "Edited". **Undo** and **Redo**, or **Ctrl+Z**
+  and **Ctrl+Shift+Z** / **Ctrl+Y** (⌘Z and ⇧⌘Z on macOS) with the focus in the merge editor,
+  step back and forth through your changes: typing, arrows, choices and **Reset**. Keystrokes in
+  one place without a pause are one step. Inside the merge editor these keys undo the merge
+  editor's changes, not the last Git operation.
+
+  **Blocks** shows each conflicting block on its own, our lines and
   their lines side by side above its result. When the pane is too narrow for three panes (the
   VS Code side panel, for example), the merge editor shows the blocks. **Show base** adds the
   common ancestor's lines ("Empty: no common lines" when there are none, for example when both
@@ -35,12 +48,13 @@ A conflicted file opens the **Resolve conflict** pane:
   block's **Result** yourself: the result field is editable, and typing in it marks the block
   "Edited". **Reset** clears a block's choice and edits. Every block starts unresolved: the
   pressed button and the label next to the block's title show your choice, and a counter such
-  as "1 of 3 resolved" shows how far you are. **Save resolution** is enabled once every block
-  has a result. The sides are labelled with what they are, for example "Ours (main)" and
+  as "1 of 3 resolved" shows how far you are (a block counts once it has a result without a
+  conflict marker). **Save resolution** is enabled once every block has a result and no
+  `<<<<<<<` or `>>>>>>>` line is left anywhere in the file. The sides are labelled with what they are, for example "Ours (main)" and
   "Theirs (feature)" for a merge. **Previous conflict** and **Next conflict** move between the
   blocks. Our lines, their lines, the base and the unchanged lines are syntax highlighted like
-  the diff, following the diff's **Syntax highlighting** option; the result fields stay plain
-  text.
+  the diff, following the diff's **Syntax highlighting** option; in the result, the lines you
+  took from a side or left unchanged are highlighted too, and typed lines stay plain.
 
   ![The merge editor: one conflict block with our and their lines, the choices and the result](assets/merge-editor.png)
 

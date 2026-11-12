@@ -60,23 +60,37 @@ function withFinalNewline(text: string): string {
   return text === "" || text.endsWith("\n") ? text : `${text}\n`;
 }
 
+/** The block as git writes it into the file while it is unresolved, between conflict markers. */
+export function conflictMarkerText(block: ConflictBlock): string {
+  return (
+    `<<<<<<< ours\n${withFinalNewline(block.ours)}||||||| base\n${withFinalNewline(block.base)}` +
+    `=======\n${withFinalNewline(block.theirs)}>>>>>>> theirs\n`
+  );
+}
+
 /**
- * The whole file: clean runs as they are, each block's result, and git's conflict markers around
- * a block that has no result yet. Each segment carries its own line terminators (see
- * `parse_conflict_markers` in `crates/git-core/src/merge.rs`), so they are joined with "".
+ * A segment's text in the result: an unchanged run as it is or as typed over (#878, an `edited`
+ * state), a block's result, or the block between git's conflict markers while it has none.
+ */
+export function segmentResult(segment: ConflictSegment, state: BlockState | undefined): string {
+  if (segment.kind === "Clean") return state?.kind === "edited" ? state.text : segment.content;
+  return blockResult(segment, state ?? { kind: "unchosen" }) ?? conflictMarkerText(segment);
+}
+
+/** Whether a block has a result, and one without a conflict's start or end marker (#878). */
+export function blockResolved(block: ConflictBlock, state: BlockState): boolean {
+  const result = blockResult(block, state);
+  return result !== null && !hasConflictMarkers(result);
+}
+
+/**
+ * The whole file: clean runs as they are (or as typed over, #878), each block's result, and git's
+ * conflict markers around a block that has no result yet. Each segment carries its own line
+ * terminators (see `parse_conflict_markers` in `crates/git-core/src/merge.rs`), so they are
+ * joined with "".
  */
 export function assembleResult(segments: ConflictSegment[], states: BlockState[]): string {
-  return segments
-    .map((segment, index) => {
-      if (segment.kind === "Clean") return segment.content;
-      const result = blockResult(segment, states[index] ?? { kind: "unchosen" });
-      if (result !== null) return result;
-      return (
-        `<<<<<<< ours\n${withFinalNewline(segment.ours)}||||||| base\n${withFinalNewline(segment.base)}` +
-        `=======\n${withFinalNewline(segment.theirs)}>>>>>>> theirs\n`
-      );
-    })
-    .join("");
+  return segments.map((segment, index) => segmentResult(segment, states[index])).join("");
 }
 
 /**
