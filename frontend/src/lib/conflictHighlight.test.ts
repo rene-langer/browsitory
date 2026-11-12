@@ -31,6 +31,22 @@ describe("conflictVersions", () => {
     ];
     expect(conflictVersions(segments).ours).toEqual({ text: "a\nc", starts: [0, 1] });
   });
+
+  // #847: a segment's lines were spread into push(), one argument per line, which throws past
+  // the engine's argument limit (V8: about 120,000).
+  it("builds a version from a segment of 200,000 lines", () => {
+    const count = 200_000;
+    const content = "x\n".repeat(count);
+    const segments: ConflictSegment[] = [
+      { kind: "Clean", content },
+      { kind: "Conflict", ours: "o\n", base: "", theirs: content },
+    ];
+    const versions = conflictVersions(segments);
+    expect(versions.ours.starts).toEqual([0, count]);
+    expect(versions.ours.text.split("\n")).toHaveLength(count + 1);
+    expect(versions.theirs.text.split("\n")).toHaveLength(2 * count);
+    expect(versions.base.starts).toEqual([0, count]);
+  });
 });
 
 describe("conflictTokens", () => {
