@@ -45,6 +45,17 @@ fn set_local(repo: &Repository, entries: &[(&str, &str)]) {
     }
 }
 
+/// Turns on `core.autocrlf` through the repository's own config handle. libgit2 caches
+/// `core.autocrlf` per open repository (filled by the commit before) and drops that cache only
+/// when a config owned by the repository changes; `set_local` writes through a level opened
+/// apart from it, which a still-open repository wouldn't notice.
+fn set_autocrlf(repo: &Repository) {
+    repo.config()
+        .unwrap()
+        .set_bool("core.autocrlf", true)
+        .unwrap();
+}
+
 fn read(path: &Path) -> String {
     std::fs::read_to_string(path).unwrap()
 }
@@ -344,7 +355,7 @@ fn file_versions_get_the_checkout_line_endings_of_core_autocrlf() {
     write_file(dir.path(), "a.txt", "one\ntwo\n");
     std::fs::write(dir.path().join("bin.dat"), b"x\0y\nz\n").unwrap();
     commit_all(&repo, "base");
-    set_local(&repo, &[("core.autocrlf", "true")]);
+    set_autocrlf(&repo);
 
     for version in [FileVersion::Head, FileVersion::Index] {
         assert_eq!(
@@ -404,7 +415,7 @@ fn the_size_limit_applies_to_the_converted_contents() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "a.txt", "1\n2\n3\n");
     commit_all(&repo, "base");
-    set_local(&repo, &[("core.autocrlf", "true")]);
+    set_autocrlf(&repo);
     assert_eq!(
         file_version_contents(&repo, "a.txt", &FileVersion::Head, 9)
             .unwrap()
@@ -493,7 +504,7 @@ fn diff_tool_side_files_get_the_checkout_line_endings() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "a.txt", "same\nold\n");
     commit_all(&repo, "base");
-    set_local(&repo, &[("core.autocrlf", "true")]);
+    set_autocrlf(&repo);
     write_file(dir.path(), "a.txt", "same\r\nnew\r\n");
     let (_c, config) = diff_config(&repo);
     let root = TempDir::new().unwrap();
