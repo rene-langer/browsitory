@@ -2090,7 +2090,7 @@ Shiki tokenizes in a Web Worker, not on the page (#843): a 2,000-line TypeScript
 (`highlightLines`, `useHunkTokens`; the merge editor's `conflictHighlight.ts`) and hands the
 work to a `HighlightTransport` (`highlightWorkerProtocol.ts`):
 
-- The tokenizer (`highlightTokenizer.ts`: grammars, Shiki, the JavaScript regex engine) works
+- The tokenizer (`highlightTokenizer.ts`: grammars, Shiki, its Oniguruma WebAssembly engine) works
   in chunks of 200 lines, carrying Shiki's grammar state from chunk to chunk, and gives the
   event loop a turn between chunks. A caller that moves on (another file, an unmounted view)
   aborts its `AbortSignal`; `highlightLines` shares one request between callers asking for the
@@ -2106,6 +2106,14 @@ work to a `HighlightTransport` (`highlightWorkerProtocol.ts`):
   `dist-vscode/assets/highlight-worker.js`, and `vscode-main.tsx` fetches it next to its own
   script, wraps it in a blob and starts it (`highlightBlobWorker.ts`). The webview CSP allows
   `worker-src blob:` for this and nothing else (`extension/src/webviewHtml.ts`).
+- The engine is Oniguruma compiled to WebAssembly (`shiki/engine/oniguruma`, binary inlined in
+  `shiki/wasm`), about 4 times faster than Shiki's JavaScript regex engine on TypeScript in
+  WebKitGTK and 2 times in VSCode's Chromium. Compiling it needs `'wasm-unsafe-eval'` in
+  `script-src`: in `tauri.conf.json`'s CSP (for the page fallback, and for the module worker
+  wherever the webview applies the page's CSP to it) and in the VSCode webview's (the blob
+  worker inherits it; without it the worker answers every request with a CSP error). It allows WebAssembly
+  compilation only, not `eval`. `polyfillResponseBytes` adds `Response.prototype.bytes`, which
+  the inlined loader uses and WebKit before Safari 18 lacks.
 - If the worker can't be created or fails to load, pending and later requests fall back to
   the page (`highlightInProcess.ts`): the same chunked tokenizer, so the page blocks for one
   chunk at a time instead of the whole file. Vitest uses that fallback too (jsdom has no

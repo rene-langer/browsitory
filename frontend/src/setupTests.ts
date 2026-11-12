@@ -86,3 +86,18 @@ Object.defineProperty(globalThis, "IntersectionObserver", {
   configurable: true,
   value: ImmediatelyIntersectingObserver,
 });
+
+// jsdom's Blob has no stream(), which Shiki's inlined WebAssembly loader uses to unpack its
+// Oniguruma engine (#843); every webview the app runs in has it.
+if (typeof Blob.prototype.stream !== "function") {
+  const streamOf = (blob: Blob) =>
+    new ReadableStream<Uint8Array>({
+      async start(controller) {
+        controller.enqueue(new Uint8Array(await blob.arrayBuffer()));
+        controller.close();
+      },
+    });
+  Blob.prototype.stream = function stream(this: Blob) {
+    return streamOf(this);
+  } as Blob["stream"];
+}
