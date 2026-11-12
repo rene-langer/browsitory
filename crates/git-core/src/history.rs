@@ -409,4 +409,50 @@ mod tests {
             None
         );
     }
+
+    /// The stored-form lookup agrees with libgit2's parsed tree for every kind of entry,
+    /// including modes libgit2 normalizes (group-writable, any execute bit).
+    #[test]
+    fn raw_tree_entries_match_libgit2s() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        let blob = repo.blob(b"x\n").unwrap();
+        let folder = tree_with(&repo, &[("f", blob, 0o100644)]);
+        let modes: [(&str, u32, Oid); 8] = [
+            ("dir", 0o40000, folder),
+            ("exec", 0o100755, blob),
+            ("group", 0o100664, blob),
+            ("link", 0o120000, blob),
+            ("module", 0o160000, blob),
+            ("odd exec", 0o100711, blob),
+            ("plain", 0o100644, blob),
+            ("z", 0o100644, blob),
+        ];
+        let mut raw = Vec::new();
+        for (name, mode, id) in modes {
+            raw.extend_from_slice(format!("{mode:o} {name}\0").as_bytes());
+            raw.extend_from_slice(id.as_bytes());
+        }
+        let tree_id = repo.odb().unwrap().write(ObjectType::Tree, &raw).unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+
+        for (name, _, _) in modes {
+            let ours = tree_entry(&repo, tree_id, name).unwrap().unwrap();
+            let theirs = tree.get_name(name).unwrap();
+            assert_eq!(ours.id, theirs.id(), "{name}");
+            assert_eq!(ours.mode, theirs.filemode(), "{name}");
+            assert_eq!(Some(ours.kind), theirs.kind(), "{name}");
+        }
+        assert_eq!(tree_entry(&repo, tree_id, "missing").unwrap(), None);
+        assert_eq!(tree_entry(&repo, tree_id, "di").unwrap(), None);
+        assert!(tree_entry(&repo, blob, "f").is_err());
+    }
+
+    #[test]
+    fn a_corrupted_tree_is_an_error_not_a_missing_entry() {
+        assert_eq!(find_raw_entry(b"100644 f", b"f"), None);
+        assert_eq!(find_raw_entry(b"100644 f\0short", b"f"), None);
+        assert_eq!(find_raw_entry(b"10064x f\0", b"f"), None);
+        assert_eq!(find_raw_entry(b"", b"f"), Some(None));
+    }
 }
