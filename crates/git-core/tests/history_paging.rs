@@ -429,3 +429,43 @@ fn line_history_errors_still_come_from_the_first_call() {
         Err(git_core::history::HistoryError::InvalidRange { count: 10, .. })
     ));
 }
+
+// ---- Found by mutation testing (#860) ----
+
+#[test]
+fn a_file_and_a_line_history_from_the_same_head_sort_the_walk_once() {
+    let (_dir, repo, _) = line_repo();
+    let mut cache = WalkCache::default();
+
+    line_page(&mut cache, &repo, "HEAD", 3);
+    file_history_cached(&repo, &mut cache, "l.txt", 3, NO_BUDGET).unwrap();
+    file_history_cached(&repo, &mut cache, "g.txt", 3, NO_BUDGET).unwrap();
+
+    assert_eq!(cache.stats().history_walks, 3);
+    assert_eq!(cache.stats().walks, 1, "one sort of HEAD's walk, shared");
+}
+
+#[test]
+fn a_page_examines_no_commit_beyond_its_last_entry() {
+    let (_dir, repo) = init_repo();
+    let v1 = commit_tree(&repo, &[("f.txt", "1", REGULAR)], &[], "v1");
+    let v2 = commit_tree(&repo, &[("f.txt", "2", REGULAR)], &[v1], "v2");
+    set_head(&repo, v2);
+    let mut cache = WalkCache::default();
+
+    let page = file_history_cached(&repo, &mut cache, "f.txt", 1, NO_BUDGET).unwrap();
+
+    assert_eq!(ids(&page.entries), vec![v2]);
+    assert_eq!(cache.stats().history_commits, 1);
+}
+
+#[test]
+fn a_broken_head_is_an_error_not_an_empty_history() {
+    let (dir, repo, _) = history_repo();
+    drop(repo);
+    std::fs::write(dir.path().join(".git/refs/heads/main"), "not an id\n").unwrap();
+    let repo = Repository::open(dir.path()).unwrap();
+    let mut cache = WalkCache::default();
+
+    assert!(file_history_cached(&repo, &mut cache, "f.txt", 300, NO_BUDGET).is_err());
+}
