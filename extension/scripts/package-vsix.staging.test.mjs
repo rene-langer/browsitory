@@ -102,6 +102,25 @@ test("rejects a webview bundle with import.meta or extra chunks", async (t) => {
   await assert.rejects(assertClassicScriptBundle(root), /extra files: rust\.js/);
 });
 
+// #843: syntax highlighting runs in a Web Worker, which the VS Code build ships as one more
+// classic script next to the bundle. That file, and only that one, is allowed.
+test("accepts the highlight worker next to the bundle, as a classic script", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "browsitory-bundle-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const assets = path.join(root, "assets");
+  await mkdir(assets, { recursive: true });
+  await writeFile(path.join(assets, "vscode-main.js"), "ok()");
+  await writeFile(path.join(assets, "highlight-worker.js"), "(function(){})()");
+  await assertClassicScriptBundle(root);
+
+  await writeFile(path.join(assets, "highlight-worker.js"), "u=import.meta.url");
+  await assert.rejects(assertClassicScriptBundle(root), /highlight-worker\.js.*import\.meta/);
+
+  await writeFile(path.join(assets, "highlight-worker.js"), "(function(){})()");
+  await writeFile(path.join(assets, "rust.js"), "x");
+  await assert.rejects(assertClassicScriptBundle(root), /extra files: rust\.js/);
+});
+
 test("manifest ships the listing page, icon and licence notices", async () => {
   const extensionRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const manifest = JSON.parse(await readFile(path.join(extensionRoot, "package.json"), "utf8"));

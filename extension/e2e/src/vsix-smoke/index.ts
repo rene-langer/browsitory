@@ -55,6 +55,11 @@ export async function run(): Promise<void> {
   const webview = await connectToWebview(`http://127.0.0.1:${cdpPort}`);
   try {
     await webview.waitForText("li", commitMessage, 30000);
+    // The packaged highlight worker starts under the webview's CSP and tokenizes (#843).
+    const colours = await webview.highlightWorkerColours();
+    if (!colours.includes("var(--shiki-token-keyword)")) {
+      throw new Error(`the highlight worker returned no keyword colour: ${colours.join(", ")}`);
+    }
   } finally {
     await webview.close();
   }
@@ -65,5 +70,5 @@ export async function run(): Promise<void> {
       throw new Error(`no running process uses the packaged sidecar ${sidecarPath}`);
     }
   }
-  console.log(`${EXTENSION_ID} ${version}: activated, sidecar running, repository history shown`);
+  console.log(`${EXTENSION_ID} ${version}: activated, sidecar running, repository history shown, highlight worker running`);
 }

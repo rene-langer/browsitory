@@ -158,6 +158,8 @@ export interface WebviewSession {
   waitForText(tag: string, text: string, timeoutMs?: number): Promise<void>;
   /** The page's visible text, for failure messages. */
   bodyText(): Promise<string>;
+  /** The token colours the packaged highlight worker returns for a line of Rust (#843). */
+  highlightWorkerColours(timeoutMs?: number): Promise<string[]>;
   /** The `name` attribute of every match of `selector` (missing attributes as ""). */
   attributes(selector: string, name: string): Promise<string[]>;
   /** Detaches from the webview target and closes the underlying CDP socket. Idempotent. */
@@ -294,6 +296,43 @@ class CdpWebviewSession implements WebviewSession {
   }
 
   /** The page's visible text, for failure messages. */
+  /**
+   * Starts the packaged syntax highlighting worker the way the app does (#843): fetches
+   * `highlight-worker.js` next to the bundle's script, starts it from a blob: URL and asks it
+   * to tokenize a line of Rust. Returns the tokens' colours; throws if the CSP or the package
+   * stops the worker.
+   */
+  async highlightWorkerColours(timeoutMs = 30000): Promise<string[]> {
+    return this.evaluate<string[]>(`
+      (async () => {
+        const script = document.querySelector('script[src*="vscode-main.js"]');
+        if (!script) throw new Error("no vscode-main.js script element");
+        const response = await fetch(new URL("highlight-worker.js", script.src).href);
+        if (!response.ok) throw new Error("highlight-worker.js: HTTP " + response.status);
+        const url = URL.createObjectURL(new Blob([await response.text()], { type: "text/javascript" }));
+        const worker = new Worker(url);
+        try {
+          return await new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error("no reply from the highlight worker")), ${timeoutMs});
+            worker.addEventListener("error", (event) => {
+              clearTimeout(timer);
+              reject(new Error("highlight worker failed: " + (event.message || "blocked")));
+            });
+            worker.addEventListener("message", (event) => {
+              clearTimeout(timer);
+              if (event.data.error) reject(new Error(event.data.error));
+              else resolve(event.data.tokens.flat().map((t) => String(t.color)));
+            });
+            worker.postMessage({ type: "tokenize", id: 1, lang: "rust", code: "fn main() {}" });
+          });
+        } finally {
+          worker.terminate();
+          URL.revokeObjectURL(url);
+        }
+      })()
+    `);
+  }
+
   async bodyText(): Promise<string> {
     return this.evaluate<string>("document.body ? document.body.innerText : ''");
   }
