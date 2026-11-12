@@ -472,3 +472,30 @@ li.fileRow.current {
   margin: var(--space-1) 0 0;
   padding-left: var(--space-4);
 }
+
+/* An untracked folder listed as one entry (#845). */
+.folderNote {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.folderPanel {
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.folderPanel p {
+  margin: 0;
+}
+
+.folderPanelActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}

@@ -32,6 +32,7 @@ where
             Command::GetStatus { .. }
             | Command::GetChangeStamp { .. }
             | Command::GetStatusWithStamp { .. }
+            | Command::ListUntrackedFolder { .. }
             | Command::GetCommitGraph { .. }
             | Command::LocateCommit { .. }
             | Command::GetMergedCommits { .. }

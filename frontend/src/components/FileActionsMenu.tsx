@@ -3,6 +3,8 @@ import type { ContextMenuItem } from "./primitives/ContextMenu";
 
 export type FileAction =
   | { kind: "discard" }
+  // An untracked folder entry's "Stage folder" (#845).
+  | { kind: "stage" }
   | { kind: "ignore"; pattern: string }
   | { kind: "stash" }
   | { kind: "openInEditor" }
@@ -53,6 +55,19 @@ export function fileMenuItems(
   stashDisabledReason: string | null = null,
 ): ContextMenuItem[] {
   const items: ContextMenuItem[] = [];
+  if (entry.untrackedFolder === true) {
+    // An untracked folder listed as one entry (#845): its files are staged, ignored or deleted
+    // together; no editor or diff tool for a folder.
+    items.push(
+      { label: "Stage folder", onSelect: () => onPick({ kind: "stage" }), group: "file" },
+      { label: "Ignore folder", onSelect: () => onPick({ kind: "ignore", pattern: `/${entry.path}` }), group: "file" },
+      { label: "Delete folder…", destructive: true, onSelect: () => onPick({ kind: "discard" }), group: "discard" },
+    );
+    if (tools !== undefined) {
+      items.push({ label: "Reveal in file manager", onSelect: () => onPick({ kind: "reveal" }), group: "tools" });
+    }
+    return items;
+  }
   if (entry.kind !== "Conflicted") {
     const stash: ContextMenuItem = {
       label: "Stash file…",
@@ -229,6 +244,9 @@ export function commitFileMenuItems(
 // Discards and deletes are undo steps (recorded, or refused rather than run unrecorded), so the
 // confirmations say Undo restores them (#662); they still ask because they drop work in one go.
 export function discardConfirmMessage(entry: StatusEntry): string {
+  if (entry.untrackedFolder === true) {
+    return `Delete the untracked folder ${entry.path} (more than 500 files)? Undo can bring it back.`;
+  }
   return isUntracked(entry)
     ? `Delete untracked file ${entry.path}? Undo can bring it back.`
     : `Discard changes to ${entry.path}? Undo can bring them back.`;
@@ -254,7 +272,14 @@ export function discardAllConfirmMessage(entries: StatusEntry[], pointToDeleteUn
 export const DELETE_UNTRACKED_PREVIEW = 5;
 
 /** The "Delete untracked…" confirmation's question (#622); the dialog lists the first paths. */
-export function deleteUntrackedConfirmMessage(paths: string[]): string {
+export function deleteUntrackedConfirmMessage(paths: string[], untrackedFolders: ReadonlySet<string> = new Set()): string {
   const n = paths.length;
-  return n === 1 ? "Delete 1 untracked file? Undo can bring it back." : `Delete ${n} untracked files? Undo can bring them back.`;
+  // An untracked folder listed as one entry (#845) is named as a folder.
+  const folders = paths.filter((path) => untrackedFolders.has(path)).length;
+  const files = n - folders;
+  const parts = [
+    files === 0 ? null : `${files} untracked ${files === 1 ? "file" : "files"}`,
+    folders === 0 ? null : `${folders} untracked ${folders === 1 ? "folder" : "folders"} with more than 500 files`,
+  ].filter((part) => part !== null);
+  return `Delete ${parts.join(" and ")}? Undo can bring ${n === 1 ? "it" : "them"} back.`;
 }

@@ -70,6 +70,24 @@ fn a_status_read_refreshes_the_index_stat_data() {
     assert_eq!(entry.mtime.seconds(), seconds);
 }
 
+/// #845: the files of an untracked folder listed as one entry, on request.
+#[test]
+fn lists_the_files_of_an_untracked_folder() {
+    let (dir, _repo) = init_repo();
+    std::fs::create_dir_all(dir.path().join("big/deep")).unwrap();
+    write_file(dir.path(), "big/a.txt", "a");
+    write_file(dir.path(), "big/deep/b.txt", "b");
+
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let files = worker
+        .handle()
+        .list_untracked_folder("big/".to_string())
+        .unwrap();
+
+    let paths: Vec<&str> = files.iter().map(|entry| entry.path.as_str()).collect();
+    assert_eq!(paths, vec!["big/a.txt", "big/deep/b.txt"]);
+}
+
 #[test]
 fn spawn_fails_on_a_non_repository_path() {
     let dir = TempDir::new().unwrap();

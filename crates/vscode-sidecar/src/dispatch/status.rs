@@ -33,6 +33,19 @@ pub(super) fn get_status_with_stamp(
     serde_json::to_value(StatusWithStampDto::from(read)).map_err(ErrorDto::from_error)
 }
 
+/// The files of an untracked folder listed as one entry (#845); `path` is the folder (`dir/`).
+pub(super) fn list_untracked_folder(
+    params: RepoFilePathParams,
+    repos: &Repos,
+) -> Result<Value, ErrorDto> {
+    let entries: Vec<StatusEntryDto> = worker_handle(repos, &params.repo_path)?
+        .list_untracked_folder(params.path)?
+        .into_iter()
+        .map(StatusEntryDto::from)
+        .collect();
+    serde_json::to_value(entries).map_err(ErrorDto::from_error)
+}
+
 pub(super) fn get_status(params: RepoPathParams, repos: &Repos) -> Result<Value, ErrorDto> {
     let entries: Vec<StatusEntryDto> = worker_handle(repos, &params.repo_path)?
         .get_status()?

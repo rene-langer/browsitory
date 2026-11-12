@@ -93,6 +93,10 @@ pub struct StatusEntryDto {
     pub old_path: Option<String>,
     pub staged: bool,
     pub kind: git_core::status::StatusKind,
+    /// Only on an untracked folder listed as one entry (#845): `true`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(any(test, feature = "ts"), ts(optional))]
+    pub untracked_folder: Option<bool>,
 }
 
 impl From<git_core::status::StatusEntry> for StatusEntryDto {
@@ -102,6 +106,7 @@ impl From<git_core::status::StatusEntry> for StatusEntryDto {
             old_path: entry.old_path,
             staged: entry.staged,
             kind: entry.kind,
+            untracked_folder: entry.untracked_folder.then_some(true),
         }
     }
 }

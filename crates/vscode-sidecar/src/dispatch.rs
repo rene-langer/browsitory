@@ -145,6 +145,7 @@ methods!(|params, repos, stdout| {
     "get_status" => get_status(RepoPathParams, repos),
     "get_change_stamp" => get_change_stamp(RepoPathParams, repos),
     "get_status_with_stamp" => get_status_with_stamp(RepoPathParams, repos),
+    "list_untracked_folder" => list_untracked_folder(RepoFilePathParams, repos),
     "get_commit_graph" => get_commit_graph(GetCommitGraphParams, repos),
     "locate_commit" => locate_commit(LocateCommitParams, repos),
     "get_merged_commits" => get_merged_commits(GetMergedCommitsParams, repos),

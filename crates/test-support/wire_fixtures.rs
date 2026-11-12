@@ -274,6 +274,16 @@ pub fn status_entries() -> Cases<git_core::status::StatusEntry> {
             untracked_folder: false,
         },
     ));
+    cases.push(case(
+        "untracked-folder",
+        git_core::status::StatusEntry {
+            path: "node_modules/".to_string(),
+            old_path: None,
+            staged: false,
+            kind: StatusKind::New,
+            untracked_folder: true,
+        },
+    ));
     cases
 }
 

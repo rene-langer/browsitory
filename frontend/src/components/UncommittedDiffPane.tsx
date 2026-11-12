@@ -4,7 +4,8 @@ import { UncommittedFileViewer } from "./UncommittedFileViewer";
 import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
 import { NO_HEAD_INFO, type DiscardRequest, type SelectionActionKind } from "./diffPaneShared";
 import { stashBlockReason } from "../lib/operationStatus";
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useVirtualRows } from "./useVirtualRows";
 import type { GraphCommit, HeadInfo, HunkOptions, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
 import { useWorkspaceActions } from "../state/useWorkspaceActions";
@@ -40,6 +41,42 @@ import { ChevronDown, ChevronRight, Minus, Plus } from "lucide-react";
 // unstages, Enter moves into the diff, the Menu key opens the menu.
 const FILE_LIST_SHORTCUTS =
   "ArrowUp ArrowDown Shift+ArrowUp Shift+ArrowDown Control+A Meta+A Escape s Enter ContextMenu Shift+F10";
+
+/** Whether `path` contains the lower-case `needle` (`""`: every path). */
+function matchesNeedle(path: string, needle: string): boolean {
+  return needle === "" || path.toLowerCase().includes(needle);
+}
+
+/** The tree layout's folders (#729); an untracked folder entry (#845) is a leaf named `dir`. */
+function toTree(entries: StatusEntry[]): FileTreeNode<StatusEntry>[] {
+  return buildFileTree(
+    entries.map((entry) => ({ path: entry.untrackedFolder === true ? entry.path.slice(0, -1) : entry.path, value: entry })),
+  );
+}
+
+/**
+ * The tree of one group's files under the filter `needle`, or `null` in the flat layout: rebuilt
+ * only when the status, the filter or the layout changes (#845). Conflicts are listed apart.
+ */
+function useChangeTree(
+  status: StatusEntry[],
+  needle: string,
+  treeLayout: boolean,
+  staged: boolean,
+): FileTreeNode<StatusEntry>[] | null {
+  return useMemo(
+    () =>
+      treeLayout
+        ? toTree(
+            status.filter(
+              (entry) =>
+                entry.staged === staged && entry.kind !== "Conflicted" && matchesNeedle(entry.path, needle),
+            ),
+          )
+        : null,
+    [status, needle, treeLayout, staged],
+  );
+}
 
 function entryKey(entry: { path: string; staged: boolean }): string {
   return `${entry.staged}:${entry.path}`;
@@ -192,7 +229,7 @@ export function UncommittedDiffPane({
   const [filterText, setFilterText] = useState("");
   const needle = filterText.trim().toLowerCase();
   const filtering = needle !== "";
-  const matchesFilter = (path: string) => !filtering || path.toLowerCase().includes(needle);
+  const matchesFilter = (path: string) => matchesNeedle(path, needle);
   const shownStatus = filtering ? status.filter((entry) => matchesFilter(entry.path)) : status;
   // Collapsed folders of the tree, by `${staged}:${folder path}`; kept while the pane is open.
   const [collapsedFolders, setCollapsedFolders] = useState<ReadonlySet<string>>(new Set());
@@ -207,6 +244,51 @@ export function UncommittedDiffPane({
       return next;
     });
   };
+  // Untracked folders listed as one entry (#845) whose files are shown under them: the files once
+  // read (`null` while reading), by folder path. Kept while the pane is open, read again on every
+  // refresh.
+  const [folderFiles, setFolderFiles] = useState<Record<string, StatusEntry[] | null>>({});
+  const readFolderFiles = (path: string) => {
+    client.listUntrackedFolder(repoPath, path).then(
+      (files) => setFolderFiles((prev) => (path in prev ? { ...prev, [path]: files } : prev)),
+      () =>
+        setFolderFiles((prev) => {
+          const next = { ...prev };
+          delete next[path];
+          return next;
+        }),
+    );
+  };
+  const showFolderFiles = (path: string, show: boolean) => {
+    if (path in folderFiles === show) return;
+    setFolderFiles((prev) => {
+      const next = { ...prev };
+      if (show) next[path] = null;
+      else delete next[path];
+      return next;
+    });
+    if (show) readFolderFiles(path);
+  };
+  const readFolderFilesRef = useRef(readFolderFiles);
+  useEffect(() => {
+    readFolderFilesRef.current = readFolderFiles;
+  });
+  const shownFolders = Object.keys(folderFiles).join("\0");
+  const readGeneration = useRef(refreshGeneration);
+  useEffect(() => {
+    if (readGeneration.current === refreshGeneration) return;
+    readGeneration.current = refreshGeneration;
+    for (const path of shownFolders === "" ? [] : shownFolders.split("\0")) readFolderFilesRef.current(path);
+  }, [refreshGeneration, shownFolders]);
+  // A folder entry's shown files (the filter applies to them too), listed right after it.
+  const filesShownUnder = (entry: StatusEntry): StatusEntry[] =>
+    entry.untrackedFolder === true ? (folderFiles[entry.path] ?? []).filter((file) => matchesFilter(file.path)) : [];
+  const withFolderFiles = (entries: StatusEntry[]) => entries.flatMap((entry) => [entry, ...filesShownUnder(entry)]);
+  const folderShowing = (entry: StatusEntry) =>
+    status.find(
+      (folder) => folder.untrackedFolder === true && folder.path in folderFiles && entry.path.startsWith(folder.path),
+    );
+
   /** A new filter: the selection keeps only the files it still shows. */
   const changeFilter = (value: string) => {
     setFilterText(value);
@@ -228,17 +310,41 @@ export function UncommittedDiffPane({
   const shownOtherChanges = shownStatus.filter((entry) => !entry.staged && entry.kind !== "Conflicted");
   const shownUnstagedCount = shownConflicts.length + shownOtherChanges.length;
   const treeLayout = layout === "tree";
-  const toTree = (entries: StatusEntry[]) => buildFileTree(entries.map((entry) => ({ path: entry.path, value: entry })));
-  const stagedTree = treeLayout ? toTree(shownStaged) : null;
-  const changesTree = treeLayout ? toTree(shownOtherChanges) : null;
+  // Built once per status and filter, not on every render (#845).
+  const stagedTree = useChangeTree(status, needle, treeLayout, true);
+  const changesTree = useChangeTree(status, needle, treeLayout, false);
   // The rows on screen in list order (a collapsed folder's files left out): what the keys,
   // the selection and the viewer's current file go through.
   const stagedEntries = stagedTree === null ? shownStaged : visibleFiles(stagedTree, isCollapsed(true));
   const conflictEntries = shownConflicts;
   const unstagedEntries = [
     ...conflictEntries,
-    ...(changesTree === null ? shownOtherChanges : visibleFiles(changesTree, isCollapsed(false))),
+    ...withFolderFiles(changesTree === null ? shownOtherChanges : visibleFiles(changesTree, isCollapsed(false))),
   ];
+  const listRefs = useRef<{ staged: HTMLUListElement | null; unstaged: HTMLUListElement | null }>({
+    staged: null,
+    unstaged: null,
+  });
+  // The flat lists render the rows in view (#845): the Changes group's other changes and the
+  // Staged group, each in the list that holds its rows directly.
+  const [unstagedRowList, setUnstagedRowList] = useState<HTMLUListElement | null>(null);
+  const [stagedRowList, setStagedRowList] = useState<HTMLUListElement | null>(null);
+  const unstagedWindow = useVirtualRows(
+    treeLayout ? null : unstagedRowList,
+    treeLayout ? 0 : unstagedEntries.length - conflictEntries.length,
+  );
+  const stagedWindow = useVirtualRows(treeLayout ? null : stagedRowList, treeLayout ? 0 : stagedEntries.length);
+  const stagedGroupRef = useCallback((el: HTMLUListElement | null) => {
+    listRefs.current.staged = el;
+    setStagedRowList(el);
+  }, []);
+  const unstagedGroupRef = useCallback((el: HTMLUListElement | null) => {
+    listRefs.current.unstaged = el;
+  }, []);
+  const unstagedGroupWithRowsRef = useCallback((el: HTMLUListElement | null) => {
+    listRefs.current.unstaged = el;
+    setUnstagedRowList(el);
+  }, []);
   const allStagedCount = status.filter((entry) => entry.staged).length;
   const allUnstagedCount = status.length - allStagedCount;
   const stagedCount = allStagedCount;
@@ -291,9 +397,20 @@ export function UncommittedDiffPane({
   }
   const currentKey = currentEntry === undefined ? null : entryKey(currentEntry);
 
+  // A row the window leaves out is scrolled to by its place in the list.
+  const scrollToCurrent = useRef<() => void>(() => {});
+  useEffect(() => {
+    scrollToCurrent.current = () => {
+      if (currentEntry === undefined || treeLayout) return;
+      if (currentEntry.staged) stagedWindow.scrollToIndex(stagedEntries.indexOf(currentEntry));
+      else unstagedWindow.scrollToIndex(unstagedEntries.indexOf(currentEntry) - conflictEntries.length);
+    };
+  });
   useEffect(() => {
     if (currentKey === null) return;
-    rowRefs.current[currentKey]?.scrollIntoView?.({ block: "nearest" });
+    const row = rowRefs.current[currentKey];
+    if (row) row.scrollIntoView?.({ block: "nearest" });
+    else scrollToCurrent.current();
   }, [currentKey]);
 
   const isEntryCurrent = (entry: StatusEntry) => currentEntry === entry;
@@ -363,10 +480,6 @@ export function UncommittedDiffPane({
   const unstagedSummary = summaryOf(false);
   const stagedSummary = summaryOf(true);
 
-  const listRefs = useRef<{ staged: HTMLUListElement | null; unstaged: HTMLUListElement | null }>({
-    staged: null,
-    unstaged: null,
-  });
 
   // Shift+arrow (`extend`) moves the current file and selects the range from the anchor to it.
   // A plain move past either end of a group goes on to the other group (#639), and focus with it.
@@ -459,6 +572,24 @@ export function UncommittedDiffPane({
     // so keys typed in them must not drive the list underneath.
     if ((event.target as HTMLElement).closest('[role="menu"], dialog') !== null) return;
     const staged = entries[0]?.staged ?? false;
+    // An untracked folder entry (#845): Right and Enter show its files, Left hides them (from one
+    // of its files too, which makes the folder current again).
+    const folder =
+      currentEntry === undefined || currentEntry.staged
+        ? undefined
+        : currentEntry.untrackedFolder === true
+          ? currentEntry
+          : folderShowing(currentEntry);
+    if (
+      folder !== undefined &&
+      event.target === event.currentTarget &&
+      (event.key === "ArrowLeft" || (folder === currentEntry && (event.key === "ArrowRight" || event.key === "Enter")))
+    ) {
+      event.preventDefault();
+      showFolderFiles(folder.path, event.key !== "ArrowLeft");
+      if (folder !== currentEntry) selectEntry(folder);
+      return;
+    }
     if (event.key === "ArrowDown" || event.key === "j") {
       event.preventDefault();
       navigateGroup(entries, 1, event.shiftKey);
@@ -517,14 +648,19 @@ export function UncommittedDiffPane({
   // The selection's discard also follows the selection's own busy rule.
   const discardFilesBlockedReason = discardBlockedReason ?? selectionBusyReason;
 
+  // With the files shown under an untracked folder entry (#845).
+  const discardableListed = [
+    ...discardableEntries,
+    ...Object.values(folderFiles).flatMap((files) => files ?? []),
+  ];
   const discardFileEntry =
     discardRequest?.kind === "file"
-      ? discardableEntries.find((entry) => entry.path === discardRequest.path)
+      ? discardableListed.find((entry) => entry.path === discardRequest.path)
       : undefined;
   // A selection's discard (#449): the requested files that can still be discarded.
   const discardFilesEntries =
     discardRequest?.kind === "files"
-      ? discardableEntries.filter((entry) => discardRequest.paths.includes(entry.path))
+      ? discardableListed.filter((entry) => discardRequest.paths.includes(entry.path))
       : [];
 
   // A request whose target is gone (refresh, staging, unmount) must not linger: otherwise the
@@ -653,6 +789,11 @@ export function UncommittedDiffPane({
           rowRefs.current[key] = el;
         }}
         name={name}
+        folderFiles={
+          entry.untrackedFolder === true
+            ? { shown: entry.path in folderFiles, onToggle: () => showFolderFiles(entry.path, !(entry.path in folderFiles)) }
+            : undefined
+        }
       />
     );
   };
@@ -663,7 +804,16 @@ export function UncommittedDiffPane({
     const entries = groupEntries(staged);
     return nodes.map((node) => {
       if (node.kind === "leaf") {
-        return renderRow(node.value, entries.indexOf(node.value), node.name);
+        const entry = node.value;
+        if (entry.untrackedFolder === true) {
+          return [
+            renderRow(entry, entries.indexOf(entry), `${node.name}/`),
+            ...filesShownUnder(entry).map((file) =>
+              renderRow(file, entries.indexOf(file), file.path.slice(entry.path.length)),
+            ),
+          ];
+        }
+        return renderRow(entry, entries.indexOf(entry), node.name);
       }
       const collapsed = isCollapsed(staged)(node.path);
       const files = filesUnder(node);
@@ -718,7 +868,15 @@ export function UncommittedDiffPane({
   };
   const renderChanges = (staged: boolean, entries: StatusEntry[], offset: number) => {
     const tree = staged ? stagedTree : changesTree;
-    return tree === null ? entries.map((entry, index) => renderRow(entry, offset + index)) : renderTreeNodes(tree, staged);
+    if (tree !== null) return renderTreeNodes(tree, staged);
+    const { start, end } = staged ? stagedWindow : unstagedWindow;
+    return entries.slice(start, end).map((entry, index) => renderRow(entry, offset + start + index));
+  };
+  // The padding that stands in for the rows a flat list leaves out (#845).
+  const windowPadding = (staged: boolean) => {
+    if (treeLayout) return undefined;
+    const { padTop, padBottom } = staged ? stagedWindow : unstagedWindow;
+    return { paddingTop: padTop, paddingBottom: padBottom };
   };
 
   // j/k in the viewer: the next or previous file in list order, focus staying in the diff.
@@ -745,9 +903,14 @@ export function UncommittedDiffPane({
           </p>
         ) : (
           <ul
-            ref={(el) => {
-              listRefs.current[staged ? "staged" : "unstaged"] = el;
-            }}
+            ref={
+              staged
+                ? stagedGroupRef
+                : conflictEntries.length > 0
+                  ? unstagedGroupRef
+                  : unstagedGroupWithRowsRef
+            }
+            style={staged || conflictEntries.length === 0 ? windowPadding(staged) : undefined}
             className={`${styles.fileList} ${styles.groupList}`}
             role="listbox"
             aria-multiselectable="true"
@@ -772,7 +935,7 @@ export function UncommittedDiffPane({
                     <span id={`${rowIdPrefix}-other-changes`} className={styles.subgroupHeading}>
                       Other changes
                     </span>
-                    <ul role="none" className={styles.fileList}>
+                    <ul role="none" className={styles.fileList} ref={setUnstagedRowList} style={windowPadding(false)}>
                       {renderChanges(false, entries.slice(conflictEntries.length), conflictEntries.length)}
                     </ul>
                   </li>
@@ -923,7 +1086,24 @@ export function UncommittedDiffPane({
           {renderGroup(true)}
         </div>
       )}
-      {currentEntry !== undefined && (
+      {currentEntry !== undefined && currentEntry.untrackedFolder === true && (
+        // An untracked folder listed as one entry (#845): its actions instead of a diff.
+        <section aria-label={`Untracked folder ${currentEntry.path}`} className={styles.folderPanel}>
+          <p>{currentEntry.path} is a new folder with more than 500 files that git doesn't ignore.</p>
+          <div className={styles.folderPanelActions}>
+            <button type="button" onClick={() => onStageFile(currentEntry.path)}>
+              Stage folder
+            </button>
+            <button type="button" onClick={() => actions.onIgnorePath(`/${currentEntry.path}`)}>
+              Ignore folder
+            </button>
+            <button type="button" onClick={() => setDiscardRequest({ kind: "file", path: currentEntry.path })}>
+              Delete folder…
+            </button>
+          </div>
+        </section>
+      )}
+      {currentEntry !== undefined && currentEntry.untrackedFolder !== true && (
         <>
           <DiffOptionsToolbar sticky />
           <UncommittedFileViewer
@@ -984,7 +1164,10 @@ export function UncommittedDiffPane({
           ariaLabel="Delete untracked files"
           message={
             <>
-              <p>{deleteUntrackedConfirmMessage(deleteUntrackedPaths)}</p>
+              <p>{deleteUntrackedConfirmMessage(
+                  deleteUntrackedPaths,
+                  new Set(status.filter((entry) => entry.untrackedFolder === true).map((entry) => entry.path)),
+                )}</p>
               {/* Under a filter (#729) every file it deletes is listed. */}
               <ul aria-label="Untracked files to delete" className={styles.confirmFileList}>
                 {(discardRequest.paths === undefined
@@ -1028,7 +1211,13 @@ export function UncommittedDiffPane({
         <ConfirmDialog
           ariaLabel="Discard changes"
           message={discardConfirmMessage(discardFileEntry)}
-          confirmLabel={isUntracked(discardFileEntry) ? "Delete file" : "Discard changes"}
+          confirmLabel={
+            discardFileEntry.untrackedFolder === true
+              ? "Delete folder"
+              : isUntracked(discardFileEntry)
+                ? "Delete file"
+                : "Discard changes"
+          }
           confirmReason={discardBlockedReason}
           onConfirm={() => {
             if (discardBlockedReason !== null) return;

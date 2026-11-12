@@ -44,6 +44,14 @@ deleted, **R** renamed, **T** type changed, **C** conflicted; hover it for the w
 **⋯** menu and a stage or unstage button. The two buttons are always there, dimmed until you
 point at the row or select it.
 
+A new folder with more than 500 files that git doesn't ignore (a `node_modules` or build output
+not yet in `.gitignore`) is one row, **untracked folder, more than 500 files**, instead of one row
+per file; smaller new folders are listed file by file. The row's arrow (or **→** and **Enter**)
+lists the folder's files under it, **←** hides them again. Selected, the folder shows **Stage
+folder**, **Ignore folder** and **Delete folder…** instead of a diff; `s`, its **⋯** menu,
+**Stage all** and **Delete untracked…** act on all its files. While the folder is collapsed, a
+change inside it doesn't refresh the list; listing its files, or **Refresh**, reads them again.
+
 When **Changes** holds both changes to tracked files and untracked (new) files, **Stage
 modified** sits next to **Stage all**: it stages the tracked files' changes (edits, deletions,
 type changes) and leaves the untracked files where they are, like `git add -u`. **Stage all**

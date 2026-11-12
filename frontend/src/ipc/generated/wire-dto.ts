@@ -311,7 +311,11 @@ export type StatusEntry = { path: string,
 /**
  * A staged rename's old path; always present (`null` otherwise).
  */
-oldPath: string | null, staged: boolean, kind: StatusKind, };
+oldPath: string | null, staged: boolean, kind: StatusKind, 
+/**
+ * Only on an untracked folder listed as one entry (#845): `true`.
+ */
+untrackedFolder?: boolean, };
 
 export type StatusKind = "New" | "Modified" | "Deleted" | "Renamed" | "TypeChange" | "Conflicted";
 
