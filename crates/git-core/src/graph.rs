@@ -125,12 +125,16 @@ impl RefDecorations {
 /// which only the shallow and graft files can change (commits never change). Those make up its
 /// key, with the repository's folder. The badges are keyed by every branch, remote branch and
 /// tag with what it points at (a tag object never changes either).
+///
+/// It also keeps the most recent file and line history walks where they stopped (#860), so
+/// "Load more" and a refresh continue them instead of walking from the start again.
 #[derive(Default)]
 pub struct WalkCache {
     /// Most recently used first, at most [`WALKS_KEPT`].
     walks: Vec<(WalkKey, Arc<[Oid]>)>,
     decorations: Option<(RefsKey, Arc<RefDecorations>)>,
-    stats: WalkCacheStats,
+    pub(crate) histories: crate::history::HistoryWalks,
+    pub(crate) stats: WalkCacheStats,
 }
 
 /// How many walk orders a [`WalkCache`] keeps: the graph's and a search's with other start
@@ -139,7 +143,7 @@ pub struct WalkCache {
 const WALKS_KEPT: usize = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct WalkKey {
+pub(crate) struct WalkKey {
     repository: std::path::PathBuf,
     starts: Vec<Oid>,
     first_parent: bool,
@@ -148,7 +152,7 @@ struct WalkKey {
 }
 
 impl WalkKey {
-    fn new(repo: &Repository, starts: &[Oid], first_parent: bool) -> Self {
+    pub(crate) fn new(repo: &Repository, starts: &[Oid], first_parent: bool) -> Self {
         let common = repo.commondir();
         let read = |path: std::path::PathBuf| std::fs::read(path).ok();
         Self {
@@ -207,6 +211,16 @@ impl WalkCache {
         Ok(Some(order))
     }
 
+    /// The order of the walk `key` when a graph or history walk already sorted it, without
+    /// making it the most recently used.
+    pub(crate) fn cached_order(&self, key: &WalkKey) -> Option<Arc<[Oid]>> {
+        self.walks
+            .iter()
+            .find(|(cached, _)| cached == key)
+            .map(|(_, order)| Arc::clone(order))
+            .or_else(|| self.histories.order(key))
+    }
+
     /// The ref badges as they are now; read again only when a branch, remote branch or tag
     /// was added, removed or moved.
     pub(crate) fn decorations(
@@ -258,7 +272,7 @@ fn refs_key(repo: &Repository) -> Result<RefsKey, git2::Error> {
 pub(crate) const CANCEL_INTERVAL: usize = 1024;
 
 /// The whole walk from `starts`, as [`WalkCache::order`] describes it.
-fn walk_order(
+pub(crate) fn walk_order(
     repo: &Repository,
     starts: &[Oid],
     first_parent: bool,

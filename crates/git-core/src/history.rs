@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 use std::path::{Component, Path};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use git2::{Delta, DiffFindOptions, ErrorCode, ObjectType, Oid, Repository, Sort, Tree};
+use git2::{Delta, DiffFindOptions, ErrorCode, ObjectType, Oid, Repository, Tree};
 use thiserror::Error;
 
-use crate::graph::{GraphCommit, RefDecorations};
+use crate::graph::{walk_order, GraphCommit, RefDecorations, WalkCache, WalkKey};
+use crate::line_history::{LineRange, LineWalk};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileHistoryEntry {
@@ -45,35 +48,220 @@ pub fn file_history(
     path: &str,
     limit: usize,
 ) -> Result<Vec<FileHistoryEntry>, HistoryError> {
+    let mut cache = WalkCache::default();
+    file_history_cached(repo, &mut cache, path, limit, Duration::MAX).map(|page| page.entries)
+}
+
+/// One answer of [`file_history_cached`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileHistoryPage {
+    /// The first `limit` entries, or fewer when the budget ran out or the history ended.
+    pub entries: Vec<FileHistoryEntry>,
+    /// The walk reached the end of the file's history: no older entry exists.
+    pub complete: bool,
+}
+
+/// [`file_history`] continued from where the cache's walk for the same HEAD and path stopped
+/// (#860). Answers the first `limit` entries, walking further only when the cache has fewer,
+/// and only until `budget` runs out (checked after each commit on the path, so a call always
+/// makes progress). Sorting the walk, the first time, isn't charged to the budget. A HEAD that
+/// moved starts a new walk; the badges are read as they are now.
+pub fn file_history_cached(
+    repo: &Repository,
+    cache: &mut WalkCache,
+    path: &str,
+    limit: usize,
+    budget: Duration,
+) -> Result<FileHistoryPage, HistoryError> {
     validate_path(path)?;
-    let head = match repo.head() {
-        Ok(head) => head,
-        Err(error) if matches!(error.code(), ErrorCode::UnbornBranch | ErrorCode::NotFound) => {
-            return Ok(Vec::new())
-        }
-        Err(error) => return Err(error.into()),
+    let Some(head) = head_commit(repo)? else {
+        return Ok(FileHistoryPage {
+            entries: Vec::new(),
+            complete: true,
+        });
     };
-    let head_id = head.peel_to_commit()?.id();
-    let decorations = RefDecorations::load(repo)?;
-
-    let mut walk = repo.revwalk()?;
-    // Topological: every child is visited before its parents, so a parent's tracked path is
-    // final by the time the walk reaches it.
-    walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
-    walk.push(head_id)?;
-
-    let head_entries = path_entries(repo, repo.find_commit(head_id)?.tree_id(), path)?;
-    let mut tracked: HashMap<Oid, (String, Option<PathEntries>)> =
-        HashMap::from([(head_id, (path.to_string(), head_entries))]);
-    let mut entries = Vec::new();
-    for oid in walk {
-        if entries.len() >= limit || tracked.is_empty() {
-            break;
+    let decorations = cache.decorations(repo)?;
+    let key = HistoryKey::new(repo, head, path, None);
+    let mut walk = match cache.histories.files.take(&key) {
+        Some(walk) => walk,
+        None => {
+            let order = history_order(repo, cache, &key.walk, head)?;
+            cache.stats.history_walks += 1;
+            FileWalk::new(repo, order, head, path)?
         }
-        let oid = oid?;
-        let Some((current_path, Some(current))) = tracked.remove(&oid) else {
-            continue;
-        };
+    };
+    let deadline = Instant::now().checked_add(budget);
+    let advanced = walk.advance(repo, limit, deadline, &mut cache.stats.history_commits);
+    let page = advanced.and_then(|()| walk.page(repo, &decorations, limit));
+    // A walk that failed part-way isn't kept: the next call starts again.
+    if page.is_ok() {
+        cache.histories.files.put(key, walk);
+    }
+    page
+}
+
+/// HEAD's commit, or `None` on an unborn branch.
+fn head_commit(repo: &Repository) -> Result<Option<Oid>, git2::Error> {
+    match repo.head() {
+        Ok(head) => Ok(Some(head.peel_to_commit()?.id())),
+        Err(error) if matches!(error.code(), ErrorCode::UnbornBranch | ErrorCode::NotFound) => {
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// The order of the walk from `start`: a graph's or history's sorted already, or sorted now.
+pub(crate) fn history_order(
+    repo: &Repository,
+    cache: &WalkCache,
+    key: &WalkKey,
+    start: Oid,
+) -> Result<Arc<[Oid]>, git2::Error> {
+    match cache.cached_order(key) {
+        Some(order) => Ok(order),
+        None => Ok(walk_order(repo, &[start], false, &|| false)?
+            .expect("a walk that is never cancelled finishes")),
+    }
+}
+
+/// What a kept history walk is for: the walk from one start commit (with the repository and
+/// what changes parents, as the graph's walks are keyed), the path, and the lines for a line
+/// history.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HistoryKey {
+    pub(crate) walk: WalkKey,
+    path: String,
+    lines: Option<LineRange>,
+}
+
+impl HistoryKey {
+    pub(crate) fn new(repo: &Repository, start: Oid, path: &str, lines: Option<LineRange>) -> Self {
+        Self {
+            walk: WalkKey::new(repo, &[start], false),
+            path: path.to_string(),
+            lines,
+        }
+    }
+}
+
+/// How many file history walks, and how many line history walks, a [`WalkCache`] keeps: the
+/// file open in the history panel and the one before it.
+const HISTORIES_KEPT: usize = 2;
+
+/// The file and line history walks a [`WalkCache`] keeps, where they stopped (#860).
+#[derive(Default)]
+pub(crate) struct HistoryWalks {
+    pub(crate) files: Kept<FileWalk>,
+    pub(crate) lines: Kept<LineWalk>,
+}
+
+impl HistoryWalks {
+    /// The order of a kept walk with the key `key`.
+    pub(crate) fn order(&self, key: &WalkKey) -> Option<Arc<[Oid]>> {
+        let files = self.files.0.iter().map(|(k, walk)| (k, &walk.order));
+        let lines = self.lines.0.iter().map(|(k, walk)| (k, walk.order()));
+        files
+            .chain(lines)
+            .find(|(k, _)| k.walk == *key)
+            .map(|(_, order)| Arc::clone(order))
+    }
+}
+
+/// Walks kept by key, most recently used first, at most [`HISTORIES_KEPT`].
+pub(crate) struct Kept<T>(Vec<(HistoryKey, T)>);
+
+impl<T> Default for Kept<T> {
+    fn default() -> Self {
+        Self(Vec::new())
+    }
+}
+
+impl<T> Kept<T> {
+    /// Takes the walk for `key` out, to be `put` back when the call is done with it.
+    pub(crate) fn take(&mut self, key: &HistoryKey) -> Option<T> {
+        let index = self.0.iter().position(|(k, _)| k == key)?;
+        Some(self.0.remove(index).1)
+    }
+
+    pub(crate) fn put(&mut self, key: HistoryKey, walk: T) {
+        self.0.insert(0, (key, walk));
+        self.0.truncate(HISTORIES_KEPT);
+    }
+}
+
+/// A file history walk where it stopped: the next position in the walk order, the path (and
+/// its tree entries) tracked at each commit still to be examined, and what it found so far.
+pub(crate) struct FileWalk {
+    order: Arc<[Oid]>,
+    next: usize,
+    /// `None` entries: the path isn't a file there, but the commit still counts as tracked, so
+    /// a later child doesn't track it under another path (first, nearest child wins).
+    tracked: HashMap<Oid, (String, Option<PathEntries>)>,
+    found: Vec<Found>,
+}
+
+/// A listed commit, without its badges (read as they are when a page is answered).
+struct Found {
+    id: Oid,
+    path: String,
+    old_path: Option<String>,
+}
+
+impl FileWalk {
+    fn new(
+        repo: &Repository,
+        order: Arc<[Oid]>,
+        head: Oid,
+        path: &str,
+    ) -> Result<Self, HistoryError> {
+        let head_entries = path_entries(repo, repo.find_commit(head)?.tree_id(), path)?;
+        Ok(Self {
+            order,
+            next: 0,
+            tracked: HashMap::from([(head, (path.to_string(), head_entries))]),
+            found: Vec::new(),
+        })
+    }
+
+    /// No commit is left to examine.
+    fn done(&self) -> bool {
+        self.tracked.is_empty() || self.next >= self.order.len()
+    }
+
+    /// Walks on until `want` commits are found, the history ends, or `deadline` passed after a
+    /// commit was examined. `examined` counts the commits examined.
+    fn advance(
+        &mut self,
+        repo: &Repository,
+        want: usize,
+        deadline: Option<Instant>,
+        examined: &mut usize,
+    ) -> Result<(), HistoryError> {
+        // Topological: every child comes before its parents, so a parent's tracked path is final
+        // by the time the walk reaches it.
+        while self.found.len() < want && !self.done() {
+            let oid = self.order[self.next];
+            self.next += 1;
+            let Some((current_path, Some(current))) = self.tracked.remove(&oid) else {
+                continue;
+            };
+            *examined += 1;
+            self.examine(repo, oid, current_path, &current)?;
+            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    fn examine(
+        &mut self,
+        repo: &Repository,
+        oid: Oid,
+        current_path: String,
+        current: &PathEntries,
+    ) -> Result<(), HistoryError> {
         let commit = repo.find_commit(oid)?;
         let blob = current.blob();
 
@@ -81,7 +269,7 @@ pub fn file_history(
         let mut renamed_from = None;
         for (index, parent) in commit.parents().enumerate() {
             let tracked_in_parent =
-                match parent_path_entries(repo, parent.tree_id(), &current, &current_path)? {
+                match parent_path_entries(repo, parent.tree_id(), current, &current_path)? {
                     Some(parent_entries) => {
                         same_as_a_parent |= parent_entries.blob() == blob;
                         Some((current_path.clone(), Some(parent_entries)))
@@ -104,43 +292,44 @@ pub fn file_history(
                 };
             if let Some(tracked_in_parent) = tracked_in_parent {
                 // First (nearest) child wins when two children track the same parent.
-                tracked.entry(parent.id()).or_insert(tracked_in_parent);
+                self.tracked.entry(parent.id()).or_insert(tracked_in_parent);
             }
         }
 
         if !same_as_a_parent {
-            entries.push(FileHistoryEntry {
-                commit: decorations.graph_commit(&commit),
+            self.found.push(Found {
+                id: oid,
                 path: current_path,
                 old_path: renamed_from,
             });
         }
+        Ok(())
     }
-    Ok(entries)
-}
 
-/// One answer of [`file_history_cached`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FileHistoryPage {
-    /// The first `limit` entries, or fewer when the budget ran out or the history ended.
-    pub entries: Vec<FileHistoryEntry>,
-    /// The walk reached the end of the file's history: no older entry exists.
-    pub complete: bool,
-}
-
-/// [`file_history`] continued from where the cache's walk for the same HEAD and path stopped
-/// (#860). Answers the first `limit` entries, walking further only when the cache has fewer,
-/// and only until `budget` runs out (after at least one commit).
-pub fn file_history_cached(
-    repo: &Repository,
-    _cache: &mut crate::graph::WalkCache,
-    path: &str,
-    limit: usize,
-    _budget: std::time::Duration,
-) -> Result<FileHistoryPage, HistoryError> {
-    let entries = file_history(repo, path, limit)?;
-    let complete = entries.len() < limit;
-    Ok(FileHistoryPage { entries, complete })
+    /// The first `limit` entries found, with the badges in `decorations`.
+    fn page(
+        &self,
+        repo: &Repository,
+        decorations: &RefDecorations,
+        limit: usize,
+    ) -> Result<FileHistoryPage, HistoryError> {
+        let entries = self
+            .found
+            .iter()
+            .take(limit)
+            .map(|found| {
+                Ok(FileHistoryEntry {
+                    commit: decorations.graph_commit(&repo.find_commit(found.id)?),
+                    path: found.path.clone(),
+                    old_path: found.old_path.clone(),
+                })
+            })
+            .collect::<Result<Vec<_>, git2::Error>>()?;
+        Ok(FileHistoryPage {
+            entries,
+            complete: self.done() && self.found.len() <= limit,
+        })
+    }
 }
 
 pub(crate) fn validate_path(path: &str) -> Result<(), HistoryError> {
