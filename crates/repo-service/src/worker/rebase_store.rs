@@ -150,8 +150,8 @@ mod tests {
         store.save(&state(&ids)).unwrap();
         let valid: serde_json::Value =
             serde_json::from_slice(&fs::read(file(&repo)).unwrap()).unwrap();
-        let mut version_2 = valid.clone();
-        version_2["version"] = 2.into();
+        let mut version_3 = valid.clone();
+        version_3["version"] = 3.into();
         let mut bad_action = valid.clone();
         bad_action["plan"][0]["action"] = serde_json::json!({ "kind": "Rebase" });
         let mut no_kind = valid.clone();
@@ -163,7 +163,7 @@ mod tests {
             String::new(),
             "\u{0}\u{1}binary".to_string(),
             r#"{"version":1}"#.to_string(),
-            version_2.to_string(),
+            version_3.to_string(),
             bad_action.to_string(),
             no_kind.to_string(),
             bad_stop.to_string(),
@@ -284,7 +284,7 @@ mod tests {
         assert_eq!(
             json,
             serde_json::json!({
-                "version": 1,
+                "version": 2,
                 "originalBranchRef": "refs/heads/main",
                 "originalTip": ids[2].to_string(),
                 "onto": ids[0].to_string(),
