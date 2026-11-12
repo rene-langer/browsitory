@@ -47,6 +47,15 @@ describe("renderWebviewHtml", () => {
     expect(html).not.toMatch(/<script[^>]*>\s*[^<\s]/);
   });
 
+  // #843: syntax highlighting runs in a Web Worker. A webview can only start one from a blob:
+  // (or data:) URL; the frontend bundle carries the worker's code and makes the blob itself.
+  it("allows workers from blob: URLs and nothing else", () => {
+    const html = renderWebviewHtml(fakeWebview(), { script: fakeUri("script.js"), style: fakeUri("style.css") });
+
+    expect(html).toMatch(/worker-src blob:;/);
+    expect(html.match(/worker-src[^;]*/g)).toEqual(["worker-src blob:"]);
+  });
+
   it("generates a fresh nonce for each document", () => {
     const webview = fakeWebview();
     const assets = { script: fakeUri("script.js"), style: fakeUri("style.css") };

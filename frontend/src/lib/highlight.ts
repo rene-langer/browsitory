@@ -9,6 +9,7 @@ import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import type { DiffHunk, DiffLine } from "../ipc/RepoClient";
 import { EXCLUDED_GRAMMAR_NAMES } from "./excludedGrammars";
 import type { HighlightLanguage } from "./languageForPath";
+import type { HighlightTransport } from "./highlightWorkerProtocol";
 
 export interface Token {
   content: string;
@@ -85,7 +86,12 @@ async function ensureLanguage(h: HighlighterCore, lang: HighlightLanguage): Prom
   return p;
 }
 
-export function highlightLines(lang: HighlightLanguage, code: string): Promise<Token[][]> {
+// Stub for the tests-first commit (#843); the implementation follows.
+export function setHighlightTransport(_transport: HighlightTransport): HighlightTransport | undefined {
+  return undefined;
+}
+
+export function highlightLines(lang: HighlightLanguage, code: string, _signal?: AbortSignal): Promise<Token[][]> {
   const key = `${lang}\u0000${code}`;
   const hit = cache.get(key);
   if (hit !== undefined) return hit;
