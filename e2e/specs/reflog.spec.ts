@@ -3,7 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
 import { clickInPage } from "../support/dom";
-import { expandSidebarSection } from "../support/sidebar";
+import { withFailureDiagnostics } from "../support/diagnostics";
+import { expandSidebarSection, sidebarState } from "../support/sidebar";
 import { git } from "../support/git";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
@@ -43,13 +44,29 @@ describe("Browsitory reflog recovery", () => {
     await selector.waitForExist();
     await selector.selectByAttribute("value", branchRef);
 
-    await browser.waitUntil(async () => (await (await $$(`button=Restore ${branchRef}`)).length) >= 2, {
-      timeoutMsg: "expected reflog entries for both fixture commits",
-    });
-    const restoreButtons = await $$(`button=Restore ${branchRef}`);
+    // The reflog list renders only the rows near the visible part of the sidebar (#775), so it
+    // is scrolled into view first, as a user would to read it; the count is the same check as
+    // before. On failure, the sidebar's state (the selected reference, the rows rendered, where
+    // the list sits) and a screenshot say which side it was (#825).
+    await withFailureDiagnostics(
+      "reflog-entries",
+      () =>
+        browser.waitUntil(
+          async () => {
+            await browser.execute(() => {
+              const list = document.querySelector("[data-active-repo='true'] section[aria-label='Reflog'] ul");
+              list?.scrollIntoView({ block: "nearest" });
+            });
+            return (await (await $$(`button=Restore ${branchName}`)).length) >= 2;
+          },
+          { timeoutMsg: "expected reflog entries for both fixture commits" },
+        ),
+      sidebarState,
+    );
+    const restoreButtons = await $$(`button=Restore ${branchName}`);
     await restoreButtons[1].click();
 
-    const dialog = await $(`aria/Restore ${branchRef}`);
+    const dialog = await $(`aria/Restore ${branchName}`);
     await dialog.waitForExist();
     await expect(dialog).toHaveText(expect.stringContaining(firstCommitId));
     // In the page (`clickInPage`): the button sits at the window's bottom edge, where

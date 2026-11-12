@@ -170,7 +170,7 @@ export function CommitGraph({
    * Tag badge menu actions (push, branch, checkout, delete locally or on a remote). Without
    * `onPushTag`, tag badges have no menu and a right-click on them opens the commit menu. Badges
    * stay non-focusable; `TagPanel` is the keyboard path for push and delete, and the commit menu
-   * has "Branch from here" and "Checkout (detached)".
+   * has "Branch from here" and "Switch to (detached)".
    */
   onPushTag?: (remoteName: string, tag: string) => void;
   onDeleteTag?: (tag: string) => Promise<void>;

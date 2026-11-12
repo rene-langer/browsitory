@@ -548,7 +548,11 @@ pub enum RemoteError {
     Git(#[from] git2::Error),
     #[error("remote URLs must not contain embedded credentials")]
     CredentialBearingUrl,
-    #[error("remote '{name}' is the upstream for local branch(es): {branches:?}")]
+    #[error(
+        "Remote '{name}' wasn't removed: it is the upstream of {}. Try again to remove it and \
+         clear the upstream.",
+        .branches.join(", ")
+    )]
     RemoteInUse { name: String, branches: Vec<String> },
     #[error("cannot pull with a dirty worktree")]
     DirtyWorktree,

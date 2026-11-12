@@ -3,7 +3,7 @@
 **Branches** is a single tree: a **Local** folder holding your local branches, and one folder
 per remote holding that remote's branches (fetched lazily the first time you expand it).
 
-- **Switch to a branch:** double-click a local branch, or choose **Checkout** from its context
+- **Switch to a branch:** double-click a local branch, or choose **Switch to** from its context
   menu.
 - **Look at a branch without switching:** click it, local or remote, to select its latest commit
   and scroll the graph there (as **Go to branch…** in the command palette does).
@@ -14,14 +14,14 @@ per remote holding that remote's branches (fetched lazily the first time you exp
 
 The menus offer:
 
-- a local branch: checkout, rename, delete, merge, **Rebase current branch onto ⟨branch⟩…** (see
-  [Rebase](rebase.md)), **Push to…**, **Isolate branch** (the graph then shows only that
-  branch's own commits and merges, see
+- a local branch: **Switch to**, rename, delete, merge, **Rebase current branch onto
+  ⟨branch⟩…** (see [Rebase](rebase.md)), **Push to…**, **Isolate branch** (the graph then shows
+  only that branch's own commits and merges, see
   [Which branches the graph shows](history.md#which-branches-the-graph-shows)), and for the
   current branch **Set upstream…** and **Push to ⟨remote⟩**, and **Copy branch name**;
-- a remote branch: checkout, **Set as upstream for current branch**, **Rebase current branch
-  onto ⟨remote⟩/⟨branch⟩…**, **Isolate branch** (as for a local branch), **Copy branch name**
-  (as `remote/branch`), or **Delete ⟨remote⟩/⟨branch⟩…**;
+- a remote branch: **Switch to** (to a local branch tracking it), **Set as upstream for current
+  branch**, **Rebase current branch onto ⟨remote⟩/⟨branch⟩…**, **Isolate branch** (as for a
+  local branch), **Copy branch name** (as `remote/branch`), or **Delete ⟨remote⟩/⟨branch⟩…**;
 - a remote: fetch, **Push current branch here**, edit, manage credentials, **Copy fetch URL**
   (and **Copy push URL** when pushes go to a different URL), or remove.
 
@@ -48,7 +48,7 @@ The menus offer:
 ## Creating a branch
 
 The **+** button in the section header opens **New branch…**, **Add remote…** and **Show all
-branches**. The New branch form's **Check out after creating** is on at first, as `git switch
+branches**. The New branch form's **Switch to it after creating** is on at first, as `git switch
 -c`, and keeps your last choice; creating and checking out is one step, which one **Undo** takes
 back. **Create branch…** in the command palette, or in the toolbar's branch list, opens the same
 form, also in a narrow window. Creating a branch from a specific commit, or starting a rebase

@@ -162,10 +162,10 @@ describe("BranchTree — local branches", () => {
   });
 
   // #509: the palette's rule (`branchActions`); before, only a rebase run here disabled them.
-  it("disables Checkout and Rename, and ignores a double-click, during a merge, like the palette", () => {
+  it("disables Switch to and Rename, and ignores a double-click, during a merge, like the palette", () => {
     const { props } = renderTree({ operationDisabled: true, operationDisabledReason: "A merge is in progress." });
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
-    for (const name of ["Checkout", "Rename"]) {
+    for (const name of ["Switch to", "Rename"]) {
       const item = screen.getByRole("menuitem", { name });
       expect(item).toBeDisabled();
       expect(item).toHaveAttribute("title", "A merge is in progress.");
@@ -222,11 +222,11 @@ describe("BranchTree — local branches", () => {
     expect(props.onOpenCreateBranchDraft).toHaveBeenCalledWith("HEAD");
   });
 
-  it("a local branch's context menu lists Checkout first and calls onSwitchBranch", () => {
+  it("a local branch's context menu lists Switch to first and calls onSwitchBranch", () => {
     const { props } = renderTree();
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     const items = screen.getAllByRole("menuitem");
-    expect(items[0]).toHaveAccessibleName("Checkout");
+    expect(items[0]).toHaveAccessibleName("Switch to");
     fireEvent.click(items[0]);
     expect(props.onSwitchBranch).toHaveBeenCalledWith("feat/foo");
   });
@@ -254,10 +254,10 @@ describe("BranchTree — local branches", () => {
     expect(screen.getByRole("menuitem", { name: "Compare with HEAD" })).toBeInTheDocument();
   });
 
-  it("Checkout is disabled for the current branch", () => {
+  it("Switch to is disabled for the current branch", () => {
     renderTree();
     fireEvent.contextMenu(screen.getByRole("button", { name: /main \(current\)/ }));
-    expect(screen.getByRole("menuitem", { name: "Checkout" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Switch to" })).toBeDisabled();
   });
 
   it("a branch's context menu Isolate branch isolates only that local branch", () => {
@@ -619,17 +619,17 @@ describe("BranchTree — remotes", () => {
     expect(onSetGraphRemoteBranchSelection).toHaveBeenCalledWith(["upstream/feature"]);
   });
 
-  it("right-clicking a remote branch offers Checkout and Set as upstream", async () => {
+  it("right-clicking a remote branch offers Switch to and Set as upstream", async () => {
     renderTree({ remotes: oneRemote, onListRemoteBranches: vi.fn().mockResolvedValue(["feat/foo"]) });
     const remoteFolder = screen.getByRole("button", { name: "origin" }).closest("li")!;
     fireEvent.click(screen.getByRole("button", { name: "origin" }));
     // Scoped to the remote's own <li> — `baseBranches` already has a local "feat/foo".
     fireEvent.contextMenu(await within(remoteFolder).findByText("foo"));
-    expect(screen.getByRole("menuitem", { name: "Checkout" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Switch to" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Set as upstream for current branch" })).toBeInTheDocument();
   });
 
-  it("double-clicking a remote branch checks it out the same way the context menu's Checkout does", async () => {
+  it("double-clicking a remote branch checks it out the same way the context menu's Switch to does", async () => {
     const onSwitchBranch = vi.fn();
     renderTree({
       branches: [...baseBranches],
@@ -667,7 +667,7 @@ describe("BranchTree — remotes", () => {
     const actionsButton = await screen.findByRole("button", { name: "Actions for origin/feat/foo" });
     expect(actionsButton).toHaveAttribute("aria-haspopup", "menu");
     fireEvent.click(actionsButton);
-    expect(screen.getByRole("menuitem", { name: "Checkout" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Switch to" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Set as upstream for current branch" })).toBeInTheDocument();
   });
 
@@ -678,7 +678,7 @@ describe("BranchTree — remotes", () => {
     expect(screen.getByRole("button", { name: "Actions for feat/foo" })).toBeInTheDocument();
   });
 
-  it("Checkout switches to an existing same-named local branch instead of creating a new one", async () => {
+  it("Switch to switches to an existing same-named local branch instead of creating a new one", async () => {
     const onSwitchBranch = vi.fn();
     const onCreateBranch = vi.fn();
     renderTree({
@@ -692,12 +692,12 @@ describe("BranchTree — remotes", () => {
     fireEvent.click(screen.getByRole("button", { name: "origin" }));
     // Scoped to the remote's own <li> — `baseBranches` already has a local "feat/foo".
     fireEvent.contextMenu(await within(remoteFolder).findByText("foo"));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Checkout" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Switch to" }));
     expect(onSwitchBranch).toHaveBeenCalledWith("feat/foo");
     expect(onCreateBranch).not.toHaveBeenCalled();
   });
 
-  it("Checkout creates and tracks a new local branch when none exists locally", async () => {
+  it("Switch to creates and tracks a new local branch when none exists locally", async () => {
     const onCreateBranch = vi.fn().mockResolvedValue(null);
     const onSetUpstream = vi.fn().mockResolvedValue(undefined);
     renderTree({
@@ -709,7 +709,7 @@ describe("BranchTree — remotes", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "origin" }));
     fireEvent.contextMenu(await screen.findByText("only-remote"));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Checkout" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Switch to" }));
     await Promise.resolve();
     expect(onCreateBranch).toHaveBeenCalledWith("feat/only-remote", "origin/feat/only-remote");
     expect(onSetUpstream).toHaveBeenCalledWith("origin", "feat/only-remote");
@@ -869,18 +869,18 @@ describe("BranchTree — remotes", () => {
     expect(screen.getByRole("button", { name: "Add remote" })).toBeDisabled();
   });
 
-  // A remote branch's Checkout can call `onSwitchBranch` (when a same-named local branch already
+  // A remote branch's Switch to can call `onSwitchBranch` (when a same-named local branch already
   // exists), which is exactly the hazard `isRebasing` already guards for local branches: switching
   // underneath a paused rebase silently retargets an unrelated branch once `rebase::finish` moves
   // the original branch ref (see BranchTree's local "does not switch branches while a rebase is in
   // progress" test and BranchSwitcher's original comment on the same hazard). `operationDisabled`
   // is the broader gate (rebase/merge/transfer/etc.), so both remote-branch actions must respect it
   // too, matching the sibling remote-folder items right above.
-  it("disables Checkout and Set as upstream on a remote branch while another operation is active", async () => {
+  it("disables Switch to and Set as upstream on a remote branch while another operation is active", async () => {
     renderTree({ remotes: oneRemote, onListRemoteBranches: vi.fn().mockResolvedValue(["only-remote"]), operationDisabled: true });
     fireEvent.click(screen.getByRole("button", { name: "origin" }));
     fireEvent.contextMenu(await screen.findByText("only-remote"));
-    expect(screen.getByRole("menuitem", { name: "Checkout" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Switch to" })).toBeDisabled();
     expect(screen.getByRole("menuitem", { name: "Set as upstream for current branch" })).toBeDisabled();
   });
 
@@ -1202,13 +1202,13 @@ describe("BranchTree — keyboard menus", () => {
     row.focus();
     fireEvent.keyDown(row, { key: "F10", shiftKey: true });
     expect(screen.getByRole("menu")).toHaveStyle({ left: "8px", top: "122px" });
-    expect(screen.getByRole("menuitem", { name: "Checkout" })).toHaveFocus();
-    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Checkout" }), { key: "Escape" });
+    expect(screen.getByRole("menuitem", { name: "Switch to" })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Switch to" }), { key: "Escape" });
     expect(screen.queryByRole("menu")).toBeNull();
     expect(row).toHaveFocus();
   });
 
-  it("the Menu key on the current branch focuses the first enabled item (Checkout is disabled)", () => {
+  it("the Menu key on the current branch focuses the first enabled item (Switch to is disabled)", () => {
     renderTree();
     const row = screen.getByTitle("main").closest('[role="button"]') as HTMLElement;
     row.focus();
@@ -1221,7 +1221,7 @@ describe("BranchTree — keyboard menus", () => {
     const actions = screen.getByRole("button", { name: "Actions for feat/foo" });
     actions.focus();
     fireEvent.keyDown(actions, { key: "ContextMenu" });
-    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Checkout" }), { key: "Escape" });
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Switch to" }), { key: "Escape" });
     expect(actions).toHaveFocus();
   });
 
@@ -1243,8 +1243,8 @@ describe("BranchTree — keyboard menus", () => {
     row.focus();
     expect(row).toHaveFocus();
     fireEvent.keyDown(row, { key: "ContextMenu" });
-    expect(screen.getByRole("menuitem", { name: "Checkout" })).toHaveFocus();
-    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Checkout" }), { key: "Escape" });
+    expect(screen.getByRole("menuitem", { name: "Switch to" })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Switch to" }), { key: "Escape" });
     expect(row).toHaveFocus();
   });
 
@@ -1301,7 +1301,7 @@ describe("BranchTree — keyboard menus", () => {
     const row = screen.getByTitle("feat/foo").closest('[role="button"]') as HTMLElement;
     screen.getByRole("button", { name: "Add" }).focus();
     fireEvent.contextMenu(row);
-    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Checkout" }), { key: "Escape" });
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Switch to" }), { key: "Escape" });
     expect(row).toHaveFocus();
   });
 

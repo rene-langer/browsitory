@@ -12,6 +12,7 @@ import { wrapLines } from "../lib/wordWrap";
 import { logFailure } from "../lib/logger";
 import { DiffLineContent } from "./DiffLineContent";
 import { DIFF_WINDOW_LINES, collapseReason, diffLineCount, windowHunks } from "../lib/largeDiff";
+import { hunkRange } from "../lib/hunkRange";
 import styles from "./DiffView.module.css";
 
 /**
@@ -544,6 +545,7 @@ export function DiffView({
             : onDiscardHunk && { label: "Discard hunk", run: () => onDiscardHunk(oldStart, newStart) };
           // Split-view cells: the line's index in `hunk.lines` (the selection's coordinate space).
           const cell = (line: DiffLine) => indexOf!.get(line)!;
+          const range = hunkRange(hunk);
           const listboxProps = lineActions
             ? {
                 role: "listbox",
@@ -560,8 +562,8 @@ export function DiffView({
               className={hasActions && hunkIndex === active ? styles.activeHunk : undefined}
             >
               <div className={styles.hunkHeader}>
-                <span className={styles.hunkRange}>
-                  @@ -{hunk.oldStart},{hunk.oldLines} +{hunk.newStart},{hunk.newLines} @@
+                <span className={`${styles.hunkRange} diff-hunk-range`} title={range.title}>
+                  {range.label}
                 </span>
                 {hunkActions !== undefined && (
                   <Toolbar aria-label="Hunk actions">

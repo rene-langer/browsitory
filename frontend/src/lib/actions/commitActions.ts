@@ -56,7 +56,7 @@ export function commitActions(context: CommitActionContext, commit: GraphCommit)
       needsParent,
     },
     revert: { ...action(`Revert${ellipsis}`, `Revert ${short}${ellipsis}`), needsParent },
-    checkout: action("Checkout (detached)", `Checkout ${short} (detached)`),
+    checkout: action("Switch to (detached)", `Switch to ${short} (detached)`),
     reset: action(
       `Reset ${context.currentBranch ?? "HEAD"} to here…`,
       `Reset to ${short}…`,

@@ -164,9 +164,8 @@ describe("Browsitory diff word wrap and whole file", () => {
     await clickInPage(`button[aria-label="Show whole file"]`);
     // l20 is 15 lines from either change: only the whole file shows it.
     await waitUntilInPage(".diff-line-context", " l20", { contains: true });
-    const hunkHeaders = await browser.execute(
-      () => [...document.querySelectorAll("span")].filter((el) => el.textContent!.startsWith("@@ ")).length,
-    );
+    // By class: other spans (commit summaries, line labels) can start with "Lines 3" too.
+    const hunkHeaders = await browser.execute(() => document.querySelectorAll(".diff-hunk-range").length);
     expect(hunkHeaders).toBe(1);
 
     // Select line 45's removal and its replacement.

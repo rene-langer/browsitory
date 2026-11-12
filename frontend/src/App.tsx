@@ -435,7 +435,7 @@ function AppContent({
           <button
             type="button"
             className={styles.iconButton}
-            aria-label="Release notes"
+            aria-label="What’s new"
             title="What’s new"
             onClick={() => setReleaseNotesView({ mode: "all", entries: allReleaseNotes })}
           >

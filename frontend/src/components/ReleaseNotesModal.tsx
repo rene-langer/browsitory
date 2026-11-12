@@ -117,8 +117,8 @@ export function ReleaseNotesModal({
     </>
   );
   return (
-    <Overlay onClose={onClose} ariaLabel="Release notes" closeOnBackdropClick>
-      <Panel title="Release notes" ariaLabel="Release notes" footer={footer} bodyLabel="Release notes text">
+    <Overlay onClose={onClose} ariaLabel="What’s new" closeOnBackdropClick>
+      <Panel title="What’s new" ariaLabel="What’s new" footer={footer} bodyLabel="What’s new text">
         {shown.length === 0 ? (
           <p className={styles.empty}>No release notes yet.</p>
         ) : (
