@@ -1403,12 +1403,14 @@ certificate.
   one. Landing a step, `finish` and Abort clear only the pick's own files
   (`commit::clear_operation_files`), so the bisect, and a terminal rebase's or cherry-pick's
   state, survive (#249, #250).
-- **Continue** (`rebase_continue`):
+- **Continue** (`rebase_continue`; `rebase_continue_with_message` passes a message for the step
+  it lands from the index, refusing an empty one, which is how Edit commit… recommits under an
+  edited message, #882):
 
   | Situation | Action |
   |---|---|
   | `cursor == plan.len()` | HEAD at `expected_head`, git clean: retry `finish` |
-  | own paused pick, HEAD at `expected_head` | commit the index as the step, go on |
+  | own paused pick, HEAD at `expected_head` | commit the index as the step (under Continue's message when given, #882), go on |
   | clean, HEAD at `expected_head` | re-apply the step (error stop, or `--abort` outside) |
   | clean, conflict/edit stop, HEAD = the step committed by hand | adopt it (a `Reword` gets its planned message; a group still collapses), go on |
   | another pick/merge/revert paused | `OperationInProgress` |

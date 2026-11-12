@@ -20,7 +20,7 @@ Right-click a commit in the graph:
   (see [Editing older commits](#editing-older-commits) below).
 
 The command palette also has commands to cherry-pick, revert, check out and reset to the
-selected commit, to reword, squash, fixup, move or drop it (**Reword 1a2b3c4…**, **Drop
+selected commit, to reword, edit, squash, fixup, move or drop it (**Reword 1a2b3c4…**, **Drop
 1a2b3c4** and so on), and to amend the last commit (where the commit menu offers them), plus
 **Continue cherry-pick** / **Abort cherry-pick** (or revert) while a sequence is paused.
 
@@ -53,9 +53,14 @@ amend starts without the chips you added for your next commit and gives them bac
 
 ## Editing older commits
 
-The commit menu has six one-click edits for commits of the current branch:
+The commit menu has seven one-click edits for commits of the current branch:
 
 - **Reword…** changes the commit's message.
+- **Edit commit…** stops at the commit with its changes staged on its parent. The status strip
+  says "Editing 1a2b3c4: change the files, then Continue". Change, stage or unstage files, edit
+  the message in the commit area if you like, then **Continue**: the staged result is committed
+  with that message (and the commit's author), and the commits after it are replayed.
+  **Abort rebase** puts the branch back as it was.
 - **Squash with parent** combines the commit with the one below it. The result keeps the
   parent's author and has both messages, the parent's first.
 - **Fixup into parent** combines them too, but keeps only the parent's message.
@@ -66,10 +71,7 @@ Each one is a small interactive rebase (see [Rebase](rebase.md)): the commits af
 one are rewritten, so they get new ids. A conflict pauses it like any rebase: the progress panel
 shows **Continue rebase** and **Abort rebase**, the paused rebase survives a restart, and Abort
 puts the branch back as it was. A finished edit is one **Undo** step named after the edit
-("Drop 1a2b3c4", "Squash 1a2b3c4 into its parent", "Move 1a2b3c4 up").
-
-The edits only change messages and the order of commits. To change the files of an older
-commit, use **Rebase onto here…** with an **Edit** step.
+("Drop 1a2b3c4", "Squash 1a2b3c4 into its parent", "Move 1a2b3c4 up", "Edit 1a2b3c4").
 
 ??? note "Details"
     An edit is disabled, with the reason as its tooltip, when:
