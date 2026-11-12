@@ -28,21 +28,36 @@ describe("useStableValue (#844)", () => {
     expect(result.current.tools.join("a", "b")).toBe("xab");
   });
 
-  it("keeps a nested plain object while its leaves stay the same, functions included", () => {
+  it("keeps a nested plain object built anew in each render while its leaves stay the same", () => {
     const list = ["a"];
     const { result, rerender } = renderHook(({ n }) => useStableValue({ nested: { list, count: 1, onGo: () => n } }), {
       initialProps: { n: 1 },
     });
-    const before = result.current;
+    // A nested object is passed through as is until it changes identity once (see the next
+    // test); from then on its stable copy is kept.
     rerender({ n: 2 });
+    const before = result.current;
+    rerender({ n: 3 });
     expect(result.current).toBe(before);
-    expect(result.current.nested.onGo()).toBe(2);
+    expect(result.current.nested.onGo()).toBe(3);
+  });
+
+  it("passes a nested object that keeps its identity through as is, without copying it", () => {
+    // A client behind a Proxy (as the tests' fake is) has methods that aren't own keys: a copy
+    // would lose them.
+    const client = new Proxy({} as { read: () => string }, { get: (_target, key) => (key === "read" ? () => "read" : undefined) });
+    const { result, rerender } = renderHook(({ n }) => useStableValue({ client, n }), { initialProps: { n: 1 } });
+    expect(result.current.client).toBe(client);
+    rerender({ n: 2 });
+    expect(result.current.client).toBe(client);
+    expect(result.current.client.read()).toBe("read");
   });
 
   it("gives a new object, up to the root, when a data leaf changes; untouched siblings stay", () => {
     const { result, rerender } = renderHook(({ count }) => useStableValue({ a: { count }, b: { label: "same" } }), {
       initialProps: { count: 1 },
     });
+    rerender({ count: 1 });
     const before = result.current;
     rerender({ count: 2 });
     expect(result.current).not.toBe(before);
