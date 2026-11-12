@@ -337,3 +337,55 @@ fn delete_branch_with_force_round_trips_through_the_worker() {
         .iter()
         .any(|b| b.name == "feature"));
 }
+
+#[test]
+fn the_branch_list_and_upstreams_count_a_moved_upstream_again_through_the_worker() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "initial commit");
+    let base = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("topic", &base, false).unwrap();
+    repo.reference("refs/remotes/origin/topic", base.id(), true, "test")
+        .unwrap();
+    repo.remote("origin", "https://example.com/owner/repo.git")
+        .unwrap();
+    let mut config = repo.config().unwrap();
+    config.set_str("branch.topic.remote", "origin").unwrap();
+    config
+        .set_str("branch.topic.merge", "refs/heads/topic")
+        .unwrap();
+    drop(config);
+    let counts = |handle: &crate::worker::WorkerHandle| {
+        let branch = handle
+            .list_branches()
+            .unwrap()
+            .into_iter()
+            .find(|branch| branch.name == "topic")
+            .unwrap();
+        let upstream = handle
+            .get_remote_upstreams("origin".into())
+            .unwrap()
+            .into_iter()
+            .find(|upstream| upstream.local_branch == "topic")
+            .unwrap();
+        assert_eq!(
+            (branch.ahead, branch.behind),
+            (upstream.ahead, upstream.behind)
+        );
+        (branch.ahead, branch.behind)
+    };
+
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    assert_eq!(counts(&handle), (Some(0), Some(0)));
+
+    let tree = base.tree().unwrap();
+    let sig = repo.signature().unwrap();
+    let ahead = repo
+        .commit(None, &sig, &sig, "fetched", &tree, &[&base])
+        .unwrap();
+    repo.reference("refs/remotes/origin/topic", ahead, true, "fetch")
+        .unwrap();
+
+    assert_eq!(counts(&handle), (Some(0), Some(1)));
+}

@@ -54,7 +54,19 @@ pub struct BranchInfo {
 }
 
 pub fn list_branches(repo: &Repository) -> Result<Vec<BranchInfo>, BranchError> {
+    list_branches_cached(repo, &mut crate::ahead_behind::AheadBehindCache::default())
+}
+
+/// [`list_branches`], with the ahead/behind counts kept in `cache` (#112): only a branch or
+/// upstream that moved since the last call is counted again. Keeps only the counts of the
+/// branches it lists.
+pub fn list_branches_cached(
+    repo: &Repository,
+    cache: &mut crate::ahead_behind::AheadBehindCache,
+) -> Result<Vec<BranchInfo>, BranchError> {
     let config = repo.config()?;
+    cache.begin(repo);
+    let mut pairs = Vec::new();
     let mut branches = Vec::new();
     for entry in repo.branches(Some(BranchType::Local))? {
         let (branch, _) = entry?;
@@ -64,7 +76,9 @@ pub fn list_branches(repo: &Repository) -> Result<Vec<BranchInfo>, BranchError> 
         let configured = crate::remote::configured_upstream(&config, name)?;
         let (ahead, behind) = match &configured {
             Some((remote, remote_branch)) => {
-                crate::remote::ahead_behind(repo, name, remote, remote_branch)
+                let pair = crate::remote::tracking_pair(repo, name, remote, remote_branch);
+                pairs.extend(pair);
+                crate::remote::pair_ahead_behind(repo, cache, pair)
             }
             None => (None, None),
         };
@@ -76,6 +90,7 @@ pub fn list_branches(repo: &Repository) -> Result<Vec<BranchInfo>, BranchError> 
             behind,
         });
     }
+    cache.retain(&pairs);
     Ok(branches)
 }
 
