@@ -73,6 +73,15 @@ shows **Continue rebase** and **Abort rebase**, the paused rebase survives a res
 puts the branch back as it was. A finished edit is one **Undo** step named after the edit
 ("Drop 1a2b3c4", "Squash 1a2b3c4 into its parent", "Move 1a2b3c4 up", "Edit 1a2b3c4").
 
+**Fold staged changes into this commit.** While you have changes staged, the commit menu (and
+the palette) also offers to fold them into a commit of the current branch, like `git commit
+--fixup` followed by `git rebase --autosquash`. The commit keeps its message and author, and the
+commits after it are replayed; on the latest commit this simply amends it. A conflict with a
+later commit pauses it like any rebase, and **Abort rebase** puts the branch back with your
+changes staged again. It is one **Undo** step ("Fold staged changes into 1a2b3c4"). Like the
+other edits it needs a clean tree apart from the staged changes: unstaged changes to tracked
+files have to be staged or stashed first (untracked files are fine). It runs no commit hooks.
+
 ??? note "Details"
     An edit is disabled, with the reason as its tooltip, when:
 
@@ -83,7 +92,8 @@ puts the branch back as it was. A finished edit is one **Undo** step named after
       that isn't the first commit or a merge commit;
     - Move up is on the latest commit;
     - you have staged changes or changes to tracked files (untracked files are fine), as for any
-      rebase: commit or stash them first;
+      rebase: commit or stash them first (Fold staged changes needs staged changes, and no
+      unstaged changes to tracked files);
     - a merge, cherry-pick, revert or rebase is in progress, here or in a terminal.
 
 ## Force push

@@ -1403,6 +1403,12 @@ certificate.
   one. Landing a step, `finish` and Abort clear only the pick's own files
   (`commit::clear_operation_files`), so the bisect, and a terminal rebase's or cherry-pick's
   state, survive (#249, #250).
+- **Fold staged changes** (`fold::fold_staged_into`, #883): after the start checks (and nothing
+  staged, or unstaged changes to tracked files, refuse) it amends the latest commit, or commits
+  the index as `fixup! <summary>` on the branch and rebases from the target's parent with that
+  commit as a `Fixup` right after the target. `RebaseState::fold_base` (`foldBase` in
+  `rebase.json`, format version 2) is the tip before the fold: Abort and a failed start move the
+  branch back there (a soft reset), so the changes are staged again.
 - **Continue** (`rebase_continue`; `rebase_continue_with_message` passes a message for the step
   it lands from the index, refusing an empty one, which is how Edit commit… recommits under an
   edited message, #882):
