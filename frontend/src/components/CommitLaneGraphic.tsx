@@ -1,4 +1,6 @@
+import { useSyncExternalStore } from "react";
 import type { CommitLayout } from "../lib/commitGraphLayout";
+import type { LaneHover } from "../lib/laneHover";
 import { laneColor } from "../lib/laneColors";
 
 const LANE_WIDTH = 16;
@@ -36,15 +38,42 @@ export function WorkingTreeLaneGraphic({ lane, totalLanes }: { lane: number; tot
   );
 }
 
+const NO_HOVER: LaneHover = { get: () => null, set: () => {}, subscribe: () => () => {} };
+/** Stands for "another segment is hovered": every line of the row dims. */
+const OTHER_SEGMENT = -1;
+
+/** Whether `layout`'s row draws segment `segmentId`. */
+function drawsSegment(layout: CommitLayout, segmentId: number): boolean {
+  return (
+    layout.laneSegmentId === segmentId ||
+    layout.passThroughLanes.some((entry) => entry.segmentId === segmentId) ||
+    layout.parentConnections.some((connection) => connection.segmentId === segmentId)
+  );
+}
+
 export function CommitLaneGraphic({
   layout,
   totalLanes,
-  hoveredSegmentId,
+  hoveredSegmentId: hoveredProp,
+  hover = NO_HOVER,
 }: {
   layout: CommitLayout;
   totalLanes: number;
   hoveredSegmentId?: number | null;
+  /**
+   * The graph's hovered segment (#837), read here: a hover changes only the rows whose look it
+   * changes, without rendering the graph. `hoveredSegmentId`, when given, wins.
+   */
+  hover?: LaneHover;
 }) {
+  // The hovered segment as far as this row is concerned: none, one it draws, or another one
+  // (everything dims). Moving between rows renders only the rows this changes for.
+  const fromStore = useSyncExternalStore(hover.subscribe, () => {
+    const segmentId = hover.get();
+    if (segmentId === null) return null;
+    return drawsSegment(layout, segmentId) ? segmentId : OTHER_SEGMENT;
+  });
+  const hoveredSegmentId = hoveredProp !== undefined ? hoveredProp : fromStore;
   const width = totalLanes * LANE_WIDTH;
   const midY = ROW_HEIGHT / 2;
 

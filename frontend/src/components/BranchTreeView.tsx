@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
 import { ChevronRight, Cloud, MoreHorizontal } from "lucide-react";
 import type { BranchInfo, RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { branchActions, remoteBranchActions, type RebaseTarget } from "../lib/actions/branchActions";
@@ -78,14 +78,31 @@ function swatchLook(color: string | undefined, shown: boolean): { className: str
 }
 
 /** What every row of the tree needs, passed down the nested folders unchanged. */
+/**
+ * A remote's loaded branch list as a tree, built once per list (#844): the remote cache keeps a
+ * list's identity until the remote is read again.
+ */
+const remoteTrees = new WeakMap<readonly string[], BranchTreeNode<string>[]>();
+const NO_REMOTE_BRANCHES: readonly string[] = [];
+function remoteTree(loaded: readonly string[] | undefined): BranchTreeNode<string>[] {
+  const list = loaded ?? NO_REMOTE_BRANCHES;
+  let tree = remoteTrees.get(list);
+  if (tree === undefined) {
+    tree = buildBranchTree(list.map((name) => ({ path: name, value: name })));
+    remoteTrees.set(list, tree);
+  }
+  return tree;
+}
+
 type RowContext = {
   branches: BranchInfo[];
   blockers: OperationBlockers;
   remoteCount: number;
   upstream: UpstreamInfo | null;
-  graphBranchSelection: string[] | null;
-  graphRemoteBranchSelection: string[] | null;
-  remoteBranchesInGraph: string[];
+  /** The local branches the graph shows, looked up per row (#844: a set, not a list search). */
+  shownLocal: ReadonlySet<string>;
+  /** The same for the remote branches, as `<remote>/<branch>`. */
+  shownRemote: ReadonlySet<string>;
   branchColors: BranchLaneColors;
   selectedRow: string | null;
   rename: BranchRename;
@@ -179,7 +196,7 @@ function LocalBranchNodes({ nodes, ctx }: { nodes: BranchTreeNode<BranchInfo>[];
 function LocalBranchRow({ branch, label, ctx }: { branch: BranchInfo; label: string; ctx: RowContext }) {
   const { rename, rowMenu } = ctx;
   const rowKey = `local:${branch.name}`;
-  const shownInGraph = (ctx.graphBranchSelection ?? ctx.branches.map((b) => b.name)).includes(branch.name);
+  const shownInGraph = ctx.shownLocal.has(branch.name);
   const isRenaming = rename.name === branch.name;
   const counts = aheadBehind(branch);
   return (
@@ -333,7 +350,7 @@ function RemoteBranchRow({
 }) {
   const { rowMenu } = ctx;
   const rowKey = `remote:${remoteName}:${branchName}`;
-  const remoteShown = (ctx.graphRemoteBranchSelection ?? ctx.remoteBranchesInGraph).includes(`${remoteName}/${branchName}`);
+  const remoteShown = ctx.shownRemote.has(`${remoteName}/${branchName}`);
   return (
     <ListRow
       {...rowDragProps(ctx, { kind: "remote", remoteName, branchName }, false)}
@@ -506,14 +523,28 @@ export function BranchTreeView({
     onSetGraphRemoteBranchSelection(next);
   };
 
+  // Once per change, not per row (#844): with thousands of branches, a list search per row made
+  // each render quadratic.
+  const shownLocal = useMemo(
+    () => new Set(graphBranchSelection ?? branches.map((branch) => branch.name)),
+    [graphBranchSelection, branches],
+  );
+  const shownRemote = useMemo(
+    () => new Set(graphRemoteBranchSelection ?? remoteBranchesInGraph),
+    [graphRemoteBranchSelection, remoteBranchesInGraph],
+  );
+  const localTree = useMemo(
+    () => buildBranchTree(branches.map((branch) => ({ path: branch.name, value: branch }))),
+    [branches],
+  );
+
   const ctx: RowContext = {
     branches,
     blockers,
     remoteCount: remotes.length,
     upstream,
-    graphBranchSelection,
-    graphRemoteBranchSelection,
-    remoteBranchesInGraph,
+    shownLocal,
+    shownRemote,
     branchColors,
     selectedRow,
     rename,
@@ -556,7 +587,7 @@ export function BranchTreeView({
         {localOpen && (
           <ul className={styles.folderBody}>
             <LocalBranchNodes
-              nodes={buildBranchTree(branches.map((branch) => ({ path: branch.name, value: branch })))}
+              nodes={localTree}
               ctx={ctx}
             />
           </ul>
@@ -632,7 +663,7 @@ export function BranchTreeView({
                 {loaded?.length === 0 && <li className={styles.statusRow}>No branches</li>}
                 <RemoteBranchNodes
                   remoteName={remote.name}
-                  nodes={buildBranchTree((loaded ?? []).map((name) => ({ path: name, value: name })))}
+                  nodes={remoteTree(loaded)}
                   ctx={ctx}
                 />
               </ul>

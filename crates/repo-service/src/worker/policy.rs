@@ -184,6 +184,8 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         // Reads.
         Command::GetStatus { .. }
         | Command::GetChangeStamp { .. }
+        | Command::GetStatusWithStamp { .. }
+        | Command::ListUntrackedFolder { .. }
         | Command::GetCommitGraph { .. }
         | Command::LocateCommit { .. }
         | Command::GetMergedCommits { .. }
@@ -504,6 +506,8 @@ pub(super) fn reply_of(command: &mut Command) -> Option<&mut dyn Reply> {
     replies!(
         GetStatus,
         GetChangeStamp,
+        GetStatusWithStamp,
+        ListUntrackedFolder,
         GetCommitGraph,
         LocateCommit,
         GetMergedCommits,

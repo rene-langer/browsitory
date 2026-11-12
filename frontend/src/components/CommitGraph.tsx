@@ -1,3 +1,4 @@
+import { stableMemo } from "../lib/stableMemo";
 import {
   useCallback,
   useEffect,
@@ -27,10 +28,11 @@ import {
 import { historyEditChecks, type HistoryEditCheck, type HistoryEditRequest } from "../lib/historyEdits";
 import { commitActions } from "../lib/actions/commitActions";
 import type { VisitKind } from "../lib/navigationHistory";
-import { rowsEqual, type SelectedRow } from "../state/useAppState";
+import type { SelectedRow } from "../state/useAppState";
 import { useCopyToClipboard } from "../state/useCopyToClipboard";
 import { useCommitDrag } from "../state/useCommitDrag";
 import { CommitLaneGraphic, WorkingTreeLaneGraphic } from "./CommitLaneGraphic";
+import { createLaneHover } from "../lib/laneHover";
 import { formatAbsoluteDate, formatShortDate } from "../lib/formatDate";
 import { useDateFormat } from "../state/useDateFormat";
 import { ListRow } from "./primitives/ListRow";
@@ -50,7 +52,7 @@ export const LOAD_AHEAD_ROWS = 50;
 const NO_EXPANSIONS: Readonly<Record<string, MergeExpansion>> = {};
 const NO_COMMITS: GraphCommit[] = [];
 
-export function CommitGraph({
+function CommitGraphContent({
   status,
   commits,
   selectedRow,
@@ -86,6 +88,7 @@ export function CommitGraph({
   onDeleteTag,
   onCreateTag,
   onDeleteTagFromRemote,
+  onCompareTag,
   revealRequest = 0,
   lineStats,
   onCommitsVisible,
@@ -178,6 +181,8 @@ export function CommitGraph({
   onCreateTag?: (commitId: string) => void;
   /** Opens the "Delete from remote" dialog for that tag (the tag badge menu). */
   onDeleteTagFromRemote?: (tag: string) => void;
+  /** A tag badge's "Compare with current branch" (#119): `refs/tags/<tag>` and the tag. Read-only. */
+  onCompareTag?: (refName: string, label: string) => void;
   /** Bumped by "Go to" (#441): scrolls the selected row into view even when it was already
    *  selected. */
   revealRequest?: number;
@@ -227,8 +232,10 @@ export function CommitGraph({
   );
   // The commit of an expanded merge each listed commit belongs to (#617), and the lanes.
   const ownLayout = useCommitGraphLayout(sharedLayout === undefined ? commits : NO_COMMITS, expandedMerges);
-  const { mergeOwners, layouts: commitLayouts, laneCount } = sharedLayout ?? ownLayout;
-  const [hoveredSegmentId, setHoveredSegmentId] = useState<number | null>(null);
+  const { mergeOwners, layouts: commitLayouts, laneCount, indexById } = sharedLayout ?? ownLayout;
+  // The hovered row's lane segment (#837): kept out of the graph's state, so a hover renders only
+  // the lane graphics it dims or undims, not the graph.
+  const [hover] = useState(createLaneHover);
   // `focusId` is the last focus the graph itself reported through `onSelectRow`. A focus that
   // differs from it came from outside (search, sidebar, refresh) and drops the multi-selection.
   const [{ selection, focusId }, setGraphSelection] = useState<{
@@ -236,11 +243,11 @@ export function CommitGraph({
     focusId: string | null;
   }>({ selection: EMPTY_SELECTION, focusId: null });
 
-  const rows: SelectedRow[] = [
-    "uncommitted",
-    ...commits.map((commit) => ({ commitId: commit.id })),
-  ];
-  const selectedIndex = rows.findIndex((row) => rowsEqual(row, selectedRow));
+  // Row 0 is "Uncommitted changes"; commit rows are offset by one. Looked up in the layout's
+  // index, not searched (#837): a render does work for the rows in view, not every loaded one.
+  const rowCount = commits.length + 1;
+  const rowAt = (index: number): SelectedRow => (index === 0 ? "uncommitted" : { commitId: commits[index - 1].id });
+  const selectedIndex = selectedRow === "uncommitted" ? 0 : (indexById.get(selectedRow.commitId) ?? -2) + 1;
 
   // The multi-selection only counts while the focused commit is the one the graph last set and
   // belongs to it, and only for commits still loaded. Anything else (a click outside the graph,
@@ -250,8 +257,7 @@ export function CommitGraph({
   const effectiveSelection: CommitSelection = (() => {
     if (primaryId === null) return EMPTY_SELECTION;
     if (primaryId !== focusId) return selectOnly(primaryId);
-    const loaded = new Set(commits.map((commit) => commit.id));
-    const ids = new Set([...selection.ids].filter((id) => loaded.has(id)));
+    const ids = new Set([...selection.ids].filter((id) => indexById.has(id)));
     if (!ids.has(primaryId)) return selectOnly(primaryId);
     if (ids.size === selection.ids.size) return selection;
     const anchorId = selection.anchorId !== null && ids.has(selection.anchorId) ? selection.anchorId : primaryId;
@@ -281,7 +287,7 @@ export function CommitGraph({
   const busyTitle = operationsBlocked ? (operationsBlockedReason ?? undefined) : undefined;
 
   // Only the rows in view render (#685); row 0 is "Uncommitted changes".
-  const virtual = useVirtualRows(listElement, rows.length);
+  const virtual = useVirtualRows(listElement, rowCount);
   const rowElement = (list: HTMLElement, index: number) =>
     list.querySelector<HTMLElement>(`:scope > li[data-row-index="${index}"]`) ?? undefined;
 
@@ -415,22 +421,35 @@ export function CommitGraph({
       onPushTag,
       onBranchFromCommit,
       onCheckoutCommit,
+      onCompareTag,
+      currentBranch,
       onDeleteFromRemote: onDeleteTagFromRemote,
       onCopy: copyToClipboard,
       onDelete: setTagToDelete,
     });
   }
 
-  // The rows on screen, for the lazily counted badges (#620). Without IntersectionObserver every
-  // loaded row counts as visible.
-  const { start: firstRendered, end: endRendered } = virtual;
+  // The rows on screen, for the lazily counted badges (#620). One observer per list (#837): rows
+  // are observed as they render and dropped as they unmount, instead of observing every rendered
+  // row anew on each scroll step. Without IntersectionObserver every loaded row counts as visible.
+  const { end: endRendered } = virtual;
+  const visibility = useRef<{
+    observer: IntersectionObserver;
+    rows: Map<Element, string>;
+    visible: Set<string>;
+  } | null>(null);
+  const latestForVisibility = useRef({ commits, indexById, onCommitsVisible });
   useEffect(() => {
-    const list = listRef.current;
-    if (onCommitsVisible === undefined || list === null) return;
-    if (typeof IntersectionObserver === "undefined") {
-      onCommitsVisible(commits.map((commit) => commit.id));
-      return;
-    }
+    latestForVisibility.current = { commits, indexById, onCommitsVisible };
+  });
+  const reportsVisibility = onCommitsVisible !== undefined;
+  const observesVisibility = typeof IntersectionObserver !== "undefined";
+  useEffect(() => {
+    if (!reportsVisibility || observesVisibility) return;
+    onCommitsVisible?.(commits.map((commit) => commit.id));
+  }, [commits, onCommitsVisible, reportsVisibility, observesVisibility]);
+  useEffect(() => {
+    if (!reportsVisibility || !observesVisibility || listElement === null) return;
     const visible = new Set<string>();
     const observer = new IntersectionObserver((records) => {
       for (const record of records) {
@@ -439,11 +458,38 @@ export function CommitGraph({
         if (record.isIntersecting) visible.add(id);
         else visible.delete(id);
       }
-      onCommitsVisible(commits.filter((commit) => visible.has(commit.id)).map((commit) => commit.id));
+      // In graph order, and only commits still loaded.
+      const { indexById: rowsOf, onCommitsVisible: report } = latestForVisibility.current;
+      const ids = [...visible]
+        .map((id) => [id, rowsOf.get(id)] as const)
+        .filter((entry): entry is readonly [string, number] => entry[1] !== undefined)
+        .sort((a, b) => a[1] - b[1])
+        .map(([id]) => id);
+      report?.(ids);
     });
-    for (const row of list.querySelectorAll<HTMLElement>("[data-commit-id]")) observer.observe(row);
-    return () => observer.disconnect();
-  }, [commits, onCommitsVisible, firstRendered, endRendered]);
+    visibility.current = { observer, rows: new Map(), visible };
+    return () => {
+      observer.disconnect();
+      visibility.current = null;
+    };
+  }, [listElement, reportsVisibility, observesVisibility]);
+  // After every render: observe the rows that just mounted, forget the ones that unmounted. The
+  // work is the rows in view, not the loaded history.
+  useEffect(() => {
+    const watch = visibility.current;
+    if (watch === null || listElement === null) return;
+    for (const [row, id] of watch.rows) {
+      if (row.isConnected) continue;
+      watch.observer.unobserve(row);
+      watch.rows.delete(row);
+      watch.visible.delete(id);
+    }
+    for (const row of listElement.querySelectorAll<HTMLElement>("[data-commit-id]")) {
+      if (watch.rows.has(row)) continue;
+      watch.rows.set(row, row.dataset.commitId ?? "");
+      watch.observer.observe(row);
+    }
+  });
 
   // Keep the keyboard-driven selection visible in a long history, and a "Go to" target too.
   const { scrollToIndex, windowed } = virtual;
@@ -453,20 +499,20 @@ export function CommitGraph({
 
   // Infinite scroll (#685): the next page loads before the last loaded row comes into view.
   useEffect(() => {
-    if (windowed && hasMore && !loadingMore && endRendered >= rows.length - LOAD_AHEAD_ROWS) onLoadMore?.();
-  }, [windowed, hasMore, loadingMore, endRendered, rows.length, onLoadMore]);
+    if (windowed && hasMore && !loadingMore && endRendered >= rowCount - LOAD_AHEAD_ROWS) onLoadMore?.();
+  }, [windowed, hasMore, loadingMore, endRendered, rowCount, onLoadMore]);
 
   const moveSelection = (nextIndex: number, extendRange: boolean) => {
     // Arrowing/paging past the last loaded row pulls in the next page instead of dead-ending.
-    if (nextIndex > rows.length - 1 && hasMore) onLoadMore?.();
-    const next = Math.max(0, Math.min(nextIndex, rows.length - 1));
+    if (nextIndex > rowCount - 1 && hasMore) onLoadMore?.();
+    const next = Math.max(0, Math.min(nextIndex, rowCount - 1));
     if (next < 1) {
-      setSelection(EMPTY_SELECTION, rows[next], "step");
+      setSelection(EMPTY_SELECTION, rowAt(next), "step");
     } else if (extendRange) {
       // Row 0 is "Uncommitted changes"; commit rows are offset by one.
-      setSelection(extendSelection(effectiveSelection, commits, commits[next - 1].id), rows[next], "step");
+      setSelection(extendSelection(effectiveSelection, commits, commits[next - 1].id), rowAt(next), "step");
     } else {
-      setSelection(selectOnly(commits[next - 1].id), rows[next], "step");
+      setSelection(selectOnly(commits[next - 1].id), rowAt(next), "step");
     }
   };
 
@@ -612,7 +658,7 @@ export function CommitGraph({
       moveSelection(0, false);
     } else if (event.key === "End") {
       event.preventDefault();
-      moveSelection(rows.length - 1, false);
+      moveSelection(rowCount - 1, false);
     } else if (event.key === "PageDown") {
       event.preventDefault();
       moveSelection(selectedIndex + PAGE_SIZE, false);
@@ -728,13 +774,22 @@ export function CommitGraph({
     ];
   })();
 
+  // The multi-selection's commits, oldest first (graph order is newest first), from the row index
+  // instead of a scan of every loaded commit (#837).
+  const selectedOldestFirst = (): GraphCommit[] =>
+    [...effectiveSelection.ids]
+      .map((id) => indexById.get(id))
+      .filter((index): index is number => index !== undefined)
+      .sort((a, b) => b - a)
+      .map((index) => commits[index]);
+
   // Read-only, so neither `operationsBlocked` nor a blocked rebase plan disables it.
   const compareItem: ContextMenuItem | null = (() => {
     if (onCompareCommits === undefined || effectiveSelection.ids.size !== 2) return null;
     const [first, second] = [...effectiveSelection.ids];
     // Graph order is newest first, so the higher index is the older commit.
-    const firstIndex = commits.findIndex((c) => c.id === first);
-    const secondIndex = commits.findIndex((c) => c.id === second);
+    const firstIndex = indexById.get(first) ?? -1;
+    const secondIndex = indexById.get(second) ?? -1;
     const [fromId, toId] = firstIndex > secondIndex ? [first, second] : [second, first];
     return { label: "Compare these commits", onSelect: () => onCompareCommits(fromId, toId), group: "export" };
   })();
@@ -745,7 +800,7 @@ export function CommitGraph({
     if (!multiSelected || (onCherryPickMany === undefined && onRevertMany === undefined)) return [];
     const count = effectiveSelection.ids.size;
     // Graph order is newest first; the backend wants oldest first.
-    const selected = commits.filter((commit) => effectiveSelection.ids.has(commit.id)).reverse();
+    const selected = selectedOldestFirst();
     const idsOldestFirst = selected.map((commit) => commit.id);
     const hasMerge = selected.some((commit) => commit.parentIds.length > 1);
     const items: ContextMenuItem[] = [];
@@ -814,7 +869,7 @@ export function CommitGraph({
       <ListRow
         className={searchMatches === null ? styles.uncommittedRow : `${styles.uncommittedRow} ${styles.searchDimmed}`}
         rowIndex={0}
-        setSize={rows.length}
+        setSize={rowCount}
         selected={selectedRow === "uncommitted"}
         onClick={() => {
           setSelection(EMPTY_SELECTION, "uncommitted");
@@ -834,7 +889,7 @@ export function CommitGraph({
         <ListRow
           key={commit.id}
           rowIndex={index + 1}
-          setSize={rows.length}
+          setSize={rowCount}
           className={[
             "commit-row",
             mergeOwners.has(commit.id) ? styles.mergedRow : null,
@@ -846,8 +901,8 @@ export function CommitGraph({
           selected={effectiveSelection.ids.has(commit.id)}
           onClick={(event) => handleCommitClick(event, commit.id)}
           onContextMenu={(event) => handleContextMenu(event, commit.id)}
-          onMouseEnter={() => setHoveredSegmentId(commitLayouts[index].laneSegmentId)}
-          onMouseLeave={() => setHoveredSegmentId(null)}
+          onMouseEnter={() => hover.set(commitLayouts[index].laneSegmentId)}
+          onMouseLeave={() => hover.set(null)}
           onPointerDown={commitDrag === null ? undefined : (event) => startCommitDrag(event, commit)}
           dragging={draggedIds.has(commit.id)}
         >
@@ -855,7 +910,7 @@ export function CommitGraph({
             <CommitLaneGraphic
               layout={commitLayouts[index]}
               totalLanes={laneCount}
-              hoveredSegmentId={hoveredSegmentId}
+              hover={hover}
             />
           </div>
           <RefBadges
@@ -1043,3 +1098,6 @@ function CommitRowLineStats({ stats }: { stats: CommitStats | null | undefined }
   if (stats == null) return null;
   return <LineStatsBadge insertions={stats.insertions} deletions={stats.deletions} className={styles.lineStats} />;
 }
+
+/** Renders again only when its data changed (#844); see `stableMemo`. */
+export const CommitGraph = stableMemo(CommitGraphContent, "CommitGraph");

@@ -88,6 +88,8 @@ pub(super) fn table() -> Vec<((&'static str, Command), &'static str)> {
         (cmd!(Ping), "-"),
         (cmd!(GetStatus), "read"),
         (cmd!(GetChangeStamp), "read"),
+        (cmd!(GetStatusWithStamp), "read"),
+        (cmd!(ListUntrackedFolder { folder: s("d/") }), "read"),
         (
             cmd!(GetCommitGraph {
                 limit: 1,

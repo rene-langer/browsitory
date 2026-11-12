@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { CommitGraphLayout } from "./lib/useCommitGraphLayout";
 import { BranchTree } from "./components/BranchTree";
 import { Sidebar } from "./components/primitives/Sidebar";
@@ -51,6 +52,12 @@ export function WorkspaceSidebar({
   graphLayout: CommitGraphLayout;
 }) {
   const { openDialog } = appState;
+  // One array per commit list, not per render, so the memoized tree skips other updates (#844).
+  const { commits } = appState.state;
+  const remoteBranchesInGraph = useMemo(
+    () => Array.from(new Set(commits.flatMap((commit) => commit.remoteBranchRefs))),
+    [commits],
+  );
   return (
     <Sidebar
       panelToggles={[
@@ -86,7 +93,7 @@ export function WorkspaceSidebar({
           graphRemoteBranchSelection={appState.state.graphSelection.remote}
           onSetGraphRemoteBranchSelection={appState.setGraphRemoteBranchSelection}
           onIsolateGraphBranch={appState.isolateGraphBranch}
-          remoteBranchesInGraph={Array.from(new Set(appState.state.commits.flatMap((c) => c.remoteBranchRefs)))}
+          remoteBranchesInGraph={remoteBranchesInGraph}
           branchColors={graphLayout.branchColors}
           remotes={appState.state.remotes}
           upstream={appState.state.upstream}
@@ -165,6 +172,8 @@ export function WorkspaceSidebar({
           onBranchFromCommit={appState.openCreateBranchDraft}
           onCheckoutCommit={announce((commitId) => `Checked out ${commitId.slice(0, 7)}`, appState.checkoutCommit, { undoable: true })}
           onGoToTag={(tag) => void goTo.goToTag(tag.name, tag.commitId)}
+          onCompareTag={compare.compareBranch}
+          currentBranch={appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null}
           pushDisabled={repositoryOperationDisabled}
           operationDisabledReason={operationDisabledReason}
           revealRequest={sectionRevealRequest(revealRequest, "tags")}

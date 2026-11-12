@@ -29,8 +29,8 @@ export interface ExternalChangesOptions {
  * Shows changes made outside the app (#650): a terminal, an editor, another Git tool. While the
  * tab is shown, the app is visible and nothing of this tab is running, it compares the
  * repository's change stamp with the one its last refresh read, and refreshes when they differ.
- * It checks every few seconds, and at once when the window gets the focus back, when the app
- * becomes visible again and when the tab is shown again. A slow check (a very large work tree)
+ * It checks every few seconds, and at once when the window gets the focus back (unless a watcher
+ * runs, see below), when the app becomes visible again and when the tab is shown again. A slow check (a very large work tree)
  * stretches the interval, so checking never takes more than about a tenth of the time. At most
  * one check runs at a time; the checks of a hidden tab or a hidden app stop.
  *
@@ -87,12 +87,14 @@ export function useExternalChanges({ client, repoPath, active, busy, checkForCha
     if (active && visible && !busy) void check();
   }, [active, visible, busy, check]);
 
+  // Not while watched (#841): the watcher reports changes made meanwhile, and the slow poll
+  // covers the file systems it misses.
   useEffect(() => {
-    if (!active) return;
+    if (!active || watching) return;
     const onFocus = () => void check();
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [active, check]);
+  }, [active, check, watching]);
 
   useEffect(() => {
     if (!active || !visible || busy) return;

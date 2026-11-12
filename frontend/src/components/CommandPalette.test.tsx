@@ -391,6 +391,127 @@ describe("CommandPalette", () => {
     });
   });
 
+  describe("rendering only the rows in view (#864)", () => {
+    // jsdom has no layout: an option `li` is OPTION tall, a group heading `li` HEADING tall, and
+    // the listbox (its own scroller) LIST tall. Everything else has no height.
+    const OPTION = 26;
+    const HEADING = 30;
+    const LIST = 260;
+    const PER_GROUP = 3000;
+    const pad = (i: number) => String(i).padStart(4, "0");
+    // Two groups: "Branches" heads the list, "Remotes" starts at option PER_GROUP.
+    const lots = (): Command[] => [
+      ...Array.from({ length: PER_GROUP }, (_, i) => ({
+        id: `branch-${i}`,
+        label: `Branch ${pad(i)}`,
+        keywords: [],
+        run: vi.fn(),
+        group: "Branches" as const,
+      })),
+      ...Array.from({ length: PER_GROUP }, (_, i) => ({
+        id: `remote-${i}`,
+        label: `Remote ${pad(i)}`,
+        keywords: [],
+        run: vi.fn(),
+        group: "Remotes" as const,
+      })),
+    ];
+    /** Most options a 260px list can need: the ten in view plus generous overscan. */
+    const BOUND = 60;
+
+    let restoreLayout: () => void;
+    beforeEach(() => {
+      const rect = Element.prototype.getBoundingClientRect;
+      Element.prototype.getBoundingClientRect = function (this: Element) {
+        const height = this.tagName !== "LI" ? 0 : this.getAttribute("role") === "option" ? OPTION : HEADING;
+        return { top: 0, left: 0, right: 0, bottom: height, width: 0, height, x: 0, y: 0, toJSON: () => ({}) };
+      };
+      Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+        configurable: true,
+        get(this: HTMLElement) {
+          return this.tagName === "UL" ? LIST : 0;
+        },
+      });
+      restoreLayout = () => {
+        Element.prototype.getBoundingClientRect = rect;
+        Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
+      };
+    });
+    afterEach(() => restoreLayout());
+
+    const input = () => screen.getByRole("combobox");
+    const listbox = () => screen.getByRole("listbox");
+    const active = () => {
+      const id = input().getAttribute("aria-activedescendant");
+      return id === null ? null : document.getElementById(id);
+    };
+    const scrollListTo = (top: number) => {
+      listbox().scrollTop = top;
+      fireEvent.scroll(listbox());
+    };
+
+    it("renders only the options in view, each with its place in the whole list", () => {
+      render(<CommandPalette commands={lots()} onRun={vi.fn()} />);
+      const options = screen.getAllByRole("option");
+      expect(options.length).toBeGreaterThanOrEqual(LIST / OPTION);
+      expect(options.length).toBeLessThanOrEqual(BOUND);
+      expect(options[0]).toHaveTextContent("Branch 0000");
+      expect(options[0]).toHaveAttribute("aria-posinset", "1");
+      expect(options[0]).toHaveAttribute("aria-setsize", String(2 * PER_GROUP));
+      expect(screen.getByText("Branches")).toBeInTheDocument();
+      expect(active()).toHaveTextContent("Branch 0000");
+    });
+
+    it("renders the options scrolled to, and the heading between two groups", () => {
+      render(<CommandPalette commands={lots()} onRun={vi.fn()} />);
+      // The top of option 4500 ("Remote 1500"): 4500 options and two headings above it.
+      scrollListTo(4500 * OPTION + 2 * HEADING);
+      expect(screen.getByRole("option", { name: "Remote 1500" })).toHaveAttribute("aria-posinset", "4501");
+      expect(screen.getAllByRole("option").length).toBeLessThanOrEqual(BOUND);
+
+      // Option 3000 ("Remote 0000") sits under the "Remotes" heading.
+      scrollListTo(3000 * OPTION + HEADING);
+      const heading = screen.getByText("Remotes");
+      expect(heading.previousElementSibling).toHaveTextContent("Branch 2999");
+      expect(heading.nextElementSibling).toHaveTextContent("Remote 0000");
+      expect(screen.getAllByRole("option").length).toBeLessThanOrEqual(BOUND);
+    });
+
+    it("keeps the highlighted option rendered as the keys move it out of view", () => {
+      render(<CommandPalette commands={lots()} onRun={vi.fn()} />);
+      fireEvent.keyDown(input(), { key: "End" });
+      expect(active()).toHaveTextContent("Remote 2999");
+      expect(active()).toHaveAttribute("aria-selected", "true");
+      expect(listbox().scrollTop).toBeGreaterThan(0);
+      expect(screen.getAllByRole("option").length).toBeLessThanOrEqual(BOUND);
+
+      fireEvent.keyDown(input(), { key: "Home" });
+      expect(active()).toHaveTextContent("Branch 0000");
+      for (let step = 0; step < 45; step += 1) fireEvent.keyDown(input(), { key: "ArrowDown" });
+      expect(active()).toHaveTextContent("Branch 0045");
+      expect(screen.getAllByRole("option").length).toBeLessThanOrEqual(BOUND);
+    });
+
+    it("runs the highlighted option reached by the keys", () => {
+      const commands = lots();
+      const onRun = vi.fn();
+      render(<CommandPalette commands={commands} onRun={onRun} />);
+      fireEvent.keyDown(input(), { key: "End" });
+      fireEvent.keyDown(input(), { key: "ArrowUp" });
+      fireEvent.keyDown(input(), { key: "Enter" });
+      expect(commands[2 * PER_GROUP - 2].run).toHaveBeenCalledOnce();
+      expect(onRun).toHaveBeenCalledOnce();
+    });
+
+    it("lists a query's matches from the top after the list was scrolled", () => {
+      render(<CommandPalette commands={lots()} onRun={vi.fn()} />);
+      scrollListTo(4000 * OPTION);
+      fireEvent.change(input(), { target: { value: "remote 0042" } });
+      expect(active()).toHaveTextContent("Remote 0042");
+      expect(screen.getAllByRole("option")[0]).toHaveTextContent("Remote 0042");
+    });
+  });
+
   it("shows the keys a command's pane binds (#764)", () => {
     const commands: Command[] = [
       { id: "next-conflict", label: "Next conflict", keywords: [], run: vi.fn(), group: "Diff", keys: "F7" },

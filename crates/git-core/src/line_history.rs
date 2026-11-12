@@ -20,7 +20,9 @@ use std::collections::{HashMap, HashSet};
 use git2::{Blob, DiffOptions, ErrorCode, Oid, Repository, Sort};
 
 use crate::graph::{GraphCommit, RefDecorations};
-use crate::history::{blob_at, rename_source, validate_path, HistoryError};
+use crate::history::{
+    parent_path_entries, path_entries, rename_source, validate_path, HistoryError, PathEntries,
+};
 
 /// Commits on the range's path a walk examines before it stops (`LineHistory::truncated`). Each
 /// costs a few tree lookups, and a blob diff when the file changed.
@@ -136,9 +138,17 @@ fn resolve(repo: &Repository, revision: &str) -> Result<Option<Oid>, HistoryErro
 /// What a commit did to the tracked range, seen from one parent.
 enum ParentOutcome {
     /// The range's lines are the same in the parent (possibly moved); carry it there.
-    Unchanged(String, LineRange),
+    Unchanged(Tracked),
     /// The commit changed the range; carry the parent's range there when some of it existed.
-    Changed(Option<(String, LineRange)>),
+    Changed(Option<Tracked>),
+}
+
+/// A commit still to be examined: the path and lines followed there, and the path's tree
+/// entries in it (found when its child was examined, so they aren't looked up twice).
+struct Tracked {
+    path: String,
+    lines: LineRange,
+    entries: PathEntries,
 }
 
 /// Called with each listed commit, its path, the path it was renamed from and the range in it;
@@ -160,12 +170,12 @@ fn walk(
 ) -> Result<bool, HistoryError> {
     validate_path(path)?;
     let commit = repo.find_commit(start)?;
-    let Some((blob_id, _)) = blob_at(&commit.tree()?, path) else {
+    let Some(start_entries) = path_entries(repo, commit.tree_id(), path)? else {
         return Err(HistoryError::NotAFile {
             path: path.to_string(),
         });
     };
-    let blob = repo.find_blob(blob_id)?;
+    let blob = repo.find_blob(start_entries.blob().0)?;
     if blob.is_binary() {
         return Err(HistoryError::NotText {
             path: path.to_string(),
@@ -186,15 +196,26 @@ fn walk(
     revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
     revwalk.push(start)?;
 
-    let mut tracked: HashMap<Oid, (String, LineRange)> =
-        HashMap::from([(start, (path.to_string(), lines))]);
+    let mut tracked: HashMap<Oid, Tracked> = HashMap::from([(
+        start,
+        Tracked {
+            path: path.to_string(),
+            lines,
+            entries: start_entries,
+        },
+    )]);
     let mut examined = 0;
     for (walked, oid) in revwalk.enumerate() {
         if tracked.is_empty() || (walked % CANCEL_INTERVAL == 0 && cancel()) {
             return Ok(false);
         }
         let oid = oid?;
-        let Some((current_path, range)) = tracked.remove(&oid) else {
+        let Some(Tracked {
+            path: current_path,
+            lines: range,
+            entries: current,
+        }) = tracked.remove(&oid)
+        else {
             continue;
         };
         if examined == max_commits {
@@ -202,42 +223,59 @@ fn walk(
         }
         examined += 1;
         let commit = repo.find_commit(oid)?;
-        let Some((blob_id, _)) = blob_at(&commit.tree()?, &current_path) else {
-            continue;
-        };
-        let blob = repo.find_blob(blob_id)?;
+        let blob_id = current.blob().0;
+        // Read only when a parent's version differs.
+        let mut blob = None;
 
         let mut outcomes = Vec::new();
         let mut renamed_from = None;
         for (index, parent) in commit.parents().enumerate() {
-            let parent_tree = parent.tree()?;
-            let (parent_path, parent_blob) = match blob_at(&parent_tree, &current_path) {
-                Some((id, _)) => (current_path.clone(), id),
-                None => {
-                    let Some(source) =
-                        rename_source(repo, &parent_tree, &commit.tree()?, &current_path)?
-                    else {
-                        outcomes.push((parent.id(), ParentOutcome::Changed(None)));
-                        continue;
-                    };
-                    if index == 0 {
-                        renamed_from = Some(source.clone());
+            let (parent_path, parent_entries) =
+                match parent_path_entries(repo, parent.tree_id(), &current, &current_path)? {
+                    Some(entries) => (current_path.clone(), entries),
+                    None => {
+                        let parent_tree = parent.tree()?;
+                        let Some(source) =
+                            rename_source(repo, &parent_tree, &commit.tree()?, &current_path)?
+                        else {
+                            outcomes.push((parent.id(), ParentOutcome::Changed(None)));
+                            continue;
+                        };
+                        if index == 0 {
+                            renamed_from = Some(source.clone());
+                        }
+                        let Some(entries) = path_entries(repo, parent_tree.id(), &source)? else {
+                            outcomes.push((parent.id(), ParentOutcome::Changed(None)));
+                            continue;
+                        };
+                        (source, entries)
                     }
-                    let Some((id, _)) = blob_at(&parent_tree, &source) else {
-                        outcomes.push((parent.id(), ParentOutcome::Changed(None)));
-                        continue;
-                    };
-                    (source, id)
-                }
-            };
+                };
+            let parent_blob = parent_entries.blob().0;
             let outcome = if parent_blob == blob_id {
-                ParentOutcome::Unchanged(parent_path, range)
+                ParentOutcome::Unchanged(Tracked {
+                    path: parent_path,
+                    lines: range,
+                    entries: parent_entries,
+                })
             } else {
+                if blob.is_none() {
+                    blob = Some(repo.find_blob(blob_id)?);
+                }
+                let new = blob.as_ref().expect("read just above");
                 let old = repo.find_blob(parent_blob)?;
-                match map_to_parent(repo, &old, &blob, range)? {
-                    Mapped::Untouched(mapped) => ParentOutcome::Unchanged(parent_path, mapped),
+                match map_to_parent(repo, &old, new, range)? {
+                    Mapped::Untouched(mapped) => ParentOutcome::Unchanged(Tracked {
+                        path: parent_path,
+                        lines: mapped,
+                        entries: parent_entries,
+                    }),
                     Mapped::Touched(mapped) => {
-                        ParentOutcome::Changed(mapped.map(|lines| (parent_path, lines)))
+                        ParentOutcome::Changed(mapped.map(|lines| Tracked {
+                            path: parent_path,
+                            lines,
+                            entries: parent_entries,
+                        }))
                     }
                 }
             };
@@ -246,12 +284,12 @@ fn walk(
 
         // A parent with the range unchanged explains it: follow that parent only, as Git's
         // history simplification does, and don't list the commit.
-        if let Some((parent, outcome)) = outcomes
+        if let Some(index) = outcomes
             .iter()
-            .find(|(_, o)| matches!(o, ParentOutcome::Unchanged(..)))
+            .position(|(_, o)| matches!(o, ParentOutcome::Unchanged(..)))
         {
-            if let ParentOutcome::Unchanged(parent_path, lines) = outcome {
-                track(&mut tracked, *parent, parent_path.clone(), *lines);
+            if let (parent, ParentOutcome::Unchanged(unchanged)) = outcomes.swap_remove(index) {
+                track(&mut tracked, parent, unchanged);
             }
             continue;
         }
@@ -260,8 +298,8 @@ fn walk(
             return Ok(false);
         }
         for (parent, outcome) in outcomes {
-            if let ParentOutcome::Changed(Some((parent_path, lines))) = outcome {
-                track(&mut tracked, parent, parent_path, lines);
+            if let ParentOutcome::Changed(Some(changed)) = outcome {
+                track(&mut tracked, parent, changed);
             }
         }
     }
@@ -271,25 +309,20 @@ fn walk(
 /// Records that `parent` is to be examined for `lines` of `path`. When two children reach the
 /// same parent with the same path, it is examined for the block covering both ranges; with
 /// different paths, the first (nearest) child wins, as in file history.
-fn track(
-    tracked: &mut HashMap<Oid, (String, LineRange)>,
-    parent: Oid,
-    path: String,
-    lines: LineRange,
-) {
+fn track(tracked: &mut HashMap<Oid, Tracked>, parent: Oid, next: Tracked) {
     tracked
         .entry(parent)
-        .and_modify(|(existing_path, existing)| {
-            if *existing_path == path {
-                existing.start = existing.start.min(lines.start);
-                existing.end = existing.end.max(lines.end);
+        .and_modify(|existing| {
+            if existing.path == next.path {
+                existing.lines.start = existing.lines.start.min(next.lines.start);
+                existing.lines.end = existing.lines.end.max(next.lines.end);
             }
         })
-        .or_insert((path, lines));
+        .or_insert(next);
 }
 
 /// Lines in `content` as a diff counts them: a last line without a newline still counts.
-fn line_count(content: &[u8]) -> usize {
+pub(crate) fn line_count(content: &[u8]) -> usize {
     let newlines = content.iter().filter(|&&b| b == b'\n').count();
     newlines + usize::from(content.last().is_some_and(|&b| b != b'\n'))
 }

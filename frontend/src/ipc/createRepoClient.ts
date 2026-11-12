@@ -2,6 +2,7 @@ import type {
   AmendOptions,
   AppearanceSettings,
   ChangeStamp,
+  StatusWithStamp,
   GraphPage,
   CommitChangeRequest,
   HunkOptions,
@@ -137,6 +138,9 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
     closeRepo: (repoPath: string) => call<void>("close_repo", { repoPath }),
     getStatus: (repoPath: string) => call<StatusEntry[]>("get_status", { repoPath }),
     getChangeStamp: (repoPath: string) => call<ChangeStamp>("get_change_stamp", { repoPath }),
+    getStatusWithStamp: (repoPath: string) => call<StatusWithStamp>("get_status_with_stamp", { repoPath }),
+    listUntrackedFolder: (repoPath: string, folder: string) =>
+      call<StatusEntry[]>("list_untracked_folder", { repoPath, path: folder }),
     watchRepo: (repoPath: string) => call<boolean>("watch_repo", { repoPath }),
     unwatchRepo: (repoPath: string) => call<void>("unwatch_repo", { repoPath }),
     getCommitGraph: (repoPath: string, limit: number, selection: GraphSelection, cursor: string | null) =>

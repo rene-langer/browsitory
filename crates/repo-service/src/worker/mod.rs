@@ -113,6 +113,17 @@ pub(crate) enum Command {
     GetChangeStamp {
         reply: Sender<Result<git_core::change_stamp::ChangeStamp, ErrorDto>>,
     },
+    /// `git_core::change_stamp::status_with_stamp` (#841): a refresh's status and stamp from one
+    /// scan of the work tree.
+    /// `git_core::status::untracked_folder_files` (#845): the files of an untracked folder
+    /// listed as one entry.
+    ListUntrackedFolder {
+        folder: String,
+        reply: Sender<Result<Vec<StatusEntry>, ErrorDto>>,
+    },
+    GetStatusWithStamp {
+        reply: Sender<Result<git_core::change_stamp::StatusWithStamp, ErrorDto>>,
+    },
     /// One page of the graph (#685): `cursor` `None` starts at the first commit.
     GetCommitGraph {
         limit: usize,

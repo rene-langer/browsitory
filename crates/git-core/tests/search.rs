@@ -1006,3 +1006,289 @@ fn a_non_matching_search_reaches_the_end_of_a_long_history_in_a_few_pages() {
     assert_eq!(last.scanned, 4000);
     assert!(last.commits.is_empty());
 }
+
+/// A commit on HEAD written byte for byte, so its message and author can hold bytes that aren't
+/// UTF-8 (#848).
+fn raw_commit_on_head(repo: &Repository, author: &[u8], message: &[u8]) -> Oid {
+    let head = repo.head().unwrap();
+    let branch = head.name().unwrap().to_string();
+    let parent = head.peel_to_commit().unwrap();
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(
+        format!("tree {}\nparent {}\nauthor ", parent.tree_id(), parent.id()).as_bytes(),
+    );
+    bytes.extend_from_slice(author);
+    bytes.extend_from_slice(
+        b" 1773057600 +0000\ncommitter Test User <test@example.com> 1773057600 +0000\n\n",
+    );
+    bytes.extend_from_slice(message);
+    let id = repo
+        .odb()
+        .unwrap()
+        .write(git2::ObjectType::Commit, &bytes)
+        .unwrap();
+    repo.reference(&branch, id, true, "test").unwrap();
+    id
+}
+
+/// #848 pins the matching before it gets cheaper: text, message, author and committer terms
+/// ignore case the way Unicode lowercasing does, also where a non-ASCII letter lowercases to an
+/// ASCII one, and a message that isn't UTF-8 is matched as its lossy text.
+#[test]
+fn case_insensitive_matching_follows_unicode_lowercasing() {
+    let (dir, repo) = init_repo();
+    commit_as(
+        &repo,
+        dir.path(),
+        "a.txt",
+        "a",
+        "ÄRGER im Büro",
+        ("Ölaf Ünal", "OLAF@Example.COM"),
+        ("ÇAĞRI", "cagri@example.com"),
+        at(T0, 0),
+    );
+    // U+212A KELVIN SIGN lowercases to an ASCII "k"; no other commit has a "k" in its message.
+    commit_as(
+        &repo,
+        dir.path(),
+        "b.txt",
+        "b",
+        "Temperature in \u{212A}",
+        ("Test User", "test@example.com"),
+        ("Test User", "test@example.com"),
+        at(T0 + 60, 0),
+    );
+    commit_as(
+        &repo,
+        dir.path(),
+        "c.txt",
+        "c",
+        "plain ascii Subject",
+        ("Test User", "test@example.com"),
+        ("Test User", "test@example.com"),
+        at(T0 + 120, 0),
+    );
+
+    assert_eq!(summaries(&repo, "ärger"), ["ÄRGER im Büro"]);
+    assert_eq!(summaries(&repo, "BÜRO"), ["ÄRGER im Büro"]);
+    assert_eq!(summaries(&repo, "message:\"im büro\""), ["ÄRGER im Büro"]);
+    assert_eq!(summaries(&repo, "k"), ["Temperature in \u{212A}"]);
+    assert_eq!(summaries(&repo, "message:K"), ["Temperature in \u{212A}"]);
+    assert_eq!(summaries(&repo, "\u{212A}"), ["Temperature in \u{212A}"]);
+    // The same for a name: U+212A in a committer name matches "k".
+    commit_as(
+        &repo,
+        dir.path(),
+        "d.txt",
+        "d",
+        "by the kelvin committer",
+        ("Test User", "test@example.com"),
+        ("Lord \u{212A}elvin", "lord@example.com"),
+        at(T0 + 180, 0),
+    );
+    assert_eq!(
+        summaries(&repo, "committer:kelvin"),
+        ["by the kelvin committer"]
+    );
+    assert_eq!(summaries(&repo, "SUBJECT"), ["plain ascii Subject"]);
+    assert_eq!(summaries(&repo, "author:ölaf"), ["ÄRGER im Büro"]);
+    assert_eq!(summaries(&repo, "author:ÜNAL"), ["ÄRGER im Büro"]);
+    assert_eq!(
+        summaries(&repo, "author:olaf@example.com"),
+        ["ÄRGER im Büro"]
+    );
+    assert_eq!(summaries(&repo, "committer:çağ"), ["ÄRGER im Büro"]);
+    assert!(
+        summaries(&repo, "author:olaf ünal").is_empty(),
+        "two terms, both must match"
+    );
+    assert_eq!(summaries(&repo, "author:\"ölaf ünal\""), ["ÄRGER im Büro"]);
+    assert!(summaries(&repo, "ärgern").is_empty());
+}
+
+#[test]
+fn a_message_or_name_that_is_not_utf8_is_matched_as_before() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a");
+    commit_all(&repo, "base");
+    raw_commit_on_head(
+        &repo,
+        b"Bad\xffName <bad@example.com>",
+        b"Broken \xff NEEDLE text\n",
+    );
+
+    assert_eq!(summaries(&repo, "needle").len(), 1);
+    assert_eq!(
+        summaries(&repo, "message:\"broken \u{FFFD} needle\"").len(),
+        1
+    );
+    // A name that isn't UTF-8 reads as empty; the email still matches.
+    assert!(summaries(&repo, "author:badname").is_empty());
+    assert!(
+        summaries(&repo, "author:bad").len() == 1,
+        "the email matches"
+    );
+    assert_eq!(summaries(&repo, "author:bad@example").len(), 1);
+}
+
+#[test]
+fn text_and_commit_terms_match_sha_prefixes_in_either_case() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a");
+    commit_all(&repo, "first");
+    write_file(dir.path(), "b.txt", "b");
+    commit_all(&repo, "second");
+    let id = repo.revparse_single("HEAD~1").unwrap().id().to_string();
+
+    assert_eq!(summaries(&repo, &id[..8].to_uppercase()), ["first"]);
+    assert_eq!(summaries(&repo, &id.to_uppercase()), ["first"]);
+    assert!(summaries(&repo, &format!("commit:{}", &id[..1])).contains(&"first".to_string()));
+    assert_eq!(summaries(&repo, &format!("commit:{id}")), ["first"]);
+    // Three hex digits are text, not a SHA prefix, and neither message holds them.
+    assert!(summaries(&repo, &id[..3]).is_empty());
+    // A 40-digit id with one digit changed matches nothing.
+    let last = if id.ends_with('0') { "1" } else { "0" };
+    let other = format!("{}{last}", &id[..39]);
+    assert!(summaries(&repo, &format!("commit:{other}")).is_empty());
+}
+
+/// #848 pins what a literal `path:` (no glob) matches before it is answered without a diff:
+/// the file itself, everything under a folder (with or without a trailing `/`), never a mere
+/// name prefix, case-sensitive, a mode change, a file turned folder and back, and a root commit.
+#[test]
+fn literal_paths_match_the_file_or_everything_under_the_folder() {
+    let (_dir, repo) = init_repo();
+    const FILE: u32 = 0o100644;
+    const EXEC: u32 = 0o100755;
+    let root = commit_tree_at(
+        &repo,
+        &[("src/lib.rs", "l", FILE), ("docs/guide.md", "g", FILE)],
+        &[],
+        "root",
+        T0,
+    );
+    let edit = commit_tree_at(
+        &repo,
+        &[("src/lib.rs", "l2", FILE), ("docs/guide.md", "g", FILE)],
+        &[root],
+        "edit lib",
+        T0 + 10,
+    );
+    let mode = commit_tree_at(
+        &repo,
+        &[("src/lib.rs", "l2", EXEC), ("docs/guide.md", "g", FILE)],
+        &[edit],
+        "make lib executable",
+        T0 + 20,
+    );
+    let library = commit_tree_at(
+        &repo,
+        &[
+            ("src/lib.rs", "l2", EXEC),
+            ("src/library.rs", "x", FILE),
+            ("docs/guide.md", "g", FILE),
+        ],
+        &[mode],
+        "add library",
+        T0 + 30,
+    );
+    let file_to_folder = commit_tree_at(
+        &repo,
+        &[
+            ("src/lib.rs", "l2", EXEC),
+            ("src/library.rs", "x", FILE),
+            ("docs/guide.md/part.md", "g", FILE),
+        ],
+        &[library],
+        "guide becomes a folder",
+        T0 + 40,
+    );
+    let docs_only = commit_tree_at(
+        &repo,
+        &[
+            ("src/lib.rs", "l2", EXEC),
+            ("src/library.rs", "x", FILE),
+            ("docs/guide.md/part.md", "g2", FILE),
+        ],
+        &[file_to_folder],
+        "docs only",
+        T0 + 50,
+    );
+    let src_file = commit_tree_at(
+        &repo,
+        &[
+            ("src/lib.rs", "l2", EXEC),
+            ("src/library.rs", "x", FILE),
+            ("docs/guide.md", "g3", FILE),
+            ("srcfile", "s", FILE),
+        ],
+        &[docs_only],
+        "folder back to a file, srcfile",
+        T0 + 60,
+    );
+    repo.reference("refs/heads/main", src_file, true, "test")
+        .unwrap();
+    repo.set_head("refs/heads/main").unwrap();
+
+    assert_eq!(
+        summaries(&repo, "path:src/lib.rs"),
+        ["make lib executable", "edit lib", "root"]
+    );
+    assert_eq!(
+        summaries(&repo, "path:src"),
+        ["add library", "make lib executable", "edit lib", "root"]
+    );
+    assert_eq!(summaries(&repo, "path:src/"), summaries(&repo, "path:src"));
+    assert_eq!(summaries(&repo, "path:src/library.rs"), ["add library"]);
+    assert!(
+        summaries(&repo, "path:src/li").is_empty(),
+        "a name prefix is no match"
+    );
+    assert!(
+        summaries(&repo, "path:SRC").is_empty(),
+        "paths are case-sensitive"
+    );
+    assert!(summaries(&repo, "path:src/lib.rs/x").is_empty());
+    assert!(summaries(&repo, "path:nowhere").is_empty());
+    assert_eq!(
+        summaries(&repo, "path:srcfile"),
+        ["folder back to a file, srcfile"]
+    );
+    assert_eq!(
+        summaries(&repo, "path:docs/guide.md"),
+        [
+            "folder back to a file, srcfile",
+            "docs only",
+            "guide becomes a folder",
+            "root"
+        ]
+    );
+    assert_eq!(
+        summaries(&repo, "path:docs/guide.md/part.md"),
+        [
+            "folder back to a file, srcfile",
+            "docs only",
+            "guide becomes a folder"
+        ]
+    );
+    assert_eq!(
+        summaries(&repo, "path:docs"),
+        summaries(&repo, "path:docs/guide.md")
+    );
+    assert_eq!(
+        summaries(&repo, "-path:src path:docs"),
+        [
+            "folder back to a file, srcfile",
+            "docs only",
+            "guide becomes a folder"
+        ]
+    );
+    assert_eq!(
+        summaries(&repo, "path:src/library.rs or path:srcfile"),
+        ["folder back to a file, srcfile", "add library"]
+    );
+    assert_eq!(
+        summaries(&repo, "path:src/lib.rs contents:l2"),
+        ["edit lib"]
+    );
+}

@@ -158,11 +158,34 @@ export function fakeRepoClient(overrides: Partial<RepoClient> = {}, fallback: Fa
     get(obj, key, receiver) {
       if (typeof key !== "string" || key in obj || NOT_METHODS.has(key)) return Reflect.get(obj, key, receiver);
       if (key === "supportsCloneAndInit" || key === "supportsHostGitCommands") return false;
+      if (key === "getStatusWithStamp") {
+        if (!stubs.has(key)) stubs.set(key, combinedRead(receiver as RepoClient));
+        return stubs.get(key);
+      }
       if (fallback === "empty" && key in EMPTY_RESULTS) return EMPTY_RESULTS[key as keyof RepoClient];
       if (!stubs.has(key)) stubs.set(key, throwingStub(key));
       return stubs.get(key);
     },
   }) as RepoClient;
+}
+
+/**
+ * `getStatusWithStamp` (#841) when a test doesn't override it: the fake's `getChangeStamp`, then
+ * its `getStatus`, as a refresh read them before the combined read. Without a stamp (no
+ * `getChangeStamp`, or it fails) each answer gets a stamp of its own, so every refresh reads
+ * everything (#685) as it did without one.
+ */
+let unstamped = 0;
+function combinedRead(client: RepoClient): RepoClient["getStatusWithStamp"] {
+  return async (repoPath) => {
+    const stamp = await Promise.resolve()
+      .then(() => client.getChangeStamp(repoPath))
+      .catch(() => {
+        unstamped += 1;
+        return { refs: `unstamped-${unstamped}`, workTree: `unstamped-${unstamped}` };
+      });
+    return { status: await client.getStatus(repoPath), stamp };
+  };
 }
 
 /** A `getCommitGraph` answer (#685): `commits`, then `nextCursor` (`null`: the walk is done). */

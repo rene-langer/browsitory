@@ -106,7 +106,7 @@ more `RepoClient` implementation — no UI rewrite.
 
 ## Why git2 (libgit2 bindings), not gitoxide
 
-`git2` is mature and complete: native blame, native interactive rebase primitives, native
+`git2` is mature and complete: native interactive rebase primitives, native
 merge conflict handling, native stash/cherry-pick, native remote transports. The pure-Rust
 alternative (`gitoxide`/`gix`) is a closer license fit (no GPL exception needed at all), but
 its write-side operations (merge, rebase) are less mature as of this writing. `git2` is the
@@ -130,6 +130,22 @@ writes are still hashed to get their ids. The setting is process-wide (it can't 
 to one repository or lane). Tests run with libgit2's default unless they call the function
 (`crates/git-core/tests/hash_verification.rs`, and the sidecar's
 `the_sidecar_reads_objects_without_rehashing_them`, which pins that the binary calls it).
+
+### Blame and the history walks
+
+File history, line history and blame share one walk (`git_core::history`, #838/#839): each
+tracked commit carries its path's tree entries (`PathEntries`), and a parent's are compared
+top-down, so only folders whose ids differ are read. A lookup scans the one entry in the
+tree's stored form (`tree_entry`) instead of parsing the whole tree (libgit2's tree parsing of
+big root trees was most of the walk). Blame is computed on this walk (`git_core::blame`) and
+no longer uses libgit2's `git_blame_file`: libgit2 1.9 diffs both commits' trees at every
+commit of history (about a minute on a 130k-commit repository, where `git blame` needs about
+a second; the upstream fix, libgit2/libgit2#7472, is unreleased). It assigns lines as git and
+libgit2 do: whole-file passes to an identical parent, then zero-context blob diffs (after
+xdiff's `trim_common_tail`) per parent, renames via libgit2's rename detection, no move or
+copy detection. Its owners match libgit2's on this repository's files, except where libgit2
+loses a file's origin (it then agrees with `git blame`). Like libgit2, it doesn't use git's
+indent heuristic, so a few ambiguous lines differ from `git blame`.
 
 ## The `RepoClient` IPC boundary
 
@@ -185,6 +201,23 @@ with each changed file's size and modification time; the index entries without t
 HEAD, references, the stash reflog, the configuration, the files of an operation in progress and
 each linked worktree's HEAD). Ignored files and the rest of the git folder (objects, reflogs,
 `FETCH_HEAD`) don't count. `get_change_stamp` is an ordinary worker read on both transports.
+
+A status read (`get_status`, `get_status_with_stamp`) writes refreshed stat data back to the index
+as `git status` does (#841, `git_core::index_refresh`), so a file whose times changed but whose
+content didn't is hashed once, not on every read. libgit2's own `update_index` would write the
+index it read at the start of the scan without checking that the file is still that index, so the
+scan reads a hard-linked scratch copy in the git folder, libgit2 writes its refresh there, and the
+real index is replaced under `index.lock` only while it is still the one the copy was made from. A
+held lock, a changed index or any error skips the write; the read never waits or fails for it. An
+index with an intent-to-add entry isn't refreshed (libgit2 would drop the mark).
+
+The status scan doesn't recurse into a wholly untracked folder (#845): libgit2 reports it as one
+`dir/` entry, and `git_core::untracked` walks it, stopping one file past
+`UNTRACKED_FOLDER_THRESHOLD` (500). A smaller folder is listed file by file from that walk (the
+stamp hashes those files too); a larger one stays one `StatusEntry` with `untracked_folder`,
+whose files `list_untracked_folder` reads on demand. Staging (`stage_file("dir/")`) and deleting
+(`discard_file("dir/")`) such an entry act on its non-ignored files, never on a nested repository
+in it. Changes inside a collapsed folder don't move the stamp.
 The stamp has two parts (`ChangeStamp`, `{ refs, workTree }`, #685): `refs` covers HEAD, the
 references, the stash list, the configuration, the operation files and the linked worktrees;
 `workTree` the index and the work tree. `refresh()` keeps the history reads (the graph and its
@@ -195,12 +228,13 @@ status, the stashes, the worktree, submodule and remote lists, HEAD and undo sta
 command (`refresh({ full: true })`), a failed refresh and a missing stamp read everything. Refreshes
 are coalesced per tab (#222): one runs and at most one waits; a call while one runs shares the
 waiting one, which starts after the running one ends, so it still sees the caller's change.
-`useAppState.refresh()` reads the stamp before its other reads (a change landing during them then
-differs), and `checkForChanges()` refreshes only when the current stamp differs from that one, so
+`useAppState.refresh()` reads the stamp together with the status, from one scan of the work tree
+(`get_status_with_stamp`, `git_core::change_stamp::status_with_stamp`, #841), before its other
+reads (a change landing during them then differs), and `checkForChanges()` refreshes only when the current stamp differs from that one, so
 the app's own action, whose refresh already read the new stamp, causes no second refresh.
 `useExternalChanges` calls it while the tab is shown, the app visible and nothing of the tab
 running: every 3 s, stretched to ten times the last check's duration (at most 60 s), and at once
-on window focus, on becoming visible again (the VSCode panel's visibility included) and when the
+on window focus (not while a watcher runs, #841), on becoming visible again (the VSCode panel's visibility included) and when the
 tab is shown. At most one check runs at a time, and none while a refresh runs.
 
 A file system watcher says when to check (#756). `repo_service::watch::RepoWatchers` keeps one
@@ -1019,7 +1053,9 @@ certificate.
   (`components/useVirtualRows.ts`: one row height, measured from the first row; padding on the
   list for the others; `aria-setsize`/`aria-posinset` on the rows) and asks for the next page
   when the rows in view come within `LOAD_AHEAD_ROWS` of the last one. Without layout (a hidden
-  tab, jsdom) every row renders.
+  tab, jsdom) every row renders. The command palette's listbox, its own scroller with group
+  headings of another height between the options, windows the same way with
+  `components/useWindowedListbox.ts` (#864): its top level lists a few commands per branch.
 - Branch colours (#673): `useCommitGraphLayout` computes the lanes once per commit list in
   `RepoWorkspace`, for `CommitGraph` and for the sidebar: a branch's swatch, and the stripe on
   its badges, is the colour of the lane its tip's row sits on (`laneColors.branchLaneColors`); a

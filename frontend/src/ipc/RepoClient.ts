@@ -10,6 +10,11 @@ export interface StatusEntry {
   oldPath: string | null;
   staged: boolean;
   kind: StatusKind;
+  /**
+   * An untracked folder with more than 500 files, listed as one entry (#845): `path` ends in `/`,
+   * `listUntrackedFolder` lists its files. Absent on every other entry.
+   */
+  untrackedFolder?: boolean;
 }
 
 export type DiffLineOrigin = "Add" | "Remove" | "Context";
@@ -378,6 +383,11 @@ export type ConflictSide = "Ours" | "Theirs";
 export interface ChangeStamp {
   refs: string;
   workTree: string;
+}
+/** `getStatusWithStamp`'s answer (#841): what `getStatus` and `getChangeStamp` answer. */
+export interface StatusWithStamp {
+  status: StatusEntry[];
+  stamp: ChangeStamp;
 }
 
 export interface UndoState {
@@ -1164,6 +1174,13 @@ export interface RepoClient {
    * history, branches and tags need reading again.
    */
   getChangeStamp(repoPath: string): Promise<ChangeStamp>;
+  /**
+   * `getStatus` and `getChangeStamp` from one scan of the work tree (#841), as a refresh reads
+   * them. Like `getStatus`, it writes refreshed file times back to the index when it can.
+   */
+  getStatusWithStamp(repoPath: string): Promise<StatusWithStamp>;
+  /** The files of an untracked folder listed as one entry (`untrackedFolder`, #845). */
+  listUntrackedFolder(repoPath: string, folder: string): Promise<StatusEntry[]>;
   /**
    * Watches the repository's work tree and git folder for changes made outside the app (#756);
    * reports arrive on `subscribeRepoWatch`. Resolves whether it is watched: not when the system

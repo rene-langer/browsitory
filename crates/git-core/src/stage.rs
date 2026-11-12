@@ -98,6 +98,9 @@ impl From<LinePatchError> for StageError {
 /// -A`). A conflicted path there is refused ("beyond a symbolic link"). A symlink is staged as a
 /// link even when it dangles.
 pub fn stage_file(repo: &git2::Repository, path: &str) -> Result<(), StageError> {
+    if path.ends_with('/') {
+        return stage_untracked_folder(repo, path);
+    }
     let rel = checked_relative(path)?;
     let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
     let mut index = repo.index()?;
@@ -134,6 +137,56 @@ pub fn stage_file(repo: &git2::Repository, path: &str) -> Result<(), StageError>
     }
     index.write()?;
     Ok(())
+}
+
+/// Stages the files of the untracked folder `folder` (`dir/`, #845), as `git add dir/`: not its
+/// ignored files, and not a nested repository in it.
+fn stage_untracked_folder(repo: &git2::Repository, folder: &str) -> Result<(), StageError> {
+    let files = untracked_folder_files(repo, folder)?;
+    let mut index = repo.index()?;
+    for file in files.iter().filter(|file| !file.path.ends_with('/')) {
+        index.add_path(Path::new(&file.path))?;
+    }
+    index.write()?;
+    Ok(())
+}
+
+/// Deletes the files of the untracked folder `folder` (`dir/`, #845), as `git clean dir/`: not
+/// its ignored files, and never a nested repository in it; then the folders it emptied.
+fn delete_untracked_folder(repo: &git2::Repository, folder: &str) -> Result<(), StageError> {
+    let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
+    if crate::untracked::is_repository(workdir, folder) {
+        return Err(StageError::IsFolder(folder.to_string()));
+    }
+    let files = untracked_folder_files(repo, folder)?;
+    for file in files.iter().filter(|file| !file.path.ends_with('/')) {
+        crate::worktree_guard::remove_beneath(workdir, &file.path)?;
+    }
+    // Deepest first; `remove_dir` only removes an empty folder, never through a link.
+    let mut folders = vec![workdir.join(folder)];
+    let mut index = 0;
+    while index < folders.len() {
+        if let Ok(read) = std::fs::read_dir(&folders[index]) {
+            for entry in read.flatten() {
+                if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                    folders.push(entry.path());
+                }
+            }
+        }
+        index += 1;
+    }
+    for path in folders.iter().rev() {
+        let _ = std::fs::remove_dir(path);
+    }
+    Ok(())
+}
+
+fn untracked_folder_files(
+    repo: &git2::Repository,
+    folder: &str,
+) -> Result<Vec<crate::status::StatusEntry>, StageError> {
+    crate::status::untracked_folder_files(repo, folder)
+        .map_err(|e| StageError::Status(e.to_string()))
 }
 
 /// True when HEAD or the index has a file or link (not a folder, not a submodule) at `rel`.
@@ -212,6 +265,9 @@ pub(crate) fn ensure_no_symlinked_parent(workdir: &Path, rel: &Path) -> Result<(
 /// restore` does (Undo brings them back); a folder that holds anything Undo can't bring back
 /// (an ignored file, a nested repository) is refused instead (#154).
 pub fn discard_file(repo: &git2::Repository, path: &str) -> Result<(), StageError> {
+    if path.ends_with('/') {
+        return delete_untracked_folder(repo, path);
+    }
     let rel = checked_relative(path)?;
     let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
     refuse_beyond_symlink(workdir, path)?;

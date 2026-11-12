@@ -54,6 +54,8 @@ fn every_refresh_read_answers(handle: &WorkerHandle, commit_id: &str) {
     let h = handle.clone();
     answers("GetStatus", move || h.get_status()).expect("status");
     let h = handle.clone();
+    answers("GetStatusWithStamp", move || h.get_status_with_stamp()).expect("status and stamp");
+    let h = handle.clone();
     answers("GetCommitGraph", move || {
         h.get_commit_graph(50, git_core::graph::GraphSelection::default(), None)
     })

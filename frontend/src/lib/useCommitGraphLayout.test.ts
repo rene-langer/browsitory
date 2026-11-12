@@ -32,4 +32,23 @@ describe("useCommitGraphLayout", () => {
     expect(result.current.layouts).toHaveLength(count);
     expect(result.current.laneCount).toBe(1);
   });
+
+  it("lays out an appended page only, and keeps the branch colours while they don't change (#837)", () => {
+    const count = 900;
+    const commits = Array.from({ length: count }, (_, i) => {
+      const n = count - 1 - i;
+      return { ...commit(`c${n}`, n === 0 ? [] : [`c${n - 1}`]), branchRefs: i === 0 ? ["main"] : [] };
+    });
+    const { result, rerender } = renderHook(({ list }) => useCommitGraphLayout(list, {}), {
+      initialProps: { list: commits.slice(0, 300) },
+    });
+    const first = result.current;
+    expect(first.indexById.get(commits[299].id)).toBe(299);
+
+    rerender({ list: commits.slice(0, 600) });
+    expect(result.current.rowsLaidOut).toBe(300);
+    expect(result.current.layouts).toHaveLength(600);
+    expect(result.current.indexById.get(commits[599].id)).toBe(599);
+    expect(result.current.branchColors).toBe(first.branchColors);
+  });
 });

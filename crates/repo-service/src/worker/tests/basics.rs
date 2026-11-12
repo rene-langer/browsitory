@@ -27,6 +27,67 @@ fn the_change_stamp_follows_an_edit_made_outside_the_app() {
     assert_ne!(handle.get_change_stamp().unwrap(), clean);
 }
 
+/// #841: one read answers both, from one scan.
+#[test]
+fn the_combined_read_answers_the_status_and_the_stamp() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "hello");
+    commit_all(&repo, "initial commit");
+    write_file(dir.path(), "file.txt", "hello, world");
+    write_file(dir.path(), "new.txt", "new");
+
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let read = handle.get_status_with_stamp().unwrap();
+
+    assert_eq!(read.status, handle.get_status().unwrap());
+    assert_eq!(read.stamp, handle.get_change_stamp().unwrap());
+}
+
+/// #841: a status read writes the refreshed stat data of a touched file back to the index.
+#[test]
+fn a_status_read_refreshes_the_index_stat_data() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "hello");
+    commit_all(&repo, "initial commit");
+    let when = std::time::SystemTime::now() - std::time::Duration::from_secs(24 * 60 * 60);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(dir.path().join("file.txt"))
+        .unwrap()
+        .set_modified(when)
+        .unwrap();
+    let seconds = when
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i32;
+
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    assert!(worker.handle().get_status().unwrap().is_empty());
+
+    let index = git2::Index::open(&repo.path().join("index")).unwrap();
+    let entry = index.get_path(std::path::Path::new("file.txt"), 0).unwrap();
+    assert_eq!(entry.mtime.seconds(), seconds);
+}
+
+/// #845: the files of an untracked folder listed as one entry, on request.
+#[test]
+fn lists_the_files_of_an_untracked_folder() {
+    let (dir, _repo) = init_repo();
+    std::fs::create_dir_all(dir.path().join("big/deep")).unwrap();
+    write_file(dir.path(), "big/a.txt", "a");
+    write_file(dir.path(), "big/deep/b.txt", "b");
+
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let files = worker
+        .handle()
+        .list_untracked_folder("big/".to_string())
+        .unwrap();
+
+    let paths: Vec<&str> = files.iter().map(|entry| entry.path.as_str()).collect();
+    assert_eq!(paths, vec!["big/a.txt", "big/deep/b.txt"]);
+}
+
 #[test]
 fn spawn_fails_on_a_non_repository_path() {
     let dir = TempDir::new().unwrap();

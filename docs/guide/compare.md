@@ -12,6 +12,9 @@ commit, a stash, a search result), including the one already selected.
   remote-tracking branch, and choose **Compare with current branch** (**Compare with HEAD**
   when no branch is checked out). It shows what the branch changed since its merge base with
   HEAD (`git diff HEAD...branch`), so commits only on your branch do not appear.
+- **A tag since it diverged:** the same **Compare with current branch** is in a tag's menu (its
+  badge in the graph, or its row in the Tags section). An annotated tag compares the commit it
+  points at.
 - **A commit against the working tree:** right-click a commit and choose **Diff against working
   tree**. Staged, unstaged and untracked changes are all included, and the view follows edits on
   disk.

@@ -93,6 +93,10 @@ pub struct StatusEntryDto {
     pub old_path: Option<String>,
     pub staged: bool,
     pub kind: git_core::status::StatusKind,
+    /// Only on an untracked folder listed as one entry (#845): `true`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(any(test, feature = "ts"), ts(optional))]
+    pub untracked_folder: Option<bool>,
 }
 
 impl From<git_core::status::StatusEntry> for StatusEntryDto {
@@ -102,6 +106,7 @@ impl From<git_core::status::StatusEntry> for StatusEntryDto {
             old_path: entry.old_path,
             staged: entry.staged,
             kind: entry.kind,
+            untracked_folder: entry.untracked_folder.then_some(true),
         }
     }
 }
@@ -1400,6 +1405,26 @@ impl From<git_core::pick::PickOutcome> for PickOutcomeDto {
 pub struct ChangeStampDto {
     pub refs: String,
     pub work_tree: String,
+}
+
+/// A refresh's status and change stamp from one scan (#841); see
+/// `git_core::change_stamp::status_with_stamp`.
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "StatusWithStamp"))]
+#[serde(rename_all = "camelCase")]
+pub struct StatusWithStampDto {
+    pub status: Vec<StatusEntryDto>,
+    pub stamp: ChangeStampDto,
+}
+
+impl From<git_core::change_stamp::StatusWithStamp> for StatusWithStampDto {
+    fn from(read: git_core::change_stamp::StatusWithStamp) -> Self {
+        Self {
+            status: read.status.into_iter().map(StatusEntryDto::from).collect(),
+            stamp: read.stamp.into(),
+        }
+    }
 }
 
 impl From<git_core::change_stamp::ChangeStamp> for ChangeStampDto {
@@ -3264,6 +3289,7 @@ mod ts_bindings {
             PickOutcomeDto,
             UndoStateDto,
             ChangeStampDto,
+            StatusWithStampDto,
             SignatureStatusDto,
             SignatureFormatDto,
             CommitSignatureDto,

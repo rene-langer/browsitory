@@ -35,6 +35,8 @@ export function TagPanel({
   onPushTag,
   onBranchFromCommit,
   onCheckoutCommit,
+  onCompareTag,
+  currentBranch = null,
   onGoToTag,
   pushDisabled,
   operationDisabledReason,
@@ -52,6 +54,10 @@ export function TagPanel({
   onPushTag: (remoteName: string, name: string) => void;
   onBranchFromCommit: (commitId: string) => void;
   onCheckoutCommit: (commitId: string) => void;
+  /** A row menu's "Compare with current branch" (#119): `refs/tags/<name>` and the name. */
+  onCompareTag?: (refName: string, label: string) => void;
+  /** The checked-out branch, `null` on a detached HEAD (the compare item's label). */
+  currentBranch?: string | null;
   /** Selects and scrolls to the tag's commit in the graph (#441). */
   onGoToTag: (tag: TagInfo) => void;
   pushDisabled: boolean;
@@ -273,6 +279,8 @@ export function TagPanel({
             onPushTag,
             onBranchFromCommit,
             onCheckoutCommit,
+            onCompareTag,
+            currentBranch,
             onDeleteFromRemote,
             onCopy: copyToClipboard,
             onDelete: setDeleteConfirmation,

@@ -259,6 +259,7 @@ pub fn status_entries() -> Cases<git_core::status::StatusEntry> {
                     old_path: None,
                     staged: false,
                     kind,
+                    untracked_folder: false,
                 },
             )
         })
@@ -270,6 +271,17 @@ pub fn status_entries() -> Cases<git_core::status::StatusEntry> {
             old_path: some("src/old.rs"),
             staged: true,
             kind: StatusKind::Renamed,
+            untracked_folder: false,
+        },
+    ));
+    cases.push(case(
+        "untracked-folder",
+        git_core::status::StatusEntry {
+            path: "node_modules/".to_string(),
+            old_path: None,
+            staged: false,
+            kind: StatusKind::New,
+            untracked_folder: true,
         },
     ));
     cases
@@ -1591,6 +1603,25 @@ pub fn change_stamps() -> Cases<git_core::change_stamp::ChangeStamp> {
         git_core::change_stamp::ChangeStamp {
             refs: "0123456789abcdef".to_string(),
             work_tree: "fedcba9876543210".to_string(),
+        },
+    )]
+}
+
+pub fn statuses_with_stamps() -> Cases<git_core::change_stamp::StatusWithStamp> {
+    vec![case(
+        "one-entry",
+        git_core::change_stamp::StatusWithStamp {
+            status: vec![git_core::status::StatusEntry {
+                path: "src/lib.rs".to_string(),
+                old_path: None,
+                staged: false,
+                kind: git_core::status::StatusKind::Modified,
+                untracked_folder: false,
+            }],
+            stamp: git_core::change_stamp::ChangeStamp {
+                refs: "0123456789abcdef".to_string(),
+                work_tree: "fedcba9876543210".to_string(),
+            },
         },
     )]
 }

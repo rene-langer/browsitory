@@ -7,6 +7,7 @@ StatusEntry/Renamed {"path":"src/lib.rs","oldPath":null,"staged":false,"kind":"R
 StatusEntry/TypeChange {"path":"src/lib.rs","oldPath":null,"staged":false,"kind":"TypeChange"}
 StatusEntry/Conflicted {"path":"src/lib.rs","oldPath":null,"staged":false,"kind":"Conflicted"}
 StatusEntry/staged-rename {"path":"src/new.rs","oldPath":"src/old.rs","staged":true,"kind":"Renamed"}
+StatusEntry/untracked-folder {"path":"node_modules/","oldPath":null,"staged":false,"kind":"New","untrackedFolder":true}
 GraphCommit/plain {"id":"0123456789abcdef0123456789abcdef01234567","shortId":"0123456","summary":"Add the graph","authorName":"Ada Lovelace","authorEmail":"ada@example.com","timestamp":1700000000,"parentIds":["89abcdef0123456789abcdef0123456789abcdef"],"branchRefs":["main"],"remoteBranchRefs":["origin/main"],"tags":["v1.0.0"]}
 GraphCommit/escapes {"id":"0123456789abcdef0123456789abcdef01234567","shortId":"0123456","summary":"Say \"hi\" \\ tab\there, café 😀\u0001","authorName":"Ada Lovelace","authorEmail":"ada@example.com","timestamp":1700000000,"parentIds":["89abcdef0123456789abcdef0123456789abcdef"],"branchRefs":["main"],"remoteBranchRefs":["origin/main"],"tags":["v1.0.0"]}
 GraphCommit/root-commit {"id":"0123456789abcdef0123456789abcdef01234567","shortId":"0123456","summary":"Initial commit","authorName":"Ada Lovelace","authorEmail":"ada@example.com","timestamp":-1,"parentIds":[],"branchRefs":[],"remoteBranchRefs":[],"tags":[]}
@@ -220,6 +221,7 @@ PickOutcome/HookFailed {"kind":"HookFailed","hook":"prepare-commit-msg","output"
 UndoState/both {"undo":"Commit","redo":"Discard"}
 UndoState/none {"undo":null,"redo":null}
 ChangeStamp/parts {"refs":"0123456789abcdef","workTree":"fedcba9876543210"}
+StatusWithStamp/one-entry {"status":[{"path":"src/lib.rs","oldPath":null,"staged":false,"kind":"Modified"}],"stamp":{"refs":"0123456789abcdef","workTree":"fedcba9876543210"}}
 CommitSignature/status-Unsigned {"status":"unsigned","format":null,"signer":null,"key":null,"detail":null}
 CommitSignature/status-Good {"status":"good","format":null,"signer":null,"key":null,"detail":null}
 CommitSignature/status-GoodUntrusted {"status":"goodUntrusted","format":null,"signer":null,"key":null,"detail":null}
