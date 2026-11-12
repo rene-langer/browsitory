@@ -95,6 +95,11 @@ pub enum StashError {
     /// index (a case-only rename). The stash couldn't revert it.
     #[error("Can't stash '{path}': it differs from '{other}' only in case. Commit the rename first, or undo it.")]
     CaseOnlyRename { path: String, other: String },
+    /// Where names fold (macOS): like `CaseOnlyRename`, but `path` and `other` differ only in
+    /// Unicode normalization, an accented letter composed (`é`, U+00E9) in one and decomposed
+    /// (`e` + U+0301) in the other, so they look identical (#404).
+    #[error("Can't stash '{path}': it differs from '{other}' only in how its accented letters are encoded, which this drive takes for one name. Commit the rename first, or undo it.")]
+    NormalizationOnlyRename { path: String, other: String },
     /// Where names fold: HEAD or the index holds both `path` and `other`, which libgit2's
     /// ignore-case index takes for one entry (`A` and `a`, committed on a case-sensitive drive).
     /// The forced checkout after libgit2's stash dropped one of them from the index, and
@@ -1139,13 +1144,15 @@ fn refuse_case_only_rename(
                 other,
             }
         } else {
-            StashError::CaseOnlyRename {
-                path: path.clone(),
-                other,
-            }
+            rename_refusal(path.clone(), other)
         });
     }
     Ok(())
+}
+
+/// The refusal for a stashed `path` renamed from `other`, two names the drive takes for one.
+fn rename_refusal(path: String, other: String) -> StashError {
+    StashError::CaseOnlyRename { path, other }
 }
 
 /// Stash all's form of `refuse_case_only_rename` (#370): where names fold, refuses when the
@@ -1196,10 +1203,10 @@ fn refuse_staged_case_only_rename(
             .iter()
             .find(|other| !in_index.contains(other.as_slice()))
         {
-            return Err(StashError::CaseOnlyRename {
-                path: String::from_utf8_lossy(path).into_owned(),
-                other: String::from_utf8_lossy(other).into_owned(),
-            });
+            return Err(rename_refusal(
+                String::from_utf8_lossy(path).into_owned(),
+                String::from_utf8_lossy(other).into_owned(),
+            ));
         }
     }
     // No rename, but HEAD or the index holds two paths libgit2's index takes for one (#392).
@@ -2383,6 +2390,54 @@ mod tests {
         );
         // Not UTF-8: ASCII letters only.
         assert_eq!(ntfs_fold(b"ab\xff"), b"AB\xff");
+    }
+
+    #[test]
+    fn a_rename_that_only_changes_unicode_normalization_is_not_called_case_only() {
+        // #404: `Café` composed (U+00E9) and decomposed (`e` + U+0301) look identical, so "only
+        // in case" confused. Both directions, and inside a folder.
+        for (path, other) in [
+            ("Cafe\u{301}", "Caf\u{e9}"),
+            ("Caf\u{e9}", "Cafe\u{301}"),
+            ("Cafe\u{301}/f", "Caf\u{e9}/f"),
+        ] {
+            let error = rename_refusal(path.into(), other.into());
+            assert!(
+                matches!(
+                    &error,
+                    StashError::NormalizationOnlyRename { path: p, other: o } if p == path && o == other
+                ),
+                "{path:?}: {error:?}"
+            );
+            assert_eq!(
+                error.to_string(),
+                format!(
+                    "Can't stash '{path}': it differs from '{other}' only in how its accented letters are encoded, which this drive takes for one name. Commit the rename first, or undo it."
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn a_rename_that_changes_case_stays_case_only() {
+        // #404: a case change, also one combined with a normalization change, `ß` → `ss`, and
+        // a name that wasn't UTF-8 (read lossily, `U+FFFD`) keep the case-only message.
+        for (path, other) in [
+            ("readme.MD", "README.md"),
+            ("CAF\u{c9}", "Caf\u{e9}"),
+            ("CAFE\u{301}", "Caf\u{e9}"),
+            ("Strasse", "Stra\u{df}e"),
+            ("\u{fffd}a", "\u{fffd}A"),
+        ] {
+            let error = rename_refusal(path.into(), other.into());
+            assert!(
+                matches!(
+                    &error,
+                    StashError::CaseOnlyRename { path: p, other: o } if p == path && o == other
+                ),
+                "{path:?}: {error:?}"
+            );
+        }
     }
 
     #[test]
