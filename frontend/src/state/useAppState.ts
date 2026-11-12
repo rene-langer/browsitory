@@ -386,38 +386,34 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
   // What the history reads on screen were read for (#685): the stamp's `refs` part, the graph
   // selection, "Collapse merges" and the limit. A refresh with the same key keeps them, so
   // staging, unstaging or editing a file reads no graph, branches, tags or upstreams; `null`
-  // after a failed refresh or without a stamp.
+  // after a failed refresh.
   const historyKey = useRef<{ base: string; limit: number } | null>(null);
   // What the next page of history continues (#685): the selection the rows were read with and
   // the last page's cursor (`null`: no more history).
   const graphPaging = useRef<{ selection: GraphSelection; cursor: string | null } | null>(null);
   const readAll = useCallback(async (full: boolean) => {
-    let ticket = 0;
     const tracking = changeStamp.current;
     tracking.running += 1;
-    // Read before the reads below are sent: a change landing while they run then differs from
-    // this stamp, and the next check shows it. Optional: a failed read only means the next
-    // check refreshes once more.
-    const stampRead = Promise.resolve()
-      .then(() => client.getChangeStamp(repoPath))
-      .catch(() => null);
+    // Taken before any read is sent, the status among them.
+    const ticket = takeReadTicket();
     let stamp: ChangeStamp | null = null;
     try {
-      const [local, remote, collapseMerges, readStamp] = await Promise.all([
+      // The status and the stamp come from one scan of the work tree (#841), read before the
+      // reads below are sent: a change landing while they run then differs from this stamp, and
+      // the next check shows it.
+      const [local, remote, collapseMerges, { status, stamp: readStamp }] = await Promise.all([
         client.getGraphBranchSelection(repoPath),
         client.getGraphRemoteBranchSelection(repoPath),
         client.getGraphCollapseMerges(repoPath),
-        stampRead,
+        client.getStatusWithStamp(repoPath),
       ]);
       stamp = readStamp;
       const limit = graphLimit.current;
-      const base = readStamp === null ? null : JSON.stringify([readStamp.refs, local, remote, collapseMerges]);
+      const base = JSON.stringify([readStamp.refs, local, remote, collapseMerges]);
       const known = historyKey.current;
       const keepHistory = !full && base !== null && known !== null && known.base === base && known.limit === limit;
       const graphSelection = toGraphSelection({ local, remote }, collapseMerges);
-      ticket = takeReadTicket();
       const repositoryReads = Promise.all([
-        client.getStatus(repoPath),
         client.listWorktrees(repoPath),
         client.listSubmodules(repoPath),
         client.listReflogRefs(repoPath),
@@ -436,7 +432,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
             client.listBranches(repoPath),
             client.listTags(repoPath),
             client.getCurrentUpstream(repoPath),
-            repositoryReads.then(async ([, , , , remotes]) =>
+            repositoryReads.then(async ([, , , remotes]) =>
               Object.fromEntries(
                 await Promise.all(
                   remotes.map(async (remote) => [remote.name, await client.getRemoteUpstreams(repoPath, remote.name)]),
@@ -444,7 +440,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
               ) as Record<string, UpstreamInfo[]>,
             ),
           ]);
-      const [[status, worktrees, submodules, reflogRefs, remotes, stashes, mergeMessage, forgeRepositories, headInfo, undoState], historyRead] =
+      const [[worktrees, submodules, reflogRefs, remotes, stashes, mergeMessage, forgeRepositories, headInfo, undoState], historyRead] =
         await Promise.all([repositoryReads, historyReads]);
       let history: {
         graphRows: GraphCommit[];
@@ -491,7 +487,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       order.refreshApplied = ticket;
       tracking.stamp = stamp;
       if (history !== null) {
-        historyKey.current = base === null ? null : { base, limit };
+        historyKey.current = { base, limit };
         graphPaging.current = { selection: graphSelection, cursor: history.graphCursor };
       }
       const undoIsNewest = ticket > order.undoApplied;
@@ -558,7 +554,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       // Still advances `refreshGeneration`: a mutation that landed before this refresh failed has
       // changed the working tree all the same, so open diffs shouldn't keep trusting what they
       // last fetched.
-      if (ticket !== 0 && ticket < readOrder.current.refreshApplied) {
+      if (ticket < readOrder.current.refreshApplied) {
         // Superseded as above: a later refresh already succeeded.
         setState((prev) => ({ ...prev, refreshGeneration: prev.refreshGeneration + 1, loaded: true }));
         return;
@@ -568,7 +564,9 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       historyKey.current = null;
       graphPaging.current = null;
       // Kept even though the reads failed: the next check must not retry (and show the same
-      // error) every few seconds. The next change, or Refresh, reloads.
+      // error) every few seconds. The next change, or Refresh, reloads. When the combined read
+      // itself failed, the stamp alone; optional, a failed read only means one more refresh.
+      if (stamp === null) stamp = await client.getChangeStamp(repoPath).catch(() => null);
       tracking.stamp = stamp;
       setState((prev) => ({
         ...prev,

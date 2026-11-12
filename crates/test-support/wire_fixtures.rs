@@ -1597,7 +1597,7 @@ pub fn change_stamps() -> Cases<git_core::change_stamp::ChangeStamp> {
 
 pub fn statuses_with_stamps() -> Cases<git_core::change_stamp::StatusWithStamp> {
     vec![case(
-        "status and stamp",
+        "one-entry",
         git_core::change_stamp::StatusWithStamp {
             status: vec![git_core::status::StatusEntry {
                 path: "src/lib.rs".to_string(),

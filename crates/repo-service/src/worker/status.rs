@@ -11,14 +11,16 @@ pub(super) fn get_status(
     repo: &git2::Repository,
     reply: Sender<Result<Vec<StatusEntry>, ErrorDto>>,
 ) {
-    let _ = reply.send(git_core::status::status(repo).map_err(ErrorDto::from_error));
+    let _ =
+        reply.send(git_core::status::status_refreshing_index(repo).map_err(ErrorDto::from_error));
 }
 
 pub(super) fn get_status_with_stamp(
-    _repo: &git2::Repository,
-    _reply: Sender<Result<git_core::change_stamp::StatusWithStamp, ErrorDto>>,
+    repo: &git2::Repository,
+    reply: Sender<Result<git_core::change_stamp::StatusWithStamp, ErrorDto>>,
 ) {
-    todo!()
+    let _ =
+        reply.send(git_core::change_stamp::status_with_stamp(repo).map_err(ErrorDto::from_error));
 }
 
 pub(super) fn get_change_stamp(

@@ -177,6 +177,7 @@ PickOutcome/HookFailed {"hook":"prepare-commit-msg","kind":"HookFailed","output"
 UndoState/both {"redo":"Discard","undo":"Commit"}
 UndoState/none {"redo":null,"undo":null}
 ChangeStamp/parts {"refs":"0123456789abcdef","workTree":"fedcba9876543210"}
+StatusWithStamp/one-entry {"stamp":{"refs":"0123456789abcdef","workTree":"fedcba9876543210"},"status":[{"kind":"Modified","oldPath":null,"path":"src/lib.rs","staged":false}]}
 CommitSignature/status-Unsigned {"detail":null,"format":null,"key":null,"signer":null,"status":"unsigned"}
 CommitSignature/status-Good {"detail":null,"format":null,"key":null,"signer":null,"status":"good"}
 CommitSignature/status-GoodUntrusted {"detail":null,"format":null,"key":null,"signer":null,"status":"goodUntrusted"}
