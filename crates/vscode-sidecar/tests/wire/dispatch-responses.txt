@@ -282,6 +282,9 @@ init_submodule/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"
 list_branches/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct RepoPathParams","data":{"kind":"Other","message":"invalid type: null, expected struct RepoPathParams"}}}
 list_branches/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 list_branches/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct RepoPathParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct RepoPathParams"}}}
+list_font_families/absent <a result that depends on the machine>
+list_font_families/empty <a result that depends on the machine>
+list_font_families/string <a result that depends on the machine>
 list_missing_recent_repos/absent {"jsonrpc":"2.0","id":7,"result":[]}
 list_missing_recent_repos/empty {"jsonrpc":"2.0","id":7,"result":[]}
 list_missing_recent_repos/string {"jsonrpc":"2.0","id":7,"result":[]}
