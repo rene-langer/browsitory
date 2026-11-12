@@ -3089,6 +3089,16 @@ describe("App external tools", () => {
     expect(await screen.findByText("Couldn't check for updates: offline")).toBeInTheDocument();
   });
 
+  it("the Help menu's Check for updates runs the updater's check and reports it (#852)", async () => {
+    const check = vi.fn<UpdateCheck>().mockResolvedValueOnce({ kind: "ready", version: "9.9.9" });
+    render(<App client={toolsClient()} updateBanner={<FakeUpdater check={check} />} />);
+    await screen.findByRole("tab", { name: "a" });
+    fireEvent.click(screen.getByRole("button", { name: "Help" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Check for updates" }));
+    expect(check).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("Update v9.9.9 is ready: restart to update")).toBeInTheDocument();
+  });
+
   it("the untracked-file note opens Preferences on the Diff group (#784)", async () => {
     localStorage.removeItem("preferences-group");
     render(
@@ -3137,6 +3147,10 @@ describe("App external tools", () => {
     const input = await openPalette(container);
     fireEvent.change(input, { target: { value: "Check for updates" } });
     await waitFor(() => expect(screen.queryByRole("option", { name: "Check for updates" })).toBeNull());
+    fireEvent.keyDown(input, { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: "Help" }));
+    expect(screen.getByRole("menuitem", { name: "What’s new" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Check for updates" })).toBeNull();
   });
 
   it("the palette and the release notes open the third-party licences", async () => {
