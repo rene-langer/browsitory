@@ -1,3 +1,4 @@
+pub mod ahead_behind;
 pub mod blame;
 pub mod branch;
 pub mod change_stamp;
