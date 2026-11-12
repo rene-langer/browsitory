@@ -401,3 +401,138 @@ fn rename_diff_matches_glob_characters_literally() {
     assert!(!all.contains(&"noise"));
     assert!(all.contains(&"CHANGED"));
 }
+
+// #838: the walk compares a nested path's entries folder by folder. These pin the results on
+// nested paths, where an unchanged folder, a changed sibling or a renamed folder decides it.
+
+#[test]
+fn a_nested_file_skips_commits_that_change_only_its_siblings_and_other_folders() {
+    let (_dir, repo) = init_repo();
+    let files = |f: &str, sibling: &str, upper: &str, other: &str| {
+        vec![
+            ("src/lib/f.txt", f.to_string()),
+            ("src/lib/g.txt", sibling.to_string()),
+            ("src/h.txt", upper.to_string()),
+            ("other/x.txt", other.to_string()),
+        ]
+    };
+    let mut tip = None;
+    for (message, contents) in [
+        ("add", files("1", "1", "1", "1")),
+        ("sibling", files("1", "2", "1", "1")),
+        ("upper", files("1", "2", "2", "1")),
+        ("other", files("1", "2", "2", "2")),
+        ("edit", files("2", "2", "2", "2")),
+        ("all but f", files("2", "3", "3", "3")),
+    ] {
+        let entries: Vec<(&str, &str, u32)> = contents
+            .iter()
+            .map(|(p, c)| (*p, c.as_str(), REGULAR))
+            .collect();
+        let parents: Vec<Oid> = tip.into_iter().collect();
+        tip = Some(commit_tree(&repo, &entries, &parents, message));
+    }
+    set_head(&repo, tip.unwrap());
+
+    let history = file_history(&repo, "src/lib/f.txt", 100).unwrap();
+
+    assert_eq!(summaries(&history), vec!["edit", "add"]);
+    assert!(history.iter().all(|e| e.path == "src/lib/f.txt"));
+}
+
+#[test]
+fn follows_a_file_whose_folder_was_renamed() {
+    let (_dir, repo) = init_repo();
+    let c1 = commit_tree(&repo, &[("old/f.txt", FIVE_LINES, REGULAR)], &[], "add");
+    let c2 = commit_tree(
+        &repo,
+        &[("old/f.txt", FIVE_LINES_EDITED, REGULAR)],
+        &[c1],
+        "edit",
+    );
+    let c3 = commit_tree(
+        &repo,
+        &[("new/f.txt", FIVE_LINES_EDITED, REGULAR)],
+        &[c2],
+        "move folder",
+    );
+    set_head(&repo, c3);
+
+    let history = file_history(&repo, "new/f.txt", 100).unwrap();
+
+    assert_eq!(summaries(&history), vec!["move folder", "edit", "add"]);
+    assert_eq!(history[0].old_path.as_deref(), Some("old/f.txt"));
+    assert_eq!(history[1].path, "old/f.txt");
+    assert_eq!(history[2].path, "old/f.txt");
+}
+
+#[test]
+fn lists_a_mode_only_change_of_a_nested_file() {
+    let (_dir, repo) = init_repo();
+    let c1 = commit_tree(&repo, &[("bin/run.sh", "echo hi\n", REGULAR)], &[], "add");
+    let c2 = commit_tree(
+        &repo,
+        &[("bin/run.sh", "echo hi\n", EXECUTABLE)],
+        &[c1],
+        "chmod",
+    );
+    set_head(&repo, c2);
+
+    assert_eq!(
+        summaries(&file_history(&repo, "bin/run.sh", 100).unwrap()),
+        vec!["chmod", "add"]
+    );
+}
+
+#[test]
+fn a_nested_file_whose_folder_was_a_file_in_the_parent_starts_there() {
+    let (_dir, repo) = init_repo();
+    let c1 = commit_tree(
+        &repo,
+        &[("a", "a file\n", REGULAR), ("k.txt", "k", REGULAR)],
+        &[],
+        "a is a file",
+    );
+    let c2 = commit_tree(
+        &repo,
+        &[("a/f.txt", FIVE_LINES, REGULAR), ("k.txt", "k", REGULAR)],
+        &[c1],
+        "a is a folder",
+    );
+    set_head(&repo, c2);
+
+    assert_eq!(
+        summaries(&file_history(&repo, "a/f.txt", 100).unwrap()),
+        vec!["a is a folder"]
+    );
+}
+
+#[test]
+fn a_nested_file_followed_on_both_sides_of_a_merge_is_listed_once_per_change() {
+    let (_dir, repo) = init_repo();
+    let base = commit_tree(&repo, &[("d/f.txt", "1", REGULAR)], &[], "base");
+    let main = commit_tree(
+        &repo,
+        &[("d/f.txt", "1", REGULAR), ("d/m.txt", "m", REGULAR)],
+        &[base],
+        "sibling on main",
+    );
+    let side = commit_tree(&repo, &[("d/f.txt", "2", REGULAR)], &[base], "edit on side");
+    let merge = commit_tree(
+        &repo,
+        &[("d/f.txt", "3", REGULAR), ("d/m.txt", "m", REGULAR)],
+        &[main, side],
+        "merge with a resolution",
+    );
+    set_head(&repo, merge);
+
+    let history = file_history(&repo, "d/f.txt", 100).unwrap();
+
+    let mut listed = summaries(&history);
+    listed.sort_unstable();
+    assert_eq!(
+        listed,
+        vec!["base", "edit on side", "merge with a resolution"]
+    );
+    assert_eq!(history[0].commit.summary, "merge with a resolution");
+}
