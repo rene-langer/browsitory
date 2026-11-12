@@ -42,7 +42,7 @@ describe("renderWebviewHtml", () => {
     expect(html).not.toMatch(/img-src[^;]*(?:https:|http:|\*|blob:)/);
     expect(html).not.toMatch(/connect-src[^;]*(?:https:|http:|\*|blob:|ws:)/);
     expect(html).not.toMatch(/(?:script-src|style-src) [^;]*'unsafe-inline'/);
-    expect(html).toMatch(/script-src 'nonce-[a-f0-9]{32}';/);
+    expect(html).toMatch(/script-src 'nonce-[a-f0-9]{32}' 'wasm-unsafe-eval';/);
     expect(html).not.toContain("'unsafe-eval'");
     expect(html).not.toMatch(/<script[^>]*>\s*[^<\s]/);
   });
