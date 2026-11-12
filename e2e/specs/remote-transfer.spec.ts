@@ -1,9 +1,10 @@
 import fs from "node:fs";
 import { createServer } from "node:https";
+import { createServer as createTcpServer, type Socket } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
-import { clickInPage } from "../support/dom";
+import { clickInPage, waitUntilGoneInPage, waitUntilInPage } from "../support/dom";
 import { ADD_REMOTE_NAME_INPUT, expandSidebarSection, sidebarRemoteFolder } from "../support/sidebar";
 import { git, gitWith } from "../support/git";
 
@@ -42,6 +43,34 @@ async function startCredentialChallengeServer(): Promise<{
     close: () => new Promise((resolve, reject) => server.close((error) => {
       error === undefined ? resolve() : reject(error);
     })),
+  };
+}
+
+// A remote that accepts the connection and never answers (#734): a fetch from it keeps
+// connecting until `close` drops the sockets. Cancel alone can't end it: the cancel flag is
+// polled inside libgit2's progress callbacks, and none run while it waits for a reply.
+async function startSilentServer(): Promise<{ url: string; close: () => Promise<void> }> {
+  const sockets = new Set<Socket>();
+  const server = createTcpServer((socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+    socket.on("error", () => {});
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (address === null || typeof address === "string") throw new Error("silent server has no TCP address");
+
+  return {
+    url: `http://127.0.0.1:${address.port}/silent.git`,
+    close: () => new Promise((resolve, reject) => {
+      for (const socket of sockets) socket.destroy();
+      server.close((error) => {
+        error === undefined ? resolve() : reject(error);
+      });
+    }),
   };
 }
 
@@ -390,5 +419,41 @@ describe("Browsitory remote transfer", () => {
     expect(
       git(E2E_REPO_PATH, "config", "--get-regexp", "^browsitory\\.remote\\.transfer-origin\\."),
     ).toBe("browsitory.remote.transfer-origin.auth-mode ssh-agent");
+  });
+  it("opens a commit while a fetch is still connecting", async () => {
+    // #734: reads (a commit's files here) used to wait until the fetch ended.
+    const silent = await startSilentServer();
+    const running = 'div[role="group"][aria-label="Fetching from silent"]';
+    try {
+      fs.writeFileSync(path.join(E2E_REPO_PATH, "read-during-fetch.txt"), "read during fetch\n");
+      git(E2E_REPO_PATH, "add", "read-during-fetch.txt");
+      git(E2E_REPO_PATH, "commit", "-m", "e2e: commit opened during a fetch");
+      const commitId = git(E2E_REPO_PATH, "rev-parse", "HEAD");
+      git(E2E_REPO_PATH, "remote", "add", "silent", silent.url);
+      // The app reads remotes and the graph when the page loads.
+      await browser.refresh();
+      await expandSidebarSection("Branches");
+      const row = `li.commit-row[data-commit-id="${commitId}"]`;
+      await waitUntilInPage(row);
+
+      await clickRemoteContextItem("silent", "Fetch");
+      await waitUntilInPage(running);
+
+      await clickInPage(row);
+      await waitUntilInPage("li", "read-during-fetch.txt", { contains: true });
+      // Still running: the files came while the fetch waited for the remote.
+      await waitUntilInPage(running);
+
+      await clickInPage(`${running} button`, "Cancel");
+    } finally {
+      await silent.close();
+      // The later spec files share this repository.
+      try {
+        gitWith(E2E_REPO_PATH, ["remote", "remove", "silent"], { stdio: "ignore" });
+      } catch {
+        // Never added: the test failed before `git remote add`.
+      }
+    }
+    await waitUntilGoneInPage(running);
   });
 });
