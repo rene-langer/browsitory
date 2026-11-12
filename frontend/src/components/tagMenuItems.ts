@@ -59,7 +59,7 @@ export function tagMenuItems({
   }
   if (commitId !== null && onCheckoutCommit !== undefined) {
     items.push({
-      label: "Checkout (detached)",
+      label: "Switch to (detached)",
       onSelect: () => onCheckoutCommit(commitId),
       disabled,
       title: busyTitle,

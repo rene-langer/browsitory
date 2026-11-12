@@ -106,7 +106,7 @@ export function NewBranchForm({
             writeCheckoutNewBranch(event.target.checked);
           }}
         />
-        Check out after creating
+        Switch to it after creating
       </label>
       <BlockedReason id={reasonId} reason={busyReason} />
       <div className={styles.draftActions}>

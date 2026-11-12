@@ -8,7 +8,7 @@ Right-click a commit in the graph:
   keeps unrelated unstaged edits.
 - **Revert** commits the inverse of that commit, with the same conflict flow (**Reverting**,
   **Abort revert**).
-- **Checkout (detached)** checks the commit out without a branch. The toolbar shows **HEAD
+- **Switch to (detached)** checks the commit out without a branch. The toolbar shows **HEAD
   detached at …** and push and pull are disabled until you check out a branch. The commit's row
   in the graph has a **HEAD** badge.
 - **Reset ⟨branch⟩ to here…** moves your branch to that commit. **Soft** keeps your changes

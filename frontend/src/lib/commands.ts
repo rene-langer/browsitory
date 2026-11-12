@@ -852,14 +852,14 @@ function branchCommands(ctx: FamilyContext): Command[] {
       );
     }
   }
-  // The keyboard path for the tag badge menu's "Checkout (detached)".
+  // The keyboard path for the tag badge menu's "Switch to (detached)".
   if (!blocked) {
     for (const tag of state.tags) {
       const commitId = tag.commitId;
       if (commitId === null) continue; // a tag of a tree or blob has nothing to check out
       add({
         id: `checkout-tag:${tag.name}`,
-        label: `Check out tag ${tag.name} (detached)`,
+        label: `Switch to tag ${tag.name} (detached)`,
         keywords: ["tag", "checkout", "detached", tag.name],
         run: () => void appState.checkoutCommit(commitId),
       });

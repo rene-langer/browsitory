@@ -84,7 +84,9 @@ Both are what `.github/workflows/docs.yml` runs.
 
 Zensical reads `mkdocs.yml` (`theme.variant: classic` keeps the Material look). The pages are
 `docs/guide/*.md`, plain Markdown with relative links (also read on GitHub); a new page needs a
-`nav` entry in `mkdocs.yml`. Screenshots in `docs/guide/assets/` come from
+`nav` entry in `mkdocs.yml`. Edge cases go in collapsible `??? note "Details"` boxes
+(`pymdownx.details`, #684), after the everyday steps; GitHub shows a box's indented body as a
+code block, so the site is the reference rendering. Screenshots in `docs/guide/assets/` come from
 `e2e/screenshots/capture.sh` (see `e2e/screenshots/README.md`); don't edit them by hand.
 
 ## Git hooks

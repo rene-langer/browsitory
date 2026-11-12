@@ -12,7 +12,7 @@ export interface BranchActionContext {
 }
 
 export interface BranchActions {
-  /** Switch to the branch: the menu's "Checkout", the palette's "Switch to <name>". */
+  /** Switch to the branch: the menu's "Switch to", the palette's "Switch to <name>". */
   checkout: PaletteAction;
   rename: MenuAction;
   /** Only for a branch other than the current one. */
@@ -40,7 +40,7 @@ export function branchActions(context: BranchActionContext, branch: BranchInfo):
   const { name, isCurrent } = branch;
   const upstream = isCurrent ? context.upstream : null;
   return {
-    checkout: { label: "Checkout", paletteLabel: `Switch to ${name}`, ...gate(blockers, isCurrent ? CURRENT_BRANCH : undefined) },
+    checkout: { label: "Switch to", paletteLabel: `Switch to ${name}`, ...gate(blockers, isCurrent ? CURRENT_BRANCH : undefined) },
     rename: { label: "Rename", ...gate(blockers) },
     merge: {
       label: "Merge into current branch…",
@@ -106,7 +106,7 @@ export function remoteBranchActions(
   branchName: string,
 ): RemoteBranchActions {
   return {
-    checkout: { label: "Checkout", ...gate(blockers) },
+    checkout: { label: "Switch to", ...gate(blockers) },
     setAsUpstream: { label: "Set as upstream for current branch", ...gate(blockers) },
     delete: { label: `Delete ${remoteName}/${branchName}…`, ...gate(blockers) },
   };
