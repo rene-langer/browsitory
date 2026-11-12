@@ -38,6 +38,24 @@ export function blockResult(block: ConflictBlock, state: BlockState): string | n
   }
 }
 
+/** Whether `side`'s lines are in the block's result, alone or with the other side's. */
+export function sideTaken(state: BlockState, side: "ours" | "theirs"): boolean {
+  if (state.kind !== "chosen") return false;
+  return state.choice === side || state.choice === "oursThenTheirs" || state.choice === "theirsThenOurs";
+}
+
+/**
+ * Takes `side` into the block's result (#876, the panes' arrows): after the other side when that
+ * one alone is taken, as is when `side` already is; over the base or a typed result it replaces
+ * them, as the Accept buttons do.
+ */
+export function takeSide(state: BlockState, side: "ours" | "theirs"): BlockState {
+  if (sideTaken(state, side)) return state;
+  if (state.kind === "chosen" && state.choice === "ours") return { kind: "chosen", choice: "oursThenTheirs" };
+  if (state.kind === "chosen" && state.choice === "theirs") return { kind: "chosen", choice: "theirsThenOurs" };
+  return { kind: "chosen", choice: side };
+}
+
 function withFinalNewline(text: string): string {
   return text === "" || text.endsWith("\n") ? text : `${text}\n`;
 }

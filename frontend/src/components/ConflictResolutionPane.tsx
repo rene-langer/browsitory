@@ -5,6 +5,7 @@ import {
   assembleResult,
   blockResult,
   hasConflictMarkers,
+  takeSide,
   type BlockChoice,
   type BlockState,
   type ConflictBlock,
@@ -617,6 +618,8 @@ export function ConflictResolutionPane({
               )
             }
             onEdit={(index, text) => setStateAt(index, { kind: "edited", text })}
+            onTake={(index, side) => setStateAt(index, takeSide(stateAt(index), side))}
+            blockTitle={blockTitle}
           />
         ) : (
           segments.map((segment, index) =>
