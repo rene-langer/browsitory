@@ -287,3 +287,29 @@ fn an_intent_to_add_entry_keeps_its_mark() {
     let entry = index.get_path(Path::new("later.txt"), 0).unwrap();
     assert_ne!(entry.flags_extended & (1 << 13), 0, "intent-to-add kept");
 }
+
+/// The scratch index gets the repository's case handling: in a case-sensitive repository two
+/// files that differ only in case stay two files.
+#[test]
+fn case_sensitive_repositories_keep_files_that_differ_only_in_case_apart() {
+    let (dir, repo) = init_repo();
+    repo.config()
+        .unwrap()
+        .set_bool("core.ignorecase", false)
+        .unwrap();
+    let repo = Repository::open(dir.path()).unwrap();
+    write_file(dir.path(), "Foo.txt", "upper\n");
+    write_file(dir.path(), "foo.txt", "lower\n");
+    commit_all(&repo, "first");
+    write_file(dir.path(), "foo.txt", "lower, edited\n");
+    write_file(dir.path(), "FOO.txt", "new\n");
+    let when = backdate(dir.path(), "Foo.txt");
+    let plain = status(&repo).unwrap();
+    let content = index_content(&repo);
+
+    let refreshed = status_refreshing_index(&repo).unwrap();
+
+    assert_eq!(refreshed, plain);
+    assert_eq!(index_content(&repo), content);
+    assert_eq!(indexed_mtime(&repo, "Foo.txt"), seconds(when));
+}
