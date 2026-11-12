@@ -6,6 +6,7 @@
   "scripts": {
     "test": "wdio run wdio.conf.ts",
     "screenshots": "wdio run wdio.screenshots.conf.ts",
+    "test:support": "node --import tsx --test support/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
