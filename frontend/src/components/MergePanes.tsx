@@ -9,17 +9,20 @@ import styles from "./MergePanes.module.css";
 /**
  * The three-pane merge editor (#875): the whole file as ours | result | theirs. Every row (an
  * unchanged run, or one conflict's sides and result) spans all the panes, so the panes stay
- * aligned whatever a block's lengths, and they scroll as one.
+ * aligned whatever a block's lengths, and they scroll as one. Show base adds the common
+ * ancestor as a fourth pane on the left (#877).
  */
 
-/** A pane's column; the base view (#877) is meant to join as a fourth. */
-export type MergePane = "ours" | "result" | "theirs";
+/** A pane's column. */
+export type MergePane = "base" | "ours" | "result" | "theirs";
 
 /** The panes, left to right. Every row lays out one cell per entry, so adding one is enough. */
 const MERGE_PANES: readonly MergePane[] = ["ours", "result", "theirs"];
+/** With Show base (#877): the base first, before the side each block starts from. */
+const MERGE_PANES_WITH_BASE: readonly MergePane[] = ["base", ...MERGE_PANES];
 
 /** Where each segment starts in each pane, 1-based, by segment index; one more entry for the end. */
-type Starts = Record<MergePane | "base", number>[];
+type Starts = Record<MergePane, number>[];
 
 function paneStarts(segments: readonly ConflictSegment[], results: readonly (string | null)[]): Starts {
   const next = { ours: 1, result: 1, theirs: 1, base: 1 };
@@ -93,7 +96,7 @@ export interface MergePanesProps {
   segments: readonly ConflictSegment[];
   stateAt(index: number): BlockState;
   /** Each pane's heading, e.g. "Ours (main)". */
-  labels: Record<MergePane, string>;
+  labels: Record<Exclude<MergePane, "base">, string>;
   tokens: ConflictTokens | null;
   showBase: boolean;
   /** Unchanged runs shown in full, by segment index. */
@@ -130,15 +133,22 @@ export function MergePanes({
   const starts = paneStarts(segments, results);
   const end = starts[segments.length];
   const digits = String(Math.max(end.ours, end.result, end.theirs, end.base)).length;
+  const panes = showBase ? MERGE_PANES_WITH_BASE : MERGE_PANES;
+  const headings: Record<MergePane, string> = { base: "Base", ...labels };
   const gridStyle = {
-    "--merge-panes": MERGE_PANES.length,
+    "--merge-panes": panes.length,
     "--merge-gutter": `${Math.max(digits, 2) + 1}ch`,
   } as CSSProperties;
 
   const row = (key: string, cells: Record<MergePane, ReactNode>, chosen: ReadonlySet<MergePane> = new Set()) => (
     <div key={key} className={styles.row}>
-      {MERGE_PANES.map((pane) => (
-        <div key={pane} data-pane={pane} className={`${styles.cell} ${chosen.has(pane) ? styles.chosen : ""}`}>
+      {panes.map((pane) => (
+        <div
+          key={pane}
+          data-pane={pane}
+          data-chosen={chosen.has(pane) ? "true" : undefined}
+          className={`${styles.cell} ${chosen.has(pane) ? styles.chosen : ""}`}
+        >
           {cells[pane]}
         </div>
       ))}
@@ -149,6 +159,7 @@ export function MergePanes({
     const cleanTokens = tokens?.ours[index];
     const start = starts[index];
     return row(key, {
+      base: <Lines text={content} tokens={cleanTokens} start={start.base} from={from} to={to} />,
       ours: <Lines text={content} tokens={cleanTokens} start={start.ours} from={from} to={to} />,
       result: <Lines text={content} tokens={cleanTokens} start={start.result} from={from} to={to} />,
       theirs: <Lines text={content} tokens={cleanTokens} start={start.theirs} from={from} to={to} />,
@@ -211,25 +222,22 @@ export function MergePanes({
     const chosen = new Set<MergePane>();
     if (choice === "ours" || choice === "oursThenTheirs" || choice === "theirsThenOurs") chosen.add("ours");
     if (choice === "theirs" || choice === "oursThenTheirs" || choice === "theirsThenOurs") chosen.add("theirs");
+    if (choice === "base") chosen.add("base");
     const resultLines = result === null ? 0 : segmentLines(result).length;
     return renderBlock(
       segment,
       index,
       styles.block,
       <>
-        {showBase && (
-          <div className={`${styles.base} ${choice === "base" ? styles.chosen : ""}`}>
-            <div className={styles.label}>Base</div>
-            {segment.base === "" ? (
-              <p className={styles.placeholder}>Empty: no common lines</p>
-            ) : (
-              <Lines text={segment.base} tokens={tokens?.base[index]} start={start.base} />
-            )}
-          </div>
-        )}
         {row(
           "panes",
           {
+            base:
+              segment.base === "" ? (
+                <p className={styles.placeholder}>Empty: no common lines</p>
+              ) : (
+                <Lines text={segment.base} tokens={tokens?.base[index]} start={start.base} />
+              ),
             ours: sideWithArrow(segment, index, "ours"),
             result: (
               <>
@@ -266,9 +274,9 @@ export function MergePanes({
   return (
     <div className={styles.panes} style={gridStyle}>
       <div className={`${styles.row} ${styles.header}`}>
-        {MERGE_PANES.map((pane) => (
+        {panes.map((pane) => (
           <div key={pane} className={styles.label} data-pane-header={pane}>
-            {labels[pane]}
+            {headings[pane]}
           </div>
         ))}
       </div>
