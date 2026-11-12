@@ -562,7 +562,7 @@ export function DiffView({
               className={hasActions && hunkIndex === active ? styles.activeHunk : undefined}
             >
               <div className={styles.hunkHeader}>
-                <span className={styles.hunkRange} title={range.title}>
+                <span className={`${styles.hunkRange} diff-hunk-range`} title={range.title}>
                   {range.label}
                 </span>
                 {hunkActions !== undefined && (
