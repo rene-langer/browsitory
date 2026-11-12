@@ -26,6 +26,9 @@ use protocol::{JsonRpcRequest, JsonRpcResponse};
 /// through the shared `stdout` mutex, which is what keeps concurrent writers from interleaving a
 /// line; see that function's doc comment in `dispatch/remote.rs`.
 fn main() {
+    // Before any repository is opened: process-wide libgit2 settings (#840).
+    git_core::repo::configure_libgit2();
+
     let stdin = io::stdin();
     let stdout = Arc::new(Mutex::new(io::stdout()));
     let repos: dispatch::Repos = Arc::default();

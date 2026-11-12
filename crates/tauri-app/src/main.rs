@@ -272,6 +272,9 @@ commands![
 ];
 
 fn main() {
+    // Before any repository is opened: process-wide libgit2 settings (#840).
+    git_core::repo::configure_libgit2();
+
     // Installed before `.run()`, so it only fires once the log plugin below has a chance to
     // set up its logger: catches a worker thread panic (see worker/mod.rs's threading model
     // notes) that would otherwise just silently stop replying to that repo's commands.
