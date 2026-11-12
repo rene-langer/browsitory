@@ -111,7 +111,7 @@ fn a_larger_untracked_folder_is_one_entry() {
     assert!(!entries.iter().any(|entry| entry.path.starts_with("big/f")));
     assert_eq!(
         untracked_paths(&entries),
-        vec!["big/", "small/f0.txt", "small/deep/f1.txt"]
+        vec!["big/", "small/deep/f1.txt", "small/f0.txt"]
     );
     assert!(entries
         .iter()
