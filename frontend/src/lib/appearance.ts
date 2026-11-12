@@ -1,5 +1,6 @@
 import {
   CODE_FONT_SIZES,
+  DATE_FORMAT_VALUES,
   DEFAULT_APPEARANCE_SETTINGS,
   TAB_SIZES,
   UI_SIZE_VALUES,
@@ -40,6 +41,9 @@ export function clampAppearance(settings: AppearanceSettings): AppearanceSetting
     codeFontSize: clampNumber(settings.codeFontSize, CODE_FONT_SIZES),
     uiSize: UI_SIZE_VALUES.includes(settings.uiSize) ? settings.uiSize : DEFAULT_APPEARANCE_SETTINGS.uiSize,
     tabSize: clampNumber(settings.tabSize, TAB_SIZES) ?? DEFAULT_APPEARANCE_SETTINGS.tabSize,
+    dateFormat: DATE_FORMAT_VALUES.includes(settings.dateFormat)
+      ? settings.dateFormat
+      : DEFAULT_APPEARANCE_SETTINGS.dateFormat,
   };
 }
 

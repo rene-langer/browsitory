@@ -13,6 +13,7 @@ import type { SelectedRow } from "../state/useAppState";
 import { copyText } from "../lib/clipboard";
 import { describeError, type DescribedError } from "../lib/errorMessages";
 import { formatAbsoluteDate, formatRelativeDate } from "../lib/formatDate";
+import { useDateFormat } from "../state/useDateFormat";
 import { filesChangedLabel } from "../lib/lineStats";
 import { parseMessageLinks } from "../lib/messageLinks";
 import { shortKey, signatureLabel, type SignatureTone } from "../lib/signatureStatus";
@@ -61,9 +62,10 @@ function MessageText({
 const REFS_SHOWN = 8;
 
 function DateTime({ timestamp }: { timestamp: number }) {
+  const dateFormat = useDateFormat();
   return (
     <>
-      <time dateTime={new Date(timestamp * 1000).toISOString()}>{formatAbsoluteDate(timestamp)}</time>{" "}
+      <time dateTime={new Date(timestamp * 1000).toISOString()}>{formatAbsoluteDate(timestamp, dateFormat)}</time>{" "}
       <span className={styles.relative}>({formatRelativeDate(timestamp)})</span>
     </>
   );

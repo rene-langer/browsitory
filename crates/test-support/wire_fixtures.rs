@@ -756,6 +756,7 @@ pub fn appearance_settings() -> Cases<config::AppearanceSettings> {
                 code_font_size: Some(15),
                 ui_size: config::UiSize::Large,
                 tab_size: 8,
+                date_format: config::DateFormat::System,
             },
         ),
         case(

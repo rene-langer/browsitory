@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { formatShortDate } from "../lib/formatDate";
+import { formatAbsoluteDate, formatShortDate } from "../lib/formatDate";
+import { useDateFormat } from "../state/useDateFormat";
 import { History } from "lucide-react";
 import type { ReflogEntry } from "../ipc/RepoClient";
 import { AccordionSection } from "./primitives/AccordionSection";
@@ -26,6 +27,7 @@ export function ReflogPanel({
   /** Expands and scrolls to the section (`useSidebarReveal`, #494). */
   revealRequest?: number;
 }) {
+  const dateFormat = useDateFormat();
   const [restoreConfirmation, setRestoreConfirmation] = useState<ReflogEntry | null>(null);
   // Only the rows in view render (#775), as in the commit graph (#685); each row is two fixed
   // lines for that.
@@ -69,13 +71,12 @@ export function ReflogPanel({
         >
           {entries.slice(virtual.start, virtual.end).map((entry, offset) => {
             const ordinal = virtual.start + offset;
-            const time = new Date(entry.timestamp * 1000);
             // The full details, cut short on the second line (#775).
             const details = [
               `Old ID: ${entry.oldId}`,
               `New ID: ${entry.newId}`,
               `${entry.committerName} <${entry.committerEmail}>`,
-              time.toLocaleString(),
+              formatAbsoluteDate(entry.timestamp, dateFormat),
               entry.message,
               ...(entry.summary === null ? [] : [entry.summary]),
             ].join("\n");
@@ -86,7 +87,7 @@ export function ReflogPanel({
                   <span className={styles.message}>{entry.message}</span>
                   <span className={styles.details}>
                     {entry.oldId.slice(0, 7)} → {entry.newId.slice(0, 7)} · {entry.committerName} ·{" "}
-                    {formatShortDate(entry.timestamp)}
+                    {formatShortDate(entry.timestamp, dateFormat)}
                   </span>
                 </span>
                 <button

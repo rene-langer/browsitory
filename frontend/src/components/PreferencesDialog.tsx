@@ -2,10 +2,12 @@ import { useEffect, useId, useRef, useState, useSyncExternalStore, type Keyboard
 import {
   CODE_FONT_SIZES,
   COMMIT_MESSAGE_COLUMNS,
+  DATE_FORMAT_VALUES,
   DIFF_ALGORITHM_VALUES,
   TAB_SIZES,
   UI_SIZE_VALUES,
   WORD_WRAP_VALUES,
+  type DateFormat,
   type DiffAlgorithm,
   type GitConfigSource,
   type GitToolInfo,
@@ -14,6 +16,7 @@ import {
   type UiSize,
   type WordWrap,
 } from "../ipc/RepoClient";
+import { formatAbsoluteDate } from "../lib/formatDate";
 import { useAppearanceSettingsContext } from "../state/useAppearanceSettings";
 import { useCommitMessageSettingsContext } from "../state/useCommitMessageSettings";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
@@ -492,6 +495,12 @@ function CommitOnBlurField({
 
 const UI_SIZE_LABEL: Record<UiSize, string> = { Small: "Small", Normal: "Normal", Large: "Large" };
 
+/** Each date format with an example, 2026-11-11 14:05 local time (#675). */
+function dateFormatLabel(format: DateFormat): string {
+  const example = new Date(2026, 10, 11, 14, 5).getTime() / 1000;
+  return `${format === "Iso" ? "ISO" : "System"} (${formatAbsoluteDate(example, format)})`;
+}
+
 const THEME_LABEL: Record<ThemePreference, string> = { system: "System", light: "Light", dark: "Dark" };
 
 /**
@@ -560,6 +569,21 @@ export function AppearanceSection({
           </select>
         )}
       </Field>
+      <Field label="Date format">
+        {(props) => (
+          <select
+            {...props}
+            value={settings.dateFormat}
+            onChange={(event) => update({ dateFormat: event.target.value as DateFormat })}
+          >
+            {DATE_FORMAT_VALUES.map((value) => (
+              <option key={value} value={value}>
+                {dateFormatLabel(value)}
+              </option>
+            ))}
+          </select>
+        )}
+      </Field>
       <CommitOnBlurField
         label="Tab size"
         type="number"
@@ -575,7 +599,7 @@ export function AppearanceSection({
         {theme !== undefined && "System follows your operating system's light or dark setting. "}
         The code font and its size apply to diffs, blame, the file viewer and conflicts; a font that
         is not installed falls back to the default. Leave them empty for the defaults. The tab size
-        is in columns.
+        is in columns. System dates use your operating system's date and time format.
       </p>
       {error !== null && (
         <p role="alert" className={styles.problem}>

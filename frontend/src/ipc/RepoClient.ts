@@ -97,6 +97,10 @@ export interface FetchSettings {
 export type UiSize = "Small" | "Normal" | "Large";
 export const UI_SIZE_VALUES: readonly UiSize[] = ["Small", "Normal", "Large"];
 
+/** How dates are shown (#675): `2026-11-11 14:05`, or the system's short date and time. */
+export type DateFormat = "Iso" | "System";
+export const DATE_FORMAT_VALUES: readonly DateFormat[] = ["Iso", "System"];
+
 /**
  * Appearance settings (`[appearance]`, #615): `codeFont` and `codeFontSize` are `null` for the
  * built-in look; sizes are clamped to `CODE_FONT_SIZES` and `TAB_SIZES`. Applied by
@@ -107,6 +111,7 @@ export interface AppearanceSettings {
   codeFontSize: number | null;
   uiSize: UiSize;
   tabSize: number;
+  dateFormat: DateFormat;
 }
 
 /**

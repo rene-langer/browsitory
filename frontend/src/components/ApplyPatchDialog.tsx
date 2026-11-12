@@ -1,5 +1,6 @@
 import type { PatchApply, PatchFileStatus, PatchPreview } from "../ipc/RepoClient";
 import { formatAbsoluteDate } from "../lib/formatDate";
+import { useDateFormat } from "../state/useDateFormat";
 import { FormDialog } from "./primitives/FormDialog";
 import styles from "./ApplyPatchDialog.module.css";
 
@@ -40,6 +41,7 @@ export function ApplyPatchDialog({
   onApply: (how: PatchApply) => void;
   onCancel: () => void;
 }) {
+  const dateFormat = useDateFormat();
   const mails = preview.parts.filter((part) => part.mail !== null).length;
   const reason = blockedReason ?? (preview.problem === null ? null : "The patch doesn't apply");
   const commitsReason = reason ?? commitsBlockedReason(preview, hasStagedChanges);
@@ -65,7 +67,7 @@ export function ApplyPatchDialog({
                   <span className={styles.subject}>{part.mail.subject || "(no subject)"}</span>
                   <span className={styles.author}>
                     {part.mail.authorName} &lt;{part.mail.authorEmail}&gt;
-                    {part.mail.timestamp !== null && ` · ${formatAbsoluteDate(part.mail.timestamp)}`}
+                    {part.mail.timestamp !== null && ` · ${formatAbsoluteDate(part.mail.timestamp, dateFormat)}`}
                   </span>
                 </div>
               )}

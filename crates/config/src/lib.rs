@@ -254,7 +254,8 @@ pub const MAX_AUTO_FETCH_MINUTES: u32 = 24 * 60;
 /// Appearance preferences, persisted as the `[appearance]` TOML table (#615). `code_font` is a
 /// font family tried before the default monospace stack, and `code_font_size` the pixel size of
 /// file content; `None` keeps the built-in look for both. `tab_size` is the width of a tab in
-/// columns. Out-of-range values are clamped both on read and on write
+/// columns. `date_format` is how dates are shown (#675). Out-of-range values are clamped both on
+/// read and on write
 /// (`AppearanceSettings::clamped`), so a hand-edited file can't break the views.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -263,6 +264,17 @@ pub struct AppearanceSettings {
     pub code_font_size: Option<u32>,
     pub ui_size: UiSize,
     pub tab_size: u32,
+    pub date_format: DateFormat,
+}
+
+/// How dates are shown (#675): `iso` is `2026-11-11 14:05`, `system` the operating system's
+/// short date and time. Stored as `"iso"` or `"system"`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DateFormat {
+    #[default]
+    Iso,
+    System,
 }
 
 /// The interface text scale: each maps the `--text-*` sizes. Stored as `"small"`, `"normal"`
@@ -283,6 +295,7 @@ impl Default for AppearanceSettings {
             code_font_size: None,
             ui_size: UiSize::Normal,
             tab_size: 4,
+            date_format: DateFormat::Iso,
         }
     }
 }
@@ -308,6 +321,7 @@ impl AppearanceSettings {
             code_font_size: self.code_font_size.map(|n| clamp(n, &CODE_FONT_SIZES)),
             ui_size: self.ui_size,
             tab_size: clamp(self.tab_size, &TAB_SIZES),
+            date_format: self.date_format,
         }
     }
 }
