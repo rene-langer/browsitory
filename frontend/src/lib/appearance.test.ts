@@ -59,3 +59,14 @@ describe("applyAppearance", () => {
     expect(root.dataset.uiSize).toBeUndefined();
   });
 });
+
+// #675
+describe("clampAppearance — date format", () => {
+  it("keeps Iso and System, and falls back to Iso for a missing or unknown one", () => {
+    expect(clampAppearance({ ...defaults, dateFormat: "System" }).dateFormat).toBe("System");
+    expect(clampAppearance({ ...defaults, dateFormat: "Iso" }).dateFormat).toBe("Iso");
+    expect(clampAppearance({ ...defaults, dateFormat: "Relative" } as never).dateFormat).toBe("Iso");
+    const { dateFormat: _omitted, ...withoutDateFormat } = defaults;
+    expect(clampAppearance(withoutDateFormat as never).dateFormat).toBe("Iso");
+  });
+});

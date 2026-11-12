@@ -4,6 +4,8 @@ import type { ReflogEntry } from "../ipc/RepoClient";
 import { formatAbsoluteDate, formatShortDate } from "../lib/formatDate";
 import { layoutInPane, ROW } from "../test/virtualLayout";
 import { ReflogPanel } from "./ReflogPanel";
+import { AppearanceSettingsContext } from "../state/useAppearanceSettings";
+import { DEFAULT_APPEARANCE_SETTINGS } from "../ipc/RepoClient";
 
 const entry: ReflogEntry = {
   reference: "refs/heads/main",
@@ -216,5 +218,33 @@ describe("ReflogPanel — windowed rows", () => {
     } finally {
       restore();
     }
+  });
+});
+
+// #675: the row's date and the tooltip's time follow Preferences → Appearance → Date format.
+describe("ReflogPanel — date format", () => {
+  it("shows the system's short date and time when the date format is System", () => {
+    localStorage.removeItem("sidebar-reflog");
+    render(
+      <AppearanceSettingsContext.Provider
+        value={{ settings: { ...DEFAULT_APPEARANCE_SETTINGS, dateFormat: "System" }, update: vi.fn(), error: null, dismissError: vi.fn() }}
+      >
+        <ReflogPanel
+          references={["HEAD", "refs/heads/main"]}
+          selectedReference="refs/heads/main"
+          entries={[entry]}
+          onSelectReference={vi.fn().mockResolvedValue(undefined)}
+          onRestore={vi.fn().mockResolvedValue(undefined)}
+          operationDisabled={false}
+        />
+      </AppearanceSettingsContext.Provider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Reflog" }));
+
+    const date = new Date(entry.timestamp * 1000);
+    const day = new Intl.DateTimeFormat(undefined, { dateStyle: "short" }).format(date);
+    const time = new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" }).format(date);
+    expect(screen.getByText(`1111111 → 2222222 · Ada Lovelace · ${day}`)).toBeInTheDocument();
+    expect(screen.getByTitle(/^Old ID: /).getAttribute("title")).toContain(`\n${time}\n`);
   });
 });

@@ -513,6 +513,23 @@ describe("AppearanceSection (#615)", () => {
     await waitFor(() => expect(root.dataset.uiSize).toBeUndefined());
   });
 
+  // #675: ISO by default; System uses the operating system's (or webview's) locale.
+  it("saves the date format, with an example of each", async () => {
+    const setAppearanceSettings = vi.fn(async () => {});
+    const group = renderAppearance({ getAppearanceSettings: async () => defaults, setAppearanceSettings });
+    const select = within(group).getByRole("combobox", { name: "Date format" });
+    expect(select).toHaveValue("Iso");
+    const example = new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" }).format(
+      new Date(2026, 10, 11, 14, 5),
+    );
+    expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "ISO (2026-11-11 14:05)",
+      `System (${example})`,
+    ]);
+    fireEvent.change(select, { target: { value: "System" } });
+    await waitFor(() => expect(setAppearanceSettings).toHaveBeenLastCalledWith({ ...defaults, dateFormat: "System" }));
+  });
+
   it("saves and applies the tab size, clamped, and ignores an empty one", async () => {
     const setAppearanceSettings = vi.fn(async () => {});
     const group = renderAppearance({ getAppearanceSettings: async () => defaults, setAppearanceSettings });

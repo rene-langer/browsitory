@@ -135,3 +135,22 @@ fn an_empty_appearance_table_means_the_defaults() {
         AppearanceSettings::default()
     );
 }
+
+// #675: the date format is stored as `date_format = "iso"` or `"system"`, ISO by default. Written
+// as TOML text so the test reads the file the way a user (or an older version) would.
+#[test]
+fn keeps_the_date_format_and_writes_iso_by_default() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let read = dir.path().join("read.toml");
+    let written = dir.path().join("written.toml");
+    std::fs::write(&read, "[appearance]\ndate_format = \"system\"\n").unwrap();
+
+    let settings = get_appearance_settings_at(&read).unwrap();
+    set_appearance_settings_at(&written, &settings).unwrap();
+    let text = std::fs::read_to_string(&written).unwrap();
+    assert!(text.contains("date_format = \"system\"\n"), "{text}");
+
+    set_appearance_settings_at(&written, &AppearanceSettings::default()).unwrap();
+    let text = std::fs::read_to_string(&written).unwrap();
+    assert!(text.contains("date_format = \"iso\"\n"), "{text}");
+}
