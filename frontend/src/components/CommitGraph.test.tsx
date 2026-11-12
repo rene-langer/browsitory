@@ -1417,6 +1417,20 @@ describe("CommitGraph — one-click history edits", () => {
     expect(onRewordCommit).toHaveBeenCalledWith("C", "B");
   });
 
+  it("Edit commit… stops at the commit, HEAD included, from its parent (#882)", () => {
+    const { openMenu, onEditHistory } = setup();
+    openMenu("C");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit commit…" }));
+    expect(onEditHistory).toHaveBeenLastCalledWith("C", "B", { kind: "Edit" });
+    openMenu("E");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit commit…" }));
+    expect(onEditHistory).toHaveBeenLastCalledWith("E", "D", { kind: "Edit" });
+    openMenu("X");
+    const item = screen.getByRole("menuitem", { name: "Edit commit…" });
+    expect(item).toBeDisabled();
+    expect(item).toHaveAttribute("title", "Only commits of the current branch can be edited.");
+  });
+
   it("rewords HEAD in the amend box and can't move it up", () => {
     const { openMenu, onEditHeadMessage, onRewordCommit } = setup();
     openMenu("E");

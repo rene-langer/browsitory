@@ -18,6 +18,7 @@ const DIVERGED_HEAD: HeadInfo = {
     onto: "def",
     currentStep: 2,
     totalSteps: 3,
+    editing: null,
     health: { kind: "Diverged", reason: "HeadMoved" },
   },
   bisect: null, terminalSequence: null,
@@ -1306,6 +1307,17 @@ describe("vscodeRepoClient", () => {
     const abortPromise = vscodeRepoClient.abortRebase("/repo");
     respond(5, { restored: true });
     await expect(abortPromise).resolves.toEqual({ restored: true });
+
+    // Continue at an edit stop with a new message for the recommitted commit (#882).
+    const messagePromise = vscodeRepoClient.rebaseContinue("/repo", "New message\n");
+    expect(postMessage).toHaveBeenLastCalledWith({
+      jsonrpc: "2.0",
+      id: 6,
+      method: "rebase_continue",
+      params: { repoPath: "/repo", message: "New message\n" },
+    });
+    respond(6, { kind: "Done" });
+    await expect(messagePromise).resolves.toEqual({ kind: "Done" });
   });
 
   it("wires detectForgeRepository, saveForgeToken, and forgetForgeToken", async () => {

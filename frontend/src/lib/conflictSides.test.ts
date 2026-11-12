@@ -47,7 +47,7 @@ describe("conflictSideNames", () => {
   it("names the base and the rebased branch during a paused rebase", () => {
     const head: HeadInfo = {
       ...idle,
-      rebase: { branch: "feature", onto: "0123456789abcdef", currentStep: 1, totalSteps: 2, health: { kind: "Paused" } },
+      rebase: { branch: "feature", onto: "0123456789abcdef", currentStep: 1, totalSteps: 2, editing: null, health: { kind: "Paused" } },
     };
     expect(conflictSideNames(head, branches, null)).toEqual({ ours: "onto 0123456", theirs: "feature" });
   });

@@ -70,7 +70,7 @@ describe("history actions", () => {
 
   it("derives rebase progress from headInfo.rebase on the first refresh", async () => {
     // What a restarted app sees: the backend restored the paused rebase from disk.
-    const rebase = { branch: "main", onto: "o1", currentStep: 1, totalSteps: 2, health: { kind: "Paused" as const } };
+    const rebase = { branch: "main", onto: "o1", currentStep: 1, totalSteps: 2, editing: null, health: { kind: "Paused" as const } };
     const info = { headId: "h1", detachedAt: "h1", headPushed: false, operation: "CherryPick" as const, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase, bisect: null, terminalSequence: null, terminalRebase: null };
     const { result } = renderHook(() => useAppState(transferClient({ getHeadInfo: async () => info }), TEST_REPO_PATH));
     await act(() => result.current.refresh());
@@ -78,7 +78,7 @@ describe("history actions", () => {
   });
 
   it("clears rebase progress when headInfo.rebase is null", async () => {
-    const rebase = { branch: "main", onto: "o1", currentStep: 2, totalSteps: 2, health: { kind: "Paused" as const } };
+    const rebase = { branch: "main", onto: "o1", currentStep: 2, totalSteps: 2, editing: null, health: { kind: "Paused" as const } };
     let current: typeof rebase | null = rebase;
     const getHeadInfo = async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: current, bisect: null, terminalSequence: null, terminalRebase: null });
     const { result } = renderHook(() => useAppState(transferClient({ getHeadInfo }), TEST_REPO_PATH));
@@ -127,6 +127,40 @@ describe("history actions", () => {
         commitId: "c",
       });
       expect(result.current.state.historyEditOutcome).toBeNull();
+    });
+
+    it("Edit commit… starts a rebase that stops at the commit, named for Undo (#882)", async () => {
+      const startRebase = vi.fn(async () => ({ kind: "PausedForEdit" }) as const);
+      const { result } = renderHook(() =>
+        useAppState(transferClient({ commitsSince: async () => span.slice(1), startRebase }), TEST_REPO_PATH),
+      );
+      let outcome: unknown;
+      await act(async () => {
+        outcome = await result.current.editHistory("c", "p", { kind: "Edit" });
+      });
+      expect(startRebase).toHaveBeenCalledWith(
+        TEST_REPO_PATH,
+        "p",
+        [{ commitId: "c", action: { kind: "Edit" }, combinedMessage: null }, pick("d")],
+        { kind: "Edit", commitId: "c" },
+      );
+      expect(outcome).toEqual({ kind: "PausedForEdit" });
+      expect(result.current.state.historyEditOutcome).toBeNull();
+    });
+
+    it("continues an edit stop with the edited message, else without one (#882)", async () => {
+      const rebaseContinue = vi.fn(async () => ({ kind: "Done" }) as const);
+      const { result } = renderHook(() => useAppState(transferClient({ rebaseContinue }), TEST_REPO_PATH));
+      act(() => result.current.setRebaseEditMessage("New message\n"));
+      await act(() => result.current.rebaseContinue());
+      expect(rebaseContinue).toHaveBeenLastCalledWith(TEST_REPO_PATH, "New message\n");
+      // Used once: the next Continue (another stop) has no edited message.
+      await act(() => result.current.rebaseContinue());
+      expect(rebaseContinue).toHaveBeenLastCalledWith(TEST_REPO_PATH);
+      act(() => result.current.setRebaseEditMessage("Kept\n"));
+      act(() => result.current.setRebaseEditMessage(null));
+      await act(() => result.current.rebaseContinue());
+      expect(rebaseContinue).toHaveBeenLastCalledWith(TEST_REPO_PATH);
     });
 
     it("refuses without starting when the history changed since the menu opened", async () => {
