@@ -432,3 +432,64 @@ fn the_line_search_key_stops_when_cancelled() {
 
     assert!(matches!(result, Err(SearchError::Cancelled)));
 }
+
+// #838: the walk compares a nested path's entries folder by folder; these pin the results on
+// nested paths whose folder changes around the file or is renamed.
+
+#[test]
+fn a_nested_file_skips_commits_that_change_only_its_siblings() {
+    let (_dir, repo) = init_repo();
+    let v1 = numbered("l", 10);
+    let v2 = replace_line(&v1, 5, "five");
+    let c1 = commit_tree(
+        &repo,
+        &[("src/a.txt", &v1, REGULAR), ("src/b.txt", "1", REGULAR)],
+        &[],
+        "add",
+    );
+    let c2 = commit_tree(
+        &repo,
+        &[("src/a.txt", &v1, REGULAR), ("src/b.txt", "2", REGULAR)],
+        &[c1],
+        "sibling",
+    );
+    let c3 = commit_tree(
+        &repo,
+        &[("src/a.txt", &v2, REGULAR), ("src/b.txt", "2", REGULAR)],
+        &[c2],
+        "edit five",
+    );
+    let c4 = commit_tree(
+        &repo,
+        &[
+            ("src/a.txt", &v2, REGULAR),
+            ("src/b.txt", "3", REGULAR),
+            ("top.txt", "t", REGULAR),
+        ],
+        &[c3],
+        "sibling and top",
+    );
+    set_head(&repo, c4);
+
+    let history = line_history(&repo, "HEAD", "src/a.txt", lines(4, 6), 100).unwrap();
+
+    assert_eq!(summaries(&history), vec!["edit five", "add"]);
+    assert_matches_git(&repo, &history, "src/a.txt", lines(4, 6));
+}
+
+#[test]
+fn follows_the_range_across_a_folder_rename() {
+    let (_dir, repo) = init_repo();
+    let v1 = numbered("l", 10);
+    let v2 = replace_line(&v1, 5, "five");
+    let c1 = commit_tree(&repo, &[("old/a.txt", &v1, REGULAR)], &[], "add");
+    let c2 = commit_tree(&repo, &[("old/a.txt", &v2, REGULAR)], &[c1], "edit five");
+    let c3 = commit_tree(&repo, &[("new/a.txt", &v2, REGULAR)], &[c2], "move folder");
+    set_head(&repo, c3);
+
+    let history = line_history(&repo, "HEAD", "new/a.txt", lines(4, 6), 100).unwrap();
+
+    assert_eq!(summaries(&history), vec!["edit five", "add"]);
+    assert_eq!(history.entries[0].path, "old/a.txt");
+    assert_matches_git(&repo, &history, "new/a.txt", lines(4, 6));
+}
