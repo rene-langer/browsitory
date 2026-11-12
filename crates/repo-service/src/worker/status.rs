@@ -39,18 +39,25 @@ pub(super) fn get_change_stamp(
     let _ = reply.send(git_core::change_stamp::change_stamp(repo).map_err(ErrorDto::from_error));
 }
 
+/// A page of the graph; without a cursor but with `loaded` rows, a refresh that continues
+/// them when the walk cache can (#835).
+#[allow(clippy::too_many_arguments)]
 pub(super) fn get_commit_graph(
     repo: &git2::Repository,
     cache: &mut WalkCache,
     limit: usize,
     selection: GraphSelection,
     cursor: Option<String>,
+    loaded: Option<git_core::graph::LoadedGraph>,
     reply: Sender<Result<git_core::graph::GraphPage, ErrorDto>>,
 ) {
-    let _ = reply.send(
-        git_core::graph::graph_page_cached(repo, cache, &selection, cursor.as_deref(), limit)
-            .map_err(ErrorDto::from_error),
-    );
+    let page = match (&cursor, &loaded) {
+        (None, Some(loaded)) => {
+            git_core::graph::graph_refresh_cached(repo, cache, &selection, loaded, limit)
+        }
+        _ => git_core::graph::graph_page_cached(repo, cache, &selection, cursor.as_deref(), limit),
+    };
+    let _ = reply.send(page.map_err(ErrorDto::from_error));
 }
 
 pub(super) fn locate_commit(
@@ -688,10 +695,23 @@ impl ReadHandle {
         selection: GraphSelection,
         cursor: Option<String>,
     ) -> Result<git_core::graph::GraphPage, ErrorDto> {
+        self.get_commit_graph_after(limit, selection, cursor, None)
+    }
+
+    /// [`Self::get_commit_graph`]; without a cursor but with the `loaded` rows a client has, a
+    /// refresh that sends only what is new to it (`git_core::graph::graph_refresh_cached`).
+    pub fn get_commit_graph_after(
+        &self,
+        limit: usize,
+        selection: GraphSelection,
+        cursor: Option<String>,
+        loaded: Option<git_core::graph::LoadedGraph>,
+    ) -> Result<git_core::graph::GraphPage, ErrorDto> {
         self.read(|tx| Command::GetCommitGraph {
             limit,
             selection,
             cursor,
+            loaded,
             reply: tx,
         })
     }

@@ -129,7 +129,8 @@ impl RefDecorations {
 pub struct WalkCache {
     /// Most recently used first, at most [`WALKS_KEPT`].
     walks: Vec<(WalkKey, Arc<[Oid]>)>,
-    decorations: Option<(RefsKey, Arc<RefDecorations>)>,
+    /// The badges, with their [`GraphPage::badges`] version.
+    decorations: Option<(RefsKey, String, Arc<RefDecorations>)>,
     stats: WalkCacheStats,
 }
 
@@ -209,22 +210,39 @@ impl WalkCache {
         &mut self,
         repo: &Repository,
     ) -> Result<Arc<RefDecorations>, git2::Error> {
+        Ok(self.versioned_decorations(repo)?.1)
+    }
+
+    /// [`Self::decorations`] with their version: a hash of the refs they were read from.
+    fn versioned_decorations(
+        &mut self,
+        repo: &Repository,
+    ) -> Result<(String, Arc<RefDecorations>), git2::Error> {
         let key = refs_key(repo)?;
-        if let Some((cached, decorations)) = &self.decorations {
+        if let Some((cached, version, decorations)) = &self.decorations {
             if *cached == key {
-                return Ok(Arc::clone(decorations));
+                return Ok((version.clone(), Arc::clone(decorations)));
             }
         }
         self.stats.decorations += 1;
+        let version = refs_version(&key);
         let decorations = Arc::new(RefDecorations::load(repo)?);
-        self.decorations = Some((key, Arc::clone(&decorations)));
-        Ok(decorations)
+        self.decorations = Some((key, version.clone(), Arc::clone(&decorations)));
+        Ok((version, decorations))
     }
 }
 
 /// Every reference under `refs/heads/`, `refs/remotes/` and `refs/tags/` (name, target id,
 /// symbolic target), sorted.
 type RefsKey = Vec<(Vec<u8>, Option<Oid>, Option<Vec<u8>>)>;
+
+/// A version of the badges read from `key`: its hash, as 16 hex digits.
+fn refs_version(key: &RefsKey) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    key.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
 
 /// Every reference under `refs/heads/`, `refs/remotes/` and `refs/tags/` with
 /// what it points at (an id, or a ref for a symbolic one): what [`RefDecorations`] reads.
@@ -384,6 +402,50 @@ pub struct GraphPage {
     /// The cursor came from another walk (a start point moved, or the selection or "Collapse
     /// merges" changed): `commits` is empty, and the caller loads the graph from the start.
     pub stale: bool,
+    /// The walk the rows come from (its cursor fingerprint), for [`LoadedGraph::walk`].
+    pub walk: String,
+    /// The version of the rows' badges (empty on a stale page), for [`LoadedGraph::badges`].
+    pub badges: String,
+    /// Only from [`graph_refresh_cached`], when it could continue the rows already loaded:
+    /// how the refreshed rows are made of `commits` and those rows. `None`: `commits` are the
+    /// rows.
+    pub refresh: Option<GraphRefresh>,
+}
+
+/// The rows a client has loaded from the graph (#835), as a refresh passes them back: the
+/// first `rows` rows of the walk `walk`, with the badges of version `badges` (both from the
+/// [`GraphPage`]s they came from).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoadedGraph {
+    pub walk: String,
+    pub badges: String,
+    pub rows: usize,
+}
+
+/// How a refresh's rows are made (#835): `layout` in order, each segment either the next rows
+/// of [`GraphPage::commits`] or a run of the rows already loaded; then `badges` replaces the
+/// badges of kept rows whose branches or tags changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphRefresh {
+    pub layout: Vec<GraphSegment>,
+    pub badges: Vec<RowBadges>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GraphSegment {
+    /// The next `count` rows of [`GraphPage::commits`].
+    New { count: usize },
+    /// The loaded rows `from..from + count`, unchanged but for [`GraphRefresh::badges`].
+    Kept { from: usize, count: usize },
+}
+
+/// A kept row's badges as they are now (see [`GraphCommit`]'s fields of the same names).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RowBadges {
+    pub id: String,
+    pub branch_refs: Vec<String>,
+    pub remote_branch_refs: Vec<String>,
+    pub tags: Vec<String>,
 }
 
 /// The commits of `selection`, children before parents (`TOPOLOGICAL | TIME`), at most `limit`,
@@ -427,11 +489,14 @@ pub fn graph_page_cached(
                     commits: Vec::new(),
                     next_cursor: None,
                     stale: true,
+                    walk: fingerprint,
+                    badges: String::new(),
+                    refresh: None,
                 })
             }
         },
     };
-    let decorations = cache.decorations(repo)?;
+    let (badges, decorations) = cache.versioned_decorations(repo)?;
     let order = cache
         .order(repo, &starts, first_parent, &|| false)?
         .expect("a walk that is never cancelled");
@@ -453,7 +518,27 @@ pub fn graph_page_cached(
         commits,
         next_cursor,
         stale: false,
+        walk: fingerprint,
+        badges,
+        refresh: None,
     })
+}
+
+/// The first page of `selection` for a client that has `loaded` rows already (#835): when
+/// `cache` still holds the walk and the badges those rows came from, only the rows that are new
+/// to the client are sent, with [`GraphPage::refresh`] saying where the loaded rows go and
+/// which of their badges changed. The refreshed rows are the walk's first rows, as many as
+/// reach past the last loaded row that is still in the walk, and at least `limit`. Otherwise
+/// (another worker, a cache that moved on) it is an ordinary first page of at least
+/// `loaded.rows` rows.
+pub fn graph_refresh_cached(
+    repo: &Repository,
+    cache: &mut WalkCache,
+    selection: &GraphSelection,
+    loaded: &LoadedGraph,
+    limit: usize,
+) -> Result<GraphPage, GraphError> {
+    graph_page_cached(repo, cache, selection, None, limit.max(loaded.rows))
 }
 
 /// The offset of `cursor` when it belongs to the walk `fingerprint` names.

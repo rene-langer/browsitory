@@ -84,8 +84,17 @@ pub(super) fn dispatch(
             limit,
             selection,
             cursor,
+            loaded,
             reply,
-        } => status::get_commit_graph(repo, state.walk_cache, limit, selection, cursor, reply),
+        } => status::get_commit_graph(
+            repo,
+            state.walk_cache,
+            limit,
+            selection,
+            cursor,
+            loaded,
+            reply,
+        ),
         Command::LocateCommit {
             revision,
             selection,

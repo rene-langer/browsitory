@@ -792,6 +792,41 @@ export interface GraphPage {
   /** The cursor belonged to another walk (a branch moved, the selection changed): no commits;
    *  load the graph from the start. */
   stale: boolean;
+  /** The walk and the badges' version the rows come from: a refresh passes them back as
+   *  `LoadedGraph` (#835). `badges` is empty on a stale page. */
+  walk: string;
+  badges: string;
+  /** Only for a refresh with `loaded` that could continue the loaded rows: how the refreshed
+   *  rows are made of `commits` and those rows (see `applyGraphRefresh`). `null`: `commits` are
+   *  the rows. */
+  refresh: GraphRefresh | null;
+}
+
+/** How a refresh's rows are made (#835): `layout` in order, then `badges` replaces the badges
+ *  of kept rows whose branches or tags changed. */
+export interface GraphRefresh {
+  layout: GraphSegment[];
+  badges: RowBadges[];
+}
+
+/** `New`: the next `count` rows of the page's `commits`; `Kept`: the loaded rows
+ *  `from..from + count`. */
+export type GraphSegment = { kind: "New"; count: number } | { kind: "Kept"; from: number; count: number };
+
+/** A kept row's badges as they are now (#835). */
+export interface RowBadges {
+  id: string;
+  branchRefs: string[];
+  remoteBranchRefs: string[];
+  tags: string[];
+}
+
+/** The rows a refresh already has (#835): the `walk` and `badges` of the pages they came from,
+ *  and how many there are. */
+export interface LoadedGraph {
+  walk: string;
+  badges: string;
+  rows: number;
 }
 
 /** One page of a commit search. */
@@ -1194,9 +1229,17 @@ export interface RepoClient {
    * The commits of `selection.local` plus those of `selection.remote`. Exactly one branch in
    * total, or `selection.firstParent`, walks first parents only; its merge rows then carry
    * `mergedCount`. Missing branches are skipped. Paged (#685): at most `limit` commits from
-   * `cursor` on (`null`: from the first commit), with the next page's cursor.
+   * `cursor` on (`null`: from the first commit), with the next page's cursor. Without a cursor
+   * but with the `loaded` rows a client has (#835), a refresh that sends only the rows new to it
+   * when the worker can still continue them (`GraphPage.refresh`), and at least `limit` rows.
    */
-  getCommitGraph(repoPath: string, limit: number, selection: GraphSelection, cursor: string | null): Promise<GraphPage>;
+  getCommitGraph(
+    repoPath: string,
+    limit: number,
+    selection: GraphSelection,
+    cursor: string | null,
+    loaded?: LoadedGraph | null,
+  ): Promise<GraphPage>;
   /**
    * The commits merge `mergeId` brought in (reachable from its other parents, not from its first
    * parent), children first, at most `limit` (#617): what expanding a collapsed merge shows.

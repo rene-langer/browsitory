@@ -674,6 +674,13 @@ pub struct GraphPageDto {
     pub next_cursor: Option<String>,
     /// The cursor belonged to another walk: no commits, load the graph from the start.
     pub stale: bool,
+    /// The walk and the badges' version the rows come from: a refresh passes them back as
+    /// `LoadedGraph` (#835).
+    pub walk: String,
+    pub badges: String,
+    /// Only for a refresh with `loaded` that could continue the loaded rows: how the refreshed
+    /// rows are made of `commits` and those rows. `null`: `commits` are the rows.
+    pub refresh: Option<GraphRefreshDto>,
 }
 
 impl From<git_core::graph::GraphPage> for GraphPageDto {
@@ -682,6 +689,93 @@ impl From<git_core::graph::GraphPage> for GraphPageDto {
             commits: p.commits.into_iter().map(GraphCommitDto::from).collect(),
             next_cursor: p.next_cursor,
             stale: p.stale,
+            walk: p.walk,
+            badges: p.badges,
+            refresh: p.refresh.map(GraphRefreshDto::from),
+        }
+    }
+}
+
+/// How a refresh's rows are made (#835): `layout` in order, then `badges` replaces the badges
+/// of kept rows whose branches or tags changed. See `git_core::graph::GraphRefresh`.
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "GraphRefresh"))]
+#[serde(rename_all = "camelCase")]
+pub struct GraphRefreshDto {
+    pub layout: Vec<GraphSegmentDto>,
+    pub badges: Vec<RowBadgesDto>,
+}
+
+impl From<git_core::graph::GraphRefresh> for GraphRefreshDto {
+    fn from(r: git_core::graph::GraphRefresh) -> Self {
+        GraphRefreshDto {
+            layout: r.layout.into_iter().map(GraphSegmentDto::from).collect(),
+            badges: r.badges.into_iter().map(RowBadgesDto::from).collect(),
+        }
+    }
+}
+
+/// `New`: the next `count` rows of the page's `commits`; `Kept`: the loaded rows
+/// `from..from + count`.
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "GraphSegment"))]
+#[serde(tag = "kind")]
+pub enum GraphSegmentDto {
+    New { count: usize },
+    Kept { from: usize, count: usize },
+}
+
+impl From<git_core::graph::GraphSegment> for GraphSegmentDto {
+    fn from(segment: git_core::graph::GraphSegment) -> Self {
+        match segment {
+            git_core::graph::GraphSegment::New { count } => Self::New { count },
+            git_core::graph::GraphSegment::Kept { from, count } => Self::Kept { from, count },
+        }
+    }
+}
+
+/// A kept row's badges as they are now (#835), named as on `GraphCommit`.
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "RowBadges"))]
+#[serde(rename_all = "camelCase")]
+pub struct RowBadgesDto {
+    pub id: String,
+    pub branch_refs: Vec<String>,
+    pub remote_branch_refs: Vec<String>,
+    pub tags: Vec<String>,
+}
+
+impl From<git_core::graph::RowBadges> for RowBadgesDto {
+    fn from(b: git_core::graph::RowBadges) -> Self {
+        RowBadgesDto {
+            id: b.id,
+            branch_refs: b.branch_refs,
+            remote_branch_refs: b.remote_branch_refs,
+            tags: b.tags,
+        }
+    }
+}
+
+/// The rows a refresh already has (#835), passed as `loaded` to `getCommitGraph`: the `walk`
+/// and `badges` of the pages they came from, and how many there are.
+#[derive(Deserialize, Clone)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "LoadedGraph"))]
+pub struct LoadedGraphDto {
+    pub walk: String,
+    pub badges: String,
+    pub rows: usize,
+}
+
+impl From<LoadedGraphDto> for git_core::graph::LoadedGraph {
+    fn from(dto: LoadedGraphDto) -> Self {
+        git_core::graph::LoadedGraph {
+            walk: dto.walk,
+            badges: dto.badges,
+            rows: dto.rows,
         }
     }
 }
@@ -3260,6 +3354,9 @@ mod ts_bindings {
             LineHistoryDto,
             SearchPageDto,
             GraphPageDto,
+            GraphRefreshDto,
+            GraphSegmentDto,
+            RowBadgesDto,
             ChangedFileDto,
             CompareRangeDto,
             CommitLocationDto,
@@ -3331,6 +3428,7 @@ mod ts_bindings {
             CreatePullRequestDto,
             DiffOptionsDto,
             GraphSelectionDto,
+            LoadedGraphDto,
             DiffAlgorithmDto,
             CommitHunkDto,
             CommitChangeRequestDto,

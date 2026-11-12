@@ -4,6 +4,7 @@ import type {
   ChangeStamp,
   StatusWithStamp,
   GraphPage,
+  LoadedGraph,
   CommitChangeRequest,
   HunkOptions,
   PatchApply,
@@ -143,8 +144,21 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
       call<StatusEntry[]>("list_untracked_folder", { repoPath, path: folder }),
     watchRepo: (repoPath: string) => call<boolean>("watch_repo", { repoPath }),
     unwatchRepo: (repoPath: string) => call<void>("unwatch_repo", { repoPath }),
-    getCommitGraph: (repoPath: string, limit: number, selection: GraphSelection, cursor: string | null) =>
-      call<GraphPage>("get_commit_graph", { repoPath, limit, selection, cursor }),
+    getCommitGraph: (
+      repoPath: string,
+      limit: number,
+      selection: GraphSelection,
+      cursor: string | null,
+      loaded: LoadedGraph | null = null,
+    ) =>
+      call<GraphPage>("get_commit_graph", {
+        repoPath,
+        limit,
+        selection,
+        cursor,
+        // Only a refresh sends it (#835): pages and older callers send what they always did.
+        ...(loaded === null ? {} : { loaded }),
+      }),
     locateCommit: (repoPath: string, revision: string, selection: GraphSelection) =>
       call<CommitLocation | null>("locate_commit", { repoPath, revision, selection }),
     getMergedCommits: (repoPath: string, mergeId: string, limit: number) =>

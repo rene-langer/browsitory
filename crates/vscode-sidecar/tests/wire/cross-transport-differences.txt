@@ -65,6 +65,8 @@ GraphCommit/escapes key-order
 GraphCommit/plain key-order
 GraphCommit/root-commit key-order
 GraphPage/more key-order
+GraphPage/refresh key-order
+GraphPage/stale key-order
 HeadInfo/empty key-order
 HeadInfo/everything key-order
 HeadInfo/operation-CherryPick key-order
