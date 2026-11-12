@@ -7,7 +7,7 @@ use repo_service::wire::StatusWithStampDto;
 use repo_service::wire::{
     to_trailers, BlameLineDto, CommitLocationDto, CommitOutcomeDto, CommitSignatureDto,
     DiffHunkDto, DiffOptionsDto, FileHistoryEntryDto, GraphPageDto, GraphSelectionDto,
-    LineHistoryDto, StatusEntryDto, TrailerDto,
+    LineHistoryDto, LoadedGraphDto, StatusEntryDto, TrailerDto,
 };
 use std::path::Path;
 use tauri::{AppHandle, State};
@@ -70,12 +70,15 @@ pub async fn get_commit_graph(
     selection: GraphSelectionDto,
     // The previous page's `nextCursor` (#685); `null` starts at the first commit.
     cursor: Option<String>,
+    // Without a cursor: the rows the client has, which a refresh continues (#835).
+    loaded: Option<LoadedGraphDto>,
     state: State<'_, AppState>,
 ) -> Result<GraphPageDto, ErrorDto> {
     let selection = git_core::graph::GraphSelection::from(selection);
+    let loaded = loaded.map(git_core::graph::LoadedGraph::from);
     repo_worker(&state, &repo_path)?
         .read(move |w| {
-            w.get_commit_graph(limit, selection, cursor)
+            w.get_commit_graph_after(limit, selection, cursor, loaded)
                 .map(GraphPageDto::from)
         })
         .await

@@ -189,7 +189,8 @@ function combinedRead(client: RepoClient): RepoClient["getStatusWithStamp"] {
   };
 }
 
-/** A `getCommitGraph` answer (#685): `commits`, then `nextCursor` (`null`: the walk is done). */
+/** A `getCommitGraph` answer (#685): `commits`, then `nextCursor` (`null`: the walk is done).
+ *  No walk or badges version, so a refresh after it reads every row again (#835). */
 export function graphPage(commits: GraphCommit[], nextCursor: string | null = null): GraphPage {
-  return { commits, nextCursor, stale: false };
+  return { commits, nextCursor, stale: false, walk: "", badges: "", refresh: null };
 }

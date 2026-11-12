@@ -414,6 +414,37 @@ fn get_commit_graph_pages_with_a_cursor() {
     assert!(!second.stale);
 }
 
+// #835: a first page with the loaded rows continues them: only the new commit is sent.
+#[test]
+fn get_commit_graph_after_continues_the_loaded_rows() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "one");
+    commit_all(&repo, "first commit");
+    write_file(dir.path(), "file.txt", "two");
+    commit_all(&repo, "second commit");
+
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let selection = git_core::graph::GraphSelection::default();
+    let page = handle
+        .get_commit_graph(10, selection.clone(), None)
+        .unwrap();
+    let loaded = git_core::graph::LoadedGraph {
+        walk: page.walk,
+        badges: page.badges,
+        rows: page.commits.len(),
+    };
+    write_file(dir.path(), "file.txt", "three");
+    commit_all(&repo, "third commit");
+
+    let refreshed = handle
+        .get_commit_graph_after(10, selection, None, Some(loaded))
+        .unwrap();
+    assert_eq!(refreshed.commits.len(), 1);
+    assert_eq!(refreshed.commits[0].summary, "third commit");
+    assert!(refreshed.refresh.is_some());
+}
+
 #[test]
 fn a_running_worker_is_alive() {
     let (dir, _repo) = init_repo();

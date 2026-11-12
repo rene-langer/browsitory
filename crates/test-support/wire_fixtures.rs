@@ -450,6 +450,9 @@ pub fn graph_pages() -> Cases<git_core::graph::GraphPage> {
                 commits: vec![graph_commit("Row")],
                 next_cursor: some("1:0123456789abcdef"),
                 stale: false,
+                walk: "0123456789abcdef".to_string(),
+                badges: "fedcba9876543210".to_string(),
+                refresh: None,
             },
         ),
         case(
@@ -458,6 +461,31 @@ pub fn graph_pages() -> Cases<git_core::graph::GraphPage> {
                 commits: Vec::new(),
                 next_cursor: None,
                 stale: true,
+                walk: "0123456789abcdef".to_string(),
+                badges: String::new(),
+                refresh: None,
+            },
+        ),
+        case(
+            "refresh",
+            git_core::graph::GraphPage {
+                commits: vec![graph_commit("New row")],
+                next_cursor: some("21:0123456789abcdef"),
+                stale: false,
+                walk: "0123456789abcdef".to_string(),
+                badges: "fedcba9876543210".to_string(),
+                refresh: Some(git_core::graph::GraphRefresh {
+                    layout: vec![
+                        git_core::graph::GraphSegment::New { count: 1 },
+                        git_core::graph::GraphSegment::Kept { from: 0, count: 20 },
+                    ],
+                    badges: vec![git_core::graph::RowBadges {
+                        id: "a".repeat(40),
+                        branch_refs: Vec::new(),
+                        remote_branch_refs: vec!["origin/main".to_string()],
+                        tags: vec!["v1.0".to_string()],
+                    }],
+                }),
             },
         ),
     ]

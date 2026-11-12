@@ -56,6 +56,7 @@ cargo install tauri-driver --locked               # once, if not already install
 cd frontend && VITE_E2E_REPO_PATH=/tmp/browsitory-e2e-repo pnpm build && cd ..
 cargo build --workspace --features tauri-app/custom-protocol,tauri-app/forge-fixture-override
 cd e2e && pnpm install && pnpm test               # spawns/reaps tauri-driver itself; needs a display (headless: dbus-run-session -- xvfb-run -a pnpm test)
+cd e2e && pnpm test:support                       # unit tests of e2e/support's helpers; no app build needed
 ```
 
 ### E2E: VSCode extension (@vscode/test-electron), from repo root

@@ -1075,6 +1075,11 @@ jobs:
         if: env.RUN_STEPS == 'true'
         working-directory: e2e
         run: pnpm typecheck
+      - name: Test e2e support code
+        if: env.RUN_STEPS == 'true'
+        working-directory: e2e
+        # Unit tests of the suite's own helpers, such as the fake external tool (#916).
+        run: pnpm test:support
       - name: Run E2E suite
         if: env.RUN_STEPS == 'true'
         working-directory: e2e
