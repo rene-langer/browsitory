@@ -61,7 +61,7 @@ describe("App", () => {
       return () => {};
     });
     const openRepo = vi.fn(async () => {});
-    const getFileHistory = vi.fn(async () => []);
+    const getFileHistory = vi.fn(async () => ({ entries: [], complete: true }));
     const client = fakeClient({
       listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
       openRepo,
@@ -1855,7 +1855,7 @@ describe("App", () => {
         <App
           client={pickClient({
             getStatus: async () => [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }],
-            getFileHistory: async () => [{ commit: merge, path: "a.txt", oldPath: null }],
+            getFileHistory: async () => ({ entries: [{ commit: merge, path: "a.txt", oldPath: null }], complete: true }),
             revertCommit,
           })}
         />,
@@ -2512,7 +2512,7 @@ describe("App", () => {
       branchRefs: [],
       remoteBranchRefs: [],
     };
-    const getFileHistory = vi.fn(async () => [{ commit: graphCommit, path: "a.txt", oldPath: null }]);
+    const getFileHistory = vi.fn(async () => ({ entries: [{ commit: graphCommit, path: "a.txt", oldPath: null }], complete: true }));
     const client = fakeClient({
       listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
       openRepo: async () => {},

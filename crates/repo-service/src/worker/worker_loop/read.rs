@@ -145,7 +145,7 @@ pub(super) fn dispatch(
             reply,
         } => status::get_blame(repo, commit_id, path, reply),
         Command::GetFileHistory { path, limit, reply } => {
-            status::get_file_history(repo, path, limit, reply)
+            status::get_file_history(repo, state.walk_cache, path, limit, reply)
         }
         Command::GetLineHistory {
             revision,
@@ -154,7 +154,16 @@ pub(super) fn dispatch(
             end_line,
             limit,
             reply,
-        } => status::get_line_history(repo, revision, path, start_line, end_line, limit, reply),
+        } => status::get_line_history(
+            repo,
+            state.walk_cache,
+            revision,
+            path,
+            start_line,
+            end_line,
+            limit,
+            reply,
+        ),
         Command::SearchCommits {
             query,
             selection,

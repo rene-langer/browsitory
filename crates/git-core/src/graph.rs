@@ -134,6 +134,9 @@ impl RefDecorations {
 /// which only the shallow and graft files can change (commits never change). Those make up its
 /// key, with the repository's folder. The badges are keyed by every branch, remote branch and
 /// tag with what it points at (a tag object never changes either).
+///
+/// It also keeps the most recent file and line history walks where they stopped (#860), so
+/// "Load more" and a refresh continue them instead of walking from the start again.
 #[derive(Default)]
 pub struct WalkCache {
     /// Most recently used first, at most [`WALKS_KEPT`], each with its cursor fingerprint.
@@ -142,7 +145,8 @@ pub struct WalkCache {
     decorations: Option<(RefsKey, String, Arc<RefDecorations>)>,
     /// The badges before them, which a refresh compares rows it keeps against (#835).
     previous_decorations: Option<(String, Arc<RefDecorations>)>,
-    stats: WalkCacheStats,
+    pub(crate) histories: crate::history::HistoryWalks,
+    pub(crate) stats: WalkCacheStats,
 }
 
 /// How many walk orders a [`WalkCache`] keeps: the graph's, a search's with other start points
@@ -151,7 +155,7 @@ pub struct WalkCache {
 const WALKS_KEPT: usize = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct WalkKey {
+pub(crate) struct WalkKey {
     repository: std::path::PathBuf,
     starts: Vec<Oid>,
     first_parent: bool,
@@ -160,7 +164,7 @@ struct WalkKey {
 }
 
 impl WalkKey {
-    fn new(repo: &Repository, starts: &[Oid], first_parent: bool) -> Self {
+    pub(crate) fn new(repo: &Repository, starts: &[Oid], first_parent: bool) -> Self {
         let common = repo.commondir();
         let read = |path: std::path::PathBuf| std::fs::read(path).ok();
         Self {
@@ -178,10 +182,15 @@ impl WalkKey {
 /// How often a [`WalkCache`] did the work it saves: for tests and measurements.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WalkCacheStats {
-    /// Full walks sorted (`TOPOLOGICAL | TIME`).
+    /// Full walks sorted (`TOPOLOGICAL | TIME`), for the graph, search and file and line
+    /// history alike.
     pub walks: usize,
     /// Times every tag was peeled for the badges.
     pub decorations: usize,
+    /// File and line history walks started from scratch (#860).
+    pub history_walks: usize,
+    /// Commits a file or line history walk examined: those on the followed path.
+    pub history_commits: usize,
 }
 
 impl WalkCache {
@@ -214,6 +223,16 @@ impl WalkCache {
         self.walks.insert(0, (key, fingerprint, Arc::clone(&order)));
         self.walks.truncate(WALKS_KEPT);
         Ok(Some(order))
+    }
+
+    /// The order of the walk `key` when a graph or history walk already sorted it, without
+    /// making it the most recently used.
+    pub(crate) fn cached_order(&self, key: &WalkKey) -> Option<Arc<[Oid]>> {
+        self.walks
+            .iter()
+            .find(|(cached, _, _)| cached == key)
+            .map(|(_, _, order)| Arc::clone(order))
+            .or_else(|| self.histories.order(key))
     }
 
     /// The ref badges as they are now; read again only when a branch, remote branch or tag
@@ -315,7 +334,7 @@ fn refs_key(repo: &Repository) -> Result<RefsKey, git2::Error> {
 pub(crate) const CANCEL_INTERVAL: usize = 1024;
 
 /// The whole walk from `starts`, as [`WalkCache::order`] describes it.
-fn walk_order(
+pub(crate) fn walk_order(
     repo: &Repository,
     starts: &[Oid],
     first_parent: bool,

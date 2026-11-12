@@ -99,6 +99,16 @@ export type FileContent = { "kind": "Text", size: number, text: string, } | { "k
 
 export type FileHistoryEntry = { commit: GraphCommit, path: string, oldPath: string | null, };
 
+export type FileHistoryPage = { 
+/**
+ * The first `limit` entries, or fewer when the call's time budget ran out first.
+ */
+entries: Array<FileHistoryEntry>, 
+/**
+ * The file's history ended: no older entry exists.
+ */
+complete: boolean, };
+
 export type FileSide = { "kind": "Missing" } | { "kind": "TooLarge", size: number, } | { "kind": "Loaded", size: number, base64: string, mime: string | null, };
 
 export type FileSides = { old: FileSide, new: FileSide, };
@@ -197,7 +207,12 @@ export type LineHistory = { entries: Array<LineHistoryEntry>,
 /**
  * The walk stopped at its commit cap, so older changes may be missing.
  */
-truncated: boolean, };
+truncated: boolean, 
+/**
+ * No older entry will come: the range's history ended, or the walk stopped at its cap.
+ * Fewer than `limit` entries without it: the call's time budget ran out first (#860).
+ */
+complete: boolean, };
 
 export type LineHistoryEntry = { commit: GraphCommit, path: string, oldPath: string | null, 
 /**

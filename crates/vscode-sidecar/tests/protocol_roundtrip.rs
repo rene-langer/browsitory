@@ -2633,7 +2633,10 @@ fn file_history_and_rename_diff_round_trip_through_the_sidecar() {
         "get_file_history",
         serde_json::json!({"repoPath": repo_path, "path": "new.txt", "limit": 10}),
     );
-    let entries = history["result"].as_array().expect("history result array");
+    assert_eq!(history["result"]["complete"], true);
+    let entries = history["result"]["entries"]
+        .as_array()
+        .expect("history result entries");
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0]["commit"]["summary"], "rename and edit");
     assert_eq!(entries[0]["oldPath"], "old.txt");

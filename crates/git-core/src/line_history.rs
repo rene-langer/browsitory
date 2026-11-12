@@ -16,12 +16,15 @@
 //! - The walk stops after [`MAX_LINE_HISTORY_COMMITS`] commits on the range's path, and says so.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use git2::{Blob, DiffOptions, ErrorCode, Oid, Repository, Sort};
+use git2::{Blob, DiffOptions, ErrorCode, Oid, Repository};
 
-use crate::graph::{GraphCommit, RefDecorations};
+use crate::graph::{walk_order, GraphCommit, RefDecorations, WalkCache};
 use crate::history::{
-    parent_path_entries, path_entries, rename_source, validate_path, HistoryError, PathEntries,
+    history_order, parent_path_entries, path_entries, rename_source, validate_path, HistoryError,
+    HistoryKey, PathEntries,
 };
 
 /// Commits on the range's path a walk examines before it stops (`LineHistory::truncated`). Each
@@ -56,6 +59,8 @@ pub struct LineHistory {
     /// The walk stopped at [`MAX_LINE_HISTORY_COMMITS`] before the range's history ended, so
     /// older changes may be missing.
     pub truncated: bool,
+    /// No older entry will come: the range's history ended, or the walk was truncated.
+    pub complete: bool,
 }
 
 /// Commits that changed lines `lines` of `path` as it is in `revision` (a commit id or "HEAD"),
@@ -67,33 +72,65 @@ pub fn line_history(
     lines: LineRange,
     limit: usize,
 ) -> Result<LineHistory, HistoryError> {
+    let mut cache = WalkCache::default();
+    line_history_cached(
+        repo,
+        &mut cache,
+        revision,
+        path,
+        lines,
+        limit,
+        Duration::MAX,
+    )
+}
+
+/// [`line_history`] continued from where the cache's walk for the same start commit, path and
+/// lines stopped (#860). Answers the first `limit` entries, walking further only when the cache
+/// has fewer, and only until `budget` runs out (checked after each commit on the range's path,
+/// so a call always makes progress). Sorting the walk, the first time, isn't charged to the
+/// budget. "HEAD" is resolved first, so a HEAD that moved starts a new walk.
+pub fn line_history_cached(
+    repo: &Repository,
+    cache: &mut WalkCache,
+    revision: &str,
+    path: &str,
+    lines: LineRange,
+    limit: usize,
+    budget: Duration,
+) -> Result<LineHistory, HistoryError> {
     let start = resolve(repo, revision)?;
     let Some(start) = start.filter(|_| limit > 0) else {
         return Ok(LineHistory {
             entries: Vec::new(),
             truncated: false,
+            complete: start.is_none(),
         });
     };
-    let decorations = RefDecorations::load(repo)?;
-    let mut entries = Vec::new();
-    let truncated = walk(
+    let decorations = cache.decorations(repo)?;
+    let key = HistoryKey::new(repo, start, path, Some(lines));
+    let mut walk = match cache.histories.lines.take(&key) {
+        Some(walk) => walk,
+        None => {
+            let entries = start_entries(repo, start, path, lines)?;
+            let order = history_order(repo, cache, &key.walk, start)?;
+            cache.stats.history_walks += 1;
+            LineWalk::new(order, start, path, lines, entries)
+        }
+    };
+    let deadline = Instant::now().checked_add(budget);
+    let advanced = walk.advance(
         repo,
-        start,
-        path,
-        lines,
-        MAX_LINE_HISTORY_COMMITS,
+        limit,
+        deadline,
         &|| false,
-        &mut |commit, path, old_path, lines| {
-            entries.push(LineHistoryEntry {
-                commit: decorations.graph_commit(commit),
-                path: path.to_string(),
-                old_path,
-                lines,
-            });
-            entries.len() < limit
-        },
-    )?;
-    Ok(LineHistory { entries, truncated })
+        &mut cache.stats.history_commits,
+    );
+    let page = advanced.and_then(|()| walk.page(repo, &decorations, limit));
+    // A walk that failed part-way isn't kept: the next call starts again.
+    if page.is_ok() {
+        cache.histories.lines.put(key, walk);
+    }
+    page
 }
 
 /// The ids of every commit [`line_history`] lists for the range, from `start`, for search's
@@ -105,20 +142,13 @@ pub(crate) fn line_history_ids(
     lines: LineRange,
     cancel: &dyn Fn() -> bool,
 ) -> Result<Option<HashSet<Oid>>, HistoryError> {
-    let mut ids = HashSet::new();
-    walk(
-        repo,
-        start,
-        path,
-        lines,
-        MAX_LINE_HISTORY_COMMITS,
-        cancel,
-        &mut |commit, _, _, _| {
-            ids.insert(commit.id());
-            true
-        },
-    )
-    .map(|_| (!cancel()).then_some(ids))
+    let entries = start_entries(repo, start, path, lines)?;
+    let Some(order) = walk_order(repo, &[start], false, cancel)? else {
+        return Ok(None);
+    };
+    let mut walk = LineWalk::new(order, start, path, lines, entries);
+    walk.advance(repo, usize::MAX, None, cancel, &mut 0)?;
+    Ok((!cancel()).then(|| walk.found.iter().map(|found| found.id).collect()))
 }
 
 /// `revision` peeled to a commit, or `None` for "HEAD" on an unborn branch.
@@ -135,39 +165,14 @@ fn resolve(repo: &Repository, revision: &str) -> Result<Option<Oid>, HistoryErro
     Ok(Some(repo.revparse_single(revision)?.peel_to_commit()?.id()))
 }
 
-/// What a commit did to the tracked range, seen from one parent.
-enum ParentOutcome {
-    /// The range's lines are the same in the parent (possibly moved); carry it there.
-    Unchanged(Tracked),
-    /// The commit changed the range; carry the parent's range there when some of it existed.
-    Changed(Option<Tracked>),
-}
-
-/// A commit still to be examined: the path and lines followed there, and the path's tree
-/// entries in it (found when its child was examined, so they aren't looked up twice).
-struct Tracked {
-    path: String,
-    lines: LineRange,
-    entries: PathEntries,
-}
-
-/// Called with each listed commit, its path, the path it was renamed from and the range in it;
-/// returns whether to go on.
-type Visit<'a> = dyn FnMut(&git2::Commit, &str, Option<String>, LineRange) -> bool + 'a;
-
-/// Walks the range's history from `start`, calling `visit` for each commit that changed it
-/// (newest first) until `visit` returns false or the history ends. Returns whether it stopped at
-/// `max_commits`. `cancel` is polled every [`CANCEL_INTERVAL`] commits; a true answer just ends
-/// the walk (the caller checks it again).
-fn walk(
+/// The path's tree entries in `start`, once the path, the file and the range are checked: a
+/// text file that has every line of the range.
+fn start_entries(
     repo: &Repository,
     start: Oid,
     path: &str,
     lines: LineRange,
-    max_commits: usize,
-    cancel: &dyn Fn() -> bool,
-    visit: &mut Visit,
-) -> Result<bool, HistoryError> {
+) -> Result<PathEntries, HistoryError> {
     validate_path(path)?;
     let commit = repo.find_commit(start)?;
     let Some(start_entries) = path_entries(repo, commit.tree_id(), path)? else {
@@ -189,39 +194,128 @@ fn walk(
             count,
         });
     }
+    Ok(start_entries)
+}
 
-    let mut revwalk = repo.revwalk()?;
-    // Topological: every child is visited before its parents, so a parent's range is final by
-    // the time the walk reaches it.
-    revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
-    revwalk.push(start)?;
+/// What a commit did to the tracked range, seen from one parent.
+enum ParentOutcome {
+    /// The range's lines are the same in the parent (possibly moved); carry it there.
+    Unchanged(Tracked),
+    /// The commit changed the range; carry the parent's range there when some of it existed.
+    Changed(Option<Tracked>),
+}
 
-    let mut tracked: HashMap<Oid, Tracked> = HashMap::from([(
-        start,
-        Tracked {
-            path: path.to_string(),
-            lines,
-            entries: start_entries,
-        },
-    )]);
-    let mut examined = 0;
-    for (walked, oid) in revwalk.enumerate() {
-        if tracked.is_empty() || (walked % CANCEL_INTERVAL == 0 && cancel()) {
-            return Ok(false);
+/// A commit still to be examined: the path and lines followed there, and the path's tree
+/// entries in it (found when its child was examined, so they aren't looked up twice).
+struct Tracked {
+    path: String,
+    lines: LineRange,
+    entries: PathEntries,
+}
+
+/// A listed commit, without its badges (read as they are when a page is answered).
+struct Found {
+    id: Oid,
+    path: String,
+    old_path: Option<String>,
+    lines: LineRange,
+}
+
+/// A line history walk where it stopped (#860): the next position in the walk order, the range
+/// tracked at each commit still to be examined, and what it found so far.
+pub(crate) struct LineWalk {
+    order: Arc<[Oid]>,
+    next: usize,
+    tracked: HashMap<Oid, Tracked>,
+    /// Commits on the range's path examined so far, at most [`MAX_LINE_HISTORY_COMMITS`].
+    examined: usize,
+    /// The walk stopped at [`MAX_LINE_HISTORY_COMMITS`] before the range's history ended.
+    truncated: bool,
+    found: Vec<Found>,
+}
+
+impl LineWalk {
+    fn new(
+        order: Arc<[Oid]>,
+        start: Oid,
+        path: &str,
+        lines: LineRange,
+        entries: PathEntries,
+    ) -> Self {
+        Self {
+            order,
+            next: 0,
+            tracked: HashMap::from([(
+                start,
+                Tracked {
+                    path: path.to_string(),
+                    lines,
+                    entries,
+                },
+            )]),
+            examined: 0,
+            truncated: false,
+            found: Vec::new(),
         }
-        let oid = oid?;
-        let Some(Tracked {
+    }
+
+    pub(crate) fn order(&self) -> &Arc<[Oid]> {
+        &self.order
+    }
+
+    /// No commit is left to examine, or the walk stopped at its cap.
+    fn done(&self) -> bool {
+        self.truncated || self.tracked.is_empty() || self.next >= self.order.len()
+    }
+
+    /// Walks on until `want` commits are found, the history ends, the walk reaches
+    /// [`MAX_LINE_HISTORY_COMMITS`], or `deadline` passed after a commit was examined.
+    /// `cancel` is polled every [`CANCEL_INTERVAL`] commits; a true answer just ends the call
+    /// (the caller checks it again). `examined` counts the commits examined.
+    fn advance(
+        &mut self,
+        repo: &Repository,
+        want: usize,
+        deadline: Option<Instant>,
+        cancel: &dyn Fn() -> bool,
+        examined: &mut usize,
+    ) -> Result<(), HistoryError> {
+        // Topological: every child comes before its parents, so a parent's range is final by
+        // the time the walk reaches it.
+        while self.found.len() < want && !self.done() {
+            if self.next.is_multiple_of(CANCEL_INTERVAL) && cancel() {
+                return Ok(());
+            }
+            let oid = self.order[self.next];
+            self.next += 1;
+            let Some(tracked) = self.tracked.remove(&oid) else {
+                continue;
+            };
+            if self.examined == MAX_LINE_HISTORY_COMMITS {
+                self.truncated = true;
+                return Ok(());
+            }
+            self.examined += 1;
+            *examined += 1;
+            self.examine(repo, oid, tracked)?;
+            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    fn examine(
+        &mut self,
+        repo: &Repository,
+        oid: Oid,
+        tracked: Tracked,
+    ) -> Result<(), HistoryError> {
+        let Tracked {
             path: current_path,
             lines: range,
             entries: current,
-        }) = tracked.remove(&oid)
-        else {
-            continue;
-        };
-        if examined == max_commits {
-            return Ok(true);
-        }
-        examined += 1;
+        } = tracked;
         let commit = repo.find_commit(oid)?;
         let blob_id = current.blob().0;
         // Read only when a parent's version differs.
@@ -289,21 +383,52 @@ fn walk(
             .position(|(_, o)| matches!(o, ParentOutcome::Unchanged(..)))
         {
             if let (parent, ParentOutcome::Unchanged(unchanged)) = outcomes.swap_remove(index) {
-                track(&mut tracked, parent, unchanged);
+                track(&mut self.tracked, parent, unchanged);
             }
-            continue;
+            return Ok(());
         }
 
-        if !visit(&commit, &current_path, renamed_from, range) {
-            return Ok(false);
-        }
+        self.found.push(Found {
+            id: oid,
+            path: current_path,
+            old_path: renamed_from,
+            lines: range,
+        });
         for (parent, outcome) in outcomes {
             if let ParentOutcome::Changed(Some(changed)) = outcome {
-                track(&mut tracked, parent, changed);
+                track(&mut self.tracked, parent, changed);
             }
         }
+        Ok(())
     }
-    Ok(false)
+
+    /// The first `limit` entries found, with the badges in `decorations`.
+    fn page(
+        &self,
+        repo: &Repository,
+        decorations: &RefDecorations,
+        limit: usize,
+    ) -> Result<LineHistory, HistoryError> {
+        let entries = self
+            .found
+            .iter()
+            .take(limit)
+            .map(|found| {
+                Ok(LineHistoryEntry {
+                    commit: decorations.graph_commit(&repo.find_commit(found.id)?),
+                    path: found.path.clone(),
+                    old_path: found.old_path.clone(),
+                    lines: found.lines,
+                })
+            })
+            .collect::<Result<Vec<_>, git2::Error>>()?;
+        let all_found = self.found.len() <= limit;
+        Ok(LineHistory {
+            entries,
+            truncated: self.truncated && all_found,
+            complete: self.done() && all_found,
+        })
+    }
 }
 
 /// Records that `parent` is to be examined for `lines` of `path`. When two children reach the

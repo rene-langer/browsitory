@@ -181,18 +181,27 @@ pub(super) fn get_blame(
         .send(git_core::blame::blame_file(repo, &commit_id, &path).map_err(ErrorDto::from_error));
 }
 
+/// How long one file or line history call walks before it answers what it found (#860), like a
+/// search page's budget: a long walk shares the worker, and the next call continues it.
+pub(super) const HISTORY_BUDGET: std::time::Duration = std::time::Duration::from_millis(250);
+
 pub(super) fn get_file_history(
     repo: &git2::Repository,
+    cache: &mut git_core::graph::WalkCache,
     path: String,
     limit: usize,
-    reply: Sender<Result<Vec<git_core::history::FileHistoryEntry>, ErrorDto>>,
+    reply: Sender<Result<git_core::history::FileHistoryPage, ErrorDto>>,
 ) {
-    let _ = reply
-        .send(git_core::history::file_history(repo, &path, limit).map_err(ErrorDto::from_error));
+    let _ = reply.send(
+        git_core::history::file_history_cached(repo, cache, &path, limit, HISTORY_BUDGET)
+            .map_err(ErrorDto::from_error),
+    );
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn get_line_history(
     repo: &git2::Repository,
+    cache: &mut git_core::graph::WalkCache,
     revision: String,
     path: String,
     start_line: usize,
@@ -205,8 +214,16 @@ pub(super) fn get_line_history(
         end: end_line,
     };
     let _ = reply.send(
-        git_core::line_history::line_history(repo, &revision, &path, lines, limit)
-            .map_err(ErrorDto::from_error),
+        git_core::line_history::line_history_cached(
+            repo,
+            cache,
+            &revision,
+            &path,
+            lines,
+            limit,
+            HISTORY_BUDGET,
+        )
+        .map_err(ErrorDto::from_error),
     );
 }
 
@@ -834,7 +851,7 @@ impl ReadHandle {
         &self,
         path: String,
         limit: usize,
-    ) -> Result<Vec<git_core::history::FileHistoryEntry>, ErrorDto> {
+    ) -> Result<git_core::history::FileHistoryPage, ErrorDto> {
         self.read(|tx| Command::GetFileHistory {
             path,
             limit,

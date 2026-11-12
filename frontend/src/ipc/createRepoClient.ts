@@ -36,7 +36,7 @@ import type {
   DiffOptions,
   DiffSettings,
   FileConflictChoice,
-  FileHistoryEntry,
+  FileHistoryPage,
   LineHistory,
   ChangedFile,
   CommitLocation,
@@ -172,7 +172,7 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
     getCommitDiff: (repoPath: string, commitId: string, path: string, opts: DiffOptions) =>
       call<DiffHunk[]>("get_commit_diff", { repoPath, commitId, path, opts }),
     getFileHistory: (repoPath: string, path: string, limit: number) =>
-      call<FileHistoryEntry[]>("get_file_history", { repoPath, path, limit }),
+      call<FileHistoryPage>("get_file_history", { repoPath, path, limit }),
     getLineHistory: (repoPath: string, revision: string, path: string, startLine: number, endLine: number, limit: number) =>
       call<LineHistory>("get_line_history", { repoPath, revision, path, startLine, endLine, limit }),
     searchCommits: (repoPath: string, query: string, selection: GraphSelection, cursor: string | null) =>

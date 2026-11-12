@@ -28,7 +28,10 @@ fn get_file_history_and_rename_diff_round_trip_through_the_worker() {
 
     let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
     let handle = worker.handle();
-    let history = handle.get_file_history("file.txt".into(), 10).unwrap();
+    let history = handle
+        .get_file_history("file.txt".into(), 10)
+        .unwrap()
+        .entries;
 
     let summaries: Vec<&str> = history.iter().map(|e| e.commit.summary.as_str()).collect();
     assert_eq!(summaries, vec!["edit file", "add file"]);

@@ -670,6 +670,14 @@ export interface FileHistoryEntry {
   oldPath: string | null;
 }
 
+/** `getFileHistory`'s answer (#860). `complete`: the file's history ended, no older entry exists.
+ *  Fewer than `limit` entries without `complete`: the call's time budget ran out first, and the
+ *  next call (same or larger `limit`) continues the walk where it stopped. */
+export interface FileHistoryPage {
+  entries: FileHistoryEntry[];
+  complete: boolean;
+}
+
 /** One commit that changed a range of lines (#447). `path`/`oldPath` as in `FileHistoryEntry`;
  *  `startLine`..`endLine` (1-based, inclusive) are the followed lines in this commit's version. */
 export interface LineHistoryEntry {
@@ -681,10 +689,12 @@ export interface LineHistoryEntry {
 }
 
 /** `getLineHistory`'s answer. `truncated`: the walk stopped at its commit cap, so older changes
- *  may be missing. */
+ *  may be missing. `complete`: no older entry will come (the history ended, or `truncated`);
+ *  without it, fewer than `limit` entries mean the time budget ran out first (#860). */
 export interface LineHistory {
   entries: LineHistoryEntry[];
   truncated: boolean;
+  complete: boolean;
 }
 
 /** One changed path in a compare; `oldPath` is set when the file was renamed (then `path` is the new name). */
@@ -1271,7 +1281,12 @@ export interface RepoClient {
   /** `oldPath` (with `staged`): a staged rename's old path, so only its edits show. */
   getWorkingDiff(repoPath: string, path: string, staged: boolean, opts: DiffOptions, oldPath?: string | null): Promise<DiffHunk[]>;
   getCommitDiff(repoPath: string, commitId: string, path: string, opts: DiffOptions): Promise<DiffHunk[]>;
-  getFileHistory(repoPath: string, path: string, limit: number): Promise<FileHistoryEntry[]>;
+  /**
+   * The commits that changed `path` from HEAD, newest first, at most `limit`. The backend keeps
+   * the walk where it stopped, so a larger `limit` continues it, and the same `limit` with HEAD
+   * unchanged walks nothing (#860). Each call walks for a bounded time: see `FileHistoryPage`.
+   */
+  getFileHistory(repoPath: string, path: string, limit: number): Promise<FileHistoryPage>;
   /**
    * The commits that changed lines `startLine`..`endLine` (1-based, inclusive) of `path` as it is
    * in `revision` (a commit id or "HEAD"), newest first, at most `limit`, following the lines

@@ -48,6 +48,11 @@ pub fn shared_wire_cases(s: &mut impl WireCases) {
         FileHistoryEntryDto::from,
     );
     s.add(
+        "FileHistoryPage",
+        fixtures::file_history_pages(),
+        FileHistoryPageDto::from,
+    );
+    s.add(
         "LineHistory",
         fixtures::line_histories(),
         LineHistoryDto::from,
