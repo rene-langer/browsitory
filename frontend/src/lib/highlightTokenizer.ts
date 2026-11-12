@@ -72,6 +72,9 @@ function nextTask(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+// Stub for the tests-first commit (#843); the implementation follows.
+export function polyfillResponseBytes(_proto: { bytes?: unknown; arrayBuffer(): Promise<ArrayBuffer> }): void {}
+
 export function createTokenizer(): Tokenizer {
   let highlighter: Promise<HighlighterCore> | null = null;
   const loaded = new Map<HighlightLanguage, Promise<void>>();
