@@ -48,6 +48,7 @@ function client(overrides: Partial<RepoClient> = {}): RepoClient {
         activePath: "/repos/a",
       }),
       openRepo: async () => {},
+      closeRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [],
       getCommitGraph: async () => graphPage([]),
@@ -63,7 +64,7 @@ function client(overrides: Partial<RepoClient> = {}): RepoClient {
 describe("App render errors (#846)", () => {
   it("a render error in one repository tab shows that tab's fallback; the rest keeps working", async () => {
     failing.graph = true;
-    const logFrontendError = vi.fn(async () => {});
+    const logFrontendError = vi.fn(async (_context: string, _error: unknown) => {});
     render(<App client={client({ logFrontendError })} />);
 
     const alert = await screen.findByRole("alert", { name: "Couldn't show a" });
@@ -92,7 +93,7 @@ describe("App render errors (#846)", () => {
 
   it("Reload tab mounts the tab's workspace again", async () => {
     failing.graph = true;
-    const getStatus = vi.fn(async () => []);
+    const getStatus = vi.fn(async (_path: string) => []);
     render(<App client={client({ getStatus })} />);
     const alert = await screen.findByRole("alert", { name: "Couldn't show a" });
     failing.graph = false;
@@ -117,7 +118,7 @@ describe("App render errors (#846)", () => {
 
   it("a render error outside the tabs shows the window's fallback, and Reload brings the app back", async () => {
     failing.help = true;
-    const logFrontendError = vi.fn(async () => {});
+    const logFrontendError = vi.fn(async (_context: string, _error: unknown) => {});
     render(<App client={client({ logFrontendError })} />);
     const alert = await screen.findByRole("alert", { name: "Browsitory couldn't show this window" });
     expect(within(alert).getByText("header exploded")).toBeInTheDocument();

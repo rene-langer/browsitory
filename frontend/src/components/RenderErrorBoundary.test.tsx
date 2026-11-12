@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { RenderErrorBoundary, RenderErrorFallback, renderErrorDetails, type CaughtRenderError } from "./RenderErrorBoundary";
+import { RenderErrorBoundary, RenderErrorFallback, type CaughtRenderError } from "./RenderErrorBoundary";
+import { renderErrorDetails } from "../lib/renderErrorDetails";
 
 // React reports every caught render error on the console; keep the test output readable.
 beforeEach(() => {
