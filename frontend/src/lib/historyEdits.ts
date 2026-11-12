@@ -40,8 +40,14 @@ const ROOT = "The first commit of the history can't be edited here.";
 const PARENT_ROOT = "Its parent is the first commit of the history, which can't be edited here.";
 const PARENT_MERGE = "Its parent is a merge commit, which can't be edited here.";
 
-// The reason every edit of the commit is refused, before looking at the single edits.
-function commonRefusal(context: HistoryEditContext, commitId: string, byId: Map<string, GraphCommit>): string | null {
+// The reason every edit of the commit is refused, before looking at the single edits. `fold`:
+// Fold staged changes (#883), which needs something staged instead of a clean tree.
+function commonRefusal(
+  context: HistoryEditContext,
+  commitId: string,
+  byId: Map<string, GraphCommit>,
+  fold = false,
+): string | null {
   const { headInfo } = context;
   if (
     headInfo.operation !== null ||
@@ -55,9 +61,16 @@ function commonRefusal(context: HistoryEditContext, commitId: string, byId: Map<
   if (context.currentBranch === null || headInfo.detachedAt !== null || headInfo.headId === null) {
     return "Check out a branch first.";
   }
-  // As `start_rebase`: staged changes and unstaged changes to tracked files are in the way;
-  // untracked files aren't.
-  if (context.status.some((entry) => entry.staged || entry.kind !== "New")) {
+  if (fold) {
+    // As `fold_staged_into`: the staged changes are what it folds in; unstaged changes to
+    // tracked files are in the way, as for any rebase; untracked files aren't.
+    if (!context.status.some((entry) => entry.staged)) return "Stage the changes to fold in first.";
+    if (context.status.some((entry) => !entry.staged && entry.kind !== "New")) {
+      return "Stage or stash your other changes first.";
+    }
+  } else if (context.status.some((entry) => entry.staged || entry.kind !== "New")) {
+    // As `start_rebase`: staged changes and unstaged changes to tracked files are in the way;
+    // untracked files aren't.
     return "Commit or stash your changes first.";
   }
   // The rebase replays HEAD's first-parent history (`commitsSince`), so only commits on it can
@@ -73,6 +86,13 @@ function commonRefusal(context: HistoryEditContext, commitId: string, byId: Map<
   if (mergeAbove) return "A merge commit comes after this one. Use Rebase onto here… instead.";
   if (current.parentIds.length === 0) return ROOT;
   return null;
+}
+
+/** Whether `foldStagedInto` can fold the staged changes into `commitId` (#883). */
+export function foldStagedCheck(context: HistoryEditContext, commitId: string): { ok: true } | { ok: false; reason: string } {
+  const byId = new Map(context.commits.map((commit) => [commit.id, commit]));
+  const refusal = commonRefusal(context, commitId, byId, true);
+  return refusal === null ? { ok: true } : { ok: false, reason: refusal };
 }
 
 /** Whether each one-click edit is possible on `commitId`, and from which commit it rebases. */

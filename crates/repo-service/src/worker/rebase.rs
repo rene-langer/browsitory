@@ -150,6 +150,26 @@ pub(super) fn start(
     }
 }
 
+/// Fold staged changes (#883): a fold that pauses is kept like a started rebase.
+pub(super) fn fold_staged(
+    repo: &git2::Repository,
+    commit_id: &str,
+    mut slot: RebaseSlot<'_>,
+    op: super::remote::TransferOp,
+    events: Sender<super::HookEvent>,
+) -> Result<RebaseStepResult, ErrorDto> {
+    let folded = with_signing(&op, events, |hooks| {
+        git_core::fold::fold_staged_into(repo, commit_id, hooks)
+    });
+    match folded {
+        Ok((Some(state), step)) => slot.persist(repo, Some(&state), Ok(step)),
+        // Done: nothing to keep.
+        Ok((None, step)) => Ok(step),
+        // Refused, or rolled back to the staged changes: there is no rebase to keep.
+        Err(error) => Err(ErrorDto::from_error(error)),
+    }
+}
+
 pub(super) fn continue_rebase(
     repo: &git2::Repository,
     message: Option<&str>,
@@ -270,11 +290,26 @@ impl WorkerHandle {
         self.rebase_continue_reporting(message, std::sync::mpsc::channel().0)
     }
 
-    /// Folds the staged changes into `commit_id` (#883).
+    /// `fold_staged_reporting` without anyone listening to the signing program.
     #[allow(dead_code)]
     pub fn fold_staged(&self, commit_id: String) -> Result<RebaseStepResult, ErrorDto> {
-        let _ = commit_id;
-        Err("not implemented".into())
+        self.fold_staged_reporting(commit_id, std::sync::mpsc::channel().0)
+    }
+
+    /// Folds the staged changes into `commit_id` (#883): the latest commit is amended, an older
+    /// one gets them through a rebase that pauses on a conflict like any other. The signing
+    /// program as for `start_rebase_reporting`.
+    pub fn fold_staged_reporting(
+        &self,
+        commit_id: String,
+        events: Sender<super::HookEvent>,
+    ) -> Result<RebaseStepResult, ErrorDto> {
+        self.request(|tx| Command::FoldStaged {
+            commit_id,
+            operation_id: self.cancelled.allocate("rebase"),
+            events,
+            reply: tx,
+        })
     }
 
     #[allow(dead_code)]

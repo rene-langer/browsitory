@@ -16,8 +16,8 @@ use git_core::reset::ResetMode;
 use git_core::undo::SnapshotScope::{self, Full, RefsAndIndex};
 
 use super::undo::{
-    amend_label, count_label, fit, merge_label, quoted, reset_label, several, short,
-    start_rebase_label, with_path, HeldReplies, UndoPlan, DISCARD_BUSY, UNDO_BUSY,
+    amend_label, count_label, fit, fold_staged_label, merge_label, quoted, reset_label, several,
+    short, start_rebase_label, with_path, HeldReplies, UndoPlan, DISCARD_BUSY, UNDO_BUSY,
 };
 use super::Command;
 
@@ -434,6 +434,9 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         Command::StartRebase { onto, edit, .. } => {
             P::recorded(start_rebase_label(onto, edit.as_ref()), Full).gated(Refused)
         }
+        Command::FoldStaged { commit_id, .. } => {
+            P::recorded(fold_staged_label(commit_id), Full).gated(Refused)
+        }
         Command::RebaseContinue { .. } => P::continuing(),
         Command::AbortRebase { .. } => P::aborting(),
         Command::CherryPick { commit_id, .. } => {
@@ -612,6 +615,7 @@ pub(super) fn reply_of(command: &mut Command) -> Option<&mut dyn Reply> {
         RestoreFileVersion,
         CommitsSince,
         StartRebase,
+        FoldStaged,
         RebaseContinue,
         AbortRebase,
         FetchRemote,

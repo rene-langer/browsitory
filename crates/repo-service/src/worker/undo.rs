@@ -124,6 +124,11 @@ pub(super) fn start_rebase_label(onto: &str, edit: Option<&HistoryEdit>) -> Stri
     }
 }
 
+/// Fold staged changes' label (#883).
+pub(super) fn fold_staged_label(commit_id: &str) -> String {
+    format!("Fold staged changes into {}", short(commit_id))
+}
+
 /// The label of a failed rebase start that still changed the repository. `git_core::rebase`
 /// rolls a failed start back to the branch; an entry is only left when the rollback didn't
 /// restore everything (or failed: `rolled_back` is false while HEAD is still detached). Its

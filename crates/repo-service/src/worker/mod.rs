@@ -689,6 +689,14 @@ pub(crate) enum Command {
         events: Sender<HookEvent>,
         reply: Sender<Result<RebaseStepResult, ErrorDto>>,
     },
+    /// Fold staged changes into `commit_id` (#883).
+    FoldStaged {
+        commit_id: String,
+        /// As for `StartRebase`.
+        operation_id: cancel::OperationId,
+        events: Sender<HookEvent>,
+        reply: Sender<Result<RebaseStepResult, ErrorDto>>,
+    },
     #[allow(dead_code)]
     AbortRebase {
         reply: Sender<Result<git_core::rebase::RebaseAbort, ErrorDto>>,

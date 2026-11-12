@@ -319,6 +319,7 @@ methods!(|params, repos, stdout| {
     "commits_since" => commits_since(CommitsSinceParams, repos),
     "start_rebase" => start_rebase(StartRebaseParams, repos, stdout),
     "rebase_continue" => rebase_continue(RebaseContinueParams, repos, stdout),
+    "fold_staged_into" => fold_staged_into(FoldStagedParams, repos, stdout),
     "abort_rebase" => abort_rebase(RepoPathParams, repos),
     "detect_forge_repository" => detect_forge_repository(RepoPathParams, repos),
     "save_forge_token" => save_forge_token(ForgeTokenParams, repos),

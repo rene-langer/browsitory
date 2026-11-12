@@ -1,5 +1,5 @@
 import { MAX_CONTEXT_LINES, type DiffSettings, type GraphCommit, type PullStrategy } from "../ipc/RepoClient";
-import { historyEditChecks, type HistoryEditCheck, type HistoryEditRequest } from "./historyEdits";
+import { foldStagedCheck, historyEditChecks, type HistoryEditCheck, type HistoryEditRequest } from "./historyEdits";
 import { UNAVAILABLE_REASON, type PaletteAction } from "./actions/action";
 import { branchActions, rebaseOntoAction } from "./actions/branchActions";
 import { commitActions } from "./actions/commitActions";
@@ -723,6 +723,16 @@ function historyCommands({ appState, state, blockers, blocked, commit }: FamilyC
       if (!check.ok) continue;
       const { onto } = check;
       add({ id, label, keywords: [...keywords, "edit", "rebase", "commit"], run: () => run(onto) });
+    }
+    // Fold staged changes (#883), where the commit menu enables it.
+    const foldContext = { commits: state.commits, headInfo: state.headInfo, currentBranch, status: state.status };
+    if (foldStagedCheck(foldContext, commitId).ok) {
+      add({
+        id: "fold-staged-selected",
+        label: `Fold staged changes into ${short}`,
+        keywords: ["fold", "fixup", "staged", "amend", "edit", "rebase", "commit"],
+        run: () => void appState.foldStaged(commitId),
+      });
     }
   }
   if (!blocked && headId !== null) {

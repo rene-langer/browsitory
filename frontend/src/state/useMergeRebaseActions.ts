@@ -71,6 +71,11 @@ export interface MergeRebaseActions {
    */
   editHistory(commitId: string, onto: string, request: HistoryEditRequest): Promise<RebaseStepResult | null>;
   /**
+   * Folds the staged changes into `commitId` (#883); toasts when done, a pause shows in the
+   * rebase panel. Resolves `null` when it failed (the error is in `state.error`).
+   */
+  foldStaged(commitId: string): Promise<RebaseStepResult | null>;
+  /**
    * Continues the paused rebase. At an edit stop, an edited message (`setRebaseEditMessage`) is
    * sent along once, as the recommitted commit's message (#882).
    */
@@ -233,6 +238,22 @@ export function useMergeRebaseActions(
     },
     [client, runMutation, repoPath, setState],
   );
+  const foldStaged = useCallback(
+    async (commitId: string): Promise<RebaseStepResult | null> => {
+      let result: RebaseStepResult | null = null;
+      setState((prev) => ({ ...prev, historyEditOutcome: null }));
+      await runMutation(async () => {
+        const step = await client.foldStagedInto(repoPath, commitId);
+        result = step;
+        if (step.kind === "Done") {
+          const message = `Folded staged changes into ${commitId.slice(0, 7)}`;
+          setState((prev) => ({ ...prev, historyEditOutcome: { message } }));
+        }
+      });
+      return result;
+    },
+    [client, runMutation, repoPath, setState],
+  );
   // Not state: only Continue reads it, and typing in the message box re-renders nothing else.
   const rebaseEditMessage = useRef<string | null>(null);
   const setRebaseEditMessage = useCallback((message: string | null) => {
@@ -278,6 +299,7 @@ export function useMergeRebaseActions(
     closeRebasePlanner,
     startRebase,
     editHistory,
+    foldStaged,
     rebaseContinue,
     setRebaseEditMessage,
     abortRebase,

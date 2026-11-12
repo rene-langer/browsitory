@@ -74,6 +74,25 @@ pub(super) fn rebase_continue<W: std::io::Write + Send + 'static>(
     serde_json::to_value(RebaseStepResultDto::from(result)).map_err(ErrorDto::from_error)
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct FoldStagedParams {
+    repo_path: String,
+    commit_id: String,
+}
+
+/// Folds the staged changes into `commitId` (#883); the signing program as for `start_rebase`.
+pub(super) fn fold_staged_into<W: std::io::Write + Send + 'static>(
+    params: FoldStagedParams,
+    repos: &Repos,
+    out: &Arc<Mutex<W>>,
+) -> Result<Value, ErrorDto> {
+    let events = hook_relay(&params.repo_path, out);
+    let result =
+        worker_handle(repos, &params.repo_path)?.fold_staged_reporting(params.commit_id, events)?;
+    serde_json::to_value(RebaseStepResultDto::from(result)).map_err(ErrorDto::from_error)
+}
+
 pub(super) fn abort_rebase(params: RepoPathParams, repos: &Repos) -> Result<Value, ErrorDto> {
     let abort = worker_handle(repos, &params.repo_path)?.abort_rebase()?;
     serde_json::to_value(RebaseAbortDto::from(abort)).map_err(ErrorDto::from_error)
