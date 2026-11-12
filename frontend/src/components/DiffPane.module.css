@@ -28,6 +28,14 @@
   white-space: nowrap;
 }
 
+/* The heading's buttons (#832): one flex item, so they move under the title together. */
+.groupActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
 .groupHeading button {
   padding: 1px var(--space-2);
   font-size: var(--text-xs);

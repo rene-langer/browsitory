@@ -845,75 +845,80 @@ export function UncommittedDiffPane({
                 {conflictCount} conflict{conflictCount === 1 ? "" : "s"}
               </span>
             )}
-            {/* Disabled when every unstaged entry is a conflict — the action would be a no-op
-                that still costs a full refresh. */}
-            <button
-              type="button"
-              onClick={handleStageAll}
-              disabled={allStagePaths.length === 0}
-              title={
-                filtering
-                  ? "Stage the changes the filter shows, untracked files included (conflicts are left out)"
-                  : showStageModified
-                    ? "Stage every change, untracked files included (conflicts are left out)"
-                    : undefined
-              }
-            >
-              {filtering ? `Stage ${allStagePaths.length} shown` : "Stage all"}
-            </button>
-            {showStageModified && (
+            {/* One group (#832): it wraps as a whole under the title, never one button alone. */}
+            <div role="group" aria-label="Changes actions" className={styles.groupActions}>
+              {/* Disabled when every unstaged entry is a conflict — the action would be a no-op
+                  that still costs a full refresh. */}
               <button
                 type="button"
-                onClick={handleStageModified}
-                disabled={modifiedStagePaths.length === 0}
+                onClick={handleStageAll}
+                disabled={allStagePaths.length === 0}
                 title={
-                  modifiedStagePaths.length === 0
-                    ? "No tracked file has changes to stage; conflicts are left out"
-                    : `Stage the changes to tracked files only; "Stage all" also stages the ${untrackedCount} untracked file${untrackedCount === 1 ? "" : "s"}`
+                  filtering
+                    ? "Stage the changes the filter shows, untracked files included (conflicts are left out)"
+                    : showStageModified
+                      ? "Stage every change, untracked files included (conflicts are left out)"
+                      : undefined
                 }
               >
-                {filtering ? `Stage ${modifiedStagePaths.length} modified shown` : "Stage modified"}
+                {filtering ? `Stage ${allStagePaths.length} shown` : "Stage all"}
               </button>
-            )}
-            <button
-              type="button"
-              onClick={() =>
-                setDiscardRequest(filtering ? { kind: "all", paths: shownDiscardablePaths } : { kind: "all" })
-              }
-              disabled={(filtering ? shownDiscardablePaths.length : discardableEntries.length) === 0}
-            >
-              {filtering ? `Discard ${shownDiscardablePaths.length} shown…` : "Discard all…"}
-            </button>
-            {untrackedCount > 0 && (
+              {showStageModified && (
+                <button
+                  type="button"
+                  onClick={handleStageModified}
+                  disabled={modifiedStagePaths.length === 0}
+                  title={
+                    modifiedStagePaths.length === 0
+                      ? "No tracked file has changes to stage; conflicts are left out"
+                      : `Stage the changes to tracked files only; "Stage all" also stages the ${untrackedCount} untracked file${untrackedCount === 1 ? "" : "s"}`
+                  }
+                >
+                  {filtering ? `Stage ${modifiedStagePaths.length} modified shown` : "Stage modified"}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() =>
-                  setDiscardRequest(filtering ? { kind: "untracked", paths: shownUntrackedPaths } : { kind: "untracked" })
+                  setDiscardRequest(filtering ? { kind: "all", paths: shownDiscardablePaths } : { kind: "all" })
                 }
-                title={`Delete the ${untrackedCount} untracked ${untrackedCount === 1 ? "file" : "files"}${filtering ? " the filter shows" : ""} and keep the changes to tracked files`}
+                disabled={(filtering ? shownDiscardablePaths.length : discardableEntries.length) === 0}
               >
-                {filtering ? `Delete ${untrackedCount} untracked shown…` : "Delete untracked…"}
+                {filtering ? `Discard ${shownDiscardablePaths.length} shown…` : "Discard all…"}
               </button>
-            )}
+              {untrackedCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setDiscardRequest(filtering ? { kind: "untracked", paths: shownUntrackedPaths } : { kind: "untracked" })
+                  }
+                  title={`Delete the ${untrackedCount} untracked ${untrackedCount === 1 ? "file" : "files"}${filtering ? " the filter shows" : ""} and keep the changes to tracked files`}
+                >
+                  {filtering ? `Delete ${untrackedCount} untracked shown…` : "Delete untracked…"}
+                </button>
+              )}
+            </div>
           </div>
           {renderGroup(false)}
           <div className={styles.groupHeading}>
             <span>
               {filtering ? `Staged (${shownStaged.length} of ${allStagedCount})` : `Staged (${allStagedCount})`}
             </span>
-            <button type="button" onClick={handleUnstageAll} disabled={shownStaged.length === 0}>
-              {filtering ? `Unstage ${shownStaged.length} shown` : "Unstage all"}
-            </button>
-            {patchActions !== undefined && (
-              <button
-                type="button"
-                disabled={allStagedCount === 0}
-                title={filtering ? "Saves every staged change, the ones the filter hides too" : undefined}
-                onClick={() => patchActions.onSavePatch({ kind: "Staged" }, "staged.patch")}
-              >
-                Save as patch…
+            <div role="group" aria-label="Staged actions" className={styles.groupActions}>
+              <button type="button" onClick={handleUnstageAll} disabled={shownStaged.length === 0}>
+                {filtering ? `Unstage ${shownStaged.length} shown` : "Unstage all"}
               </button>
-            )}
+              {patchActions !== undefined && (
+                <button
+                  type="button"
+                  disabled={allStagedCount === 0}
+                  title={filtering ? "Saves every staged change, the ones the filter hides too" : undefined}
+                  onClick={() => patchActions.onSavePatch({ kind: "Staged" }, "staged.patch")}
+                >
+                  Save as patch…
+                </button>
+              )}
+            </div>
           </div>
           {renderGroup(true)}
         </div>
