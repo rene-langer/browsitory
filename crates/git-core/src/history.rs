@@ -284,14 +284,15 @@ fn find_raw_entry(mut data: &[u8], name: &[u8]) -> Option<Option<RawEntry>> {
     Some(None)
 }
 
+/// An entry's octal mode as libgit2 reads it: leading zeros allowed, at most 0o177777.
 fn parse_octal(digits: &[u8]) -> Option<u32> {
-    if digits.is_empty() || digits.len() > 7 {
+    if digits.is_empty() {
         return None;
     }
     digits.iter().try_fold(0u32, |mode, &digit| {
-        (b'0'..=b'7')
-            .contains(&digit)
-            .then(|| mode * 8 + u32::from(digit - b'0'))
+        let digit = digit.checked_sub(b'0').filter(|&d| d < 8)?;
+        let mode = mode * 8 + u32::from(digit);
+        (mode <= 0o177777).then_some(mode)
     })
 }
 
