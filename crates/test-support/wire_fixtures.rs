@@ -259,6 +259,7 @@ pub fn status_entries() -> Cases<git_core::status::StatusEntry> {
                     old_path: None,
                     staged: false,
                     kind,
+                    untracked_folder: false,
                 },
             )
         })
@@ -270,6 +271,7 @@ pub fn status_entries() -> Cases<git_core::status::StatusEntry> {
             old_path: some("src/old.rs"),
             staged: true,
             kind: StatusKind::Renamed,
+            untracked_folder: false,
         },
     ));
     cases
@@ -1604,6 +1606,7 @@ pub fn statuses_with_stamps() -> Cases<git_core::change_stamp::StatusWithStamp> 
                 old_path: None,
                 staged: false,
                 kind: git_core::status::StatusKind::Modified,
+                untracked_folder: false,
             }],
             stamp: git_core::change_stamp::ChangeStamp {
                 refs: "0123456789abcdef".to_string(),

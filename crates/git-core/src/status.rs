@@ -25,6 +25,20 @@ pub struct StatusEntry {
     pub old_path: Option<String>,
     pub staged: bool,
     pub kind: StatusKind,
+    /// An untracked folder with more than [`UNTRACKED_FOLDER_THRESHOLD`] files, listed as one
+    /// entry (`path` ends in `/`) instead of file by file (#845); see [`untracked_folder_files`].
+    pub untracked_folder: bool,
+}
+
+/// An untracked folder with more files than this is listed as one entry (#845).
+pub const UNTRACKED_FOLDER_THRESHOLD: usize = 500;
+
+/// The files of the untracked folder `folder` (`dir/`), as unstaged new entries (#845).
+pub fn untracked_folder_files(
+    _repo: &git2::Repository,
+    _folder: &str,
+) -> Result<Vec<StatusEntry>, StatusError> {
+    todo!()
 }
 
 /// The options `status` reads with; `change_stamp` reads the same entries (#650).
@@ -66,6 +80,7 @@ pub(crate) fn entries(statuses: &git2::Statuses<'_>) -> Vec<StatusEntry> {
                 old_path: None,
                 staged: false,
                 kind: StatusKind::Conflicted,
+                untracked_folder: false,
             });
             continue;
         }
@@ -82,6 +97,7 @@ pub(crate) fn entries(statuses: &git2::Statuses<'_>) -> Vec<StatusEntry> {
                 },
                 staged: true,
                 kind,
+                untracked_folder: false,
             });
         }
         if let Some(kind) = unstaged_kind(flags) {
@@ -92,6 +108,7 @@ pub(crate) fn entries(statuses: &git2::Statuses<'_>) -> Vec<StatusEntry> {
                 old_path: None,
                 staged: false,
                 kind,
+                untracked_folder: false,
             });
         }
     }
