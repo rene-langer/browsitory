@@ -1187,6 +1187,11 @@ pub fn abort_rebase(repo: &Repository, state: &RebaseState) -> Result<RebaseAbor
         // A file another program holds open is named (#303, in `restore_original_branch`).
         // `start_rebase`'s rollback reports the step's error instead.
         restore_original_branch(repo, &state.original_branch_ref, state.original_tip)?;
+        if let Some(base) = state.fold_base {
+            // A paused fold (#883): the branch is back at the fold's fixup commit; take it off,
+            // so its changes are staged again as before the fold.
+            crate::fold::put_back(repo, &state.original_branch_ref, state.original_tip, base)?;
+        }
         return Ok(RebaseAbort { restored: true });
     }
     if at_expected {

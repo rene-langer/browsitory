@@ -33,7 +33,8 @@ pub fn decode(bytes: &[u8], repo: &Repository) -> Result<RebaseState, String> {
     to_state(stored, repo)
 }
 
-const FORMAT_VERSION: u32 = 1;
+/// 2 adds `foldBase` (#883), `None` when missing.
+const FORMAT_VERSION: u32 = 2;
 const OLDEST_READABLE_VERSION: u32 = 1;
 
 #[derive(Serialize, Deserialize)]
@@ -48,6 +49,8 @@ struct StoredRebase {
     group_start_parent: Option<String>,
     expected_head: String,
     stop: StoredStop,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fold_base: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -109,6 +112,7 @@ impl From<&RebaseState> for StoredRebase {
                 RebaseStop::Edit => StoredStop::Edit,
                 RebaseStop::Error => StoredStop::Error,
             },
+            fold_base: state.fold_base.map(|oid| oid.to_string()),
         }
     }
 }
@@ -177,6 +181,6 @@ fn to_state(stored: StoredRebase, repo: &Repository) -> Result<RebaseState, Stri
             StoredStop::Edit => RebaseStop::Edit,
             StoredStop::Error => RebaseStop::Error,
         },
-        fold_base: None,
+        fold_base: stored.fold_base.as_deref().map(commit).transpose()?,
     })
 }
