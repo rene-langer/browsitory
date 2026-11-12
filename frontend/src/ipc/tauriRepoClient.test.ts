@@ -385,9 +385,9 @@ describe("tauriRepoClient transfer progress subscription", () => {
     expect(invoke).toHaveBeenLastCalledWith("set_fetch_settings", { settings: { autoFetchMinutes: 30 } });
     await tauriRepoClient.getAppearanceSettings();
     expect(invoke).toHaveBeenLastCalledWith("get_appearance_settings", undefined);
-    await tauriRepoClient.setAppearanceSettings({ codeFont: "Mono", codeFontSize: 14, uiSize: "Large", tabSize: 2 });
+    await tauriRepoClient.setAppearanceSettings({ codeFont: "Mono", codeFontSize: 14, uiSize: "Large", tabSize: 2, dateFormat: "System" });
     expect(invoke).toHaveBeenLastCalledWith("set_appearance_settings", {
-      settings: { codeFont: "Mono", codeFontSize: 14, uiSize: "Large", tabSize: 2 },
+      settings: { codeFont: "Mono", codeFontSize: 14, uiSize: "Large", tabSize: 2, dateFormat: "System" },
     });
     await tauriRepoClient.getUpdateSettings();
     expect(invoke).toHaveBeenLastCalledWith("get_update_settings", undefined);

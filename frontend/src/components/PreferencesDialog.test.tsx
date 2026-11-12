@@ -418,7 +418,7 @@ describe("Fetch preferences", () => {
 });
 
 describe("AppearanceSection (#615)", () => {
-  const defaults = { codeFont: null, codeFontSize: null, uiSize: "Normal" as const, tabSize: 4 };
+  const defaults = { codeFont: null, codeFontSize: null, uiSize: "Normal" as const, tabSize: 4, dateFormat: "Iso" as const };
   const root = document.documentElement;
 
   afterEach(() => {
@@ -452,7 +452,7 @@ describe("AppearanceSection (#615)", () => {
 
   it("shows and applies the stored settings, clamped", async () => {
     const group = renderAppearance({
-      getAppearanceSettings: async () => ({ codeFont: "Example Mono", codeFontSize: 99, uiSize: "Small" as const, tabSize: 2 }),
+      getAppearanceSettings: async () => ({ codeFont: "Example Mono", codeFontSize: 99, uiSize: "Small" as const, tabSize: 2, dateFormat: "Iso" as const }),
     });
     const size = within(group).getByRole("spinbutton", { name: "Code font size (px)" });
     await waitFor(() => expect(size).toHaveValue(24));

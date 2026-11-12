@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { applyAppearance, clampAppearance, codeFontStack } from "./appearance";
 
-const defaults = { codeFont: null, codeFontSize: null, uiSize: "Normal" as const, tabSize: 4 };
+const defaults = { codeFont: null, codeFontSize: null, uiSize: "Normal" as const, tabSize: 4, dateFormat: "Iso" as const };
 
 describe("clampAppearance", () => {
   it("keeps valid settings", () => {
-    const settings = { codeFont: "Example Mono", codeFontSize: 14, uiSize: "Large" as const, tabSize: 8 };
+    const settings = { codeFont: "Example Mono", codeFontSize: 14, uiSize: "Large" as const, tabSize: 8, dateFormat: "System" as const };
     expect(clampAppearance(settings)).toEqual(settings);
   });
 
@@ -46,7 +46,7 @@ describe("applyAppearance", () => {
   });
 
   it("sets the custom properties and the interface size, and removes them again", () => {
-    applyAppearance({ codeFont: "Example Mono", codeFontSize: 15, uiSize: "Large", tabSize: 2 }, root);
+    applyAppearance({ codeFont: "Example Mono", codeFontSize: 15, uiSize: "Large", tabSize: 2, dateFormat: "Iso" }, root);
     expect(root.style.getPropertyValue("--font-mono")).toBe('"Example Mono", var(--font-mono-default)');
     expect(root.style.getPropertyValue("--code-font-size")).toBe("15px");
     expect(root.style.getPropertyValue("--tab-size")).toBe("2");

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ReflogEntry } from "../ipc/RepoClient";
-import { formatShortDate } from "../lib/formatDate";
+import { formatAbsoluteDate, formatShortDate } from "../lib/formatDate";
 import { layoutInPane, ROW } from "../test/virtualLayout";
 import { ReflogPanel } from "./ReflogPanel";
 
@@ -62,7 +62,7 @@ describe("ReflogPanel", () => {
     expect(details).toContain(`Old ID: ${entry.oldId}`);
     expect(details).toContain(`New ID: ${entry.newId}`);
     expect(details).toContain("Ada Lovelace <ada@example.com>");
-    expect(details).toContain(new Date(entry.timestamp * 1000).toLocaleString());
+    expect(details).toContain(formatAbsoluteDate(entry.timestamp));
     expect(details).toContain(entry.summary!);
     expect(screen.getByRole("button", { name: `Restore refs/heads/main to ${entry.newId}` })).toBeEnabled();
   });
@@ -126,7 +126,7 @@ describe("ReflogPanel — rows", () => {
         `Old ID: ${entry.oldId}`,
         `New ID: ${entry.newId}`,
         "Ada Lovelace <ada@example.com>",
-        new Date(entry.timestamp * 1000).toLocaleString(),
+        formatAbsoluteDate(entry.timestamp),
         entry.message,
         entry.summary,
       ].join("\n"),
@@ -144,7 +144,7 @@ describe("ReflogPanel — rows", () => {
         `Old ID: ${entry.oldId}`,
         `New ID: ${entry.newId}`,
         "Ada Lovelace <ada@example.com>",
-        new Date(entry.timestamp * 1000).toLocaleString(),
+        formatAbsoluteDate(entry.timestamp),
         entry.message,
       ].join("\n"),
     );
