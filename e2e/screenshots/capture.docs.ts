@@ -132,6 +132,18 @@ describe("Documentation screenshots", () => {
     await expandSidebarSection("Branches");
   });
 
+  it("preferences", async () => {
+    await click('button[aria-label="Preferences"]');
+    const filter = await $('input[aria-label="Filter settings"]');
+    await filter.waitForDisplayed();
+    // The Appearance group: theme, fonts, sizes and the date format.
+    await click('//div[@aria-label="Preference groups"]/button[normalize-space()="Appearance"]');
+    await $("legend=Appearance").waitForDisplayed();
+    await shoot("preferences");
+    await browser.keys(["Escape"]);
+    await filter.waitForDisplayed({ reverse: true });
+  });
+
   it("command-palette", async () => {
     await browser.keys(["Control", "k"]);
     const input = await $('input[aria-label="Command palette"]');
@@ -166,5 +178,15 @@ describe("Documentation screenshots", () => {
     await setTheme("dark");
     await shoot("dark-theme");
     await setTheme("light");
+  });
+
+  it("merge-editor", async () => {
+    // A taller window, so the merge editor shows a whole conflict block under the file list.
+    await browser.setWindowSize(WINDOW.width, 1000);
+    const block = await $('section[aria-label="Conflict 1 of 1"]');
+    await block.waitForExist();
+    await browser.execute((el) => (el as HTMLElement).scrollIntoView({ block: "start" }), block);
+    await shoot("merge-editor");
+    await browser.setWindowSize(WINDOW.width, WINDOW.height);
   });
 });

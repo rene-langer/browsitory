@@ -29,6 +29,9 @@ A conflicted file opens the **Resolve conflict** pane:
   blocks. Our lines, their lines, the base and the unchanged lines are syntax highlighted like
   the diff, following the diff's **Syntax highlighting** option; the result fields stay plain
   text.
+
+  ![The merge editor: one conflict block with our and their lines, the choices and the result](assets/merge-editor.png)
+
 - From the keyboard: with a block focused, **1** to **5** take **Accept ours**, **Accept
   theirs**, **Ours then theirs**, **Theirs then ours** and **Accept base**. **F7** and
   **Shift+F7** (⇧F7 on macOS) go to the next and previous conflict from anywhere in the merge

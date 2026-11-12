@@ -122,6 +122,8 @@ contains the text, for example "font"; Escape clears the filter. Preferences ope
 you looked at last, and the **Diff preferences** button next to an untracked file's **Show
 contents** opens it on **Diff**.
 
+![Preferences, open on the Appearance group](assets/preferences.png)
+
 **Appearance.** The Appearance group of Preferences changes how the window and its text look.
 Each change shows at once, without a restart:
 
