@@ -6,6 +6,385 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-12
+
+Changes made outside the app now show by themselves, within about a second, and switching tabs
+keeps the view; the commit history and the other long lists load and draw only what is on
+screen; a commit search highlights its matches in the graph; the Resolve conflict pane is now a
+merge editor; drag and drop for branches, commits and the rebase planner; a file tree and a path
+filter for the working tree's files; Preferences in groups, with a date format; keyboard
+shortcuts for the core loop; plainer words for actions and Git names ("Switch to", "Lines
+12–19"); and, in the VSCode extension, a status bar button, an Open key, Timeline commits and
+opening the workspace's repository.
+
+### Changes from outside the app, tab switching
+
+- Added: changes made outside Browsitory (a terminal, an editor, another Git tool) show up by
+  themselves. While a tab is shown, the app checks every few seconds whether anything it displays
+  changed (files, staging, commits, branches, tags, stashes, remotes, an operation in progress) and
+  reloads only then; it also checks at once when the window gets the focus back or comes into
+  view, and when you switch to a tab. Ignored files and git's own bookkeeping don't count, nothing
+  is checked while one of the tab's own actions runs, and a slow check in a very large repository
+  stretches the interval (#650).
+- Changed: switching tabs keeps the view. The last four tabs you looked at stay loaded, so the
+  selected commit, scroll positions, open panels, search and file history are still there when you
+  switch back, and the repository is read again only if it changed meanwhile (#642).
+- Changed: Left/Right, Home and End in the tab bar move the focus between tabs without switching;
+  Enter or Space switches to the focused tab (#642).
+- Changed: changes made outside Browsitory now show within about a second. The app asks the
+  operating system to report changes to the repository's files (ignored files and git's own
+  bookkeeping left out) and checks only then, plus every 30 seconds in case a change went
+  unreported (some network drives report none). Where changes can't be reported (no file watches
+  left on Linux, more than 20 000 folders, some network drives), it checks every few seconds as
+  before (#756).
+
+### History that scales, search in the graph, matching branch colours
+
+- Changed: the commit graph loads older history as you scroll towards the end instead of with
+  **Load more**, reads only the next page (from where the last one ended) instead of reloading
+  everything, and draws only the rows on screen, so long histories stay fast (#685).
+- Changed: a commit search highlights its matches in the graph instead of replacing it: the
+  other commits are dimmed, a count shows which match is selected ("3 of 42"), and Enter / F3
+  and Shift+Enter / Shift+F3 (or the arrows next to the count) go to the next and previous
+  match, loading history or expanding a collapsed merge as needed; **List** shows the matches
+  alone as before (#687).
+- Changed: a branch's dot in the sidebar and its badges in the graph now have the colour the
+  graph draws that branch in; a branch whose latest commit isn't loaded has a grey dot, and
+  only the checked-out branch's badge is filled (#673).
+
+### Long lists
+
+The lists that can grow to thousands of rows now draw only the rows in view, like the commit
+history (#685).
+
+- Changed: file, folder and line history, the search's "List" view, the Reflog and the Stashes
+  lists render only the rows on screen; screen readers still hear each row's place in the whole
+  list, and the keyboard selection scrolls into view as before (#775).
+- Changed: a Reflog entry now takes two lines, its message, then "old → new · name · date" with
+  short IDs; the full IDs, email, time and summary are in its tooltip, and Restore sits at the
+  end of the row (#775).
+- Fixed: the stash and reflog lists (and the history pane's long lists) showed blank rows, or
+  none, after a section above them opened or closed, or the branch list finished loading, until
+  you scrolled. They now follow the move at once (#828).
+
+### Lighter refreshes
+
+- Changed: staging, unstaging, discarding or editing a file no longer reloads the history,
+  branches, tags and upstreams; they are read again only when a commit, branch, tag, remote or
+  the graph's selection changed, or on Refresh (#685).
+- Fixed: actions and checks that ask for a refresh while one runs now share one that follows it,
+  so a busy repository no longer works through a queue of outdated refreshes (#222).
+
+### Reads during a fetch, pull or push
+
+- Fixed: while a fetch, pull, push or the automatic fetch was running, opening a commit, a diff,
+  blame, file history, search or Refresh waited until the transfer ended; they now answer at once.
+  They still wait while a pull merges and runs its `post-merge` hook (#734).
+- Internal: a Tauri E2E spec opens a commit while a fetch waits on a remote that never answers,
+  then cancels the fetch (#734).
+
+### Conflicts, the merge editor and rebase messages
+
+The Resolve conflict pane is now a merge editor (#720).
+
+- Added: each conflicting block shows the common ancestor's lines behind **Show base**, and can
+  take them with **Accept base**, or both sides in either order (**Ours then theirs**, **Theirs
+  then ours**) (#720).
+- Added: a block's result is editable; typing in it marks the block "Edited", and **Reset**
+  clears it. **Edit whole result** edits the whole file as one text, with conflict markers
+  around blocks still open, and asks before dropping those edits on the way back (#720).
+- Added: long runs of unchanged lines between the conflicts are collapsed to the lines next to
+  them, with **Show N unchanged lines** (#720).
+- Changed: a conflict where both sides added the file gets the merge editor, with an empty base,
+  instead of the keep-ours/keep-theirs/delete choice (#720).
+- Changed: **Accept both** is now **Ours then theirs** (#720).
+- Fixed: a line of the file that looks like a conflict marker (`=======`, `<<<<<<<`) is no
+  longer read as one when the file is split into blocks (#720).
+- Fixed: opening a conflicted binary file read a merge result libgit2 doesn't produce for
+  binary files (undefined behaviour, which could show an empty block view). The pane now says
+  the file is binary and offers the whole-file choices (#720).
+- Fixed: the rebase planner's combined message for Squash rows held only the commit summaries,
+  so a rebase started without editing it dropped every body. It now starts from the whole
+  messages of the group's first commit and its Squash rows, bodies included, as `git rebase -i`
+  does; Start waits until they have loaded (#721).
+- Added: the merge editor highlights our lines, their lines, the base and the unchanged lines
+  like the diff, following its **Syntax highlighting** option; the result fields stay plain
+  text (#763).
+- Added: merge editor keys. With a conflict block focused, **1** to **5** take **Accept ours**,
+  **Accept theirs**, **Ours then theirs**, **Theirs then ours** and **Accept base**; **F7** and
+  **Shift+F7** go to the next and previous conflict. In a result field the digits type text:
+  **Esc** goes back to the block. The keys are on the buttons, in the shortcut sheet's new
+  "Merge editor" group, and in the command palette, which offers the moves and choices for the
+  current conflict too (#764).
+
+### Rebase onto a branch, file list tree and filter
+
+- Added: **Rebase current branch onto ⟨branch⟩…** in the menus of local and remote branches and
+  in the command palette opens the rebase planner on that branch, named in the planner's title.
+  It is disabled with the reason during a merge, rebase or cherry-pick and not offered on a
+  detached HEAD (#619).
+- Changed: **Undo** names a rebase onto a branch by the branch ("Rebase onto origin/main"), also
+  for **Rebase** after a pull has diverged, instead of the full ref name (#619).
+- Added: **Filter files** above the working tree's file list narrows both groups by path. While it
+  hides files, the group buttons act on the shown files only and say so (**Stage 3 shown**,
+  **Discard 3 shown…**, whose confirmation lists those files), and Ctrl+A selects only the shown
+  files (#729).
+- Added: **Flat** and **Tree** switch the file list to a tree of folders, with collapsible folders
+  and a stage or unstage button per folder. The choice is kept on this computer and is also in
+  **Preferences → Diff** (#729).
+
+### Drag and drop
+
+- Added: drag a branch onto the current branch, or the current branch onto another branch, to
+  merge or rebase. The drop opens a small menu with both choices, naming both branches, and they
+  open the same merge dialog or rebase planner as the menu items. Drops that can't run (two
+  branches that aren't current, a detached HEAD, a busy repository) are refused, and the label
+  beside the pointer says why. Collapsed folders open while a branch hovers them (#744).
+- Added: drag a commit from the graph onto the current branch in the sidebar to cherry-pick it.
+  The drop opens a menu with "Cherry-pick ⟨commit⟩ onto ⟨branch⟩" and Cancel; a row of a
+  multi-selection drags all selected commits (picked oldest first), and a merge commit opens the
+  parent picker. Other branches, a detached HEAD, HEAD itself, a selection with a merge commit and
+  a busy repository refuse the drop, and the label beside the pointer says why (#744).
+- Added: rows of the rebase planner can be dragged by their handle and dropped above or below
+  another row; a line shows where the row will land, and Escape cancels. Move up/Move down and
+  Alt+Up/Down still work, and every move, by drag or by key, is announced to screen readers
+  (#744).
+
+### Staging several files, no-ff pulls
+
+- Changed: staging, unstaging or ignoring several files at once (the selection bar, Stage all,
+  Unstage all) is one Undo step ("Stage 3 files") instead of one per file, and all or nothing:
+  when one file can't be staged, none is. The notification after ignoring several files now
+  offers Undo (#528).
+- Fixed: Pull follows `pull.ff=false`, `--no-ff` in `branch.<name>.mergeoptions` and
+  `merge.ff=false` like `git pull`: a branch that could fast-forward gets a merge commit instead,
+  ready to commit in the commit box. A configured rebase still fast-forwards (#740).
+
+### Stashes
+
+- Changed: "Restore staged changes" is no longer a checkbox above the stash list that silently
+  changed what Apply and Pop do. Apply and Pop bring staged work back as staged; a stash that
+  holds staged changes also offers "Apply as unstaged" and "Pop as unstaged", in its menu, in
+  the stash view and in the command palette (#657).
+- Added: each stash shows its branch, age and file count ("On main · 2 days ago · 3 files"),
+  and its name without git's "On main:" prefix; the full message and date are in its tooltip
+  (#657).
+- Fixed: a stash holding a file that replaced a folder, or files in a folder that replaced a
+  file, was refused by Apply and Pop. Browsitory now applies it in git's order, removing the
+  folder or file first; a folder holding anything the stash doesn't know is still refused
+  (#229). `git stash pop` itself can't apply the second kind.
+- Fixed: "Stash file…" on a folder that replaced a file was refused although git accepts it.
+  It now stashes the file's deletion with the folder's untracked files, and Pop brings both
+  back; git's own stash leaves the deletion out. A folder that also holds ignored files, a
+  repository or untracked files left out is still refused, where git stops half-way (#207).
+- Changed: the stash view's **Apply**, **Pop** and **Drop…** show why they are blocked in
+  visible text tied to the button, and both Drop confirmations tie their reason to the confirm
+  button (#772).
+
+### Commit notification, disabled reasons and the working tree
+
+- Changed: after a commit the notification offers **Push** and **Undo** together, not one or the
+  other (#733).
+- Fixed: the commit notification's **Push** pushed whichever branch was current when it was
+  clicked; it now pushes only the branch it names and otherwise says "Not pushed: main is no
+  longer the current branch." (#735).
+- Fixed: in the working tree, the Changes heading broke its labels over two lines and the diff
+  options toolbar was cut in half when the file list grew (#752).
+- Fixed: "Clone repository" opened as a dialog inside another dialog, announced twice by screen
+  readers (#761).
+- Changed: the buttons of the sidebar panels (worktrees, tags, pull requests, branches, remotes),
+  the operation status strip, the rebase planner, the files-at-a-commit view and the remaining
+  dialogs and confirmations say why they can't run in visible text tied to the button, not only
+  in a tooltip (#664, #748).
+- Internal: the worktree E2E spec waits for the new tab's current-branch row; since tabs stay
+  mounted, it could read the row of the tab it was leaving.
+- Fixed: the commit toast's Push, clicked right after the toast appeared, sometimes did nothing,
+  and clicked right after another branch was checked out it could push that branch instead of
+  saying "Not pushed: … is no longer the current branch" (#816).
+
+### Preferences in groups, date format
+
+- Changed: Preferences shows one group of settings at a time (Appearance, Diff, Commit message,
+  Fetch, External tools and, in the desktop app, Updates), picked in a list on the left or with
+  the arrow keys. The dialog keeps its size, only the group scrolls, and it reopens on the group
+  you looked at last (#784).
+- Added: **Filter settings** in Preferences keeps the groups with a setting whose name matches
+  and says how many match (#784).
+- Added: next to an untracked file's **Show contents**, **Diff preferences** opens Preferences on
+  the Diff group, where **Expand untracked files** is (#784).
+- Added: Preferences → Appearance → Date format: "ISO" (2026-11-11 14:05, the default) or
+  "System", your operating system's short date and time (#675).
+- Changed: every date in the app follows it: the history's date column, search results, file
+  history, the Reflog, stashes, commit details, patches and the "Fetched … ago" tooltip. None
+  shows seconds any more, and "3 days ago"-style labels are always in English, like the rest of
+  the app (#675).
+
+### One word for each action, plain names instead of Git syntax
+
+- Changed: branch menus say "Switch to" instead of "Checkout", like the command palette; commit
+  and tag menus say "Switch to (detached)", the palette "Switch to abc1234 (detached)" and "Switch
+  to tag v1 (detached)", and the New branch form "Switch to it after creating" (#681).
+- Changed: the release notes are "What's new" everywhere: the header button's name now matches
+  its tooltip, and the dialog has the same title (#681).
+- Changed: a diff's hunk headers read "Lines 12–19" (or "Removed lines 4–6") instead of git's
+  "@@ -10,6 +12,8 @@"; the tooltip names the lines before and after the change (#682).
+- Changed: the Reflog panel names branches as the branch list does, "main" rather than
+  "refs/heads/main", in its picker, Restore buttons and confirmation (#682).
+- Changed: removing a remote that a branch still tracks names those branches in plain words
+  instead of a bracketed list (#682).
+
+### Controls, states and targets
+
+- Changed: a pressed toggle button (diff options, Blame, Changes / All files, conflict choices,
+  the search bar's toggles) now has a tinted fill and an outline, not just a text colour; Wrap
+  lines on Auto has a dashed outline (#667).
+- Changed: lines selected for partial staging in a diff have a bar on their right edge, apart from
+  the line cursor's bar on the left, and keep their added or removed colour (#722).
+- Changed: the Tags section no longer has a push form. Tick tags (or **Select all**) and a bar
+  under the list pushes them; a tag's menu still pushes one tag and the command palette all of
+  them (#674).
+- Changed: Undo and Redo, the close buttons, the context-line stepper, toasts and the signature
+  badge use the same icon set as the rest of the app instead of text symbols; the commit
+  message's column ruler is a faint dotted line, no longer a second border (#674).
+- Fixed: the remove button on a co-author chip, an error's dismiss button and a toast's dismiss
+  button are at least 24 × 24 px (#672).
+- Fixed: the command palette, keyboard shortcuts, rebase plan, open repository and clone dialogs
+  have names for screen readers; the commit graph's menus are no longer inside its list; and an
+  invalid search is read out politely once you stop typing, not as an alert on every keystroke
+  (#669).
+
+### Keyboard shortcuts for the core loop
+
+- Added: global shortcuts for Refresh (F5), Fetch (Shift+F5), Pull (Ctrl+Shift+L), Push
+  (Ctrl+Shift+K), Stage all (Ctrl+Shift+A) and the commit message (Alt+C), with ⌘ for Ctrl on
+  macOS. They run the command palette's commands, so they follow the same rules, and a
+  notification says why one can't run. The palette shows each command's shortcut beside it, and
+  the toolbar's tooltips name theirs (#646).
+- Added: Ctrl+Tab and Ctrl+Shift+Tab switch to the next and previous tab, Ctrl+1 … Ctrl+8 to the
+  first eight tabs and Ctrl+9 to the last (#646).
+- Added: F6 and Shift+F6 move the focus between the toolbar, the sidebar, the history and the
+  diff, back to where it last was in each; the sidebar, history and diff are labelled regions
+  for screen readers (#670).
+- Changed: shortcuts are written for the platform in one notation: Ctrl+Shift+Z on Windows and
+  Linux, ⇧⌘Z on macOS, arrows as ← ↑ → ↓ (#683).
+- Internal: the global shortcuts are defined once in `frontend/src/lib/keybindings.ts`, for the
+  shortcut list, the palette, the tooltips and the VS Code keybindings to come (#679).
+
+### First launch, the repository picker and patches
+
+- Changed: the first launch shows a welcome in the repository picker (open, clone or create a
+  repository, the command palette key, the user guide) instead of opening release notes (#688).
+- Added: the picker's recent repositories can be removed from the list, a repository whose
+  folder is gone is marked "Folder not found", and a filter narrows the recent repositories and
+  workspaces (#690).
+- Changed: "Open workspace root" is now "New workspace…", next to the picker's workspaces (#690).
+- Added: in VSCode, the picker's and palette's Clone… and New repository… run VSCode's Git: Clone
+  and Git: Initialize Repository (#680).
+- Changed: in VSCode, an update shows a notice with a "What’s new" button instead of opening the
+  release notes over the editor (#680).
+- Added: recent repositories can be pinned in the picker: pinned ones come first and don't count
+  against the ten recent ones (#766).
+- Added: "Apply as commits" runs the `applypatch-msg`, `pre-applypatch` and `post-applypatch`
+  hooks like `git am`; a rejecting hook takes the whole patch file back and shows its output
+  (#747).
+
+### VSCode extension
+
+- Changed: "Browsitory: Open" opens the repository of the file in the active editor, or else, when
+  the panel opens, the workspace folders' repositories, instead of always showing the picker
+  (#677).
+- Added: "Open in Browsitory" in the Explorer's folder menu and in a Git repository's menu in the
+  Source Control view; "Show File History in Browsitory" in the Explorer's file menu, an editor
+  tab's menu and the editor's menu; "Show Line History in Browsitory" for the lines selected in an
+  editor (#678).
+- Changed: the Browsitory panel has its icon, opens in the active editor group and comes back
+  after a window reload (#678).
+- Fixed: Ctrl/Cmd+K, F5, Shift+F5, F6, Shift+F6, Ctrl/Cmd+Alt+B, Ctrl+Tab, Ctrl/Cmd+1 … 9,
+  Ctrl/Cmd+W, Ctrl/Cmd+Shift+T and Back/Forward ran VSCode's commands instead of Browsitory's. The
+  extension now binds them while Browsitory has the focus; change them in VSCode's Keyboard
+  Shortcuts (#679).
+- Added: a Browsitory button in the status bar that opens the active editor's repository; the
+  `browsitory.statusBar.enabled` setting hides it (#759).
+- Added: Ctrl+K Ctrl+G (Cmd+K Cmd+G on macOS) runs "Browsitory: Open" (#759).
+- Added: "Show Commit in Browsitory" on a commit in VSCode's Timeline view selects it in the
+  graph, loading as much history as it needs (#759).
+- Changed: when "Browsitory: Open" opens the workspace's repositories and finds several, it asks
+  which ones to open, all ticked. It also finds the repositories directly inside a workspace
+  folder, including ones nested in another repository (#759).
+
+### Reliability
+
+- Fixed: a mixed or hard reset writes the index before it moves the branch, as git does. HEAD
+  no longer points at the target while the index still holds the old tree, and a reset whose
+  index can't be written (another git command holds `index.lock`) now leaves HEAD where it was
+  instead of moving it (#796).
+- Internal: a file watcher marks itself stopped before it reports `Stopped`, so a watch
+  requested right after the event starts a new watcher; this also fixes the flaky
+  `growing_past_the_folder_limit_stops_the_watcher` test (#797).
+- Internal: CI's mutation testing comment says "Mutation testing didn't run" when an earlier
+  step failed or cargo-mutants left no results, instead of claiming every mutant was caught
+  (#798).
+- Internal: the blame E2E spec looks the commit message field up again before it types into
+  it, and a failed commit there records the commit box's state and a screenshot (#810).
+- Fixed: a toast's Undo clicked the moment the toast appeared could be refused as stale, or
+  ignored, instead of undoing its step (#769).
+- Internal: the lock-contention burst test compares the waits the worker chose instead of
+  elapsed time, so a slow CI runner no longer fails it (#736).
+- Internal: the search test fixture with a merged side branch commits at fixed times, so the
+  order of its two sibling commits no longer depends on the clock (#770).
+- Internal: the VSCode E2E specs run git through one shared helper,
+  `extension/e2e/src/support/git.ts`, which the Tauri E2E suite re-exports (#524).
+
+### E2E reliability
+
+- Internal: the Tauri E2E specs open a sidebar section only after the workspace's first load has
+  landed, and check that it opened. A header clicked while the branch tree replaced its loading
+  placeholder could miss (the worktree spec never saw its form, #824) or move far out of view
+  with its body, where the windowed reflog list renders no rows (#825). The reflog spec also
+  scrolls its list into view before counting entries, and both specs print the sidebar's state
+  and save a screenshot when they fail.
+- Internal: the Tauri E2E specs set a field that starts with text (the reword and combined
+  messages) inside the page with the new `setValueInPage` helper, so a render between
+  WebKitWebDriver's clear and its typing no longer leaves the old text in front of the new
+  (#783, #791).
+- Internal: the cherry-pick sequence and stash specs click Continue and Pop with `clickInPage`,
+  which waits while the button is blocked (`aria-disabled`), instead of a click that a blocked
+  button ignores (#790).
+- Internal: the history rewrite spec reports the history when its wait gives up, not when it
+  started (#783).
+- Internal: WebDriver's own clicks reach the whole 1200×800 E2E window, its bottom edge
+  included; the bottom-edge failures seen on #749 no longer reproduce on main (#751).
+
+### Code clean-ups
+
+- Internal: a push is built from named steps (negotiation with lease check and `pre-push`, the
+  remote's per-ref answer, the outcome) and takes its settings as one `PushRequest` instead of
+  nine parameters (#502).
+- Internal: the path-limited stash is built in named steps (select and check the paths, build
+  the index, untracked and worktree commits, push `refs/stash`, revert the paths) instead of one
+  300-line function (#502).
+- Internal: creating a worktree, the search query tokenizer and the line-staging patch builder
+  are split into named steps instead of one long function each (#502).
+- Internal: the work-tree walk that guards every write against links swapped in meanwhile is
+  written once, over a small per-platform trait (`HeldDir`), instead of once for Unix and once
+  for Windows; the shared loop is tested on every platform with a scripted folder (#501).
+- Internal: the wire snapshot tests of the desktop app and the VSCode sidecar take their shared
+  DTO cases from one list (`crates/test-support/wire_cases.rs`), so a new DTO is snapshotted by
+  both transports at once (#488).
+- Internal: committing and a cherry-pick or revert step are built from named phases (merge state
+  read, hooks, commit, clean-up) instead of one long function each (#502).
+- Internal: the git-core tests share `git_ok`, `head_id` and `index_paths` from
+  `tests/common` instead of keeping their own copies (#505).
+- Internal: stash, conflict resolution and rebase write a work-tree file's blob through git's
+  clean filters with one shared helper (#210).
+
+### Internal: faster pull request checks
+
+- Internal: CI cancels a pull request's older run when a new commit is pushed, skips the Rust
+  jobs when a pull request changes no file they read, and skips every build and test job for
+  documentation-only pull requests. The skipped jobs still report success, so the required
+  checks keep their names; pushes to main, the schedule and dispatched runs run everything.
+
 ## [0.10.0] - 2026-11-11
 
 A security fix for "Apply patch…" (GHSA-5j9j-62g5-846m), and the work of 0.9.0 and 0.10.0
