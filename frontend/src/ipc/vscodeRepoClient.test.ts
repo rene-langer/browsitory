@@ -199,6 +199,7 @@ describe("vscodeRepoClient", () => {
       [() => vscodeRepoClient.setFetchSettings({ autoFetchMinutes: 10 }), "set_fetch_settings", { settings: { autoFetchMinutes: 10 } }, null],
       [() => vscodeRepoClient.getAppearanceSettings(), "get_appearance_settings", {}, { codeFont: null, codeFontSize: null, uiSize: "Normal" as const, tabSize: 4, dateFormat: "Iso" as const }],
       [() => vscodeRepoClient.setAppearanceSettings({ codeFont: "Mono", codeFontSize: 14, uiSize: "Small" as const, tabSize: 8, dateFormat: "System" as const }), "set_appearance_settings", { settings: { codeFont: "Mono", codeFontSize: 14, uiSize: "Small" as const, tabSize: 8, dateFormat: "System" as const } }, null],
+      [() => vscodeRepoClient.listFontFamilies(), "list_font_families", {}, [{ name: "Fira Code", monospace: true }]],
       [() => vscodeRepoClient.getUpdateSettings(), "get_update_settings", {}, { checkAutomatically: true }],
       [() => vscodeRepoClient.setUpdateSettings({ checkAutomatically: false }), "set_update_settings", { settings: { checkAutomatically: false } }, null],
       [() => vscodeRepoClient.backgroundFetch("/r", null, 5), "background_fetch", { repoPath: "/r", prune: null, intervalMinutes: 5 }, "background-fetch-1"],
