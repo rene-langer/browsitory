@@ -38,8 +38,8 @@ Then look at every changed image before you commit it.
   webview data already live in temp folders in the E2E harness. Nothing reads or writes your
   own settings, keys or Browsitory data.
 - `capture.docs.ts` opens the demo from the repository picker, sets a 1280×800 window and the
-  light theme, and saves each screen to `docs/guide/assets/<name>.png`. The last shot uses the dark
-  theme.
+  light theme, and saves each screen to `docs/guide/assets/<name>.png`. The `dark-theme` shot uses
+  the dark theme, and `merge-editor` a taller window.
 
 ## Shots
 
@@ -51,9 +51,11 @@ Then look at every changed image before you commit it.
 | `branches.png` | The Branches section with the `origin` folder open |
 | `stashes.png` | The Stashes section |
 | `tags.png` | The Tags section |
+| `preferences.png` | Preferences, open on the Appearance group |
 | `command-palette.png` | The command palette, filtered to "branch" |
 | `conflict.png` | A merge stopped on a conflict, with the resolve controls |
 | `dark-theme.png` | The same conflict in the dark theme |
+| `merge-editor.png` | The merge editor on that conflict, in a 1280×1000 window |
 
 To add a shot, add a test to `capture.docs.ts` that ends with `shoot("<name>")`, run the
 script, and add the file to this table.

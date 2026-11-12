@@ -96,10 +96,10 @@ the right:
   VSCode the button isn't there: the panel takes the colours and fonts of VSCode's own theme
   (light, dark or high contrast) and changes with it.
 - The gear button opens **Preferences** (see below).
-- The sparkle button (**What's new**) opens the release notes (see below).
+- The sparkle button (**What's new**) opens what changed in each version (see below).
 - The question mark button (**Help**) opens a menu: **User guide** opens this guide in your
   browser, **Keyboard shortcuts** shows the list of shortcuts (while a repository is open), and
-  **What's new** opens the release notes.
+  **What's new** opens the same dialog.
 
 **Preferences.** The settings are grouped, and the dialog shows one group at a time: pick it
 in the list on the left (above the settings in a narrow window), or move through the list with
@@ -122,6 +122,8 @@ contains the text, for example "font"; Escape clears the filter. Preferences ope
 you looked at last, and the **Diff preferences** button next to an untracked file's **Show
 contents** opens it on **Diff**.
 
+![Preferences, open on the Appearance group](assets/preferences.png)
+
 **Appearance.** The Appearance group of Preferences changes how the window and its text look.
 Each change shows at once, without a restart:
 
@@ -142,12 +144,14 @@ Each change shows at once, without a restart:
   history, the Reflog, stashes and commit details. "3 days ago" labels stay in English.
 - **Tab size**: how many columns a tab character takes in file content, from 1 to 16 (4 at
   first).
-- The sparkle button (**What's new**) opens **What's new**: what changed in each version. They also open
-  by themselves the first time you start a new version (in VSCode, a notice says Browsitory was
-  updated, and its **What’s new** button opens them). The very first start shows a welcome in
-  the repository picker instead (see [Open, clone and create repositories](opening-repositories.md)). The buttons at the bottom stay in view
-  while you scroll: **Close** (or Escape, or a click outside the dialog) closes them, and
-  **User guide** opens this guide in your browser.
+
+**What's new.** The sparkle button (**What's new**) opens the **What's new** dialog: what
+changed in each version. It also opens by itself the first time you start a new version (in
+VSCode, a notice says Browsitory was updated, and its **What’s new** button opens it). The very
+first start shows a welcome in the repository picker instead (see
+[Open, clone and create repositories](opening-repositories.md)). The buttons at the bottom stay
+in view while you scroll: **Close** (or Escape, or a click outside the dialog) closes it, and
+**User guide** opens this guide in your browser.
 
 **Updates (desktop app).** Browsitory checks for a new version when it starts and every six
 hours, and downloads it in the background. If a check or download fails (for example while the
