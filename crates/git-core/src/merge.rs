@@ -824,8 +824,10 @@ pub fn mark_resolved(
 /// `mark_resolved` with a test seam: `after_check` runs between the marker check and the
 /// staging, so a test can swap the file in that instant (#199).
 ///
-/// The file is read once, through `worktree_guard::read_beneath` (no link followed at any
-/// component, a FIFO never opened for reading), and exactly those bytes are checked and staged.
+/// The file is read once, through the handle `worktree_guard::open_leaf_beneath` opened (no
+/// link followed at any component, a FIFO never opened for reading), and exactly those bytes
+/// are checked and staged. They stream into the object database in pieces while they are
+/// checked, so a big file is never held in memory (#212); with markers, nothing is written.
 /// `Index::add_path` isn't used for a file or link: libgit2 would `lstat` and open the path a
 /// second time, following a link and blocking on a FIFO swapped in meanwhile, and stage content
 /// that was never checked (#199). A file's blob goes through `blob_writer` with the path as
@@ -857,7 +859,7 @@ pub fn mark_resolved_with_pauses(
     after_check: &mut dyn FnMut(),
     folder_held: &mut dyn FnMut(),
 ) -> Result<MarkResolvedOutcome, MergeError> {
-    use crate::worktree_guard::Leaf;
+    use crate::worktree_guard::Opened;
     if !crate::launch::is_safe_relative(path) {
         return Err(MergeError::NoConflict(path.to_string()));
     }
@@ -880,33 +882,50 @@ pub fn mark_resolved_with_pauses(
         .find_map(|stage| index.get_path(Path::new(path), stage))
         .map(|entry| entry.mode);
     let config = crate::undo::worktree_config(repo).map_err(undo_error)?;
-    let leaf = crate::worktree_guard::read_beneath(workdir, path).map_err(|error| {
+    let unreadable = |error: std::io::Error| {
         if error.kind() == std::io::ErrorKind::PermissionDenied {
             MergeError::Unreadable(path.to_string())
         } else {
             MergeError::Io(error)
         }
-    })?;
+    };
+    let leaf = crate::worktree_guard::open_leaf_beneath(workdir, path).map_err(unreadable)?;
     match leaf {
-        Some(Leaf::Link { target, stat }) => {
+        Some(Opened::Link { target, stat }) => {
             after_check();
             let id = repo.blob(&target)?;
             index.remove_path(Path::new(path))?;
             index.add(&staged_entry(path, id, crate::undo::MODE_LINK, &stat))?;
         }
-        Some(Leaf::File {
-            bytes,
+        Some(Opened::File {
+            mut file,
             executable,
             stat,
         }) => {
             let mode = crate::undo::file_mode(&config, executable, previous_mode);
+            // Streamed from the opened handle into the object database, checked on the way
+            // (#212). Through the clean filters (the path as hint), also for a link kept as a
+            // file, as git does.
+            let mut writer = repo.blob_writer(Some(Path::new(path)))?;
+            let mut scan = MarkerScan::default();
+            let mut buffer = vec![0; STREAM_CHUNK];
+            loop {
+                let read = match std::io::Read::read(&mut file, &mut buffer) {
+                    Ok(0) => break,
+                    Ok(read) => read,
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(error) => return Err(unreadable(error)),
+                };
+                scan.feed(&buffer[..read]);
+                std::io::Write::write_all(&mut writer, &buffer[..read])?;
+            }
             // A link kept as a file (`core.symlinks` off) holds a target, not text to check.
-            if !force && mode != crate::undo::MODE_LINK && has_conflict_markers(&bytes) {
+            // With markers, the writer is dropped uncommitted: nothing is written.
+            if !force && mode != crate::undo::MODE_LINK && scan.finish() {
                 return Ok(MarkResolvedOutcome::MarkersRemain);
             }
             after_check();
-            // Through the clean filters, also for a link kept as a file, as git does.
-            let id = crate::undo::filtered_blob::<MergeError>(repo, path, &bytes)?;
+            let id = writer.commit()?;
             index.remove_path(Path::new(path))?;
             index.add(&staged_entry(path, id, mode, &stat))?;
         }
@@ -937,6 +956,9 @@ pub fn mark_resolved_with_pauses(
     index.write()?;
     Ok(MarkResolvedOutcome::Resolved)
 }
+
+/// How much of a file `mark_resolved` reads at a time while it streams it (#212).
+const STREAM_CHUNK: usize = 64 * 1024;
 
 /// Git's file mode for a gitlink (a nested repository's commit).
 const MODE_GITLINK: u32 = 0o160000;
@@ -1140,33 +1162,85 @@ fn undo_error(error: crate::undo::UndoError) -> MergeError {
 /// A line starting with `<<<<<<<` or `>>>>>>>` followed by a space or the line end. `=======`
 /// alone is not a marker (it is also a Markdown/RST underline). Binary files (a NUL in the
 /// first 8000 bytes, git's heuristic) are never reported.
-/// [`has_conflict_markers`] fed a file in pieces (#212). Stub: keeps every byte.
+/// How many leading bytes [`MarkerScan`] checks for a NUL, as git's binary check does.
+const BINARY_CHECK_LEN: usize = 8000;
+
+/// [`has_conflict_markers`] fed a file in pieces (#212), so a file is checked while it streams
+/// into the object database instead of being held in memory. The answer is the same however
+/// the bytes are split.
 #[derive(Default)]
 pub(crate) struct MarkerScan {
-    bytes: Vec<u8>,
+    /// Bytes fed so far, counted up to [`BINARY_CHECK_LEN`].
+    checked: usize,
+    /// A NUL in the first [`BINARY_CHECK_LEN`] bytes: binary, so no markers.
+    binary: bool,
+    found: bool,
+    /// The current line's first bytes: a marker, a space or `\r`, and one more to tell a
+    /// trailing `\r` from one inside the line.
+    line: [u8; 9],
+    /// The current line's length so far.
+    line_len: usize,
 }
 
 impl MarkerScan {
     pub(crate) fn feed(&mut self, bytes: &[u8]) {
-        self.bytes.extend_from_slice(bytes);
+        if self.checked < BINARY_CHECK_LEN {
+            let head = &bytes[..bytes.len().min(BINARY_CHECK_LEN - self.checked)];
+            self.binary |= head.contains(&0);
+            self.checked += head.len();
+        }
+        if self.found || self.binary {
+            return;
+        }
+        for &byte in bytes {
+            if byte == b'\n' {
+                self.end_line();
+            } else {
+                if let Some(slot) = self.line.get_mut(self.line_len) {
+                    *slot = byte;
+                }
+                self.line_len = self.line_len.saturating_add(1);
+            }
+        }
     }
 
-    pub(crate) fn finish(self) -> bool {
-        has_conflict_markers(&self.bytes)
+    /// Whether the bytes fed hold a conflict marker line.
+    pub(crate) fn finish(mut self) -> bool {
+        self.end_line();
+        self.found && !self.binary
+    }
+
+    fn end_line(&mut self) {
+        let kept = &self.line[..self.line_len.min(self.line.len())];
+        // A trailing `\r` is known only when the whole line was kept; in a longer line the
+        // byte after the marker is kept either way.
+        let line = if self.line_len <= self.line.len() {
+            kept.strip_suffix(b"\r").unwrap_or(kept)
+        } else {
+            kept
+        };
+        self.found |= is_marker_line(line);
+        self.line_len = 0;
     }
 }
 
-pub(crate) fn has_conflict_markers(content: &[u8]) -> bool {
-    if content.iter().take(8000).any(|b| *b == 0) {
-        return false;
-    }
-    content.split(|b| *b == b'\n').any(|line| {
-        let line = line.strip_suffix(b"\r").unwrap_or(line);
-        [&b"<<<<<<<"[..], &b">>>>>>>"[..]].iter().any(|marker| {
-            line.strip_prefix(*marker)
-                .is_some_and(|rest| rest.is_empty() || rest[0] == b' ')
-        })
+/// `line` (without its newline and trailing `\r`, or its first bytes) starts a conflict
+/// marker: `<<<<<<<` or `>>>>>>>`, alone or followed by a space.
+fn is_marker_line(line: &[u8]) -> bool {
+    [&b"<<<<<<<"[..], &b">>>>>>>"[..]].iter().any(|marker| {
+        line.strip_prefix(*marker)
+            .is_some_and(|rest| rest.is_empty() || rest[0] == b' ')
     })
+}
+
+/// A line starting with `<<<<<<<` or `>>>>>>>`, alone or followed by a space (the marker
+/// lines git writes), outside a file with a NUL in its first 8,000 bytes (binary). The whole
+/// file at once, for tests; `mark_resolved` feeds a [`MarkerScan`].
+#[cfg(test)]
+fn has_conflict_markers(content: &[u8]) -> bool {
+    let mut scan = MarkerScan::default();
+    scan.feed(content);
+    scan.finish()
 }
 
 pub fn abort_merge(repo: &Repository) -> Result<(), MergeError> {
