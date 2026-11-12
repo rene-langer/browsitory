@@ -1,7 +1,8 @@
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
-import { expandSidebarSection } from "../support/sidebar";
+import { withFailureDiagnostics } from "../support/diagnostics";
+import { expandSidebarSection, sidebarState } from "../support/sidebar";
 import { git } from "../support/git";
 import { UI_TIMEOUT } from "../support/timeouts";
 
@@ -67,7 +68,8 @@ describe("Browsitory worktrees", () => {
     await expandSidebarSection("Branches");
 
     const createForm = await $("form[aria-label='Create worktree']");
-    await createForm.waitForExist();
+    // On failure, the sidebar's sections (which are open) and a screenshot (#824).
+    await withFailureDiagnostics("worktree-create-form", () => createForm.waitForExist(), sidebarState);
     const currentBranchButton = await $('//li[@role="button" and contains(., \' (current)\')]');
     await currentBranchButton.waitForExist();
     // The row reads "<name> (current)" optionally followed by ahead/behind counts (↑n ↓m).
