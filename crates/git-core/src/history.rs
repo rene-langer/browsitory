@@ -62,42 +62,49 @@ pub fn file_history(
     walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
     walk.push(head_id)?;
 
-    let mut tracked: HashMap<Oid, String> = HashMap::from([(head_id, path.to_string())]);
+    let head_entries = path_entries(repo, repo.find_commit(head_id)?.tree_id(), path)?;
+    let mut tracked: HashMap<Oid, (String, Option<PathEntries>)> =
+        HashMap::from([(head_id, (path.to_string(), head_entries))]);
     let mut entries = Vec::new();
     for oid in walk {
         if entries.len() >= limit || tracked.is_empty() {
             break;
         }
         let oid = oid?;
-        let Some(current_path) = tracked.remove(&oid) else {
+        let Some((current_path, Some(current))) = tracked.remove(&oid) else {
             continue;
         };
         let commit = repo.find_commit(oid)?;
-        let tree = commit.tree()?;
-        let Some(blob) = blob_at(&tree, &current_path) else {
-            continue;
-        };
+        let blob = current.blob();
 
         let mut same_as_a_parent = false;
         let mut renamed_from = None;
         for (index, parent) in commit.parents().enumerate() {
-            let parent_tree = parent.tree()?;
-            let parent_path = match blob_at(&parent_tree, &current_path) {
-                Some(parent_blob) => {
-                    same_as_a_parent |= parent_blob == blob;
-                    Some(current_path.clone())
-                }
-                None => {
-                    let source = rename_source(repo, &parent_tree, &tree, &current_path)?;
-                    if index == 0 {
-                        renamed_from.clone_from(&source);
+            let tracked_in_parent =
+                match parent_path_entries(repo, parent.tree_id(), &current, &current_path)? {
+                    Some(parent_entries) => {
+                        same_as_a_parent |= parent_entries.blob() == blob;
+                        Some((current_path.clone(), Some(parent_entries)))
                     }
-                    source
-                }
-            };
-            if let Some(parent_path) = parent_path {
+                    None => {
+                        let parent_tree = parent.tree()?;
+                        let source =
+                            rename_source(repo, &parent_tree, &commit.tree()?, &current_path)?;
+                        if index == 0 {
+                            renamed_from.clone_from(&source);
+                        }
+                        match source {
+                            Some(source) => {
+                                let parent_entries = path_entries(repo, parent_tree.id(), &source)?;
+                                Some((source, parent_entries))
+                            }
+                            None => None,
+                        }
+                    }
+                };
+            if let Some(tracked_in_parent) = tracked_in_parent {
                 // First (nearest) child wins when two children track the same parent.
-                tracked.entry(parent.id()).or_insert(parent_path);
+                tracked.entry(parent.id()).or_insert(tracked_in_parent);
             }
         }
 
@@ -122,12 +129,6 @@ pub(crate) fn validate_path(path: &str) -> Result<(), HistoryError> {
         return Err(HistoryError::InvalidPath);
     }
     Ok(())
-}
-
-/// Blob id and file mode at `path`, or `None` when absent or not a file (e.g. a directory).
-pub(crate) fn blob_at(tree: &Tree, path: &str) -> Option<(Oid, i32)> {
-    let entry = tree.get_path(Path::new(path)).ok()?;
-    (entry.kind() == Some(git2::ObjectType::Blob)).then(|| (entry.id(), entry.filemode()))
 }
 
 /// The path `new_path` was renamed from between `old` and `new`, if libgit2 sees a rename.
@@ -166,13 +167,13 @@ impl PathEntries {
 }
 
 /// The entries along `path` in the tree `tree`, or `None` when a component is missing, a folder
-/// component isn't a folder, or the last one isn't a file (as [`blob_at`]).
+/// component isn't a folder, or the last one isn't a file (a folder or a submodule).
 pub(crate) fn path_entries(
     repo: &Repository,
     tree: Oid,
     path: &str,
 ) -> Result<Option<PathEntries>, git2::Error> {
-    entries_below(repo, &repo.find_tree(tree)?, &components(path), Vec::new())
+    entries_from(repo, tree, &components(path), Vec::new())
 }
 
 /// The entries along `path` in a parent's root tree `parent_tree`, given the child's entries
@@ -183,40 +184,140 @@ pub(crate) fn parent_path_entries(
     child: &PathEntries,
     path: &str,
 ) -> Result<Option<PathEntries>, git2::Error> {
-    let _ = child;
-    path_entries(repo, parent_tree, path)
+    let names = components(path);
+    let mut found = Vec::with_capacity(names.len());
+    let mut tree = parent_tree;
+    for (depth, name) in names.iter().enumerate() {
+        let Some(entry) = tree_entry(repo, tree, name)? else {
+            return Ok(None);
+        };
+        let pair = (entry.id, entry.mode);
+        if child.0.get(depth) == Some(&pair) {
+            found.extend_from_slice(&child.0[depth..]);
+            return Ok(Some(PathEntries(found)));
+        }
+        let last = depth + 1 == names.len();
+        if entry.kind != expected_kind(last) {
+            return Ok(None);
+        }
+        found.push(pair);
+        tree = entry.id;
+    }
+    Ok(Some(PathEntries(found)))
 }
 
 fn components(path: &str) -> Vec<&str> {
     path.split('/').collect()
 }
 
-fn entries_below(
+fn expected_kind(last: bool) -> ObjectType {
+    if last {
+        ObjectType::Blob
+    } else {
+        ObjectType::Tree
+    }
+}
+
+fn entries_from(
     repo: &Repository,
-    tree: &Tree,
+    tree: Oid,
     names: &[&str],
     mut found: Vec<(Oid, i32)>,
 ) -> Result<Option<PathEntries>, git2::Error> {
     let Some((name, rest)) = names.split_first() else {
         return Ok(Some(PathEntries(found)));
     };
-    let Some(entry) = tree.get_name(name) else {
+    let Some(entry) = tree_entry(repo, tree, name)? else {
         return Ok(None);
     };
-    let expected = if rest.is_empty() {
-        ObjectType::Blob
-    } else {
-        ObjectType::Tree
-    };
-    if entry.kind() != Some(expected) {
+    if entry.kind != expected_kind(rest.is_empty()) {
         return Ok(None);
     }
-    found.push((entry.id(), entry.filemode()));
+    found.push((entry.id, entry.mode));
     if rest.is_empty() {
         return Ok(Some(PathEntries(found)));
     }
-    let subtree = repo.find_tree(entry.id())?;
-    entries_below(repo, &subtree, rest, found)
+    entries_from(repo, entry.id, rest, found)
+}
+
+/// One entry of a tree: its id, its file mode as `git2::TreeEntry::filemode` reports it, and
+/// what kind of object it names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RawEntry {
+    id: Oid,
+    mode: i32,
+    kind: ObjectType,
+}
+
+/// The entry `name` of tree `tree`, read from the tree's stored form without building a
+/// `git2::Tree`: parsing every entry of a big root tree (thousands) was most of a history walk's
+/// time, and a walk needs one entry of it.
+fn tree_entry(repo: &Repository, tree: Oid, name: &str) -> Result<Option<RawEntry>, git2::Error> {
+    let odb = repo.odb()?;
+    let object = odb.read(tree)?;
+    if object.kind() != ObjectType::Tree {
+        return Err(git2::Error::from_str(&format!("{tree} isn't a tree")));
+    }
+    find_raw_entry(object.data(), name.as_bytes())
+        .ok_or_else(|| git2::Error::from_str(&format!("tree {tree} is corrupted")))
+}
+
+/// Looks `name` up in a tree's stored form: entries of `<octal mode> <name>\0<20-byte id>`.
+/// `Some(None)` when the tree has no such entry, `None` when the data isn't a valid tree.
+fn find_raw_entry(mut data: &[u8], name: &[u8]) -> Option<Option<RawEntry>> {
+    const ID_LEN: usize = 20;
+    while !data.is_empty() {
+        let space = data.iter().position(|&b| b == b' ')?;
+        let raw_mode = parse_octal(&data[..space])?;
+        let rest = &data[space + 1..];
+        let nul = rest.iter().position(|&b| b == 0)?;
+        let id = rest.get(nul + 1..nul + 1 + ID_LEN)?;
+        if &rest[..nul] == name {
+            return Some(Some(RawEntry {
+                id: Oid::from_bytes(id).ok()?,
+                mode: normalize_mode(raw_mode),
+                kind: kind_of_mode(raw_mode),
+            }));
+        }
+        data = &rest[nul + 1 + ID_LEN..];
+    }
+    Some(None)
+}
+
+fn parse_octal(digits: &[u8]) -> Option<u32> {
+    if digits.is_empty() || digits.len() > 7 {
+        return None;
+    }
+    digits.iter().try_fold(0u32, |mode, &digit| {
+        (b'0'..=b'7')
+            .contains(&digit)
+            .then(|| mode * 8 + u32::from(digit - b'0'))
+    })
+}
+
+const MODE_TYPE_MASK: u32 = 0o170000;
+const MODE_TREE: u32 = 0o040000;
+const MODE_COMMIT: u32 = 0o160000;
+const MODE_LINK: u32 = 0o120000;
+
+/// libgit2's `normalize_filemode`, which `git_tree_entry_filemode` applies.
+fn normalize_mode(mode: u32) -> i32 {
+    match mode & MODE_TYPE_MASK {
+        MODE_TREE => 0o040000,
+        _ if mode & 0o111 != 0 => 0o100755,
+        MODE_COMMIT => 0o160000,
+        MODE_LINK => 0o120000,
+        _ => 0o100644,
+    }
+}
+
+/// libgit2's `git_tree_entry_type`.
+fn kind_of_mode(mode: u32) -> ObjectType {
+    match mode & MODE_TYPE_MASK {
+        MODE_COMMIT => ObjectType::Commit,
+        MODE_TREE => ObjectType::Tree,
+        _ => ObjectType::Blob,
+    }
 }
 
 #[cfg(test)]
