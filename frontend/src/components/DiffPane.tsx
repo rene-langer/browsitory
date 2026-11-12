@@ -1,3 +1,4 @@
+import { stableMemo } from "../lib/stableMemo";
 import { UncommittedDiffPane } from "./UncommittedDiffPane";
 import { CommitDiffPane } from "./CommitDiffPane";
 import { StashDiffPane } from "./StashDiffPane";
@@ -23,7 +24,7 @@ export type {
  * The diff pane: the working tree's changes and the commit dock, a commit's files, or a stash.
  * Its actions come from `WorkspaceActionsContext` (#491); the props are the data it shows.
  */
-export function DiffPane(props: Parameters<typeof DiffPaneContent>[0]) {
+function DiffPaneWithOptions(props: Parameters<typeof DiffPaneContent>[0]) {
   // The pane's diffs and its one options toolbar share Split and whole file (#640); under the
   // app's provider that is the app's.
   return (
@@ -159,3 +160,6 @@ function DiffPaneContent({
     />
   );
 }
+
+/** Renders again only when its data changed (#844); see `stableMemo`. */
+export const DiffPane = stableMemo(DiffPaneWithOptions, "DiffPane");
