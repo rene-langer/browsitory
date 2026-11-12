@@ -9,8 +9,9 @@ import { fakeRepoClient, graphPage } from "./test/fakeRepoClient";
 // `useCommitGraphLayout` once per render (with no commits of its own: the workspace passes the
 // shared layout, and the workspace's own call has the commits), and the diff pane renders one of
 // its panes.
-const counts = vi.hoisted(() => ({ branchTreeView: 0, buildBranchTree: 0, commitGraph: 0, diffPane: 0 }));
+const counts = vi.hoisted(() => ({ branchTreeView: 0, buildBranchTree: 0, commitGraph: 0, diffPane: 0, worktreePanel: 0 }));
 function resetCounts() {
+  counts.worktreePanel = 0;
   counts.branchTreeView = 0;
   counts.buildBranchTree = 0;
   counts.commitGraph = 0;
@@ -34,6 +35,18 @@ vi.mock("./lib/branchTree", async (importOriginal) => {
       counts.buildBranchTree += 1;
       return original.buildBranchTree(items);
     }) as typeof original.buildBranchTree,
+  };
+});
+// `WorktreePanel` asks for its Prune action once per render (the palette asks too, but only
+// while it builds its commands).
+vi.mock("./lib/actions/worktreeActions", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./lib/actions/worktreeActions")>();
+  return {
+    ...original,
+    pruneWorktreesAction: ((...args) => {
+      counts.worktreePanel += 1;
+      return original.pruneWorktreesAction(...args);
+    }) as typeof original.pruneWorktreesAction,
   };
 });
 vi.mock("./lib/useCommitGraphLayout", async (importOriginal) => {
@@ -146,7 +159,7 @@ describe("workspace renders (#844)", () => {
     fireEvent(input.closest("dialog")!, new Event("close"));
     await waitFor(() => expect(screen.queryByRole("combobox", { name: "Command palette" })).toBeNull());
     await settle();
-    expect(counts).toEqual({ branchTreeView: 0, buildBranchTree: 0, commitGraph: 0, diffPane: 0 });
+    expect(counts).toMatchObject({ branchTreeView: 0, buildBranchTree: 0, commitGraph: 0, diffPane: 0 });
   });
 
   it("hiding a branch from the graph renders the tree without building it again", async () => {
@@ -159,6 +172,16 @@ describe("workspace renders (#844)", () => {
     await settle();
     expect(counts.branchTreeView).toBeGreaterThan(0);
     expect(counts.buildBranchTree).toBe(0);
+  });
+
+  it("selecting a commit renders neither the branch tree nor the worktree panel (its branch list)", async () => {
+    const view = await openWorkspace();
+    resetCounts();
+    fireEvent.click(view.container.querySelector(`[data-commit-id="${id(3)}"]`)!);
+    await settle();
+    expect(counts.commitGraph).toBeGreaterThan(0);
+    expect(counts.branchTreeView).toBe(0);
+    expect(counts.worktreePanel).toBe(0);
   });
 
   it("a branch list that changes still shows in the tree", async () => {
