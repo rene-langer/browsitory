@@ -17,6 +17,15 @@ on:
 permissions:
   contents: read
 
+env:
+  # The VSCode that e2e-vscode and vsix-smoke run in
+  # (extension/e2e/src/support/vscodeDownload.ts). Pinned so a run with the cached copy asks
+  # the update service nothing; that request timed out and failed unrelated pull requests
+  # (#918). Renovate proposes each new stable release; it must satisfy
+  # extension/package.json's engines.vscode.
+  # renovate: datasource=github-releases depName=microsoft/vscode
+  BROWSITORY_E2E_VSCODE_VERSION: 1.146.0
+
 # A new push to a pull request cancels that pull request's older, still-running run: only the
 # newest commit's checks matter there. Every other run (push to main, schedule, dispatch) gets a
 # group of its own (its run id), so nothing ever cancels or queues it: a group shared by main's
@@ -854,6 +863,14 @@ jobs:
         working-directory: extension/e2e
         # --ignore-workspace: see e2e-vscode.
         run: pnpm install --frozen-lockfile --ignore-workspace
+      # The pinned VSCode, keyed by version (#918): a hit skips the download and the version
+      # lookup. Only that folder: runTests also keeps a profile in .vscode-test/.
+      - name: Cache VSCode
+        if: env.RUN_STEPS == 'true'
+        uses: actions/cache@v6
+        with:
+          path: extension/e2e/.vscode-test/vscode-linux-x64-${{ env.BROWSITORY_E2E_VSCODE_VERSION }}
+          key: vscode-${{ runner.os }}-${{ runner.arch }}-${{ env.BROWSITORY_E2E_VSCODE_VERSION }}
       - name: Install the package into VSCode and smoke-test it
         if: env.RUN_STEPS == 'true'
         working-directory: extension/e2e
@@ -936,6 +953,18 @@ jobs:
         if: env.RUN_STEPS == 'true'
         working-directory: extension/e2e
         run: pnpm --ignore-workspace typecheck
+      - name: Unit-test the e2e harness helpers
+        if: env.RUN_STEPS == 'true'
+        working-directory: extension/e2e
+        run: pnpm --ignore-workspace test:unit
+      # The pinned VSCode, keyed by version (#918): a hit skips the download and the version
+      # lookup. Only that folder: runTests also keeps a profile in .vscode-test/.
+      - name: Cache VSCode
+        if: env.RUN_STEPS == 'true'
+        uses: actions/cache@v6
+        with:
+          path: extension/e2e/.vscode-test/vscode-linux-x64-${{ env.BROWSITORY_E2E_VSCODE_VERSION }}
+          key: vscode-${{ runner.os }}-${{ runner.arch }}-${{ env.BROWSITORY_E2E_VSCODE_VERSION }}
       - name: Run VSCode E2E suite
         if: env.RUN_STEPS == 'true'
         working-directory: extension/e2e

@@ -129,8 +129,10 @@ Renovate (`renovate.json`) opens dependency PRs before 6am on Mondays (Europe/Be
 three open at a time, labelled `maintainability`, and never automerges — merge by hand once CI
 is green. Covered: the Cargo workspace, all four pnpm projects (`frontend/`, `extension/`,
 `e2e/`, `extension/e2e/`, each with its own lockfile), GitHub Actions,
-`rust-toolchain.toml`, and the user guide site's Python tools (`docs/requirements.in`, locked
-with hashes in `docs/requirements.txt` by Renovate's `pip-compile` manager). Minor/patch updates
+`rust-toolchain.toml`, the VSCode release the extension E2E jobs run in (`ci.yml`'s
+`BROWSITORY_E2E_VSCODE_VERSION`, #918), and the user guide site's Python tools
+(`docs/requirements.in`, locked with hashes in `docs/requirements.txt` by Renovate's
+`pip-compile` manager). Minor/patch updates
 are grouped per ecosystem (Rust, JS, Python docs tools, GitHub Actions); Tauri crates and `@tauri-apps/*` packages share one group;
 `tauri-apps/tauri-action` (pinned by commit in `release.yml`, #399) gets its own PR. Majors and
 `git2`/`libgit2-sys` wait for approval on the Dependency Dashboard issue (libgit2 bumps change
