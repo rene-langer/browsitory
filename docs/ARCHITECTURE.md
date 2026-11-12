@@ -2227,9 +2227,14 @@ work to a `HighlightTransport` (`highlightWorkerProtocol.ts`):
   opening VSCode's merge editor the host calls the internal `check_merge_target`, the same
   guards `prepare_merge_tool` applies (text conflict, no symlink/submodule, work tree file
   inside the tree).
-- Side files and `read_file_version` return raw blob bytes: git2 0.21 exposes neither
-  `git_blob_filter` nor libgit2's filter lists, so CRLF/`ident`/filter-driver conversion is not
-  applied (documented for users in USER_GUIDE).
+- Side files and `read_file_version` hold a blob as checkout writes it (#130): git2 0.21
+  doesn't wrap `git_blob_filter`, so `tools::checkout_contents` declares it against the linked
+  libgit2 (as `index_refresh` does `git_index_set_caps`). That applies libgit2's built-in
+  filters, CRLF/eol (`core.autocrlf`, `core.eol`, `text`/`eol` attributes) and `ident`;
+  libgit2 runs no external filter driver (Git LFS shows its pointer). Binary blobs are returned
+  as stored. libgit2 caches `core.autocrlf` per open repository, so a change made outside the
+  app applies once the repository is opened again. For a p4merge add/add conflict,
+  `prepare_merge_tool` writes git's virtual base (`create_virtual_base`, #159).
 - A commit's file tree (#446, `git-core::tree`): `get_commit_tree` lists one folder per call
   (the frontend loads folders as they open) or, with a filter, walks the whole tree for matching
   paths (at most `MAX_TREE_MATCHES`). `get_file_at_commit` sends text, or a sniffed image's
