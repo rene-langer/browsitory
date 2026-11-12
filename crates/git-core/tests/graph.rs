@@ -1024,3 +1024,38 @@ fn the_graph_walk_and_a_branch_search_walk_are_both_kept() {
     }
     assert_eq!(cache.stats().walks, 2);
 }
+
+// #835: while a walk is sorted into the cache, a search polls `cancel` once every 1,024
+// commits; a cached walk needs no polls.
+#[test]
+fn sorting_a_walk_polls_cancel_every_1024_commits() {
+    let (_dir, repo) = init_repo();
+    linear_history(&repo, 2_100);
+    let selection = GraphSelection::default();
+    let query = git_core::search::parse_query("zzzznotfound").unwrap();
+    let limits = git_core::search::PageLimits {
+        matches: 100,
+        scan: 1,
+        time: std::time::Duration::MAX,
+    };
+    let mut cache = git_core::graph::WalkCache::default();
+    let polls = std::cell::Cell::new(0);
+    let counting = || {
+        polls.set(polls.get() + 1);
+        false
+    };
+    let search = |cache: &mut git_core::graph::WalkCache| {
+        git_core::search::search_commits_cached(
+            &repo, cache, &query, &selection, None, limits, &counting,
+        )
+        .unwrap()
+    };
+
+    search(&mut cache);
+    // Once before the walk, at commits 0, 1,024 and 2,048 while sorting, once for the one
+    // scanned commit.
+    assert_eq!(polls.get(), 5);
+    polls.set(0);
+    search(&mut cache);
+    assert_eq!(polls.get(), 2, "before the walk and for the scanned commit");
+}
