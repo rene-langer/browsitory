@@ -1,14 +1,14 @@
 export type HighlightLanguage =
   | "typescript" | "tsx" | "javascript" | "jsx" | "json" | "rust" | "python" | "go" | "java"
-  | "c" | "csharp" | "css" | "scss" | "html" | "markdown" | "yaml" | "toml"
+  | "c" | "cpp" | "csharp" | "css" | "scss" | "html" | "markdown" | "yaml" | "toml"
   | "shellscript" | "sql" | "ruby" | "php" | "kotlin" | "swift";
 
 const BY_EXTENSION: Record<string, HighlightLanguage> = {
   ts: "typescript", mts: "typescript", cts: "typescript", tsx: "tsx",
   js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "jsx",
   json: "json", rs: "rust", py: "python", go: "go", java: "java",
-  // C++ uses the C grammar: Shiki's C++ grammar embeds an unlicensed one (excludedGrammars.ts).
-  c: "c", h: "c", cc: "c", cpp: "c", hpp: "c", cs: "csharp",
+  // `.h` stays C: C headers outnumber C++ ones, and C++ in a `.h` file still reads well as C.
+  c: "c", h: "c", cc: "cpp", cpp: "cpp", cxx: "cpp", hpp: "cpp", hxx: "cpp", hh: "cpp", cs: "csharp",
   css: "css", scss: "scss", html: "html", htm: "html", md: "markdown",
   yml: "yaml", yaml: "yaml", toml: "toml", sh: "shellscript", bash: "shellscript", zsh: "shellscript",
   sql: "sql", rb: "ruby", php: "php", kt: "kotlin", kts: "kotlin", swift: "swift",
