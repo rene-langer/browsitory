@@ -40,7 +40,9 @@ export function conflictVersions(segments: readonly ConflictSegment[]): Record<C
     const starts: number[] = [];
     for (const segment of segments) {
       starts.push(lines.length);
-      lines.push(...segmentLines(sideContent(segment, side)));
+      // A loop, not a spread: a spread passes one argument per line and throws past the
+      // engine's argument limit on a very long segment (#847).
+      for (const line of segmentLines(sideContent(segment, side))) lines.push(line);
     }
     return { text: lines.join("\n"), starts };
   };
