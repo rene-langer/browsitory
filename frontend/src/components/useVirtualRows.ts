@@ -79,18 +79,46 @@ export function useVirtualRows(list: HTMLElement | null, count: number): Virtual
     if (list === null || parent === null) return;
     parent.addEventListener("scroll", updateRange, { passive: true });
     let observer: ResizeObserver | null = null;
+    let mutations: MutationObserver | null = null;
     if (typeof ResizeObserver !== "undefined") {
-      observer = new ResizeObserver(() => {
+      const resizes = new ResizeObserver(() => {
         measureRow();
         updateRange();
       });
-      observer.observe(parent);
+      observer = resizes;
+      resizes.observe(parent);
       const row = list.querySelector(":scope > li");
-      if (row !== null) observer.observe(row);
+      if (row !== null) resizes.observe(row);
+
+      // Content above the list in the same scroller (a sidebar section opening, a placeholder
+      // replaced, #828) moves the list without a scroll or a resize of the scroller. It changes
+      // the height of an element beside the list or beside one of its ancestors up to the
+      // scroller, so those are observed; elements added there later too. A removed one changes
+      // no observed height when it was the scroller's child, hence the range update on mutation.
+      const containers: HTMLElement[] = [];
+      for (let node = list.parentElement; node !== null; node = node.parentElement) {
+        containers.push(node);
+        if (node === parent) break;
+      }
+      for (const container of containers) {
+        for (const child of container.children) if (child !== list) resizes.observe(child);
+      }
+      if (typeof MutationObserver !== "undefined") {
+        mutations = new MutationObserver((records) => {
+          for (const record of records) {
+            for (const node of record.addedNodes) {
+              if (node instanceof Element && node !== list) resizes.observe(node);
+            }
+          }
+          updateRange();
+        });
+        for (const container of containers) mutations.observe(container, { childList: true });
+      }
     }
     return () => {
       parent.removeEventListener("scroll", updateRange);
       observer?.disconnect();
+      mutations?.disconnect();
     };
   }, [list, measureRow, updateRange]);
 
