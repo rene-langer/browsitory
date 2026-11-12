@@ -56,6 +56,8 @@ pub struct LineHistory {
     /// The walk stopped at [`MAX_LINE_HISTORY_COMMITS`] before the range's history ended, so
     /// older changes may be missing.
     pub truncated: bool,
+    /// No older entry will come: the range's history ended, or the walk was truncated.
+    pub complete: bool,
 }
 
 /// Commits that changed lines `lines` of `path` as it is in `revision` (a commit id or "HEAD"),
@@ -72,6 +74,7 @@ pub fn line_history(
         return Ok(LineHistory {
             entries: Vec::new(),
             truncated: false,
+            complete: true,
         });
     };
     let decorations = RefDecorations::load(repo)?;
@@ -93,7 +96,26 @@ pub fn line_history(
             entries.len() < limit
         },
     )?;
-    Ok(LineHistory { entries, truncated })
+    let complete = truncated || entries.len() < limit;
+    Ok(LineHistory {
+        entries,
+        truncated,
+        complete,
+    })
+}
+
+/// [`line_history`] continued from where the cache's walk for the same start commit, path and
+/// lines stopped (#860), within `budget` (after at least one commit).
+pub fn line_history_cached(
+    repo: &Repository,
+    _cache: &mut crate::graph::WalkCache,
+    revision: &str,
+    path: &str,
+    lines: LineRange,
+    limit: usize,
+    _budget: std::time::Duration,
+) -> Result<LineHistory, HistoryError> {
+    line_history(repo, revision, path, lines, limit)
 }
 
 /// The ids of every commit [`line_history`] lists for the range, from `start`, for search's

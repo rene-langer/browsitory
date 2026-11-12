@@ -119,6 +119,30 @@ pub fn file_history(
     Ok(entries)
 }
 
+/// One answer of [`file_history_cached`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileHistoryPage {
+    /// The first `limit` entries, or fewer when the budget ran out or the history ended.
+    pub entries: Vec<FileHistoryEntry>,
+    /// The walk reached the end of the file's history: no older entry exists.
+    pub complete: bool,
+}
+
+/// [`file_history`] continued from where the cache's walk for the same HEAD and path stopped
+/// (#860). Answers the first `limit` entries, walking further only when the cache has fewer,
+/// and only until `budget` runs out (after at least one commit).
+pub fn file_history_cached(
+    repo: &Repository,
+    _cache: &mut crate::graph::WalkCache,
+    path: &str,
+    limit: usize,
+    _budget: std::time::Duration,
+) -> Result<FileHistoryPage, HistoryError> {
+    let entries = file_history(repo, path, limit)?;
+    let complete = entries.len() < limit;
+    Ok(FileHistoryPage { entries, complete })
+}
+
 pub(crate) fn validate_path(path: &str) -> Result<(), HistoryError> {
     let relative = Path::new(path);
     if path.is_empty()

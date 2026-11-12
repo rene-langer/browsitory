@@ -409,6 +409,7 @@ pub fn line_histories() -> Cases<git_core::line_history::LineHistory> {
                     },
                 ],
                 truncated: false,
+                complete: true,
             },
         ),
         case(
@@ -416,6 +417,7 @@ pub fn line_histories() -> Cases<git_core::line_history::LineHistory> {
             git_core::line_history::LineHistory {
                 entries: Vec::new(),
                 truncated: true,
+                complete: true,
             },
         ),
     ]

@@ -170,6 +170,10 @@ pub struct WalkCacheStats {
     pub walks: usize,
     /// Times every tag was peeled for the badges.
     pub decorations: usize,
+    /// File and line history walks started from scratch (#860).
+    pub history_walks: usize,
+    /// Commits a file or line history walk examined: those on the followed path.
+    pub history_commits: usize,
 }
 
 impl WalkCache {
