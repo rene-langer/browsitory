@@ -257,6 +257,9 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
     // Before `entry_in_the_way`, which on macOS and Windows takes the deleted `Old` of a
     // case-only rename for an ignored file removed from the index (#370).
     refuse_staged_case_only_rename(repo, &index)?;
+    // One status pass and one walk of HEAD's tree for every check below (#243).
+    let scan = WorktreeScan::new(repo)?;
+    let head_files = head_files(repo)?;
     // The reset after stashing would delete an untracked file (#186), an ignored file or folder
     // (#208) or a nested repository (#211) in the way of a tracked path. The path-limited stash
     // checks only its own paths.
@@ -264,8 +267,13 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
         path,
         tracked,
         kind,
-    }) = entry_in_the_way(repo, opts.keep_index, opts.include_untracked)?
-    {
+    }) = entry_in_the_way(
+        repo,
+        &scan,
+        &head_files,
+        opts.keep_index,
+        opts.include_untracked,
+    )? {
         return Err(match kind {
             Kind::Untracked => StashError::UntrackedInTheWay {
                 untracked: path,
@@ -288,10 +296,10 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
     // and an edit to a file removed from the index, which libgit2 loses or records twice (see
     // `edit_removed_from_index`).
     if crate::worktree_guard::has_hazard(repo)?
-        || (opts.include_untracked && kept_entry_in_untracked_folder(repo)?)
+        || (opts.include_untracked && kept_entry_in_untracked_folder(repo, &scan, &head_files)?)
         || edit_removed_from_index(repo)?
     {
-        let paths = changed_paths(repo, opts.include_untracked)?;
+        let paths = scan.changed_paths(opts.include_untracked);
         if paths.is_empty() {
             return Err(StashError::NothingToStash);
         }
@@ -311,7 +319,7 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
     }
     // libgit2's reset after stashing writes each changed file in place; give one with other
     // hard links a name of its own first, as git's reset does (#420).
-    crate::hardlink::before_writing(repo, &changed_paths(repo, false)?);
+    crate::hardlink::before_writing(repo, &scan.changed_paths(false));
     // `stash_save2` (not `stash_save`) because it accepts a `None` message, letting libgit2
     // generate its own default ("WIP on <branch>: <short> <summary>").
     repo.stash_save2(&signature, message, Some(flags))
@@ -410,22 +418,19 @@ fn statuses<'r>(
     repo.statuses(Some(options))
 }
 
-/// Every changed file path (staged, unstaged and, with `include_untracked`, untracked; never
-/// ignored files or untracked nested repositories), as `save_path_limited_stash` selects them.
-fn changed_paths(repo: &Repository, include_untracked: bool) -> Result<Vec<String>, StashError> {
-    let mut options = git2::StatusOptions::new();
-    options
-        .include_untracked(include_untracked)
-        .recurse_untracked_dirs(true)
-        .include_ignored(false)
-        .exclude_submodules(true);
+/// Every file path in HEAD's tree (folders left out), as Stash all's checks compare them with
+/// the worktree. Empty on an unborn branch.
+fn head_files(repo: &Repository) -> Result<Vec<String>, StashError> {
     let mut paths = Vec::new();
-    for entry in statuses(repo, &mut options)?.iter() {
-        let Ok(path) = entry.path() else { continue };
-        if entry.status().contains(git2::Status::IGNORED) || path.ends_with('/') {
-            continue;
-        }
-        paths.push(path.to_string());
+    if let Ok(head) = repo.head().and_then(|head| head.peel_to_tree()) {
+        head.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
+            if entry.kind() != Some(git2::ObjectType::Tree) {
+                if let Ok(name) = entry.name() {
+                    paths.push(format!("{root}{name}"));
+                }
+            }
+            git2::TreeWalkResult::Ok
+        })?;
     }
     Ok(paths)
 }
@@ -1257,24 +1262,20 @@ fn is_untracked(repo: &Repository, path: &str) -> Result<bool, StashError> {
 /// stashed; its own refusals then apply (a folder that replaced a tracked file is
 /// `DirectoryReplacedNonDirectory`). An untracked folder holding only ignored entries doesn't
 /// count: libgit2 sees it as ignored and leaves it.
-fn kept_entry_in_untracked_folder(repo: &Repository) -> Result<bool, StashError> {
+fn kept_entry_in_untracked_folder(
+    repo: &Repository,
+    scan: &WorktreeScan,
+    head_files: &[String],
+) -> Result<bool, StashError> {
     let Some(workdir) = repo.workdir() else {
         return Ok(false);
     };
-    let mut options = git2::StatusOptions::new();
-    options
-        .include_untracked(true)
-        .recurse_untracked_dirs(true)
-        .include_ignored(true)
-        .recurse_ignored_dirs(false)
-        .exclude_submodules(true);
     let mut kept = Vec::new();
     // Every untracked (not ignored) path, nested repositories included.
     let mut untracked = Vec::new();
-    for entry in statuses(repo, &mut options)?.iter() {
-        let Ok(raw) = entry.path() else { continue };
+    for (status, raw) in &scan.entries {
         let path = raw.trim_end_matches('/');
-        let is_kept = match entry.status() {
+        let is_kept = match *status {
             git2::Status::IGNORED => true,
             git2::Status::WT_NEW => {
                 untracked.push(path.to_string());
@@ -1306,18 +1307,7 @@ fn kept_entry_in_untracked_folder(repo: &Repository) -> Result<bool, StashError>
             .iter()
             .map(|entry| String::from_utf8_lossy(&entry.path).into_owned()),
     );
-    let mut head_paths = Vec::new();
-    if let Ok(head) = repo.head().and_then(|head| head.peel_to_tree()) {
-        head.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
-            if entry.kind() != Some(git2::ObjectType::Tree) {
-                if let Ok(name) = entry.name() {
-                    head_paths.push(format!("{root}{name}"));
-                }
-            }
-            git2::TreeWalkResult::Ok
-        })?;
-    }
-    let in_head = folders_of(&mut head_paths.into_iter());
+    let in_head = folders_of(&mut head_files.iter().cloned());
     // libgit2 removes the outermost untracked folder only when it holds an untracked path (one
     // holding only ignored files counts as ignored and stays).
     Ok(kept.iter().any(|path| {
@@ -1414,9 +1404,22 @@ impl WorktreeScan {
 
     /// Every changed file path, as `save_path_limited_stash` selects them: staged and unstaged
     /// changes and, with `include_untracked`, untracked files; never ignored files or untracked
-    /// nested repositories (#243). Stub.
-    fn changed_paths(&self, _include_untracked: bool) -> Vec<String> {
-        Vec::new()
+    /// nested repositories (#243).
+    ///
+    /// As the status pass without ignored entries (and without untracked ones, unless
+    /// `include_untracked`) lists them: an entry counts by its other flags. One the index no
+    /// longer has and that is ignored or untracked now (`INDEX_DELETED` with `IGNORED` or
+    /// `WT_NEW`) is still a change; an untracked folder (a nested repository) is not a file.
+    fn changed_paths(&self, include_untracked: bool) -> Vec<String> {
+        let mut left_out = git2::Status::IGNORED;
+        if !include_untracked {
+            left_out |= git2::Status::WT_NEW;
+        }
+        self.entries
+            .iter()
+            .filter(|(status, raw)| !status.difference(left_out).is_empty() && !raw.ends_with('/'))
+            .map(|(_, raw)| raw.clone())
+            .collect()
     }
 
     /// For the entry `raw` with `status`: a file the index no longer has but the worktree still
@@ -1496,6 +1499,8 @@ enum Kind {
 /// (`BeyondSymlink`).
 fn entry_in_the_way(
     repo: &Repository,
+    scan: &WorktreeScan,
+    head_files: &[String],
     keep_index: bool,
     include_untracked: bool,
 ) -> Result<Option<InTheWay>, StashError> {
@@ -1521,15 +1526,8 @@ fn entry_in_the_way(
         }
         files.insert(folded, path.to_string());
     };
-    if let Ok(head) = repo.head().and_then(|head| head.peel_to_tree()) {
-        head.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
-            if entry.kind() != Some(git2::ObjectType::Tree) {
-                if let Ok(name) = entry.name() {
-                    add(&format!("{root}{name}"));
-                }
-            }
-            git2::TreeWalkResult::Ok
-        })?;
+    for path in head_files {
+        add(path);
     }
     if keep_index {
         for entry in repo.index()?.iter() {
@@ -1539,7 +1537,6 @@ fn entry_in_the_way(
         }
     }
     let workdir = repo.workdir().map(std::path::Path::to_path_buf);
-    let scan = WorktreeScan::new(repo)?;
     for (status, raw) in &scan.entries {
         let status = *status;
         if files.contains_key(&fold(raw)) {
