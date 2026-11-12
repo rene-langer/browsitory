@@ -1059,3 +1059,267 @@ fn sorting_a_walk_polls_cancel_every_1024_commits() {
     search(&mut cache);
     assert_eq!(polls.get(), 2, "before the walk and for the scanned commit");
 }
+
+/// The rows a client has after applying a refresh `page` to its `loaded` rows (#835).
+fn refreshed_rows(
+    loaded: &[git_core::graph::GraphCommit],
+    page: &git_core::graph::GraphPage,
+) -> Vec<git_core::graph::GraphCommit> {
+    let Some(refresh) = &page.refresh else {
+        return page.commits.clone();
+    };
+    let mut rows = Vec::new();
+    let mut new = page.commits.iter();
+    for segment in &refresh.layout {
+        match *segment {
+            git_core::graph::GraphSegment::New { count } => {
+                rows.extend(new.by_ref().take(count).cloned());
+            }
+            git_core::graph::GraphSegment::Kept { from, count } => {
+                rows.extend_from_slice(&loaded[from..from + count]);
+            }
+        }
+    }
+    assert!(new.next().is_none(), "every sent row has a place");
+    for badges in &refresh.badges {
+        let row = rows
+            .iter_mut()
+            .find(|row| row.id == badges.id)
+            .expect("badges for a kept row");
+        row.branch_refs = badges.branch_refs.clone();
+        row.remote_branch_refs = badges.remote_branch_refs.clone();
+        row.tags = badges.tags.clone();
+    }
+    rows
+}
+
+/// Loads the first `rows` rows of `selection` into `cache`, as a client that scrolled.
+fn load_rows(
+    repo: &git2::Repository,
+    cache: &mut git_core::graph::WalkCache,
+    selection: &GraphSelection,
+    rows: usize,
+) -> (
+    Vec<git_core::graph::GraphCommit>,
+    git_core::graph::LoadedGraph,
+) {
+    let page = git_core::graph::graph_page_cached(repo, cache, selection, None, rows).unwrap();
+    let loaded = git_core::graph::LoadedGraph {
+        walk: page.walk.clone(),
+        badges: page.badges.clone(),
+        rows: page.commits.len(),
+    };
+    (page.commits, loaded)
+}
+
+/// Refreshes `loaded` and checks the rows it makes are the graph's own first rows; returns the
+/// page.
+fn refresh(
+    repo: &git2::Repository,
+    cache: &mut git_core::graph::WalkCache,
+    selection: &GraphSelection,
+    rows: &[git_core::graph::GraphCommit],
+    loaded: &git_core::graph::LoadedGraph,
+) -> git_core::graph::GraphPage {
+    let page = git_core::graph::graph_refresh_cached(repo, cache, selection, loaded, 5).unwrap();
+    let refreshed = refreshed_rows(rows, &page);
+    let whole = git_core::graph::graph_log(repo, 1_000, selection).unwrap();
+    assert_eq!(refreshed, whole[..refreshed.len()], "the walk's first rows");
+    let next = page
+        .next_cursor
+        .as_deref()
+        .map(|cursor| cursor.split_once(':').unwrap().0.parse::<usize>().unwrap());
+    assert_eq!(
+        next.unwrap_or(whole.len()),
+        refreshed.len(),
+        "the cursor continues them"
+    );
+    page
+}
+
+// #835: after a commit on a branch, a refresh sends the new row only and moves the branch's
+// badge on the kept row it left.
+#[test]
+fn a_refresh_after_a_commit_sends_only_the_new_row() {
+    let (_dir, repo) = init_repo();
+    let main = branchy_history(&repo);
+    let mut cache = git_core::graph::WalkCache::default();
+    let selection = GraphSelection::default();
+    let (rows, loaded) = load_rows(&repo, &mut cache, &selection, 20);
+
+    let newer = commit_at(&repo, &[main], "newer", 5_000);
+    repo.reference("refs/heads/main", newer, true, "test")
+        .unwrap();
+    let page = refresh(&repo, &mut cache, &selection, &rows, &loaded);
+
+    assert_eq!(page.commits.len(), 1);
+    assert_eq!(page.commits[0].summary, "newer");
+    let refresh = page.refresh.expect("the loaded rows continue");
+    assert_eq!(
+        refresh.layout,
+        [
+            git_core::graph::GraphSegment::New { count: 1 },
+            git_core::graph::GraphSegment::Kept { from: 0, count: 20 },
+        ]
+    );
+    let ids: Vec<&str> = refresh.badges.iter().map(|b| b.id.as_str()).collect();
+    assert_eq!(ids, [main.to_string()]);
+    assert!(refresh.badges[0].branch_refs.is_empty());
+}
+
+// #835: a branch reset below loaded rows drops them; the rest are kept, none sent again.
+#[test]
+fn a_refresh_after_a_reset_keeps_the_rows_still_in_the_walk() {
+    let (_dir, repo) = init_repo();
+    branchy_history(&repo);
+    let mut cache = git_core::graph::WalkCache::default();
+    let selection = GraphSelection::default();
+    let (rows, loaded) = load_rows(&repo, &mut cache, &selection, 20);
+
+    let back = repo.revparse_single("main~2").unwrap().id();
+    repo.reference("refs/heads/main", back, true, "test")
+        .unwrap();
+    let page = refresh(&repo, &mut cache, &selection, &rows, &loaded);
+
+    let refresh = page.refresh.expect("the loaded rows continue");
+    let kept: usize = refresh
+        .layout
+        .iter()
+        .map(|segment| match segment {
+            git_core::graph::GraphSegment::Kept { count, .. } => *count,
+            git_core::graph::GraphSegment::New { .. } => 0,
+        })
+        .sum();
+    assert_eq!(kept, 18, "every loaded row but the two reset away");
+    assert!(page.commits.len() <= 2, "sent {}", page.commits.len());
+}
+
+// #835: a deleted branch takes its own rows out from among the kept ones.
+#[test]
+fn a_refresh_after_deleting_a_branch_drops_its_rows() {
+    let (_dir, repo) = init_repo();
+    branchy_history(&repo);
+    let mut cache = git_core::graph::WalkCache::default();
+    let selection = GraphSelection::default();
+    let (rows, loaded) = load_rows(&repo, &mut cache, &selection, 30);
+
+    repo.find_reference("refs/heads/side")
+        .unwrap()
+        .delete()
+        .unwrap();
+    let page = refresh(&repo, &mut cache, &selection, &rows, &loaded);
+    assert!(page.refresh.is_some(), "the loaded rows continue");
+}
+
+// #835: a new tag on a loaded row comes as new badges for that row only.
+#[test]
+fn a_refresh_after_a_new_tag_sends_only_its_row_badges() {
+    let (_dir, repo) = init_repo();
+    branchy_history(&repo);
+    let mut cache = git_core::graph::WalkCache::default();
+    let selection = GraphSelection::default();
+    let (rows, loaded) = load_rows(&repo, &mut cache, &selection, 20);
+
+    let deep = git2::Oid::from_str(&rows[15].id).unwrap();
+    repo.tag_lightweight("deep", &repo.find_object(deep, None).unwrap(), false)
+        .unwrap();
+    let page = refresh(&repo, &mut cache, &selection, &rows, &loaded);
+
+    assert!(page.commits.is_empty());
+    let refresh = page.refresh.expect("the loaded rows continue");
+    assert_eq!(
+        refresh.layout,
+        [git_core::graph::GraphSegment::Kept { from: 0, count: 20 }]
+    );
+    assert_eq!(refresh.badges.len(), 1);
+    assert_eq!(refresh.badges[0].id, rows[15].id);
+    assert_eq!(refresh.badges[0].tags, ["deep"]);
+}
+
+// #835: a refresh of only a few loaded rows still gets a full first page.
+#[test]
+fn a_refresh_of_few_rows_reads_at_least_a_page() {
+    let (_dir, repo) = init_repo();
+    let main = branchy_history(&repo);
+    let mut cache = git_core::graph::WalkCache::default();
+    let selection = GraphSelection::default();
+    let (rows, loaded) = load_rows(&repo, &mut cache, &selection, 2);
+
+    let newer = commit_at(&repo, &[main], "newer", 5_000);
+    repo.reference("refs/heads/main", newer, true, "test")
+        .unwrap();
+    let page = refresh(&repo, &mut cache, &selection, &rows, &loaded);
+    assert_eq!(refreshed_rows(&rows, &page).len(), 5);
+    assert!(page.refresh.is_some());
+}
+
+// #835: a walk or badges the cache no longer has (another worker) get an ordinary first page of
+// as many rows as were loaded.
+#[test]
+fn a_refresh_the_cache_cannot_continue_reads_the_loaded_rows_again() {
+    let (_dir, repo) = init_repo();
+    branchy_history(&repo);
+    let selection = GraphSelection::default();
+    let (rows, loaded) = load_rows(
+        &repo,
+        &mut git_core::graph::WalkCache::default(),
+        &selection,
+        20,
+    );
+
+    let mut fresh = git_core::graph::WalkCache::default();
+    let page = refresh(&repo, &mut fresh, &selection, &rows, &loaded);
+    assert_eq!(page.refresh, None);
+    assert_eq!(page.commits.len(), 20);
+}
+
+// #835: new rows next to each other make one segment; a refresh that reaches the end of the walk
+// has no cursor.
+#[test]
+fn new_rows_together_are_one_segment_and_the_end_has_no_cursor() {
+    let (_dir, repo) = init_repo();
+    let main = branchy_history(&repo);
+    let mut cache = git_core::graph::WalkCache::default();
+    let selection = local(&["main"]);
+    let (rows, loaded) = load_rows(&repo, &mut cache, &selection, 1_000);
+
+    let one = commit_at(&repo, &[main], "one", 5_000);
+    let two = commit_at(&repo, &[one], "two", 5_001);
+    repo.reference("refs/heads/main", two, true, "test")
+        .unwrap();
+    let page = refresh(&repo, &mut cache, &selection, &rows, &loaded);
+
+    let refresh = page.refresh.expect("the loaded rows continue");
+    assert_eq!(
+        refresh.layout,
+        [
+            git_core::graph::GraphSegment::New { count: 2 },
+            git_core::graph::GraphSegment::Kept {
+                from: 0,
+                count: rows.len()
+            },
+        ]
+    );
+    assert_eq!(page.next_cursor, None);
+}
+
+// #835: rows whose badges are two ref changes old can't be compared any more: every loaded row
+// is read again.
+#[test]
+fn badges_two_ref_changes_old_are_read_again() {
+    let (_dir, repo) = init_repo();
+    let main = branchy_history(&repo);
+    let mut cache = git_core::graph::WalkCache::default();
+    let selection = GraphSelection::default();
+    let (rows, loaded) = load_rows(&repo, &mut cache, &selection, 20);
+    let tip = repo.find_object(main, None).unwrap();
+
+    for tag in ["first", "second"] {
+        repo.tag_lightweight(tag, &tip, false).unwrap();
+        // Something else reads the badges (a later page, a search).
+        git_core::graph::graph_page_cached(&repo, &mut cache, &selection, None, 1).unwrap();
+    }
+    let page = refresh(&repo, &mut cache, &selection, &rows, &loaded);
+    assert_eq!(page.refresh, None);
+    assert_eq!(page.commits.len(), 20);
+}
