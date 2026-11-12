@@ -157,9 +157,6 @@ fn containment_refs(repo: &Repository) -> Result<Vec<NamedTip>, git2::Error> {
 /// target and a descendant could make a ref that contains the target look like it doesn't.
 const CLOCK_SKEW_SLOP: i64 = 24 * 60 * 60;
 
-/// While walking, the deadline is checked once every this many commits.
-const DEADLINE_INTERVAL: usize = 256;
-
 /// For each of `tips`, whether it is `target` or descends from it; `None` when `deadline`
 /// passed first.
 ///
@@ -202,7 +199,8 @@ pub(crate) fn containing_tips(
     let mut reached = vec![0u64; words];
     for (&tip, &bit) in &bit_of_tip {
         let time = repo.find_commit(tip)?.time().seconds();
-        if tip != target_id && time < cutoff {
+        // The target itself is never older than the cut-off.
+        if time < cutoff {
             continue;
         }
         let bits = pending.entry(tip).or_insert_with(|| {
@@ -211,10 +209,8 @@ pub(crate) fn containing_tips(
         });
         bits[bit / 64] |= 1 << (bit % 64);
     }
-    let mut steps = 0usize;
     while let Some((_, oid)) = queue.pop() {
-        steps += 1;
-        if steps.is_multiple_of(DEADLINE_INTERVAL) && Instant::now() >= deadline {
+        if Instant::now() >= deadline {
             return Ok(None);
         }
         let Some(bits) = pending.remove(&oid) else {
@@ -230,7 +226,7 @@ pub(crate) fn containing_tips(
         for parent in commit.parents() {
             let time = parent.time().seconds();
             let id = parent.id();
-            if id != target_id && time < cutoff {
+            if time < cutoff {
                 continue;
             }
             let into = pending.entry(id).or_insert_with(|| {
