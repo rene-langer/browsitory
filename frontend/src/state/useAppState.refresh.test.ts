@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { RepoError, type GraphCommit, type RepoClient, type StatusEntry, type TagInfo } from "../ipc/RepoClient";
+import { RepoError, type GraphCommit, type GraphPage, type RepoClient, type StatusEntry, type TagInfo } from "../ipc/RepoClient";
 import { useAppState } from "./useAppState";
 import { graphPage } from "../test/fakeRepoClient";
 import { TEST_REPO_PATH, remote, upstream, transferClient } from "./useAppStateTestClient";
@@ -295,7 +295,7 @@ describe("useAppState", () => {
       client.getCommitGraph = async (repoPath, limit, selection, cursor) => {
         if (stale && cursor !== null) {
           await paged(repoPath, limit, selection, cursor);
-          return { commits: [], nextCursor: null, stale: true };
+          return { commits: [], nextCursor: null, stale: true, walk: "", badges: "", refresh: null };
         }
         return paged(repoPath, limit, selection, cursor);
       };
@@ -323,6 +323,113 @@ describe("useAppState", () => {
       refs = "r2";
       await act(() => result.current.refresh());
       expect(calls.at(-1)).toEqual({ limit: 600, cursor: null });
+    });
+
+    // #835: a refresh after the refs moved sends the rows it has and gets only what is new.
+    describe("continuing the loaded rows", () => {
+      // A backend whose pages name their walk and badges, like the real one.
+      function versionedClient(overrides: Partial<RepoClient> = {}) {
+        let refs = "r1";
+        const calls: { limit: number; cursor: string | null; loaded: unknown }[] = [];
+        const refreshPage = vi.fn(async (): Promise<GraphPage> => ({
+          commits: [commitFor(5000)],
+          nextCursor: "601:w2",
+          stale: false,
+          walk: "w2",
+          badges: "b2",
+          refresh: {
+            layout: [
+              { kind: "New", count: 1 },
+              { kind: "Kept", from: 0, count: 600 },
+            ],
+            badges: [{ id: "id0", branchRefs: [], remoteBranchRefs: [], tags: ["v1"] }],
+          },
+        }));
+        const client = transferClient({
+          getChangeStamp: async () => ({ refs, workTree: "w" }),
+          getStatusWithStamp: async () => ({ status: [], stamp: { refs, workTree: "w" } }),
+          getCommitGraph: async (_repoPath, limit, _selection, cursor, loaded) => {
+            calls.push({ limit, cursor, loaded: loaded ?? null });
+            if (loaded) return refreshPage();
+            const start = cursor === null ? 0 : Number(cursor.split(":")[0]);
+            const end = Math.min(start + limit, history.length);
+            return {
+              commits: history.slice(start, end),
+              nextCursor: end < history.length ? `${end}:w1` : null,
+              stale: false,
+              walk: "w1",
+              badges: "b1",
+              refresh: null,
+            };
+          },
+          ...overrides,
+        });
+        return { client, calls, refreshPage, moveRefs: () => (refs = "r2") };
+      }
+
+      it("asks for a page with the loaded rows and builds the rows from the answer", async () => {
+        const { client, calls, moveRefs } = versionedClient();
+        const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+        await act(() => result.current.refresh());
+        await act(() => result.current.loadMoreHistory());
+        moveRefs();
+        await act(() => result.current.refresh());
+
+        expect(calls.at(-1)).toEqual({ limit: 300, cursor: null, loaded: { walk: "w1", badges: "b1", rows: 600 } });
+        const ids = result.current.state.commits.map((c) => c.id);
+        expect(ids).toEqual(["id5000", ...history.slice(0, 600).map((c) => c.id)]);
+        expect(result.current.state.commits[1].tags).toEqual(["v1"]);
+        expect(result.current.state.graphLimit).toBe(601);
+        expect(result.current.state.hasMoreHistory).toBe(true);
+        // The next page continues the refreshed walk.
+        await act(() => result.current.loadMoreHistory());
+        expect(calls.at(-1)).toEqual({ limit: 300, cursor: "601:w2", loaded: null });
+      });
+
+      it("takes the answer's rows as they are when it couldn't continue them", async () => {
+        const { client, refreshPage, moveRefs } = versionedClient();
+        refreshPage.mockResolvedValueOnce({
+          commits: history.slice(0, 300),
+          nextCursor: "300:w2",
+          stale: false,
+          walk: "w2",
+          badges: "b2",
+          refresh: null,
+        });
+        const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+        await act(() => result.current.refresh());
+        moveRefs();
+        await act(() => result.current.refresh());
+
+        expect(result.current.state.commits).toHaveLength(300);
+        expect(result.current.state.graphLimit).toBe(300);
+      });
+
+      it("reads every row again on the Refresh command", async () => {
+        const { client, calls, moveRefs } = versionedClient();
+        const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+        await act(() => result.current.refresh());
+        moveRefs();
+        await act(() => result.current.refresh({ full: true }));
+
+        expect(calls.at(-1)).toEqual({ limit: 300, cursor: null, loaded: null });
+      });
+
+      it("reads every row again after a page came with other badges than the rows before it", async () => {
+        const { client, calls, moveRefs } = versionedClient();
+        const paged = client.getCommitGraph;
+        client.getCommitGraph = async (repoPath, limit, selection, cursor, loaded) => {
+          const page = await paged(repoPath, limit, selection, cursor, loaded);
+          return cursor === null ? page : { ...page, badges: "b-other" };
+        };
+        const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+        await act(() => result.current.refresh());
+        await act(() => result.current.loadMoreHistory());
+        moveRefs();
+        await act(() => result.current.refresh());
+
+        expect(calls.at(-1)).toEqual({ limit: 600, cursor: null, loaded: null });
+      });
     });
 
     it("loadHistoryThrough loads whole pages up to a graph row (#441)", async () => {

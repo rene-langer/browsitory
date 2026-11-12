@@ -6,7 +6,7 @@ use repo_service::wire::StatusWithStampDto;
 use repo_service::wire::{
     to_trailers, BlameLineDto, CommitLocationDto, CommitOutcomeDto, CommitSignatureDto,
     DiffHunkDto, DiffOptionsDto, FileHistoryPageDto, GraphPageDto, GraphSelectionDto,
-    LineHistoryDto, StatusEntryDto,
+    LineHistoryDto, LoadedGraphDto, StatusEntryDto,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -66,16 +66,21 @@ pub(super) struct GetCommitGraphParams {
     /// The previous page's `nextCursor` (#685); absent or `null` starts at the first commit.
     #[serde(default)]
     cursor: Option<String>,
+    /// Without a cursor: the rows the client has, which a refresh continues (#835); absent or
+    /// `null` reads them all again.
+    #[serde(default)]
+    loaded: Option<LoadedGraphDto>,
 }
 
 pub(super) fn get_commit_graph(
     params: GetCommitGraphParams,
     repos: &Repos,
 ) -> Result<Value, ErrorDto> {
-    let page = worker_handle(repos, &params.repo_path)?.get_commit_graph(
+    let page = worker_handle(repos, &params.repo_path)?.get_commit_graph_after(
         params.limit,
         params.selection.into(),
         params.cursor,
+        params.loaded.map(Into::into),
     )?;
     serde_json::to_value(GraphPageDto::from(page)).map_err(ErrorDto::from_error)
 }

@@ -79,6 +79,13 @@ fn methods() -> Vec<String> {
     serde_json::from_str(&text).expect("parse sidecar-methods.json")
 }
 
+/// Methods whose answer depends on the machine, not on the params: their lines are pinned as
+/// `MACHINE_DEPENDENT_LINE` once the answer is checked to be a result (no error).
+/// `list_font_families` lists the installed fonts (#858; its shape is checked in
+/// `protocol_roundtrip.rs`).
+const MACHINE_DEPENDENT: [&str; 1] = ["list_font_families"];
+const MACHINE_DEPENDENT_LINE: &str = "<a result that depends on the machine>";
+
 #[test]
 fn every_method_answers_bad_params_with_the_pinned_line() {
     let mut sidecar = Sidecar::spawn();
@@ -89,7 +96,13 @@ fn every_method_answers_bad_params_with_the_pinned_line() {
             ("empty", Some(serde_json::json!({}))),
             ("string", Some(serde_json::json!("x"))),
         ] {
-            cases.push((format!("{method}/{shape}"), sidecar.call(&method, params)));
+            let mut line = sidecar.call(&method, params);
+            if MACHINE_DEPENDENT.contains(&method.as_str()) {
+                let answer: serde_json::Value = serde_json::from_str(&line).expect("json line");
+                assert!(answer.get("result").is_some(), "{method}/{shape}: {line}");
+                line = MACHINE_DEPENDENT_LINE.to_string();
+            }
+            cases.push((format!("{method}/{shape}"), line));
         }
     }
     let file = test_support::wire_snapshot_file(

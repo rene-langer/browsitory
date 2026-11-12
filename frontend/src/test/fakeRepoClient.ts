@@ -124,6 +124,7 @@ export const EMPTY_RESULTS: Partial<RepoClient> = {
   setFetchSettings: async () => {},
   getAppearanceSettings: async () => ({ codeFont: null, codeFontSize: null, uiSize: "Normal" as const, tabSize: 4, dateFormat: "Iso" as const }),
   setAppearanceSettings: async () => {},
+  listFontFamilies: async () => [],
   getUpdateSettings: async () => ({ checkAutomatically: true }),
   setUpdateSettings: async () => {},
 };
@@ -188,7 +189,8 @@ function combinedRead(client: RepoClient): RepoClient["getStatusWithStamp"] {
   };
 }
 
-/** A `getCommitGraph` answer (#685): `commits`, then `nextCursor` (`null`: the walk is done). */
+/** A `getCommitGraph` answer (#685): `commits`, then `nextCursor` (`null`: the walk is done).
+ *  No walk or badges version, so a refresh after it reads every row again (#835). */
 export function graphPage(commits: GraphCommit[], nextCursor: string | null = null): GraphPage {
-  return { commits, nextCursor, stale: false };
+  return { commits, nextCursor, stale: false, walk: "", badges: "", refresh: null };
 }

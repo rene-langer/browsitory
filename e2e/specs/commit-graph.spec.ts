@@ -11,6 +11,7 @@ const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 // freshly re-cloned fixture repo.
 const PRIME_FILE = "graph-prime.txt";
 const DETACHED_FILE = "graph-detached.txt";
+const CONTINUED_FILE = "graph-continued.txt";
 
 describe("Browsitory commit graph", () => {
   before(() => {
@@ -60,6 +61,37 @@ describe("Browsitory commit graph", () => {
     // elsewhere in the app (e.g. BranchTree's Local folder rows).
     const featureCommitEntryText = await featureCommitEntry.getText();
     expect(featureCommitEntryText).toContain("e2e-graph-feature");
+  });
+
+  // #835: a commit made in the app refreshes the graph by continuing the rows already loaded:
+  // the new commit comes on top, the rows below stay, and the branch badge moves off the row
+  // that was the tip.
+  it("moves the branch badge to a new commit and keeps the rows below it", async () => {
+    const baseBranch = git(E2E_REPO_PATH, "rev-parse", "--abbrev-ref", "HEAD");
+    fs.writeFileSync(path.join(E2E_REPO_PATH, CONTINUED_FILE), "continued\n");
+    const commitMessageInput = await $("textarea[placeholder='Commit message']");
+    await commitMessageInput.waitForExist();
+    const stageButton = await $(`button[aria-label="Stage ${CONTINUED_FILE}"]`);
+    await stageButton.waitForExist();
+    await browser.execute((el) => (el as HTMLElement).scrollIntoView({ block: "center" }), stageButton);
+    await browser.execute((el) => (el as HTMLElement).click(), stageButton);
+    await waitUntilInPage(`button[aria-label="Unstage ${CONTINUED_FILE}"]`);
+    await browser.execute((el) => { const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set; setter?.call(el, "e2e: continued refresh"); el.dispatchEvent(new Event("input", { bubbles: true })); }, commitMessageInput);
+    await clickInPage('button[data-action="commit"]');
+
+    const newRow = await $("li*=e2e: continued refresh");
+    await newRow.waitForExist();
+    await browser.waitUntil(async () => (await newRow.getText()).includes(baseBranch), {
+      timeoutMsg: "the new commit's row got no branch badge",
+    });
+    const previousTip = await $("li*=e2e: prime the refresh");
+    await previousTip.waitForExist();
+    await browser.waitUntil(async () => !(await previousTip.getText()).includes(baseBranch), {
+      timeoutMsg: "the badge stayed on the row that was the tip",
+    });
+    // The rows below are still there.
+    await (await $("li*=e2e: commit graph base commit")).waitForExist();
+    await (await $("li*=e2e: commit graph feature commit")).waitForExist();
   });
 
   // #620: a commit's row shows the lines it added and removed; its details show the totals.

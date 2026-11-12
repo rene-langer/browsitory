@@ -2583,6 +2583,34 @@ fn appearance_settings_round_trip_through_the_sidecar_clamped() {
 }
 
 #[test]
+fn installed_font_families_come_through_the_sidecar() {
+    // #858: the VSCode webview can't list fonts, so the sidecar does, as the desktop app's
+    // backend does: `{name, monospace}` per family, sorted by name.
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    let reply = sidecar.call(1, "list_font_families", serde_json::json!({}));
+    let families = reply["result"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{reply}"));
+    for family in families {
+        let object = family.as_object().unwrap();
+        assert_eq!(object.len(), 2, "{family}");
+        assert!(object["name"].is_string(), "{family}");
+        assert!(object["monospace"].is_boolean(), "{family}");
+    }
+    let names: Vec<String> = families
+        .iter()
+        .map(|f| f["name"].as_str().unwrap().to_lowercase())
+        .collect();
+    let mut sorted = names.clone();
+    sorted.sort();
+    assert_eq!(names, sorted);
+    if cfg!(any(target_os = "macos", windows)) {
+        assert!(!families.is_empty());
+    }
+}
+
+#[test]
 fn file_history_and_rename_diff_round_trip_through_the_sidecar() {
     let (_guard, config_dir) = ConfigDirGuard::new();
     let (dir, repo) = init_repo();

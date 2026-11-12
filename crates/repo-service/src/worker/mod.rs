@@ -129,6 +129,8 @@ pub(crate) enum Command {
         limit: usize,
         selection: GraphSelection,
         cursor: Option<String>,
+        /// Without a cursor: the rows the client has, which a refresh continues (#835).
+        loaded: Option<git_core::graph::LoadedGraph>,
         reply: Sender<Result<git_core::graph::GraphPage, ErrorDto>>,
     },
     LocateCommit {

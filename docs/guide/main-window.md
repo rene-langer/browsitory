@@ -135,8 +135,13 @@ Each change shows at once, without a restart:
   and the selection stay marked.
 - **Code font**: the font for file content and commit IDs: diffs, blame, the file viewer,
   conflicts, and the commit message field while its ruler is shown. Type a font family name, or
-  several separated by commas. A font that isn't installed falls back to the default monospace
-  font; leave the field empty to use the default.
+  several separated by commas. While you type, the field suggests the installed fonts whose name
+  contains your text, monospaced ones first and marked "monospace", each shown in its own font;
+  pick one with the arrow keys and Enter, or click it (Escape hides the list). In a list of
+  fonts, the suggestions are for the last one. Browsitory reads the installed fonts from your
+  computer when you first click into the field; the list stays on your computer and isn't
+  saved. A font that isn't installed falls back to the default monospace font; leave the field
+  empty to use the default.
 - **Code font size (px)**: the size of file content in diffs, blame, the file viewer and
   conflicts, from 10 to 24 pixels. Empty keeps each view's built-in size.
 - **Interface size**: Small, Normal or Large text for the rest of the window.

@@ -4131,12 +4131,15 @@ fn a_rename_the_drive_folds_is_refused_as_a_case_only_rename() {
     // `CAFÉ`) the two names are one file, but libgit2's index compares only ASCII case. Stash
     // all refused with "Stashing would overwrite the ignored 'Straße'…" and Stash file… with
     // that or `RenameSourceRecreated`, all misleading (seen on CI). Now refused as a case-only
-    // rename, like `README` → `readme` (#152, #370), before anything is written.
+    // rename, like `README` → `readme` (#152, #370), before anything is written. A rename that
+    // only changes Unicode normalization (NFC ↔ NFD) has its own message (#404).
+    use unicode_normalization::UnicodeNormalization;
     for rename in UNICODE_RENAMES {
         if !drive_folds(rename) {
             continue;
         }
         let (old, new, ..) = rename;
+        let normalization_only = old.nfc().eq(new.nfc());
         let mut runs = whole_stash_modes();
         runs.push(with(|o| o.paths = vec![new.into()]));
         runs.push(with(|o| o.paths = vec![old.into()]));
@@ -4147,9 +4150,16 @@ fn a_rename_the_drive_folds_is_refused_as_a_case_only_rename() {
 
             let error = git_core::stash::save_stash(&mut repo, &opts).unwrap_err();
 
-            let StashError::CaseOnlyRename { path, other } = &error else {
+            let (StashError::CaseOnlyRename { path, other }
+            | StashError::NormalizationOnlyRename { path, other }) = &error
+            else {
                 panic!("{new:?} {opts:?}: {error:?}");
             };
+            assert_eq!(
+                matches!(error, StashError::NormalizationOnlyRename { .. }),
+                normalization_only,
+                "{new:?} {opts:?}: {error:?}"
+            );
             let mut named = [path.as_str(), other.as_str()];
             named.sort();
             let mut expected = [old, new];

@@ -1063,7 +1063,15 @@ certificate.
   format (`graph::walk_fingerprint`). A cursor of another walk answers `stale: true` with no
   commits rather than an error, and the frontend reads the history again from the start.
   `useAppState.loadMoreHistory` appends the next page in the tab's read queue (after a running
-  refresh, never alongside one); a refresh that reads the history again reads as many rows as
+  refresh, never alongside one). The worker keeps each walk's order and the ref badges in a
+  `graph::WalkCache` (#835), so later pages, "Go to" and search pages slice the cached order.
+  A refresh that reads the history again sends the rows it has as `loaded` (the `walk` and
+  `badges` version of their pages and how many there are, #835); when the cache still holds
+  that walk and those badges, `graph::graph_refresh_cached` answers only the rows new to the
+  client plus a `refresh` layout (`New` rows from `commits`, `Kept` runs of the loaded rows) and
+  the new badges of kept rows whose refs changed; rows a reset or a deleted branch took out of
+  the walk drop out. `lib/graphRefresh.ts` rebuilds the rows. Otherwise (another worker, the
+  Refresh command, a page whose badges differ from the rows before it) it reads as many rows as
   are loaded (`graphLimit`). `CommitGraph` renders only the rows in view
   (`components/useVirtualRows.ts`: one row height, measured from the first row; padding on the
   list for the others; `aria-setsize`/`aria-posinset` on the rows) and asks for the next page
@@ -2236,15 +2244,25 @@ work to a `HighlightTransport` (`highlightWorkerProtocol.ts`):
   `LOCAL`/`REMOTE`/`BASE` files into a fresh `browsitory-tool-*` directory in the temp dir
   (random name, 0700, files created `O_EXCL` with sanitized names). The Tauri command spawns the
   tool and, for the merge tool, waits on `off_runtime` (the blocking pool), so a tool window that stays open for
-  hours never blocks the repo's command queue. Stale directories are swept after 24 hours.
+  hours never blocks the repo's command queue. Stale directories are swept after 24 hours,
+  except one whose tool is still running (#129): the spawned tool's PID is written to
+  `.browsitory-tool.pid` in its directory, and the sweep keeps the directory while that process
+  is alive (`process::process_alive`), even after Browsitory has quit. A PID file rather than
+  touching the directory while the tool runs, because tools are detached and outlive the app,
+  which would stop touching. A reused PID only keeps a directory longer.
 - VSCode reads historical file contents through the `browsitory-file:` content provider, which
   calls the sidecar's internal `read_file_version`. No temp files are needed there. Before
   opening VSCode's merge editor the host calls the internal `check_merge_target`, the same
   guards `prepare_merge_tool` applies (text conflict, no symlink/submodule, work tree file
   inside the tree).
-- Side files and `read_file_version` return raw blob bytes: git2 0.21 exposes neither
-  `git_blob_filter` nor libgit2's filter lists, so CRLF/`ident`/filter-driver conversion is not
-  applied (documented for users in USER_GUIDE).
+- Side files and `read_file_version` hold a blob as checkout writes it (#130): git2 0.21
+  doesn't wrap `git_blob_filter`, so `tools::checkout_contents` declares it against the linked
+  libgit2 (as `index_refresh` does `git_index_set_caps`). That applies libgit2's built-in
+  filters, CRLF/eol (`core.autocrlf`, `core.eol`, `text`/`eol` attributes) and `ident`;
+  libgit2 runs no external filter driver (Git LFS shows its pointer). Binary blobs are returned
+  as stored. libgit2 caches `core.autocrlf` per open repository, so a change made outside the
+  app applies once the repository is opened again. For a p4merge add/add conflict,
+  `prepare_merge_tool` writes git's virtual base (`create_virtual_base`, #159).
 - A commit's file tree (#446, `git-core::tree`): `get_commit_tree` lists one folder per call
   (the frontend loads folders as they open) or, with a filter, walks the whole tree for matching
   paths (at most `MAX_TREE_MATCHES`). `get_file_at_commit` sends text, or a sniffed image's

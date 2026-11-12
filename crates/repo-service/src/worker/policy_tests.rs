@@ -94,7 +94,8 @@ pub(super) fn table() -> Vec<((&'static str, Command), &'static str)> {
             cmd!(GetCommitGraph {
                 limit: 1,
                 selection: graph(),
-                cursor: None
+                cursor: None,
+                loaded: None
             }),
             "read",
         ),

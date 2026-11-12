@@ -91,6 +91,15 @@ impl RefDecorations {
         })
     }
 
+    /// The badges of `oid`: local branches, remote branches, tags.
+    fn badges(&self, oid: &Oid) -> [Option<&Vec<String>>; 3] {
+        [
+            self.local.get(oid),
+            self.remote.get(oid),
+            self.tags.get(oid),
+        ]
+    }
+
     pub(crate) fn graph_commit(&self, commit: &git2::Commit) -> GraphCommit {
         let oid = commit.id();
         let id = oid.to_string();
@@ -130,17 +139,20 @@ impl RefDecorations {
 /// "Load more" and a refresh continue them instead of walking from the start again.
 #[derive(Default)]
 pub struct WalkCache {
-    /// Most recently used first, at most [`WALKS_KEPT`].
-    walks: Vec<(WalkKey, Arc<[Oid]>)>,
-    decorations: Option<(RefsKey, Arc<RefDecorations>)>,
+    /// Most recently used first, at most [`WALKS_KEPT`], each with its cursor fingerprint.
+    walks: Vec<(WalkKey, String, Arc<[Oid]>)>,
+    /// The badges, with their [`GraphPage::badges`] version.
+    decorations: Option<(RefsKey, String, Arc<RefDecorations>)>,
+    /// The badges before them, which a refresh compares rows it keeps against (#835).
+    previous_decorations: Option<(String, Arc<RefDecorations>)>,
     pub(crate) histories: crate::history::HistoryWalks,
     pub(crate) stats: WalkCacheStats,
 }
 
-/// How many walk orders a [`WalkCache`] keeps: the graph's and a search's with other start
-/// points (a `branch:` term, or "Collapse merges", which the search doesn't follow). About
-/// 20 bytes a commit each.
-const WALKS_KEPT: usize = 2;
+/// How many walk orders a [`WalkCache`] keeps: the graph's, a search's with other start points
+/// (a `branch:` term, or "Collapse merges", which the search doesn't follow), and the graph's
+/// before a ref moved, which a refresh continues from (#835). About 20 bytes a commit each.
+const WALKS_KEPT: usize = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WalkKey {
@@ -197,9 +209,9 @@ impl WalkCache {
         cancel: &dyn Fn() -> bool,
     ) -> Result<Option<Arc<[Oid]>>, git2::Error> {
         let key = WalkKey::new(repo, starts, first_parent);
-        if let Some(index) = self.walks.iter().position(|(cached, _)| *cached == key) {
+        if let Some(index) = self.walks.iter().position(|(cached, _, _)| *cached == key) {
             let entry = self.walks.remove(index);
-            let order = Arc::clone(&entry.1);
+            let order = Arc::clone(&entry.2);
             self.walks.insert(0, entry);
             return Ok(Some(order));
         }
@@ -207,7 +219,8 @@ impl WalkCache {
         let Some(order) = walk_order(repo, starts, first_parent, cancel)? else {
             return Ok(None);
         };
-        self.walks.insert(0, (key, Arc::clone(&order)));
+        let fingerprint = walk_fingerprint(starts, first_parent)?;
+        self.walks.insert(0, (key, fingerprint, Arc::clone(&order)));
         self.walks.truncate(WALKS_KEPT);
         Ok(Some(order))
     }
@@ -217,8 +230,8 @@ impl WalkCache {
     pub(crate) fn cached_order(&self, key: &WalkKey) -> Option<Arc<[Oid]>> {
         self.walks
             .iter()
-            .find(|(cached, _)| cached == key)
-            .map(|(_, order)| Arc::clone(order))
+            .find(|(cached, _, _)| cached == key)
+            .map(|(_, _, order)| Arc::clone(order))
             .or_else(|| self.histories.order(key))
     }
 
@@ -228,22 +241,70 @@ impl WalkCache {
         &mut self,
         repo: &Repository,
     ) -> Result<Arc<RefDecorations>, git2::Error> {
+        Ok(self.versioned_decorations(repo)?.1)
+    }
+
+    /// The cached walk whose cursor fingerprint is `fingerprint`, with whether it follows first
+    /// parents only.
+    fn walk_of(&self, fingerprint: &str) -> Option<(bool, Arc<[Oid]>)> {
+        self.walks
+            .iter()
+            .find(|(_, print, _)| print == fingerprint)
+            .map(|(key, _, order)| (key.first_parent, Arc::clone(order)))
+    }
+
+    /// The cached badges of version `version`.
+    fn decorations_of(&self, version: &str) -> Option<Arc<RefDecorations>> {
+        let current = self
+            .decorations
+            .as_ref()
+            .map(|(_, cached, decorations)| (cached, decorations));
+        let previous = self
+            .previous_decorations
+            .as_ref()
+            .map(|(cached, decorations)| (cached, decorations));
+        [current, previous]
+            .into_iter()
+            .flatten()
+            .find(|(cached, _)| *cached == version)
+            .map(|(_, decorations)| Arc::clone(decorations))
+    }
+
+    /// [`Self::decorations`] with their version: a hash of the refs they were read from.
+    fn versioned_decorations(
+        &mut self,
+        repo: &Repository,
+    ) -> Result<(String, Arc<RefDecorations>), git2::Error> {
         let key = refs_key(repo)?;
-        if let Some((cached, decorations)) = &self.decorations {
+        if let Some((cached, version, decorations)) = &self.decorations {
             if *cached == key {
-                return Ok(Arc::clone(decorations));
+                return Ok((version.clone(), Arc::clone(decorations)));
             }
         }
         self.stats.decorations += 1;
+        let version = refs_version(&key);
         let decorations = Arc::new(RefDecorations::load(repo)?);
-        self.decorations = Some((key, Arc::clone(&decorations)));
-        Ok(decorations)
+        let replaced = self
+            .decorations
+            .replace((key, version.clone(), Arc::clone(&decorations)));
+        if let Some((_, version, decorations)) = replaced {
+            self.previous_decorations = Some((version, decorations));
+        }
+        Ok((version, decorations))
     }
 }
 
 /// Every reference under `refs/heads/`, `refs/remotes/` and `refs/tags/` (name, target id,
 /// symbolic target), sorted.
 type RefsKey = Vec<(Vec<u8>, Option<Oid>, Option<Vec<u8>>)>;
+
+/// A version of the badges read from `key`: its hash, as 16 hex digits.
+fn refs_version(key: &RefsKey) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    key.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
 
 /// Every reference under `refs/heads/`, `refs/remotes/` and `refs/tags/` with
 /// what it points at (an id, or a ref for a symbolic one): what [`RefDecorations`] reads.
@@ -403,6 +464,50 @@ pub struct GraphPage {
     /// The cursor came from another walk (a start point moved, or the selection or "Collapse
     /// merges" changed): `commits` is empty, and the caller loads the graph from the start.
     pub stale: bool,
+    /// The walk the rows come from (its cursor fingerprint), for [`LoadedGraph::walk`].
+    pub walk: String,
+    /// The version of the rows' badges (empty on a stale page), for [`LoadedGraph::badges`].
+    pub badges: String,
+    /// Only from [`graph_refresh_cached`], when it could continue the rows already loaded:
+    /// how the refreshed rows are made of `commits` and those rows. `None`: `commits` are the
+    /// rows.
+    pub refresh: Option<GraphRefresh>,
+}
+
+/// The rows a client has loaded from the graph (#835), as a refresh passes them back: the
+/// first `rows` rows of the walk `walk`, with the badges of version `badges` (both from the
+/// [`GraphPage`]s they came from).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoadedGraph {
+    pub walk: String,
+    pub badges: String,
+    pub rows: usize,
+}
+
+/// How a refresh's rows are made (#835): `layout` in order, each segment either the next rows
+/// of [`GraphPage::commits`] or a run of the rows already loaded; then `badges` replaces the
+/// badges of kept rows whose branches or tags changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphRefresh {
+    pub layout: Vec<GraphSegment>,
+    pub badges: Vec<RowBadges>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GraphSegment {
+    /// The next `count` rows of [`GraphPage::commits`].
+    New { count: usize },
+    /// The loaded rows `from..from + count`, unchanged but for [`GraphRefresh::badges`].
+    Kept { from: usize, count: usize },
+}
+
+/// A kept row's badges as they are now (see [`GraphCommit`]'s fields of the same names).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RowBadges {
+    pub id: String,
+    pub branch_refs: Vec<String>,
+    pub remote_branch_refs: Vec<String>,
+    pub tags: Vec<String>,
 }
 
 /// The commits of `selection`, children before parents (`TOPOLOGICAL | TIME`), at most `limit`,
@@ -446,11 +551,14 @@ pub fn graph_page_cached(
                     commits: Vec::new(),
                     next_cursor: None,
                     stale: true,
+                    walk: fingerprint,
+                    badges: String::new(),
+                    refresh: None,
                 })
             }
         },
     };
-    let decorations = cache.decorations(repo)?;
+    let (badges, decorations) = cache.versioned_decorations(repo)?;
     let order = cache
         .order(repo, &starts, first_parent, &|| false)?
         .expect("a walk that is never cancelled");
@@ -459,12 +567,7 @@ pub fn graph_page_cached(
     let page = &page[..page.len().min(limit)];
     let mut commits = Vec::with_capacity(page.len());
     for oid in page {
-        let commit = repo.find_commit(*oid)?;
-        let mut row = decorations.graph_commit(&commit);
-        if first_parent && commit.parent_count() > 1 {
-            row.merged_count = Some(merged_walk(repo, &commit)?.count());
-        }
-        commits.push(row);
+        commits.push(graph_row(repo, &decorations, *oid, first_parent)?);
     }
     let next = offset + commits.len();
     let next_cursor = (next < order.len()).then(|| format!("{next}:{fingerprint}"));
@@ -472,6 +575,116 @@ pub fn graph_page_cached(
         commits,
         next_cursor,
         stale: false,
+        walk: fingerprint,
+        badges,
+        refresh: None,
+    })
+}
+
+/// The graph row of `oid`; with `first_parent`, a merge's carries its merged count.
+fn graph_row(
+    repo: &Repository,
+    decorations: &RefDecorations,
+    oid: Oid,
+    first_parent: bool,
+) -> Result<GraphCommit, git2::Error> {
+    let commit = repo.find_commit(oid)?;
+    let mut row = decorations.graph_commit(&commit);
+    if first_parent && commit.parent_count() > 1 {
+        row.merged_count = Some(merged_walk(repo, &commit)?.count());
+    }
+    Ok(row)
+}
+
+/// The first page of `selection` for a client that has `loaded` rows already (#835): when
+/// `cache` still holds the walk and the badges those rows came from, only the rows that are new
+/// to the client are sent, with [`GraphPage::refresh`] saying where the loaded rows go and
+/// which of their badges changed. The refreshed rows are the walk's first rows, as many as
+/// reach past the last loaded row that is still in the walk, and at least `limit`. Otherwise
+/// (another worker, a cache that moved on) it is an ordinary first page of at least
+/// `loaded.rows` rows.
+pub fn graph_refresh_cached(
+    repo: &Repository,
+    cache: &mut WalkCache,
+    selection: &GraphSelection,
+    loaded: &LoadedGraph,
+    limit: usize,
+) -> Result<GraphPage, GraphError> {
+    let starts = selection.start_oids(repo)?;
+    let first_parent = selection.walks_first_parent();
+    // Looked up before this read can push them out of the cache.
+    let old_walk = cache.walk_of(&loaded.walk);
+    let old_decorations = cache.decorations_of(&loaded.badges);
+    let (Some((old_first_parent, old)), Some(old_decorations)) = (old_walk, old_decorations) else {
+        return graph_page_cached(repo, cache, selection, None, limit.max(loaded.rows));
+    };
+    if old_first_parent != first_parent {
+        // The kept rows' merge counts would be another walk's.
+        return graph_page_cached(repo, cache, selection, None, limit.max(loaded.rows));
+    }
+    let fingerprint = walk_fingerprint(&starts, first_parent)?;
+    let (badges, decorations) = cache.versioned_decorations(repo)?;
+    let order = cache
+        .order(repo, &starts, first_parent, &|| false)?
+        .expect("a walk that is never cancelled");
+
+    let loaded_rows = &old[..loaded.rows.min(old.len())];
+    let loaded_at: HashMap<Oid, usize> = loaded_rows
+        .iter()
+        .enumerate()
+        .map(|(row, oid)| (*oid, row))
+        .collect();
+    let last_loaded = order.iter().rposition(|oid| loaded_at.contains_key(oid));
+    let rows = last_loaded
+        .map_or(0, |last| last + 1)
+        .max(limit.min(order.len()));
+
+    let mut layout: Vec<GraphSegment> = Vec::new();
+    let mut commits = Vec::new();
+    let mut changed = Vec::new();
+    for oid in &order[..rows] {
+        match loaded_at.get(oid) {
+            Some(&row) => {
+                match layout.last_mut() {
+                    Some(GraphSegment::Kept { from, count }) if *from + *count == row => {
+                        *count += 1;
+                    }
+                    _ => layout.push(GraphSegment::Kept {
+                        from: row,
+                        count: 1,
+                    }),
+                }
+                let now = decorations.badges(oid);
+                if old_decorations.badges(oid) != now {
+                    let [local, remote, tags] = now.map(|names| names.cloned().unwrap_or_default());
+                    changed.push(RowBadges {
+                        id: oid.to_string(),
+                        branch_refs: local,
+                        remote_branch_refs: remote,
+                        tags,
+                    });
+                }
+            }
+            None => {
+                match layout.last_mut() {
+                    Some(GraphSegment::New { count }) => *count += 1,
+                    _ => layout.push(GraphSegment::New { count: 1 }),
+                }
+                commits.push(graph_row(repo, &decorations, *oid, first_parent)?);
+            }
+        }
+    }
+    let next_cursor = (rows < order.len()).then(|| format!("{rows}:{fingerprint}"));
+    Ok(GraphPage {
+        commits,
+        next_cursor,
+        stale: false,
+        walk: fingerprint,
+        badges,
+        refresh: Some(GraphRefresh {
+            layout,
+            badges: changed,
+        }),
     })
 }
 

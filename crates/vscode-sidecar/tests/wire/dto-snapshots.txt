@@ -23,8 +23,9 @@ LineHistory/truncated {"complete":true,"entries":[],"truncated":true}
 LineHistory/more {"complete":false,"entries":[],"truncated":false}
 SearchPage/more {"commits":[{"authorEmail":"ada@example.com","authorName":"Ada Lovelace","branchRefs":["main"],"id":"0123456789abcdef0123456789abcdef01234567","parentIds":["89abcdef0123456789abcdef0123456789abcdef"],"remoteBranchRefs":["origin/main"],"shortId":"0123456","summary":"Match","tags":["v1.0.0"],"timestamp":1700000000}],"nextCursor":"cursor-1","scanned":500}
 SearchPage/exhausted {"commits":[],"nextCursor":null,"scanned":0}
-GraphPage/more {"commits":[{"authorEmail":"ada@example.com","authorName":"Ada Lovelace","branchRefs":["main"],"id":"0123456789abcdef0123456789abcdef01234567","parentIds":["89abcdef0123456789abcdef0123456789abcdef"],"remoteBranchRefs":["origin/main"],"shortId":"0123456","summary":"Row","tags":["v1.0.0"],"timestamp":1700000000}],"nextCursor":"1:0123456789abcdef","stale":false}
-GraphPage/stale {"commits":[],"nextCursor":null,"stale":true}
+GraphPage/more {"badges":"fedcba9876543210","commits":[{"authorEmail":"ada@example.com","authorName":"Ada Lovelace","branchRefs":["main"],"id":"0123456789abcdef0123456789abcdef01234567","parentIds":["89abcdef0123456789abcdef0123456789abcdef"],"remoteBranchRefs":["origin/main"],"shortId":"0123456","summary":"Row","tags":["v1.0.0"],"timestamp":1700000000}],"nextCursor":"1:0123456789abcdef","refresh":null,"stale":false,"walk":"0123456789abcdef"}
+GraphPage/stale {"badges":"","commits":[],"nextCursor":null,"refresh":null,"stale":true,"walk":"0123456789abcdef"}
+GraphPage/refresh {"badges":"fedcba9876543210","commits":[{"authorEmail":"ada@example.com","authorName":"Ada Lovelace","branchRefs":["main"],"id":"0123456789abcdef0123456789abcdef01234567","parentIds":["89abcdef0123456789abcdef0123456789abcdef"],"remoteBranchRefs":["origin/main"],"shortId":"0123456","summary":"New row","tags":["v1.0.0"],"timestamp":1700000000}],"nextCursor":"21:0123456789abcdef","refresh":{"badges":[{"branchRefs":[],"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","remoteBranchRefs":["origin/main"],"tags":["v1.0"]}],"layout":[{"count":1,"kind":"New"},{"count":20,"from":0,"kind":"Kept"}]},"stale":false,"walk":"0123456789abcdef"}
 ChangedFile/plain {"oldPath":null,"path":"a.txt"}
 ChangedFile/renamed {"oldPath":"a.txt","path":"b.txt"}
 CompareRange/plain {"fromId":"1111111111111111111111111111111111111111","toId":"2222222222222222222222222222222222222222"}
@@ -55,6 +56,8 @@ FetchSettings/every-10 {"autoFetchMinutes":10}
 AppearanceSettings/default {"codeFont":null,"codeFontSize":null,"dateFormat":"Iso","tabSize":4,"uiSize":"Normal"}
 AppearanceSettings/set {"codeFont":"Example Mono","codeFontSize":15,"dateFormat":"System","tabSize":8,"uiSize":"Large"}
 AppearanceSettings/small {"codeFont":null,"codeFontSize":null,"dateFormat":"Iso","tabSize":4,"uiSize":"Small"}
+FontFamily/monospace {"monospace":true,"name":"Example Mono"}
+FontFamily/proportional {"monospace":false,"name":"Example Sans"}
 UpdateSettings/on {"checkAutomatically":true}
 UpdateSettings/off {"checkAutomatically":false}
 GitTools/diff-tool-System {"diffTool":{"command":"meld \"$LOCAL\" \"$REMOTE\"","name":"meld","problem":"not found on PATH","source":"System","viaMergeTool":true},"mergeTool":null}

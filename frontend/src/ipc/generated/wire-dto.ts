@@ -115,6 +115,8 @@ export type FileSides = { old: FileSide, new: FileSide, };
 
 export type FileStats = { path: string, insertions: number, deletions: number, binary: boolean, };
 
+export type FontFamily = { name: string, monospace: boolean, };
+
 export type ForgeProvider = "GitHub" | "Bitbucket";
 
 export type ForgeRepository = { provider: ForgeProvider, host: string, owner: string, name: string, remoteName: string, };
@@ -140,7 +142,21 @@ nextCursor: string | null,
 /**
  * The cursor belonged to another walk: no commits, load the graph from the start.
  */
-stale: boolean, };
+stale: boolean, 
+/**
+ * The walk and the badges' version the rows come from: a refresh passes them back as
+ * `LoadedGraph` (#835).
+ */
+walk: string, badges: string, 
+/**
+ * Only for a refresh with `loaded` that could continue the loaded rows: how the refreshed
+ * rows are made of `commits` and those rows. `null`: `commits` are the rows.
+ */
+refresh: GraphRefresh | null, };
+
+export type GraphRefresh = { layout: Array<GraphSegment>, badges: Array<RowBadges>, };
+
+export type GraphSegment = { "kind": "New", count: number, } | { "kind": "Kept", from: number, count: number, };
 
 export type GraphSelection = { 
 /**
@@ -203,6 +219,8 @@ export type LineHistoryEntry = { commit: GraphCommit, path: string, oldPath: str
  * The tracked lines in this commit's version of the file, 1-based and inclusive.
  */
 startLine: number, endLine: number, };
+
+export type LoadedGraph = { walk: string, badges: string, rows: number, };
 
 export type MarkResolvedOutcome = "Resolved" | "MarkersRemain";
 
@@ -295,6 +313,8 @@ export type RepoWatch = { repoPath: string, kind: RepoWatchKind, };
 export type RepoWatchKind = "Changed" | "Stopped";
 
 export type ResetMode = "soft" | "mixed" | "hard";
+
+export type RowBadges = { id: string, branchRefs: Array<string>, remoteBranchRefs: Array<string>, tags: Array<string>, };
 
 export type SearchPage = { commits: Array<GraphCommit>, nextCursor: string | null, scanned: number, };
 
