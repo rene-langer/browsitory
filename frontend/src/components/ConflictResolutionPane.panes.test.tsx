@@ -275,9 +275,9 @@ describe("ConflictResolutionPane three-pane view (#875)", () => {
   it("shows a block's base behind Show base and edits the whole result", async () => {
     renderPane(unequal);
     const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
-    expect(within(first).queryByText("Base")).not.toBeInTheDocument();
+    expect(first.querySelector('[data-pane="base"]')).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Show base" }));
-    expect(within(first).getByText("Base")).toBeInTheDocument();
+    expect(cellOf(first, "base")).toBeInTheDocument();
     expect(within(first).getByText("x")).toBeInTheDocument();
     fireEvent.click(within(first).getByRole("button", { name: "Accept base" }));
     expect(within(first).getByLabelText("Result")).toHaveValue("x\n");
