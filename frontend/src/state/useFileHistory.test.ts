@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { FileHistoryEntry, RepoClient } from "../ipc/RepoClient";
+import type { FileHistoryEntry, FileHistoryPage, RepoClient } from "../ipc/RepoClient";
 import type { SelectedRow } from "./useAppState";
 import { FILE_HISTORY_PAGE_SIZE, useFileHistory } from "./useFileHistory";
 import { fakeRepoClient } from "../test/fakeRepoClient";
@@ -21,6 +21,11 @@ function entry(id: string, path = "f.txt", oldPath: string | null = null): FileH
     path,
     oldPath,
   };
+}
+
+/** A `getFileHistory` answer: the whole history unless `complete` says otherwise. */
+function page(entries: FileHistoryEntry[], complete = true): FileHistoryPage {
+  return { entries, complete };
 }
 
 function deferred<T>() {
@@ -44,7 +49,7 @@ function setup(getFileHistory: RepoClient["getFileHistory"], selectedRow: Select
 
 describe("useFileHistory", () => {
   it("opens with one page and selects the newest entry", async () => {
-    const getFileHistory = vi.fn(async () => [entry("c2"), entry("c1")]);
+    const getFileHistory = vi.fn(async () => page([entry("c2"), entry("c1")]));
     const { result, selectRow } = setup(getFileHistory);
 
     act(() => result.current.open("f.txt"));
@@ -57,7 +62,7 @@ describe("useFileHistory", () => {
   });
 
   it("close clears history and restores the row selected before opening", async () => {
-    const { result, selectRow } = setup(vi.fn(async () => [entry("c1")]), { commitId: "before" });
+    const { result, selectRow } = setup(vi.fn(async () => page([entry("c1")])), { commitId: "before" });
 
     act(() => result.current.open("f.txt"));
     await waitFor(() => expect(result.current.history?.loading).toBe(false));
@@ -69,7 +74,11 @@ describe("useFileHistory", () => {
 
   it("loadMore re-requests with a larger limit and reports hasMore", async () => {
     const full = Array.from({ length: FILE_HISTORY_PAGE_SIZE }, (_, i) => entry(`c${i}`));
-    const getFileHistory = vi.fn(async () => full);
+    // A full page with more to come, then the end of the history.
+    const getFileHistory = vi
+      .fn<RepoClient["getFileHistory"]>()
+      .mockResolvedValueOnce(page(full, false))
+      .mockResolvedValue(page(full));
     const { result } = setup(getFileHistory);
 
     act(() => result.current.open("f.txt"));
@@ -82,15 +91,15 @@ describe("useFileHistory", () => {
   });
 
   it("drops a stale response when another file was opened meanwhile", async () => {
-    const forA = deferred<FileHistoryEntry[]>();
-    const forB = deferred<FileHistoryEntry[]>();
+    const forA = deferred<FileHistoryPage>();
+    const forB = deferred<FileHistoryPage>();
     const getFileHistory = vi.fn((_repo: string, path: string) => (path === "a.txt" ? forA.promise : forB.promise));
     const { result } = setup(getFileHistory);
 
     act(() => result.current.open("a.txt"));
     act(() => result.current.open("b.txt"));
-    await act(async () => forB.resolve([entry("b1", "b.txt")]));
-    await act(async () => forA.resolve([entry("a1", "a.txt")]));
+    await act(async () => forB.resolve(page([entry("b1", "b.txt")])));
+    await act(async () => forA.resolve(page([entry("a1", "a.txt")])));
 
     expect(result.current.history?.path).toBe("b.txt");
     expect(result.current.history?.entries.map((e) => e.commit.id)).toEqual(["b1"]);
@@ -99,8 +108,8 @@ describe("useFileHistory", () => {
   it("refetches the open history when the repo refreshes", async () => {
     const getFileHistory = vi
       .fn<RepoClient["getFileHistory"]>()
-      .mockResolvedValueOnce([entry("c1")])
-      .mockResolvedValueOnce([entry("c2"), entry("c1")]);
+      .mockResolvedValueOnce(page([entry("c1")]))
+      .mockResolvedValueOnce(page([entry("c2"), entry("c1")]));
     const { result, rerender } = setup(getFileHistory);
 
     act(() => result.current.open("f.txt"));
@@ -111,7 +120,7 @@ describe("useFileHistory", () => {
   });
 
   it("does nothing on refresh while closed", () => {
-    const getFileHistory = vi.fn(async () => []);
+    const getFileHistory = vi.fn(async () => page([]));
     const { rerender } = setup(getFileHistory);
 
     rerender({ generation: 1, row: "uncommitted" });
@@ -123,7 +132,7 @@ describe("useFileHistory", () => {
     const getFileHistory = vi
       .fn<RepoClient["getFileHistory"]>()
       .mockRejectedValueOnce(new Error("Path must be relative to the repository root."))
-      .mockResolvedValueOnce([entry("c1")]);
+      .mockResolvedValueOnce(page([entry("c1")]));
     const { result } = setup(getFileHistory);
 
     act(() => result.current.open("../x"));
@@ -149,6 +158,7 @@ describe("useFileHistory", () => {
       const getLineHistory = vi.fn(async () => ({
         entries: [{ ...entry("c2"), startLine: 3, endLine: 4 }],
         truncated: false,
+        complete: true,
       }));
       const { result, selectRow } = setupLines(getLineHistory);
 
@@ -163,7 +173,7 @@ describe("useFileHistory", () => {
 
     it("offers no more pages once the backend stopped at its cap", async () => {
       const full = Array.from({ length: FILE_HISTORY_PAGE_SIZE }, (_, i) => ({ ...entry(`c${i}`), startLine: 1, endLine: 1 }));
-      const { result } = setupLines(vi.fn(async () => ({ entries: full, truncated: true })));
+      const { result } = setupLines(vi.fn(async () => ({ entries: full, truncated: true, complete: true })));
 
       act(() => result.current.openLines("f.txt", "HEAD", 1, 1));
 
@@ -174,7 +184,11 @@ describe("useFileHistory", () => {
 
     it("loads more and reloads on refresh with the same lines", async () => {
       const full = Array.from({ length: FILE_HISTORY_PAGE_SIZE }, (_, i) => ({ ...entry(`c${i}`), startLine: 1, endLine: 1 }));
-      const getLineHistory = vi.fn(async () => ({ entries: full, truncated: false }));
+      // A full page with more to come, then the end of the history.
+      const getLineHistory = vi
+        .fn<RepoClient["getLineHistory"]>()
+        .mockResolvedValueOnce({ entries: full, truncated: false, complete: false })
+        .mockResolvedValue({ entries: full, truncated: false, complete: true });
       const { result, rerender } = setupLines(getLineHistory);
 
       act(() => result.current.openLines("f.txt", "HEAD", 1, 2));
@@ -189,8 +203,8 @@ describe("useFileHistory", () => {
     });
 
     it("switching from a file's history to its lines drops the file's entries", async () => {
-      const lines = deferred<{ entries: never[]; truncated: boolean }>();
-      const getFileHistory = vi.fn(async () => [entry("c1")]);
+      const lines = deferred<{ entries: never[]; truncated: boolean; complete: boolean }>();
+      const getFileHistory = vi.fn(async () => page([entry("c1")]));
       const { result } = setupLines(
         vi.fn(() => lines.promise),
         getFileHistory,
