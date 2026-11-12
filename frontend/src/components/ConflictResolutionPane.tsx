@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { Fragment, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { errorKind, type ConflictSegment, type ConflictSide, type FileConflictChoice, type RepoClient } from "../ipc/RepoClient";
 import { conflictSideNames, type ConflictSideNames } from "../lib/conflictSides";
 import {
@@ -20,7 +20,10 @@ import {
 import { languageForPath } from "../lib/languageForPath";
 import { logFailure } from "../lib/logger";
 import { useRegisterMergeEditor } from "../state/useCurrentMergeEditor";
+import { useMergeEditorView } from "../state/useMergeEditorView";
+import { useNarrowLayout } from "../state/useNarrowLayout";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
+import { MergePanes } from "./MergePanes";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { Panel } from "./primitives/Panel";
 import { Toolbar } from "./primitives/Toolbar";
@@ -60,6 +63,9 @@ const STATE_LABELS: Record<BlockChoice, string> = {
 
 /** Lines of an unchanged run shown next to a conflict; a longer run is collapsed in between. */
 const CONTEXT_LINES = 3;
+
+/** Below this width the three panes (#875) give way to the block view (a VS Code side panel). */
+const MERGE_PANES_MIN_WIDTH = 680;
 
 function sideLabel(side: string, name: string | null): string {
   return name === null ? side : `${side} (${name})`;
@@ -246,6 +252,12 @@ export function ConflictResolutionPane({
   const { settings } = useDiffSettingsContext();
   const tokens = useConflictTokens(segments, languageForPath(path), settings.syntaxHighlight, logHighlightError);
 
+  // The whole file in panes (#875) unless the user chose the blocks or the pane is too narrow.
+  const [view, setView] = useMergeEditorView();
+  const [editorElement, setEditorElement] = useState<HTMLDivElement | null>(null);
+  const narrow = useNarrowLayout(editorElement, MERGE_PANES_MIN_WIDTH);
+  const panes = view === "panes" && !narrow;
+
   // "Ours" is stage 2 (HEAD); "theirs" stage 3, the commit being applied. During a rebase that
   // makes "ours" the branch being rebased onto, which is why the titles name what they replace.
   const header =
@@ -404,14 +416,12 @@ export function ConflictResolutionPane({
     );
   };
 
-  const renderBlock = (segment: ConflictBlock, index: number) => {
+  const blockTitle = (index: number) => `Conflict ${conflictIndices.indexOf(index) + 1} of ${conflictIndices.length}`;
+
+  /** A block's focusable section (#764): its title, then `children`; it takes the choices' keys. */
+  const blockSection = (index: number, className: string, children: ReactNode) => {
     const position = conflictIndices.indexOf(index);
-    const state = stateAt(index);
-    const title = `Conflict ${position + 1} of ${conflictIndices.length}`;
-    const result = blockResult(segment, state);
-    const choice = state.kind === "chosen" ? state.choice : null;
-    const bothChosen = choice === "oursThenTheirs" || choice === "theirsThenOurs";
-    const resultId = `${idPrefix}-result-${index}`;
+    const title = blockTitle(index);
     return (
       <section
         key={index}
@@ -420,7 +430,7 @@ export function ConflictResolutionPane({
         }}
         tabIndex={-1}
         aria-label={title}
-        className={styles.block}
+        className={className}
         onFocus={() => setCurrentConflict(position)}
         onKeyDown={(event) => {
           if (inTextField(event.target)) {
@@ -440,8 +450,51 @@ export function ConflictResolutionPane({
       >
         <h4 className={styles.blockTitle}>
           {title}
-          <span className={styles.blockState}>{stateLabel(state)}</span>
+          <span className={styles.blockState}>{stateLabel(stateAt(index))}</span>
         </h4>
+        {children}
+      </section>
+    );
+  };
+
+  /** A block's choices and Reset. */
+  const choiceToolbar = (index: number) => {
+    const state = stateAt(index);
+    const choice = state.kind === "chosen" ? state.choice : null;
+    return (
+      <Toolbar aria-label={`${blockTitle(index)}: choice`}>
+        {CHOICES.map((option) => (
+          <button
+            key={option.choice}
+            aria-pressed={choice === option.choice}
+            aria-keyshortcuts={mergeEditorAriaKeyShortcuts(option.shortcut)}
+            title={`${option.title} (${mergeEditorShortcutLabel(option.shortcut)})`}
+            onClick={() => setStateAt(index, { kind: "chosen", choice: option.choice })}
+          >
+            {option.label}
+          </button>
+        ))}
+        <button
+          disabled={state.kind === "unchosen"}
+          title="Clear this block's choice and edits."
+          onClick={() => setStateAt(index, { kind: "unchosen" })}
+        >
+          Reset
+        </button>
+      </Toolbar>
+    );
+  };
+
+  const renderBlock = (segment: ConflictBlock, index: number) => {
+    const state = stateAt(index);
+    const result = blockResult(segment, state);
+    const choice = state.kind === "chosen" ? state.choice : null;
+    const bothChosen = choice === "oursThenTheirs" || choice === "theirsThenOurs";
+    const resultId = `${idPrefix}-result-${index}`;
+    return blockSection(
+      index,
+      styles.block,
+      <>
         {showBase && (
           <div className={`${styles.side} ${choice === "base" ? styles.chosen : ""}`}>
             <div className={styles.sideLabel}>Base</div>
@@ -464,26 +517,7 @@ export function ConflictResolutionPane({
             </pre>
           </div>
         </div>
-        <Toolbar aria-label={`${title}: choice`}>
-          {CHOICES.map((option) => (
-            <button
-              key={option.choice}
-              aria-pressed={choice === option.choice}
-              aria-keyshortcuts={mergeEditorAriaKeyShortcuts(option.shortcut)}
-              title={`${option.title} (${mergeEditorShortcutLabel(option.shortcut)})`}
-              onClick={() => setStateAt(index, { kind: "chosen", choice: option.choice })}
-            >
-              {option.label}
-            </button>
-          ))}
-          <button
-            disabled={state.kind === "unchosen"}
-            title="Clear this block's choice and edits."
-            onClick={() => setStateAt(index, { kind: "unchosen" })}
-          >
-            Reset
-          </button>
-        </Toolbar>
+        {choiceToolbar(index)}
         <label className={styles.sideLabel} htmlFor={resultId}>
           Result
         </label>
@@ -497,7 +531,7 @@ export function ConflictResolutionPane({
           onChange={(event) => setStateAt(index, { kind: "edited", text: event.target.value })}
         />
         {result === "" && <p className={styles.hint}>Empty: the block&apos;s lines are removed.</p>}
-      </section>
+      </>,
     );
   };
 
@@ -513,7 +547,7 @@ export function ConflictResolutionPane({
   return (
     <Panel title="Resolve conflict">
       {header}
-      <div onKeyDown={onEditorKeyDown}>
+      <div ref={setEditorElement} onKeyDown={onEditorKeyDown}>
         {conflictIndices.length > 0 && (
           <Toolbar aria-label="Conflicts">
             <span role="status">
@@ -539,10 +573,55 @@ export function ConflictResolutionPane({
               Show base
             </button>
             <button onClick={startWholeEdit}>Edit whole result</button>
+            <span className={styles.segmented} role="group" aria-label="Merge editor layout">
+              <button
+                aria-pressed={panes}
+                disabled={narrow}
+                title={
+                  narrow
+                    ? "The pane is too narrow for three panes; widen it to use them."
+                    : "The whole file in three panes: ours, the result and theirs."
+                }
+                onClick={() => setView("panes")}
+              >
+                Three panes
+              </button>
+              <button
+                aria-pressed={!panes}
+                title="Each conflict on its own, with both sides and the result."
+                onClick={() => setView("blocks")}
+              >
+                Blocks
+              </button>
+            </span>
           </Toolbar>
         )}
-        {segments.map((segment, index) =>
-          segment.kind === "Clean" ? renderClean(segment.content, index) : renderBlock(segment, index),
+        {panes ? (
+          <MergePanes
+            segments={segments}
+            stateAt={stateAt}
+            labels={{ ours: sideLabel("Ours", names.ours), result: "Result", theirs: sideLabel("Theirs", names.theirs) }}
+            tokens={tokens}
+            showBase={showBase}
+            expanded={expanded}
+            onExpand={(index) => setExpanded((prev) => new Set(prev).add(index))}
+            contextLines={CONTEXT_LINES}
+            renderBlock={(_segment, index, className, children) =>
+              blockSection(
+                index,
+                className,
+                <>
+                  {choiceToolbar(index)}
+                  {children}
+                </>,
+              )
+            }
+            onEdit={(index, text) => setStateAt(index, { kind: "edited", text })}
+          />
+        ) : (
+          segments.map((segment, index) =>
+            segment.kind === "Clean" ? renderClean(segment.content, index) : renderBlock(segment, index),
+          )
         )}
       </div>
       {loaded && !allResolved && (
