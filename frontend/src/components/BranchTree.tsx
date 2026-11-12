@@ -1,3 +1,4 @@
+import { stableMemo } from "../lib/stableMemo";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { BranchLaneColors } from "../lib/laneColors";
 import { GitBranch, Plus } from "lucide-react";
@@ -60,7 +61,7 @@ import styles from "./BranchTree.module.css";
  * prompt in `WorkspaceDialogs` (#636, #637). A remote's Edit / Credentials / Remove dialog is opened
  * through `onOpenRemoteDialog` and rendered by its owner (`WorkspaceDialogs`' `RemoteDialogs`).
  */
-export function BranchTree({
+function BranchTreeContent({
   branches,
   createBranchDraft,
   onSwitchBranch,
@@ -739,3 +740,6 @@ export function BranchTree({
     </>
   );
 }
+
+/** Renders again only when its data changed (#844); see `stableMemo`. */
+export const BranchTree = stableMemo(BranchTreeContent, "BranchTree");

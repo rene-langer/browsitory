@@ -1,3 +1,4 @@
+import { stableMemo } from "../lib/stableMemo";
 import {
   useCallback,
   useEffect,
@@ -50,7 +51,7 @@ export const LOAD_AHEAD_ROWS = 50;
 const NO_EXPANSIONS: Readonly<Record<string, MergeExpansion>> = {};
 const NO_COMMITS: GraphCommit[] = [];
 
-export function CommitGraph({
+function CommitGraphContent({
   status,
   commits,
   selectedRow,
@@ -1043,3 +1044,6 @@ function CommitRowLineStats({ stats }: { stats: CommitStats | null | undefined }
   if (stats == null) return null;
   return <LineStatsBadge insertions={stats.insertions} deletions={stats.deletions} className={styles.lineStats} />;
 }
+
+/** Renders again only when its data changed (#844); see `stableMemo`. */
+export const CommitGraph = stableMemo(CommitGraphContent, "CommitGraph");
