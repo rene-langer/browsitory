@@ -12,18 +12,31 @@ const supportedTargets = new Set([
 
 // The webview loads the bundle as a classic <script> under a nonce-only CSP: `import.meta` is a
 // SyntaxError there and lazy chunks/wasm would be blocked. frontend/vite.vscode.config.ts inlines
-// everything; this fails the package step if that regresses.
+// everything; this fails the package step if that regresses. The one other script is the syntax
+// highlighting worker (#843), which the page fetches and starts from a blob: URL; it must be a
+// classic script too.
+const ALLOWED_SCRIPTS = ["vscode-main.js", "highlight-worker.js"];
+
 export async function assertClassicScriptBundle(frontendDist) {
   const assets = path.join(frontendDist, "assets");
   const extra = (await readdir(assets)).filter(
-    (name) => (name.endsWith(".js") && name !== "vscode-main.js") || name.endsWith(".wasm"),
+    (name) => (name.endsWith(".js") && !ALLOWED_SCRIPTS.includes(name)) || name.endsWith(".wasm"),
   );
   if (extra.length > 0) {
     throw new Error(`webview bundle must be a single script; found extra files: ${extra.join(", ")}`);
   }
-  const main = await readFile(path.join(assets, "vscode-main.js"), "utf8");
-  if (main.includes("import.meta")) {
-    throw new Error("webview bundle must not contain import.meta (classic script)");
+  for (const name of ALLOWED_SCRIPTS) {
+    let script;
+    try {
+      script = await readFile(path.join(assets, name), "utf8");
+    } catch (error) {
+      // vscode-main.js must exist; a missing worker is reported by check-vsix.
+      if (name === "vscode-main.js" || error?.code !== "ENOENT") throw error;
+      continue;
+    }
+    if (script.includes("import.meta")) {
+      throw new Error(`webview bundle: ${name} must not contain import.meta (classic script)`);
+    }
   }
 }
 

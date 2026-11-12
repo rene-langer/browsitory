@@ -45,6 +45,8 @@ const REQUIRED_NON_EMPTY = [
   "extension/dist/extension.js",
   "extension/webview/assets/vscode-main.js",
   "extension/webview/assets/vscode-main.css",
+  // The syntax highlighting worker (#843), fetched by the webview and started from a blob.
+  "extension/webview/assets/highlight-worker.js",
   "extension/icon.png",
   "extension/THIRD_PARTY_NOTICES.md",
   "extension/webview/third-party-notices.md",
