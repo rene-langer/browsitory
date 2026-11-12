@@ -14,6 +14,10 @@ pub enum RepoError {
     Io(#[from] std::io::Error),
 }
 
+/// Process-wide libgit2 settings for every binary that opens repositories (#840). Call once at
+/// startup, before the first repository is opened.
+pub fn configure_libgit2() {}
+
 pub fn open(path: &Path) -> Result<git2::Repository, RepoError> {
     Ok(git2::Repository::discover(path)?)
 }
