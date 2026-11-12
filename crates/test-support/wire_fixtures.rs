@@ -1449,6 +1449,7 @@ fn rebase_info(health: RebaseHealth) -> git_core::repo::RebaseInfo {
         current_step: 1,
         total_steps: 4,
         health,
+        editing: None,
     }
 }
 

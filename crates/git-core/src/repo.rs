@@ -690,6 +690,9 @@ pub struct RebaseInfo {
     pub current_step: usize,
     pub total_steps: usize,
     pub health: crate::rebase::RebaseHealth,
+    /// Full id of the commit the rebase stopped at to be edited (an `Edit` step, #882);
+    /// `None` at a conflict or error stop.
+    pub editing: Option<String>,
 }
 
 impl RebaseInfo {
@@ -705,6 +708,7 @@ impl RebaseInfo {
             current_step: progress.current_step,
             total_steps: progress.total_steps,
             health,
+            editing: None,
         }
     }
 }

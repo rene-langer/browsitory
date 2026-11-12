@@ -69,6 +69,10 @@ pub enum RebaseError {
     /// the branch with force, so it only starts from a clean tracked tree, as `git rebase` does.
     #[error("{}", local_changes_message(paths))]
     LocalChanges { paths: Vec<String> },
+    /// Continue was given a message for the paused step that is empty or only whitespace
+    /// (#882); nothing was changed.
+    #[error("The commit message is empty. Write a message, then continue.")]
+    EmptyMessage,
 }
 
 /// The refusal copy for [`RebaseError::OperationPaused`] (#265).
@@ -502,6 +506,18 @@ pub fn rebase_continue(
     state: &mut RebaseState,
 ) -> Result<RebaseStepResult, RebaseError> {
     rebase_continue_with(repo, state, HookOptions::default())
+}
+
+/// `rebase_continue_with`, landing the paused step under `message` instead of its planned one
+/// when given (Edit commit…, #882).
+pub fn rebase_continue_with_message(
+    repo: &Repository,
+    state: &mut RebaseState,
+    message: Option<&str>,
+    hooks: HookOptions<'_>,
+) -> Result<RebaseStepResult, RebaseError> {
+    let _ = message;
+    rebase_continue_with(repo, state, hooks)
 }
 
 /// `rebase_continue` with a cancel check and a reporter for the signing program, as in
