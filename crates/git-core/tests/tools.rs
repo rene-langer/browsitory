@@ -767,6 +767,47 @@ fn sweep_removes_only_old_tool_dirs() {
     assert!(root.path().join("someone-elses-dir").exists());
 }
 
+/// #129: a tool directory whose tool is still running (its PID in `.browsitory-tool.pid` is a
+/// live process) is kept however old it is; a dead PID, garbage or no file sweeps as before.
+#[test]
+fn sweep_keeps_the_directory_of_a_tool_that_is_still_running() {
+    let root = TempDir::new().unwrap();
+    let live = root.path().join("browsitory-tool-live");
+    std::fs::create_dir(&live).unwrap();
+    std::fs::write(
+        live.join(".browsitory-tool.pid"),
+        format!("{}\n", std::process::id()),
+    )
+    .unwrap();
+
+    // A process that has exited: this test binary listing its tests.
+    let dead_pid = std::process::Command::new(std::env::current_exe().unwrap())
+        .arg("--list")
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .map(|mut child| {
+            child.wait().unwrap();
+            child.id()
+        })
+        .unwrap();
+    let dead = root.path().join("browsitory-tool-dead");
+    std::fs::create_dir(&dead).unwrap();
+    std::fs::write(dead.join(".browsitory-tool.pid"), dead_pid.to_string()).unwrap();
+    let garbage = root.path().join("browsitory-tool-garbage");
+    std::fs::create_dir(&garbage).unwrap();
+    std::fs::write(garbage.join(".browsitory-tool.pid"), "not a pid").unwrap();
+    let zero = root.path().join("browsitory-tool-zero");
+    std::fs::create_dir(&zero).unwrap();
+    std::fs::write(zero.join(".browsitory-tool.pid"), "0").unwrap();
+
+    sweep_stale_tool_dirs(root.path(), Duration::ZERO);
+
+    assert!(live.exists());
+    assert!(!dead.exists());
+    assert!(!garbage.exists());
+    assert!(!zero.exists());
+}
+
 #[cfg(unix)]
 #[test]
 fn sweep_never_follows_a_symlink() {
@@ -882,6 +923,47 @@ mod spawning {
         let err = launch_diff_tool(prepared, Duration::from_secs(5)).unwrap_err();
         assert_eq!(err.to_string(), "The diff tool failed (exit 7): broken");
         assert!(!temp_dir.exists());
+    }
+
+    /// #129: a running diff tool's directory survives a sweep, and is removed once it exits.
+    #[test]
+    fn a_running_diff_tools_side_files_survive_the_sweep() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a\n");
+        commit_all(&repo, "base");
+        let (_c, config) = user_config(
+            Some(&repo),
+            &[("diff.tool", "t"), ("difftool.t.cmd", "sleep 2")],
+        );
+        let root = TempDir::new().unwrap();
+        let prepared = prepare(&repo, &config, "a.txt", DiffSource::Unstaged, root.path());
+        let temp_dir = prepared.temp_dir.clone();
+        launch_diff_tool(prepared, Duration::from_millis(200)).unwrap();
+
+        sweep_stale_tool_dirs(root.path(), Duration::ZERO);
+        assert!(temp_dir.join("a_LOCAL.txt").exists());
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while temp_dir.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(!temp_dir.exists());
+    }
+
+    /// #129: a merge tool's side files survive a sweep while it runs.
+    #[test]
+    fn a_running_merge_tools_side_files_survive_the_sweep() {
+        let (_dir, repo) = conflicted_repo();
+        let (_c, config) = merge_config(&repo, "sleep 2", false);
+        let root = TempDir::new().unwrap();
+        let prepared = prepare_merge_tool_with(&repo, &config, "shared.txt", root.path()).unwrap();
+        let base = env(&prepared.invocation.env, "BASE");
+        let running = std::thread::spawn(move || run_merge_tool(prepared));
+
+        std::thread::sleep(Duration::from_millis(500));
+        sweep_stale_tool_dirs(root.path(), Duration::ZERO);
+        assert!(base.exists());
+        running.join().unwrap().unwrap();
     }
 
     #[test]
