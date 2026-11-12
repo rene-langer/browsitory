@@ -51,6 +51,9 @@ import { useTabChangeMarkers } from "./state/useTabChangeMarkers";
 import { useWorkspaces } from "./state/useWorkspaces";
 import styles from "./App.module.css";
 import { RepoWorkspace } from "./RepoWorkspace";
+import { RenderErrorBoundary, RenderErrorFallback } from "./components/RenderErrorBoundary";
+import { renderErrorReport, type CaughtRenderError } from "./lib/renderErrorDetails";
+import { repoPanelId, repoTabId } from "./components/repoTabIds";
 import { useBusyPaths } from "./state/useBusyPaths";
 import { useCommitDrafts } from "./state/useCommitDrafts";
 import { useE2eAutoOpen } from "./state/useE2eAutoOpen";
@@ -70,19 +73,47 @@ export default function App(props: {
   /** Loads THIRD_PARTY_NOTICES.md (`lib/thirdPartyNotices.ts`); without it the app offers no licences view. */
   loadThirdPartyNotices?: () => Promise<string>;
 }) {
+  // The last resort (#846): a render error outside a repository tab's workspace (the header,
+  // the tabs, a dialog) shows this instead of a blank window. Reload mounts the whole tree again,
+  // which restores the open repositories as on start-up; the page itself is not reloaded, which
+  // works the same in the desktop app and in the VSCode webview.
   return (
-    <DiffSettingsProvider client={props.client}>
-      <CommitMessageSettingsProvider client={props.client}>
-        <FetchSettingsProvider client={props.client}>
-          <AppearanceSettingsProvider client={props.client}>
-            <UpdateSettingsProvider client={props.client} enabled={hasUpdater(props.updateBanner)}>
-              <AppContent {...props} />
-            </UpdateSettingsProvider>
-          </AppearanceSettingsProvider>
-        </FetchSettingsProvider>
-      </CommitMessageSettingsProvider>
-    </DiffSettingsProvider>
+    <RenderErrorBoundary
+      onError={(caught) => logRenderError(props.client, "Render error", caught)}
+      fallback={(caught, reset) => (
+        <main>
+          <RenderErrorFallback
+            title="Browsitory couldn't show this window"
+            caught={caught}
+            hint="Reload to open your repositories again. If it happens again, copy the details into a bug report."
+            reloadLabel="Reload"
+            onReload={reset}
+            getAppVersion={() => props.client.getAppVersion()}
+            focusOnShow
+          />
+        </main>
+      )}
+    >
+      <DiffSettingsProvider client={props.client}>
+        <CommitMessageSettingsProvider client={props.client}>
+          <FetchSettingsProvider client={props.client}>
+            <AppearanceSettingsProvider client={props.client}>
+              <UpdateSettingsProvider client={props.client} enabled={hasUpdater(props.updateBanner)}>
+                <AppContent {...props} />
+              </UpdateSettingsProvider>
+            </AppearanceSettingsProvider>
+          </FetchSettingsProvider>
+        </CommitMessageSettingsProvider>
+      </DiffSettingsProvider>
+    </RenderErrorBoundary>
   );
+}
+
+/** Logs a caught render error (#846) with its stacks, through the client's log like every failure. */
+function logRenderError(client: RepoClient, context: string, caught: CaughtRenderError): void {
+  void Promise.resolve()
+    .then(() => client.logFrontendError(context, renderErrorReport(caught)))
+    .catch(() => {});
 }
 
 const hasUpdater = (updateBanner: ReactNode) => updateBanner !== undefined && updateBanner !== null;
@@ -617,22 +648,51 @@ function AppContent({
           openRepos.openRepos
             .filter((repo) => mountedTabs.includes(repo.path))
             .map((repo) => (
-              <RepoWorkspace
+              // A render error in one repository's views (#846) shows this tab's fallback; the
+              // header, the tabs and the other repositories keep working. Reload tab mounts the
+              // workspace again, which reads the repository again; commit drafts live here and stay.
+              <RenderErrorBoundary
                 key={repo.path}
-                repoPath={repo.path}
-                active={repo.path === openRepos.activePath}
-                client={client}
-                onOpenRepoTab={openRepoTab}
-                onBusyChange={onBusyChange}
-                openRepos={openRepos.openRepos}
-                onSwitchRepoTab={openRepos.switchTo}
-                onCloseRepoTab={openRepos.closeRepo}
-                getCommitDraft={getCommitDraft}
-                onCommitDraftChange={onCommitDraftChange}
-                appCommands={appCommands}
-                pushToast={pushAppToast}
-                onStatusChange={tabChangeMarkers.onLiveStatus}
-              />
+                onError={(caught) => logRenderError(client, "Render error in repository tab", caught)}
+                fallback={(caught, reset) => {
+                  const active = repo.path === openRepos.activePath;
+                  return (
+                    <div
+                      role="tabpanel"
+                      id={repoPanelId(repo.path)}
+                      aria-labelledby={repoTabId(repo.path)}
+                      style={{ display: active ? "contents" : "none" }}
+                    >
+                      <RenderErrorFallback
+                        title={`Couldn't show ${openRepos.aliases.get(repo.path) ?? repoNameOf(repo.path)}`}
+                        caught={caught}
+                        hint="Reload the tab to read the repository again. Your commit message draft is kept. If it happens again, copy the details into a bug report."
+                        reloadLabel="Reload tab"
+                        onReload={reset}
+                        onClose={() => openRepos.closeRepo(repo.path)}
+                        getAppVersion={() => client.getAppVersion()}
+                        focusOnShow={active}
+                      />
+                    </div>
+                  );
+                }}
+              >
+                <RepoWorkspace
+                  repoPath={repo.path}
+                  active={repo.path === openRepos.activePath}
+                  client={client}
+                  onOpenRepoTab={openRepoTab}
+                  onBusyChange={onBusyChange}
+                  openRepos={openRepos.openRepos}
+                  onSwitchRepoTab={openRepos.switchTo}
+                  onCloseRepoTab={openRepos.closeRepo}
+                  getCommitDraft={getCommitDraft}
+                  onCommitDraftChange={onCommitDraftChange}
+                  appCommands={appCommands}
+                  pushToast={pushAppToast}
+                  onStatusChange={tabChangeMarkers.onLiveStatus}
+                />
+              </RenderErrorBoundary>
             ))
         )}
       </main>
