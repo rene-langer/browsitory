@@ -440,7 +440,7 @@ describe("AppearanceSection (#615)", () => {
 
   it("keeps the built-in look by default", async () => {
     const group = renderAppearance({ getAppearanceSettings: async () => defaults });
-    expect(within(group).getByRole("textbox", { name: "Code font" })).toHaveValue("");
+    expect(within(group).getByRole("combobox", { name: "Code font" })).toHaveValue("");
     expect(within(group).getByRole("spinbutton", { name: "Code font size (px)" })).toHaveValue(null);
     expect(within(group).getByRole("combobox", { name: "Interface size" })).toHaveValue("Normal");
     expect(within(group).getByRole("spinbutton", { name: "Tab size" })).toHaveValue(4);
@@ -456,7 +456,7 @@ describe("AppearanceSection (#615)", () => {
     });
     const size = within(group).getByRole("spinbutton", { name: "Code font size (px)" });
     await waitFor(() => expect(size).toHaveValue(24));
-    expect(within(group).getByRole("textbox", { name: "Code font" })).toHaveValue("Example Mono");
+    expect(within(group).getByRole("combobox", { name: "Code font" })).toHaveValue("Example Mono");
     await waitFor(() => expect(root.style.getPropertyValue("--font-mono")).toBe('"Example Mono", var(--font-mono-default)'));
     await waitFor(() => expect(root.style.getPropertyValue("--code-font-size")).toBe("24px"));
     await waitFor(() => expect(root.style.getPropertyValue("--tab-size")).toBe("2"));
@@ -466,7 +466,7 @@ describe("AppearanceSection (#615)", () => {
   it("saves and applies the code font on blur, and clears it", async () => {
     const setAppearanceSettings = vi.fn(async () => {});
     const group = renderAppearance({ getAppearanceSettings: async () => defaults, setAppearanceSettings });
-    const font = within(group).getByRole("textbox", { name: "Code font" });
+    const font = within(group).getByRole("combobox", { name: "Code font" });
     fireEvent.change(font, { target: { value: " Example Mono, monospace " } });
     expect(setAppearanceSettings).not.toHaveBeenCalled();
     fireEvent.blur(font);
