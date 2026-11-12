@@ -106,6 +106,19 @@ export function assignLanes(commits: GraphCommit[], merged: ReadonlySet<string> 
   return layouts;
 }
 
+// How many lanes `layouts` draw: one more than the highest lane any row uses. A loop, not
+// `Math.max(...lanes)`: spreading every row into one call throws past the engine's argument
+// limit, at about 30,000 rows of a narrow history (#836).
+export function graphLaneCount(layouts: readonly CommitLayout[]): number {
+  let highest = 0;
+  for (const layout of layouts) {
+    highest = Math.max(highest, layout.lane);
+    for (const entry of layout.passThroughLanes) highest = Math.max(highest, entry.lane);
+    for (const connection of layout.parentConnections) highest = Math.max(highest, connection.lane);
+  }
+  return highest + 1;
+}
+
 // A squash group can only be a straight, unbranched chain: each commit in the range (other than
 // the oldest) must be the sole parent of the one above it. That single check also rejects both
 // ways a range can be non-linear — a merge commit inside it (more than one parent) and a fork

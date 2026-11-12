@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GraphCommit } from "../ipc/RepoClient";
-import { assignLanes, isSquashableRange } from "./commitGraphLayout";
+import { assignLanes, graphLaneCount, isSquashableRange } from "./commitGraphLayout";
 
 function commit(id: string, parentIds: string[]): GraphCommit {
   return {
@@ -182,5 +182,39 @@ describe("isSquashableRange", () => {
     const commits = [commit("A", [])];
 
     expect(isSquashableRange(commits, 0, 0)).toBe(true);
+  });
+});
+
+/** `count` commits in one line, newest first: "c<count-1>" down to the root "c0". */
+function linearCommits(count: number): GraphCommit[] {
+  return Array.from({ length: count }, (_, i) => {
+    const n = count - 1 - i;
+    return commit(`c${n}`, n === 0 ? [] : [`c${n - 1}`]);
+  });
+}
+
+describe("graphLaneCount", () => {
+  it("is one more than the highest lane a row, a pass-through or a parent connection uses", () => {
+    expect(graphLaneCount([])).toBe(1);
+    expect(graphLaneCount(assignLanes([commit("C", ["B"]), commit("B", ["A"]), commit("A", [])]))).toBe(1);
+    // Rows on lane 0 only; lane 2 shows up only as a pass-through, lane 3 only as a connection.
+    const row = (passThrough: number[], connections: number[]) => ({
+      commitId: "x",
+      lane: 0,
+      laneSegmentId: 0,
+      parentConnections: connections.map((lane) => ({ parentId: "p", lane, segmentId: 0 })),
+      passThroughLanes: passThrough.map((lane) => ({ lane, segmentId: 0 })),
+      hiddenParentIds: [],
+    });
+    expect(graphLaneCount([row([0, 2], [0])])).toBe(3);
+    expect(graphLaneCount([row([0], [0]), row([1], [3])])).toBe(4);
+  });
+
+  // #836: the count spread every row's lanes into one `Math.max` call, which throws a RangeError
+  // past the engine's argument limit (about 30,000 rows of a narrow history in V8), blanking the app.
+  it("counts the lanes of 200,000 loaded rows", () => {
+    const layouts = assignLanes(linearCommits(200_000));
+
+    expect(graphLaneCount(layouts)).toBe(1);
   });
 });

@@ -903,3 +903,106 @@ fn cancel_is_polled_while_skipping_to_a_cursor() {
         Err(SearchError::Cancelled)
     ));
 }
+
+/// A linear history of `commits` empty-tree commits on `main` (checked out), "commit 0" the
+/// oldest, written straight to the object database: fast enough for thousands of commits.
+fn long_history(repo: &Repository, commits: usize) {
+    let tree_id = repo.treebuilder(None).unwrap().write().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let mut parent: Option<git2::Commit> = None;
+    for i in 0..commits {
+        let when = at(T0 + i as i64, 0);
+        let signature = Signature::new("Author", "author@example.com", &when).unwrap();
+        let parents: Vec<&git2::Commit> = parent.iter().collect();
+        let message = format!("commit {i}");
+        let id = repo
+            .commit(None, &signature, &signature, &message, &tree, &parents)
+            .unwrap();
+        parent = Some(repo.find_commit(id).unwrap());
+    }
+    let tip = parent.expect("at least one commit").id();
+    repo.reference("refs/heads/main", tip, true, "test history")
+        .unwrap();
+    repo.set_head("refs/heads/main").unwrap();
+}
+
+/// A page's time budget is for scanning (#834). The set-up before the first scanned commit
+/// (sorting the history, skipping to the cursor) grows with the history and runs on every page;
+/// charged to the budget, it left a large repository one scanned commit per page. Here the first
+/// `cancel` poll, which comes before the walk, stands in for a set-up slower than the budget.
+#[test]
+fn set_up_before_the_scan_is_not_charged_to_the_time_budget() {
+    let (_dir, repo) = init_repo();
+    long_history(&repo, 300);
+    let query = parse_query("zzzznotfound").unwrap();
+    let limits = PageLimits {
+        matches: 100,
+        scan: 100,
+        time: Duration::from_millis(250),
+    };
+
+    let mut scanned = Vec::new();
+    let mut cursor: Option<String> = None;
+    for _ in 0..3 {
+        let polls = Cell::new(0);
+        let slow_set_up = || {
+            polls.set(polls.get() + 1);
+            if polls.get() == 1 {
+                std::thread::sleep(Duration::from_millis(300));
+            }
+            false
+        };
+        let page = search_commits(
+            &repo,
+            &query,
+            &everything(),
+            cursor.as_deref(),
+            limits,
+            &slow_set_up,
+        )
+        .unwrap();
+        scanned.push(page.scanned);
+        cursor = page.next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(scanned, [100, 200, 300]);
+    assert_eq!(cursor, None);
+}
+
+/// The same on a real set-up (#834): with a page budget shorter than sorting a few thousand
+/// commits and skipping to the cursor, a search that matches nothing still reaches the end of
+/// the history in a bounded number of pages instead of one commit per page.
+#[test]
+fn a_non_matching_search_reaches_the_end_of_a_long_history_in_a_few_pages() {
+    let (_dir, repo) = init_repo();
+    long_history(&repo, 4000);
+    let query = parse_query("zzzznotfound").unwrap();
+    let limits = PageLimits {
+        time: Duration::from_millis(10),
+        ..PageLimits::DEFAULT
+    };
+
+    let mut pages = 0;
+    let mut cursor: Option<String> = None;
+    let last = loop {
+        let page = search_commits(
+            &repo,
+            &query,
+            &everything(),
+            cursor.as_deref(),
+            limits,
+            &|| false,
+        )
+        .unwrap();
+        pages += 1;
+        cursor = page.next_cursor.clone();
+        if cursor.is_none() || pages == 100 {
+            break page;
+        }
+    };
+    assert_eq!(cursor, None, "still scanning after {pages} pages");
+    assert_eq!(last.scanned, 4000);
+    assert!(last.commits.is_empty());
+}
