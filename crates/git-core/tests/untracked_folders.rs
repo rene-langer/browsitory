@@ -245,3 +245,27 @@ fn deleting_a_folder_entry_removes_the_emptied_folders() {
 
     assert!(!dir.path().join("big").exists());
 }
+
+/// Each of the listing's refusals on its own (mutation testing): a folder without its slash, a
+/// path through `..` that still names a folder, a file named with a slash, a path through a
+/// symbolic link to a folder, and a nested repository.
+#[test]
+fn listing_refuses_each_kind_of_path_on_its_own() {
+    let (dir, repo) = committed_repo();
+    fill(dir.path(), "big/", 3);
+    std::fs::create_dir_all(dir.path().join("big/sub")).unwrap();
+    write_file(dir.path(), "big/sub/s.txt", "x\n");
+    Repository::init(dir.path().join("inner")).unwrap();
+    write_file(dir.path(), "inner/i.txt", "x\n");
+
+    assert!(untracked_folder_files(&repo, "big").is_err());
+    assert!(untracked_folder_files(&repo, "big/../big/").is_err());
+    assert!(untracked_folder_files(&repo, "tracked.txt/").is_err());
+    assert!(untracked_folder_files(&repo, "inner/").is_err());
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(dir.path().join("big"), dir.path().join("link")).unwrap();
+        assert!(untracked_folder_files(&repo, "link/sub/").is_err());
+    }
+    assert!(untracked_folder_files(&repo, "big/").is_ok());
+}
