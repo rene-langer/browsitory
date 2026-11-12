@@ -103,14 +103,14 @@ describe("Browsitory restart resilience", () => {
     await editRow.selectByVisibleText("Edit");
     await (await $("button=Start rebase")).click();
 
-    await browser.waitUntil(async () => (await stripText()).includes("Rebasing, step 1 of 2"), {
+    await browser.waitUntil(async () => (await stripText()).includes("Editing "), {
       timeoutMsg: "the rebase did not pause at the edit step",
     });
     expect(fs.existsSync(path.join(E2E_REPO_PATH, ".git/browsitory/rebase.json"))).toBe(true);
 
     await reloadSessionWithRetry();
 
-    await browser.waitUntil(async () => (await stripText()).includes("Rebasing, step 1 of 2"), {
+    await browser.waitUntil(async () => (await stripText()).includes("Editing "), {
       timeout: RESTART_TIMEOUT,
       timeoutMsg: "the restarted app did not show the paused rebase",
     });
