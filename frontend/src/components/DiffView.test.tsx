@@ -140,6 +140,8 @@ describe("DiffView", () => {
 
     const header = screen.getByText("Lines 20–21");
     expect(header).toHaveAttribute("title", "Before: lines 10–11. After: lines 20–21.");
+    // The e2e specs find hunk headers by this class.
+    expect(header).toHaveClass("diff-hunk-range");
     expect(container.textContent).not.toContain("@@");
   });
 
