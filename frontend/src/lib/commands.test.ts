@@ -206,6 +206,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     closeRebasePlanner: vi.fn(),
     startRebase: vi.fn(),
     editHistory: vi.fn(),
+    foldStaged: vi.fn(),
     rebaseContinue: vi.fn(),
     setRebaseEditMessage: vi.fn(),
     abortRebase: vi.fn(),
@@ -1484,6 +1485,17 @@ describe("history commands", () => {
       expect(head.editHistory).toHaveBeenLastCalledWith("c1", "c2", { kind: "Edit" });
       const dirty = commandsFor(makeAppState({ ...editState, status: [{ path: "a", oldPath: null, staged: false, kind: "Modified" }] }));
       expect(dirty.map((c) => c.id)).not.toContain("edit-selected");
+    });
+
+    it("offers folding staged changes into the selected commit (#883)", () => {
+      const staged = { path: "a", oldPath: null, staged: true, kind: "Modified" as const };
+      const appState = makeAppState({ ...editState, status: [staged] });
+      const fold = commandsFor(appState).find((command) => command.id === "fold-staged-selected")!;
+      expect(fold.label).toBe("Fold staged changes into c2");
+      fold.run();
+      expect(appState.foldStaged).toHaveBeenCalledWith("c2");
+      const nothingStaged = commandsFor(makeAppState(editState)).map((c) => c.id);
+      expect(nothingStaged).not.toContain("fold-staged-selected");
     });
 
     it("leaves out edits the menu disables", () => {

@@ -1431,6 +1431,25 @@ describe("CommitGraph — one-click history edits", () => {
     expect(item).toHaveAttribute("title", "Only commits of the current branch can be edited.");
   });
 
+  it("offers Fold staged changes into this commit only with changes staged (#883)", () => {
+    const staged: StatusEntry = { path: "a.txt", oldPath: null, staged: true, kind: "Modified" };
+    const onFoldStaged = vi.fn();
+    const { openMenu } = setup({ status: [staged], onFoldStaged });
+    openMenu("C");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Fold staged changes into this commit" }));
+    expect(onFoldStaged).toHaveBeenCalledWith("C");
+    openMenu("X");
+    const item = screen.getByRole("menuitem", { name: "Fold staged changes into this commit" });
+    expect(item).toBeDisabled();
+    expect(item).toHaveAttribute("title", "Only commits of the current branch can be edited.");
+  });
+
+  it("leaves Fold staged changes out with nothing staged (#883)", () => {
+    const { openMenu } = setup({ onFoldStaged: vi.fn() });
+    openMenu("C");
+    expect(screen.queryByRole("menuitem", { name: "Fold staged changes into this commit" })).toBeNull();
+  });
+
   it("rewords HEAD in the amend box and can't move it up", () => {
     const { openMenu, onEditHeadMessage, onRewordCommit } = setup();
     openMenu("E");

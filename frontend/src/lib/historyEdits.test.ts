@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GraphCommit, HeadInfo, RebasePlanCommit, StatusEntry } from "../ipc/RepoClient";
-import { buildHistoryEditPlan, historyEditChecks, type HistoryEditContext } from "./historyEdits";
+import { buildHistoryEditPlan, foldStagedCheck, historyEditChecks, type HistoryEditContext } from "./historyEdits";
 
 function commit(id: string, parentIds: string[]): GraphCommit {
   return {
@@ -229,5 +229,48 @@ describe("buildHistoryEditPlan", () => {
     expect(() => buildHistoryEditPlan({ kind: "Drop" }, "C", fromA)).toThrow(changed);
     expect(() => buildHistoryEditPlan({ kind: "Fixup" }, "C", fromB)).toThrow(changed);
     expect(() => buildHistoryEditPlan({ kind: "MoveUp" }, "E", ["E"].map(planCommit))).toThrow(changed);
+  });
+});
+
+describe("foldStagedCheck (#883)", () => {
+  const staged: StatusEntry = { path: "a.txt", oldPath: null, staged: true, kind: "Modified" };
+  const untracked: StatusEntry = { path: "new.txt", oldPath: null, staged: false, kind: "New" };
+  const unstaged: StatusEntry = { path: "b.txt", oldPath: null, staged: false, kind: "Modified" };
+
+  it("folds into any commit of the branch, HEAD included, with something staged", () => {
+    expect(foldStagedCheck(context({ status: [staged, untracked] }), "C")).toEqual({ ok: true });
+    expect(foldStagedCheck(context({ status: [staged] }), "E")).toEqual({ ok: true });
+  });
+
+  it("needs something staged and no other changes to tracked files", () => {
+    expect(foldStagedCheck(context({ status: [untracked] }), "C")).toEqual({
+      ok: false,
+      reason: "Stage the changes to fold in first.",
+    });
+    expect(foldStagedCheck(context({ status: [staged, unstaged] }), "C")).toEqual({
+      ok: false,
+      reason: "Stage or stash your other changes first.",
+    });
+  });
+
+  it("keeps the other edits' refusals", () => {
+    const status = [staged];
+    expect(foldStagedCheck(context({ status }), "X")).toEqual({
+      ok: false,
+      reason: "Only commits of the current branch can be edited.",
+    });
+    expect(foldStagedCheck(context({ status }), "A")).toEqual({
+      ok: false,
+      reason: "The first commit of the history can't be edited here.",
+    });
+    expect(foldStagedCheck(context({ status, headInfo: { ...HEAD, operation: "Merge" } }), "C")).toEqual({
+      ok: false,
+      reason: "Finish or abort the operation in progress first.",
+    });
+    const commits = [commit("M", ["E", "X"]), ...chain];
+    expect(foldStagedCheck(context({ status, commits, headInfo: { ...HEAD, headId: "M" } }), "C")).toEqual({
+      ok: false,
+      reason: "A merge commit comes after this one. Use Rebase onto here… instead.",
+    });
   });
 });
