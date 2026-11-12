@@ -469,3 +469,48 @@ fn a_broken_head_is_an_error_not_an_empty_history() {
 
     assert!(file_history_cached(&repo, &mut cache, "f.txt", 300, NO_BUDGET).is_err());
 }
+
+#[test]
+fn a_history_reuses_the_graph_walk_of_the_same_start() {
+    let (_dir, repo, _) = history_repo();
+    let mut cache = WalkCache::default();
+    // Every local branch: only main, so the graph walks from HEAD, all parents.
+    git_core::graph::graph_page_cached(
+        &repo,
+        &mut cache,
+        &git_core::graph::GraphSelection::default(),
+        None,
+        10,
+    )
+    .unwrap();
+    assert_eq!(cache.stats().walks, 1);
+
+    let page = file_history_cached(&repo, &mut cache, "f.txt", 300, NO_BUDGET).unwrap();
+
+    assert_eq!(page.entries, file_history(&repo, "f.txt", 300).unwrap());
+    assert_eq!(cache.stats().walks, 1, "the graph's sort is reused");
+}
+
+#[test]
+fn a_line_history_page_examines_no_commit_beyond_its_last_entry() {
+    let (_dir, repo) = init_repo();
+    let v1 = commit_tree(&repo, &[("l.txt", "a\nb\n", REGULAR)], &[], "v1");
+    let v2 = commit_tree(&repo, &[("l.txt", "A\nb\n", REGULAR)], &[v1], "v2");
+    set_head(&repo, v2);
+    let mut cache = WalkCache::default();
+
+    let page = line_page_of(&mut cache, &repo, "l.txt", lines(1, 1), 1);
+
+    assert_eq!(page.entries.len(), 1);
+    assert_eq!(cache.stats().history_commits, 1);
+}
+
+fn line_page_of(
+    cache: &mut WalkCache,
+    repo: &Repository,
+    path: &str,
+    range: LineRange,
+    limit: usize,
+) -> LineHistory {
+    line_history_cached(repo, cache, "HEAD", path, range, limit, NO_BUDGET).unwrap()
+}
