@@ -2707,6 +2707,13 @@ only `error`.
   leftover `dconf watch` process before launch, then picks a dynamically free CDP port, to
   mitigate a GTK/GLib proxy-resolver helper that can otherwise squat the debug port. CI runs it
   under `xvfb-run` as its own `e2e-vscode` job (`.github/workflows/ci.yml`), parallel to `e2e`.
+  It and the packaged-VSIX smoke test (`runVsixSmoke.ts`, the `vsix-smoke` job) get VSCode from
+  `extension/e2e/src/support/vscodeDownload.ts` (#918): in CI the version is pinned by
+  `ci.yml`'s `BROWSITORY_E2E_VSCODE_VERSION` (Renovate proposes each new stable release) and
+  `actions/cache` keeps `.vscode-test/vscode-linux-x64-<version>`, so a warm run makes no
+  request to the update service; a failed lookup or download is retried with backoff.
+  Unpinned (a local run), test-electron picks the latest stable release that satisfies
+  `engines.vscode`. The helper's unit tests run with `pnpm --ignore-workspace test:unit`.
 - Mutation testing (`ci.yml`'s `mutants` job, pull requests and dispatched runs only,
   informational): cargo-mutants mutates the lines a PR changes under `crates/git-core/src/` and `crates/repo-service/src/` and
   runs that package's tests against each mutant. A *missed* mutant is a code change no test

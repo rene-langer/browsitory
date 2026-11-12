@@ -12,17 +12,14 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import {
-  downloadAndUnzipVSCode,
-  resolveCliArgsFromVSCodeExecutablePath,
-  runTests,
-} from "@vscode/test-electron";
+import { resolveCliArgsFromVSCodeExecutablePath, runTests } from "@vscode/test-electron";
 import {
   getFreePort,
   killStaleDconfWatchers,
   PLATFORM_LAUNCH_ARGS,
   prepareLaunchEnvironment,
 } from "./support/launch";
+import { downloadVSCode } from "./support/vscodeDownload";
 
 const EXTENSION_ID = "browsitory.browsitory";
 const COMMIT_MESSAGE = "smoke: packaged extension sees this commit";
@@ -131,7 +128,7 @@ async function smokeTest({
     }),
   );
 
-  const vscodeExecutablePath = await downloadAndUnzipVSCode();
+  const vscodeExecutablePath = await downloadVSCode();
   const [cli] = resolveCliArgsFromVSCodeExecutablePath(vscodeExecutablePath);
   if (!cli) throw new Error("could not resolve the VSCode CLI");
   const profileArgs = [`--extensions-dir=${extensionsDir}`, `--user-data-dir=${userDataDir}`];

@@ -59,6 +59,11 @@
       "groupName": null
     },
     {
+      "description": "The VSCode release CI's e2e-vscode and vsix-smoke jobs run in (ci.yml's BROWSITORY_E2E_VSCODE_VERSION, #918): wait for the first recovery release before proposing a new one",
+      "matchPackageNames": ["microsoft/vscode"],
+      "minimumReleaseAge": "3 days"
+    },
+    {
       "matchManagers": ["rust-toolchain"],
       "groupName": "Rust toolchain"
     },

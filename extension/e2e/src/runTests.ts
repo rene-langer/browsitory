@@ -10,6 +10,7 @@ import {
   prepareConfigDir,
   prepareLaunchEnvironment,
 } from "./support/launch";
+import { downloadVSCode } from "./support/vscodeDownload";
 
 // Plain CommonJS `__dirname` (this package compiles to CommonJS — see package.json's note
 // above) rather than the `fileURLToPath(import.meta.url)` ESM idiom.
@@ -33,7 +34,9 @@ async function main() {
 
   const cdpPort = await getFreePort();
   process.env["BROWSITORY_VSCODE_E2E_CDP_PORT"] = String(cdpPort);
+  const vscodeExecutablePath = await downloadVSCode(extensionDevelopmentPath);
   await runTests({
+    vscodeExecutablePath,
     extensionDevelopmentPath,
     extensionTestsPath,
     launchArgs: [
