@@ -28,9 +28,11 @@ export function renderWebviewHtml(webview: Webview, assets: WebviewAssets): stri
     "connect-src " +
     webview.cspSource +
     "; " +
+    // 'wasm-unsafe-eval' lets syntax highlighting compile its WebAssembly regex engine (#843);
+    // it allows WebAssembly compilation only, not eval().
     "script-src 'nonce-" +
     nonce +
-    "'; " +
+    "' 'wasm-unsafe-eval'; " +
     // Syntax highlighting runs in a Web Worker (#843). A webview can start one only from a
     // blob: URL: the frontend fetches its worker file (connect-src) and wraps it in a blob.
     "worker-src blob:;";

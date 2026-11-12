@@ -5,7 +5,7 @@ import {
   type HighlighterCore,
   type LanguageRegistration,
 } from "shiki/core";
-import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
+import { createOnigurumaEngine } from "shiki/engine/oniguruma";
 import { withoutExcludedGrammars } from "./excludedGrammars";
 import type { Token } from "./highlight";
 import type { HighlightLanguage } from "./languageForPath";
@@ -16,7 +16,7 @@ import { abortError } from "./highlightWorkerProtocol";
  * or on the page as the fallback when no worker can start (`highlightInProcess.ts`).
  */
 
-/** Lines per chunk: about 100 ms for TypeScript, the slowest grammar measured. */
+/** Lines per chunk: tens of ms for TypeScript, the slowest grammar measured. */
 export const HIGHLIGHT_CHUNK_LINES = 200;
 
 const THEME = createCssVariablesTheme({ name: "browsitory", variablePrefix: "--shiki-", fontStyle: false });
@@ -72,15 +72,31 @@ function nextTask(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-// Stub for the tests-first commit (#843); the implementation follows.
-export function polyfillResponseBytes(_proto: { bytes?: unknown; arrayBuffer(): Promise<ArrayBuffer> }): void {}
+/**
+ * Shiki's inlined WebAssembly loader (`shiki/wasm`) reads the binary with `Response.bytes()`,
+ * which WebKit added only in Safari 18 (older macOS keeps an older WKWebView).
+ */
+export function polyfillResponseBytes(proto: { bytes?: unknown; arrayBuffer(): Promise<ArrayBuffer> }): void {
+  if (typeof proto.bytes === "function") return;
+  proto.bytes = async function bytes(this: { arrayBuffer(): Promise<ArrayBuffer> }) {
+    return new Uint8Array(await this.arrayBuffer());
+  };
+}
 
 export function createTokenizer(): Tokenizer {
   let highlighter: Promise<HighlighterCore> | null = null;
   const loaded = new Map<HighlightLanguage, Promise<void>>();
 
   const getHighlighter = () => {
-    highlighter ??= createHighlighterCore({ themes: [THEME], langs: [], engine: createJavaScriptRegexEngine() });
+    if (typeof Response !== "undefined") polyfillResponseBytes(Response.prototype);
+    // The Oniguruma WebAssembly engine (#843): about 4 times faster than Shiki's JavaScript
+    // regex engine on TypeScript in WebKitGTK. Compiling it needs 'wasm-unsafe-eval' in the
+    // CSP (crates/tauri-app/tauri.conf.json, extension/src/webviewHtml.ts).
+    highlighter ??= createHighlighterCore({
+      themes: [THEME],
+      langs: [],
+      engine: createOnigurumaEngine(import("shiki/wasm")),
+    });
     return highlighter;
   };
 
