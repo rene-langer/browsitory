@@ -59,7 +59,12 @@ export function rowMenuKey(menu: RowContextMenu): string {
 
 /** "Compare with current branch", or "Compare with HEAD" on a detached HEAD. Read-only, so never disabled. */
 export function compareLabel(branches: BranchInfo[]): string {
-  return branches.some((branch) => branch.isCurrent) ? "Compare with current branch" : "Compare with HEAD";
+  return compareLabelFor(branches.find((branch) => branch.isCurrent)?.name ?? null);
+}
+
+/** `compareLabel` by the checked-out branch's name, `null` on a detached HEAD. */
+export function compareLabelFor(currentBranch: string | null): string {
+  return currentBranch !== null ? "Compare with current branch" : "Compare with HEAD";
 }
 
 /** The current branch's name, `null` on a detached HEAD. */

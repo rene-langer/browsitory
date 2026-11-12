@@ -88,6 +88,7 @@ function CommitGraphContent({
   onDeleteTag,
   onCreateTag,
   onDeleteTagFromRemote,
+  onCompareTag,
   revealRequest = 0,
   lineStats,
   onCommitsVisible,
@@ -180,6 +181,8 @@ function CommitGraphContent({
   onCreateTag?: (commitId: string) => void;
   /** Opens the "Delete from remote" dialog for that tag (the tag badge menu). */
   onDeleteTagFromRemote?: (tag: string) => void;
+  /** A tag badge's "Compare with current branch" (#119): `refs/tags/<tag>` and the tag. Read-only. */
+  onCompareTag?: (refName: string, label: string) => void;
   /** Bumped by "Go to" (#441): scrolls the selected row into view even when it was already
    *  selected. */
   revealRequest?: number;
@@ -418,6 +421,8 @@ function CommitGraphContent({
       onPushTag,
       onBranchFromCommit,
       onCheckoutCommit,
+      onCompareTag,
+      currentBranch,
       onDeleteFromRemote: onDeleteTagFromRemote,
       onCopy: copyToClipboard,
       onDelete: setTagToDelete,

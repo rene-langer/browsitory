@@ -1,13 +1,15 @@
 import type { RemoteInfo } from "../ipc/RepoClient";
 import type { CopyToClipboard } from "../state/useCopyToClipboard";
 import type { ContextMenuItem } from "./primitives/ContextMenu";
+import { compareLabelFor } from "./branchMenuItems";
 
 /**
  * The actions on one tag, shared by the tag badge menu in the graph (`CommitGraph`) and the
  * Tags panel's row menu (`TagPanel`), so both offer the same items in the same order. An action
  * whose handler is missing is left out; `commitId` `null` (a tag of a tree or blob) leaves out
  * the actions that need a commit. "Copy tag name" (#614) sits before the destructive items and is
- * never disabled (copying is not a Git operation).
+ * never disabled (copying is not a Git operation), nor is "Compare with current branch" (#119),
+ * which is read-only like the branch menus' compare.
  */
 export function tagMenuItems({
   tag,
@@ -18,6 +20,8 @@ export function tagMenuItems({
   onPushTag,
   onBranchFromCommit,
   onCheckoutCommit,
+  onCompareTag,
+  currentBranch = null,
   onDeleteFromRemote,
   onCopy,
   onDelete,
@@ -31,6 +35,14 @@ export function tagMenuItems({
   onPushTag?: (remoteName: string, tag: string) => void;
   onBranchFromCommit?: (commitId: string) => void;
   onCheckoutCommit?: (commitId: string) => void;
+  /**
+   * "Compare with current branch" (#119): `refs/tags/<name>` and the tag's name, the arguments of
+   * the branch menus' compare (`useCompare`'s `compareBranch`). The backend peels an annotated
+   * tag to its commit.
+   */
+  onCompareTag?: (refName: string, label: string) => void;
+  /** The checked-out branch, `null` on a detached HEAD ("Compare with HEAD"). */
+  currentBranch?: string | null;
   onDeleteFromRemote?: (tag: string) => void;
   onCopy?: CopyToClipboard;
   /** Opens the local-delete confirmation. */
@@ -63,6 +75,13 @@ export function tagMenuItems({
       onSelect: () => onCheckoutCommit(commitId),
       disabled,
       title: busyTitle,
+      group: "commit",
+    });
+  }
+  if (commitId !== null && onCompareTag !== undefined) {
+    items.push({
+      label: compareLabelFor(currentBranch),
+      onSelect: () => onCompareTag(`refs/tags/${tag}`, tag),
       group: "commit",
     });
   }

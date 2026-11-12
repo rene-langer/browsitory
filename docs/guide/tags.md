@@ -24,8 +24,9 @@ selected and pushes them: **Push to ⟨remote⟩**, or, with several remotes, pi
 **Push**. **Clear selection** unticks them. To push one tag, use **Push ⟨tag⟩ to ⟨remote⟩** in its
 menu; **Push all tags to ⟨remote⟩** in the command palette pushes every tag. A tag's other actions are in its menu: the **…** button (it appears when you point at or tab into
 the row), a right-click, or the Menu key or Shift+F10 on the row, its checkbox or its **…**. The menu has the same items as the tag's
-badge in the graph: push to a remote, **Branch from tag**, **Switch to (detached)**, **Copy tag
-name**, **Delete from remote…** and **Delete tag…** (the local tag, after a confirmation).
+badge in the graph: push to a remote, **Branch from tag**, **Switch to (detached)**, **Compare
+with current branch** (see [Compare](compare.md)), **Copy tag name**, **Delete from remote…** and
+**Delete tag…** (the local tag, after a confirmation).
 
 ## Delete a tag on a remote
 

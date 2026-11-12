@@ -264,6 +264,7 @@ export function WorkspaceMain({
                 onDeleteTag={appState.deleteTag}
                 onCreateTag={(commitId) => appState.openDialog({ kind: "createTag", commitId })}
                 onDeleteTagFromRemote={(tagName) => appState.openDialog({ kind: "deleteRemoteTag", tagName })}
+                onCompareTag={compare.compareBranch}
                 revealRequest={revealRequest}
                 lineStats={showLineStats ? lineStats.stats : undefined}
                 onCommitsVisible={showLineStats ? lineStats.request : undefined}
