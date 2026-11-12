@@ -397,3 +397,117 @@ describe("ConflictResolutionPane three-pane view (#875)", () => {
     expect(highlighted(container)).toBe(false);
   }, 20000);
 });
+
+// #876: an arrow in the ours and the theirs pane of every block puts that side into the result.
+describe("ConflictResolutionPane take-side arrows (#876)", () => {
+  const arrow = (region: HTMLElement, pane: "ours" | "theirs") =>
+    within(cellOf(region, pane)).getByRole("button", { name: pane === "ours" ? "Take ours" : "Take theirs" });
+
+  it("puts our lines into the result with the ours pane's arrow", async () => {
+    renderPane(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    fireEvent.click(arrow(first, "ours"));
+    expect(within(first).getByLabelText("Result")).toHaveValue("o1\no2\no3\n");
+    expect(within(first).getByRole("button", { name: "Accept ours" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(first).getByText("Ours", { selector: "span" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("1 of 2 resolved");
+    // Taken: the arrow has nothing more to add.
+    expect(arrow(first, "ours")).toBeDisabled();
+    expect(arrow(first, "theirs")).toBeEnabled();
+  });
+
+  it("puts their lines into the result with the theirs pane's arrow", async () => {
+    renderPane(unequal);
+    const second = await screen.findByRole("region", { name: "Conflict 2 of 2" });
+    fireEvent.click(arrow(second, "theirs"));
+    expect(within(second).getByLabelText("Result")).toHaveValue("t2\nt3\n");
+    expect(within(second).getByRole("button", { name: "Accept theirs" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("status")).toHaveTextContent("1 of 2 resolved");
+    expect(arrow(second, "theirs")).toBeDisabled();
+    // The other block is untouched.
+    expect(within(screen.getByRole("region", { name: "Conflict 1 of 2" })).getByLabelText("Result")).toHaveValue("");
+  });
+
+  it("appends the second side taken: ours then theirs, or theirs then ours", async () => {
+    renderPane(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    const second = screen.getByRole("region", { name: "Conflict 2 of 2" });
+
+    fireEvent.click(arrow(first, "ours"));
+    fireEvent.click(arrow(first, "theirs"));
+    expect(within(first).getByLabelText("Result")).toHaveValue("o1\no2\no3\nt1\n");
+    expect(within(first).getByRole("button", { name: "Ours then theirs" })).toHaveAttribute("aria-pressed", "true");
+    expect(arrow(first, "ours")).toBeDisabled();
+    expect(arrow(first, "theirs")).toBeDisabled();
+
+    fireEvent.click(arrow(second, "theirs"));
+    fireEvent.click(arrow(second, "ours"));
+    // Ours is empty in this block: theirs then (nothing of) ours.
+    expect(within(second).getByLabelText("Result")).toHaveValue("t2\nt3\n");
+    expect(within(second).getByRole("button", { name: "Theirs then ours" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("status")).toHaveTextContent("2 of 2 resolved");
+  });
+
+  it("takes theirs then ours on a block with lines on both sides", async () => {
+    renderPane([{ kind: "Conflict", ours: "o\n", base: "", theirs: "t\n" }]);
+    const block = await screen.findByRole("region", { name: "Conflict 1 of 1" });
+    fireEvent.click(arrow(block, "theirs"));
+    fireEvent.click(arrow(block, "ours"));
+    expect(within(block).getByLabelText("Result")).toHaveValue("t\no\n");
+  });
+
+  it("is undone by Reset, which brings the block back to unresolved", async () => {
+    renderPane(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    fireEvent.click(arrow(first, "theirs"));
+    expect(screen.getByRole("status")).toHaveTextContent("1 of 2 resolved");
+
+    fireEvent.click(within(first).getByRole("button", { name: "Reset" }));
+    expect(within(first).getByLabelText("Result")).toHaveValue("");
+    expect(within(first).getByText("Not chosen")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("0 of 2 resolved");
+    expect(arrow(first, "ours")).toBeEnabled();
+    expect(arrow(first, "theirs")).toBeEnabled();
+  });
+
+  it("stays in sync with the choices and their keys", async () => {
+    const { onResolve } = renderPane(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    const second = screen.getByRole("region", { name: "Conflict 2 of 2" });
+
+    // A key takes theirs; the arrow then appends ours after it.
+    act(() => first.focus());
+    fireEvent.keyDown(first, { key: "2", code: "Digit2" });
+    expect(arrow(first, "theirs")).toBeDisabled();
+    fireEvent.click(arrow(first, "ours"));
+    expect(within(first).getByLabelText("Result")).toHaveValue("t1\no1\no2\no3\n");
+    expect(within(first).getByRole("button", { name: "Theirs then ours" })).toHaveAttribute("aria-pressed", "true");
+
+    // The base, or a typed result, is replaced by the side taken.
+    fireEvent.click(within(second).getByRole("button", { name: "Accept base" }));
+    fireEvent.click(arrow(second, "theirs"));
+    expect(within(second).getByLabelText("Result")).toHaveValue("t2\nt3\n");
+    fireEvent.change(within(second).getByLabelText("Result"), { target: { value: "typed\n" } });
+    expect(arrow(second, "theirs")).toBeEnabled();
+    fireEvent.click(arrow(second, "theirs"));
+    expect(within(second).getByLabelText("Result")).toHaveValue("t2\nt3\n");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save resolution" }));
+    expect(onResolve).toHaveBeenCalledWith("shared.txt", "a\nb\nt1\no1\no2\no3\nc\nt2\nt3\nd\n");
+  });
+
+  it("names the block each arrow acts on", async () => {
+    renderPane(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    expect(arrow(first, "ours")).toHaveAttribute("title", expect.stringContaining("Conflict 1 of 2"));
+    expect(arrow(first, "theirs")).toHaveAttribute("title", expect.stringContaining("Conflict 1 of 2"));
+  });
+
+  it("has no arrows in the block view, which keeps its choices", async () => {
+    localStorage.setItem("mergeEditor.view", "blocks");
+    renderPane(unequal);
+    await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    expect(screen.queryByRole("button", { name: "Take ours" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Take theirs" })).not.toBeInTheDocument();
+  });
+});
