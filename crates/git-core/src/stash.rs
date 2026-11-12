@@ -394,6 +394,22 @@ fn registered_submodule(workdir: &std::path::Path, path: &str) -> bool {
     false
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Status passes this module ran on this thread, for the tests (#243).
+    static STATUS_PASSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// `repo.statuses`, counted for the tests (#243).
+fn statuses<'r>(
+    repo: &'r Repository,
+    options: &mut git2::StatusOptions,
+) -> Result<git2::Statuses<'r>, git2::Error> {
+    #[cfg(test)]
+    STATUS_PASSES.with(|passes| passes.set(passes.get() + 1));
+    repo.statuses(Some(options))
+}
+
 /// Every changed file path (staged, unstaged and, with `include_untracked`, untracked; never
 /// ignored files or untracked nested repositories), as `save_path_limited_stash` selects them.
 fn changed_paths(repo: &Repository, include_untracked: bool) -> Result<Vec<String>, StashError> {
@@ -404,7 +420,7 @@ fn changed_paths(repo: &Repository, include_untracked: bool) -> Result<Vec<Strin
         .include_ignored(false)
         .exclude_submodules(true);
     let mut paths = Vec::new();
-    for entry in repo.statuses(Some(&mut options))?.iter() {
+    for entry in statuses(repo, &mut options)?.iter() {
         let Ok(path) = entry.path() else { continue };
         if entry.status().contains(git2::Status::IGNORED) || path.ends_with('/') {
             continue;
@@ -563,7 +579,7 @@ fn collect_paths(
         untracked: Vec::new(),
         deleted: std::collections::HashSet::new(),
     };
-    for entry in repo.statuses(Some(&mut status_options))?.iter() {
+    for entry in statuses(repo, &mut status_options)?.iter() {
         let status = entry.status();
         let Ok(path) = entry.path() else { continue };
         if status.contains(git2::Status::INDEX_DELETED) {
@@ -992,7 +1008,7 @@ fn with_rename_partners(
         })
     };
     let mut all = paths.to_vec();
-    for entry in repo.statuses(Some(&mut options))?.iter() {
+    for entry in statuses(repo, &mut options)?.iter() {
         if !entry.status().contains(git2::Status::INDEX_RENAMED) {
             continue;
         }
@@ -1255,7 +1271,7 @@ fn kept_entry_in_untracked_folder(repo: &Repository) -> Result<bool, StashError>
     let mut kept = Vec::new();
     // Every untracked (not ignored) path, nested repositories included.
     let mut untracked = Vec::new();
-    for entry in repo.statuses(Some(&mut options))?.iter() {
+    for entry in statuses(repo, &mut options)?.iter() {
         let Ok(raw) = entry.path() else { continue };
         let path = raw.trim_end_matches('/');
         let is_kept = match entry.status() {
@@ -1389,12 +1405,18 @@ impl WorktreeScan {
             .include_ignored(true)
             .recurse_ignored_dirs(false)
             .exclude_submodules(true);
-        let entries = repo
-            .statuses(Some(&mut options))?
+        let entries = statuses(repo, &mut options)?
             .iter()
             .filter_map(|entry| Some((entry.status(), entry.path().ok()?.to_string())))
             .collect();
         Ok(Self { entries })
+    }
+
+    /// Every changed file path, as `save_path_limited_stash` selects them: staged and unstaged
+    /// changes and, with `include_untracked`, untracked files; never ignored files or untracked
+    /// nested repositories (#243). Stub.
+    fn changed_paths(&self, _include_untracked: bool) -> Vec<String> {
+        Vec::new()
     }
 
     /// For the entry `raw` with `status`: a file the index no longer has but the worktree still
@@ -2333,6 +2355,177 @@ pub fn drop_stash(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn status_passes() -> usize {
+        STATUS_PASSES.with(std::cell::Cell::get)
+    }
+
+    /// `changed_paths` as it was before it read the shared scan (#243): its own status pass.
+    fn changed_paths_oracle(repo: &Repository, include_untracked: bool) -> Vec<String> {
+        let mut options = git2::StatusOptions::new();
+        options
+            .include_untracked(include_untracked)
+            .recurse_untracked_dirs(true)
+            .include_ignored(false)
+            .exclude_submodules(true);
+        let mut paths = Vec::new();
+        for entry in repo.statuses(Some(&mut options)).unwrap().iter() {
+            let path = entry.path().unwrap();
+            if entry.status().contains(git2::Status::IGNORED) || path.ends_with('/') {
+                continue;
+            }
+            paths.push(path.to_string());
+        }
+        paths
+    }
+
+    fn write(dir: &std::path::Path, path: &str, text: &str) {
+        let full = dir.join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, text).unwrap();
+    }
+
+    /// A repository with one committed `a.txt` and `.gitignore` (`*.log`, `build/`).
+    fn repo_with_a_commit() -> (tempfile::TempDir, Repository) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        {
+            let mut config = repo.config().unwrap();
+            config.set_str("user.name", "T").unwrap();
+            config.set_str("user.email", "t@example.com").unwrap();
+            config.set_bool("core.autocrlf", false).unwrap();
+        }
+        write(dir.path(), "a.txt", "a\n");
+        write(dir.path(), ".gitignore", "*.log\nbuild/\n");
+        commit_everything(&repo, &["a.txt", ".gitignore"]);
+        (dir, repo)
+    }
+
+    fn commit_everything(repo: &Repository, paths: &[&str]) {
+        let mut index = repo.index().unwrap();
+        for path in paths {
+            index.add_path(std::path::Path::new(path)).unwrap();
+        }
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let sig = repo.signature().unwrap();
+        let parent = repo.head().ok().map(|head| head.peel_to_commit().unwrap());
+        let parents: Vec<&git2::Commit> = parent.iter().collect();
+        repo.commit(Some("HEAD"), &sig, &sig, "c", &tree, &parents)
+            .unwrap();
+    }
+
+    /// Every kind of entry status reports: modified, staged (new, edit), deleted, removed from
+    /// the index but still there (plain and ignored), untracked (top level and in a new
+    /// folder), ignored files and folders, a new folder of ignored files only, and an untracked
+    /// nested repository.
+    #[test]
+    fn changed_paths_from_the_shared_scan_equal_their_own_status_pass() {
+        let (dir, repo) = repo_with_a_commit();
+        let root = dir.path();
+        for path in ["d/b.txt", "gone.txt", "kept.txt", "x.log", "d/e/f.txt"] {
+            write(root, path, "1\n");
+        }
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("x.log")).unwrap();
+        index.write().unwrap();
+        commit_everything(&repo, &["d/b.txt", "gone.txt", "kept.txt", "d/e/f.txt"]);
+        write(root, "a.txt", "edited\n");
+        write(root, "d/b.txt", "staged\n");
+        write(root, "new.txt", "staged new\n");
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("d/b.txt")).unwrap();
+        index.add_path(std::path::Path::new("new.txt")).unwrap();
+        index.remove_path(std::path::Path::new("kept.txt")).unwrap();
+        index.remove_path(std::path::Path::new("x.log")).unwrap();
+        index.write().unwrap();
+        std::fs::remove_file(root.join("gone.txt")).unwrap();
+        write(root, "d/e/f.txt", "edited\n");
+        for path in ["u.txt", "u/dir/f.txt", "y.log", "build/out.o", "only/z.log"] {
+            write(root, path, "u\n");
+        }
+        Repository::init(root.join("nested")).unwrap();
+        write(root, "nested/n.txt", "n\n");
+
+        let scan = WorktreeScan::new(&repo).unwrap();
+        for include_untracked in [false, true] {
+            let expected = changed_paths_oracle(&repo, include_untracked);
+            assert!(expected.contains(&"kept.txt".to_string()), "{expected:?}");
+            assert_eq!(
+                scan.changed_paths(include_untracked),
+                expected,
+                "include_untracked: {include_untracked}"
+            );
+        }
+    }
+
+    /// Stash all reads the worktree's status once, with or without untracked files, when it
+    /// takes libgit2's route (not counting libgit2's own passes inside `stash_save2`).
+    #[test]
+    fn a_whole_stash_runs_one_status_pass() {
+        for include_untracked in [false, true] {
+            let (dir, mut repo) = repo_with_a_commit();
+            write(dir.path(), "a.txt", "edited\n");
+            write(dir.path(), "u.txt", "untracked\n");
+            let before = status_passes();
+
+            save_stash(
+                &mut repo,
+                &StashOptions {
+                    include_untracked,
+                    ..StashOptions::default()
+                },
+            )
+            .unwrap();
+
+            assert_eq!(
+                status_passes() - before,
+                1,
+                "include_untracked: {include_untracked}"
+            );
+            assert_eq!(
+                std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+                "a\n"
+            );
+            assert_eq!(
+                dir.path().join("u.txt").exists(),
+                !include_untracked,
+                "include_untracked: {include_untracked}"
+            );
+        }
+    }
+
+    /// The routed stash (an ignored file in an untracked folder, kept by the path-limited
+    /// route) reads the worktree's status once before it routes.
+    #[test]
+    fn a_routed_whole_stash_scans_once_before_routing() {
+        let (dir, mut repo) = repo_with_a_commit();
+        write(dir.path(), "a.txt", "edited\n");
+        write(dir.path(), "new/u.txt", "untracked\n");
+        write(dir.path(), "new/keep.log", "ignored\n");
+        let before = status_passes();
+        save_stash(&mut repo, &StashOptions::default()).unwrap();
+        let whole = status_passes() - before;
+
+        // The same stash asked for by its paths goes straight to the path-limited route.
+        let (dir, mut repo) = repo_with_a_commit();
+        write(dir.path(), "a.txt", "edited\n");
+        write(dir.path(), "new/u.txt", "untracked\n");
+        write(dir.path(), "new/keep.log", "ignored\n");
+        let before = status_passes();
+        save_stash(
+            &mut repo,
+            &StashOptions {
+                paths: vec!["a.txt".into(), "new/u.txt".into()],
+                ..StashOptions::default()
+            },
+        )
+        .unwrap();
+        let picked = status_passes() - before;
+
+        assert!(dir.path().join("new/keep.log").exists());
+        assert_eq!(whole, picked + 1);
+    }
 
     /// Only libgit2's checkout conflict ("1 conflict prevents checkout") is a file in the way;
     /// a conflict code from another class, or another checkout error, is not (#416).
