@@ -446,6 +446,7 @@ function AppContent({
             shortcuts={openRepos.openRepos.length > 0}
             onOpenUserGuide={openUserGuide}
             onShowReleaseNotes={() => setReleaseNotesView({ mode: "all", entries: allReleaseNotes })}
+            onCheckForUpdates={checkForUpdates}
           />
         </header>
         {openRepos.restoreError !== null && (

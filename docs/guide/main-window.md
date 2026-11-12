@@ -98,8 +98,9 @@ the right:
 - The gear button opens **Preferences** (see below).
 - The sparkle button (**What's new**) opens what changed in each version (see below).
 - The question mark button (**Help**) opens a menu: **User guide** opens this guide in your
-  browser, **Keyboard shortcuts** shows the list of shortcuts (while a repository is open), and
-  **What's new** opens the same dialog.
+  browser, **Keyboard shortcuts** shows the list of shortcuts (while a repository is open),
+  **What's new** opens the same dialog, and **Check for updates** (desktop app) checks for a new
+  version now (see below).
 
 **Preferences.** The settings are grouped, and the dialog shows one group at a time: pick it
 in the list on the left (above the settings in a narrow window), or move through the list with
@@ -161,10 +162,12 @@ Click **Restart to update** to install it, or keep working: nothing changes unti
 
 To stop the automatic checks, clear **Check for updates automatically** under **Updates** in
 **Preferences** (it is `check_automatically = false` under `[updates]` in `config.toml`).
-Browsitory then contacts the update server only when you ask: click **Check for updates** in
-that section, or run **Check for updates** from the command palette. It tells you whether you
-are up to date; a new version downloads and shows the same banner.
-The VSCode extension updates through VSCode instead and has neither setting nor command.
+Browsitory then contacts the update server only when you ask: choose **Check for updates** in
+the **Help** menu, click **Check for updates** in that section, or run **Check for updates** from
+the command palette. It tells you whether you are up to date; a new version downloads and shows
+the same banner.
+The VSCode extension updates through VSCode instead and has neither setting, menu item nor
+command.
 
 **Notifications.** A finished action shows a short notification in the bottom-right corner:
 green for done, blue for information, amber for a warning, red for an error, each with its own
