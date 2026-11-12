@@ -3,3 +3,18 @@
   color: var(--color-warning-text);
   font-size: var(--text-sm);
 }
+
+.message {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+}
+
+.message textarea {
+  font: inherit;
+  font-family: var(--font-mono);
+  resize: vertical;
+  width: 100%;
+  box-sizing: border-box;
+}

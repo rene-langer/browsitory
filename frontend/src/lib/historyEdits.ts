@@ -8,7 +8,7 @@ export type { HistoryEditKind };
  * through `startRebase`, so conflicts pause it like any rebase and it is one Undo step, named after
  * the edit (`startRebase`'s `edit`, #473).
  */
-export const HISTORY_EDIT_KINDS: readonly HistoryEditKind[] = ["Reword", "Squash", "Fixup", "MoveUp", "MoveDown", "Drop"];
+export const HISTORY_EDIT_KINDS: readonly HistoryEditKind[] = ["Reword", "Squash", "Fixup", "MoveUp", "MoveDown", "Drop", "Edit"];
 
 /** What a one-click edit needs on top of its kind: Reword's new message, Squash's combined one. */
 export type HistoryEdit =
@@ -17,7 +17,9 @@ export type HistoryEdit =
   | { kind: "Fixup" }
   | { kind: "MoveUp" }
   | { kind: "MoveDown" }
-  | { kind: "Drop" };
+  | { kind: "Drop" }
+  /** Edit commit… (#882): stops at the commit with its changes staged, for a recommit. */
+  | { kind: "Edit" };
 
 /** `onto`: the commit the one-step rebase starts from (passed to `commitsSince`/`startRebase`). */
 export type HistoryEditCheck = { ok: true; onto: string } | { ok: false; reason: string };
@@ -79,7 +81,15 @@ export function historyEditChecks(context: HistoryEditContext, commitId: string)
   const refusal = commonRefusal(context, commitId, byId);
   if (refusal !== null) {
     const refused: HistoryEditCheck = { ok: false, reason: refusal };
-    return { Reword: refused, Squash: refused, Fixup: refused, MoveUp: refused, MoveDown: refused, Drop: refused };
+    return {
+      Reword: refused,
+      Squash: refused,
+      Fixup: refused,
+      MoveUp: refused,
+      MoveDown: refused,
+      Drop: refused,
+      Edit: refused,
+    };
   }
   const parentId = byId.get(commitId)!.parentIds[0];
   const parent = byId.get(parentId);
@@ -100,6 +110,7 @@ export function historyEditChecks(context: HistoryEditContext, commitId: string)
     MoveUp: context.headInfo.headId === commitId ? { ok: false, reason: "This is already the newest commit." } : fromParent,
     MoveDown: fromGrandparent,
     Drop: fromParent,
+    Edit: fromParent,
   };
 }
 
@@ -143,6 +154,9 @@ export function buildHistoryEditPlan(edit: HistoryEdit, commitId: string, span: 
     case "Drop":
       plan[index] = { ...plan[index], action: { kind: "Drop" } };
       break;
+    case "Edit":
+      plan[index] = { ...plan[index], action: { kind: "Edit" } };
+      break;
   }
   return plan;
 }
@@ -173,5 +187,7 @@ export function historyEditDoneMessage(kind: HistoryEditKind, shortId: string): 
       return `Moved ${shortId} down`;
     case "Drop":
       return `Dropped ${shortId}`;
+    case "Edit":
+      return `Edited ${shortId}`;
   }
 }

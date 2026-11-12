@@ -701,6 +701,7 @@ export function RepoWorkspace({
     onSaveStash: announce("Changes stashed", () => appState.saveStash()),
     onOpenStashDialog: (paths) => openDialog({ kind: "stash", paths }),
     onRebaseContinue: appState.rebaseContinue,
+    onRebaseEditMessage: appState.setRebaseEditMessage,
     onRebaseAbort: () => void abortRebase(),
     onSequenceContinue: continueSequence,
     onSequenceAbort: abortSequence,

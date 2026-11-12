@@ -207,6 +207,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     startRebase: vi.fn(),
     editHistory: vi.fn(),
     rebaseContinue: vi.fn(),
+    setRebaseEditMessage: vi.fn(),
     abortRebase: vi.fn(),
     listPullRequests: vi.fn(),
     saveForgeToken: vi.fn(),

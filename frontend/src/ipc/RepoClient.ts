@@ -352,6 +352,8 @@ export interface RebaseInfo {
   currentStep: number;
   totalSteps: number;
   health: RebaseHealth;
+  /** Full id of the commit an Edit step stopped at (Edit commit…, #882); `null` at any other stop. */
+  editing: string | null;
 }
 /** `restored: false`: the rebase no longer owned HEAD, so HEAD was left where it is. */
 export interface RebaseAbort {
@@ -1064,7 +1066,7 @@ export interface RebasePlanEntry {
 }
 
 /** A one-click history edit from the commit menu (#442). */
-export type HistoryEditKind = "Reword" | "Squash" | "Fixup" | "MoveUp" | "MoveDown" | "Drop";
+export type HistoryEditKind = "Reword" | "Squash" | "Fixup" | "MoveUp" | "MoveDown" | "Drop" | "Edit";
 
 /**
  * `startRebase`'s `edit`: the one-click history edit the rebase runs, so its Undo entry names it
@@ -1586,7 +1588,8 @@ export interface RepoClient {
     plan: RebasePlanEntry[],
     edit?: HistoryEditTarget | null,
   ): Promise<RebaseStepResult>;
-  rebaseContinue(repoPath: string): Promise<RebaseStepResult>;
+  /** `message` replaces the message of the step Continue commits (an edit stop's, #882). */
+  rebaseContinue(repoPath: string, message?: string): Promise<RebaseStepResult>;
   abortRebase(repoPath: string): Promise<RebaseAbort>;
   detectForgeRepository(repoPath: string): Promise<ForgeRepository[]>;
   saveForgeToken(repoPath: string, provider: ForgeProvider, account: string, token: string): Promise<void>;
