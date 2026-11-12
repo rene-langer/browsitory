@@ -306,6 +306,18 @@ GRAMMAR_EXCEPTIONS: dict[str, GrammarException] = {
     "toml": TEXTMATE_BUNDLE,  # textmate/toml.tmbundle
 }
 
+# Browsitory's own grammars (#326), shipped in place of excluded upstream ones. Stub for the tests.
+OWN_GRAMMARS: dict[str, str] = {}
+
+
+def grammar_metadata(grammars: list[dict], injections: list[dict]) -> dict[str, dict]:
+    return {}
+
+
+def own_grammar_entries(own, excluded, read_file, license_text):
+    return [], [], []
+
+
 # Keys Shiki adds to a tm-grammars grammar when it builds @shikijs/langs.
 SHIKI_ADDED_KEYS = ("aliases", "embeddedLangs", "embeddedLangsLazy")
 

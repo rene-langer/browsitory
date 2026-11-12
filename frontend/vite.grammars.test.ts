@@ -41,4 +41,13 @@ describe("excludeGrammarsPlugin", () => {
 
     expect(() => generateBundle.call({ error }, {}, chunk(glsl))).toThrow(/assets\/x\.js contains the excluded "glsl" grammar/);
   });
+
+  it("lets Browsitory's own glsl grammar through (#326)", () => {
+    const { generateBundle } = hooks();
+    const error = vi.fn();
+    // The own grammar is an object literal in the bundle, not tm-grammars' JSON string.
+    const own = 'const GLSL_GRAMMAR={name:"glsl",displayName:"GLSL",scopeName:"source.glsl",embeddedLangs:["c"]};';
+    generateBundle.call({ error }, {}, { "assets/x.js": { type: "chunk", code: own } });
+    expect(error).not.toHaveBeenCalled();
+  });
 });

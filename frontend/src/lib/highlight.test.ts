@@ -1,6 +1,7 @@
 import { renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DiffHunk } from "../ipc/RepoClient";
+import { GLSL_GRAMMAR } from "./grammars/glsl";
 import {
   highlightLines,
   loadedLanguages,
@@ -37,7 +38,55 @@ describe("highlightLines", () => {
   }, 20000);
 });
 
+describe("C++ highlighting (#326)", () => {
+  const color = (line: Token[], content: string) => line.find((t) => t.content.trim() === content)?.color;
+
+  it("highlights C++ with the C++ grammar", async () => {
+    const [line] = await highlightLines("cpp", "template <typename T> class Box {};");
+    expect(line.map((t) => t.content).join("")).toBe("template <typename T> class Box {};");
+    // The C grammar has no `template` or `typename` keywords; C++'s does.
+    expect(color(line, "template")).toMatch(/^var\(--shiki-token/);
+    expect(color(line, "typename")).toMatch(/^var\(--shiki-token/);
+  }, 20000);
+
+  it("highlights GLSL in a glsl raw string with Browsitory's own grammar", async () => {
+    const [line] = await highlightLines("cpp", 'auto src = R"glsl(uniform vec4 tint;)glsl";');
+    expect(line.map((t) => t.content).join("")).toBe('auto src = R"glsl(uniform vec4 tint;)glsl";');
+    // Inside the raw string, GLSL's qualifier and type are their own tokens, coloured unlike
+    // the identifier next to them.
+    const vec4 = color(line, "vec4");
+    expect(vec4).toMatch(/^var\(--shiki-token/);
+    expect(color(line, "uniform")).toMatch(/^var\(--shiki-token/);
+    expect(color(line, "tint")).not.toBe(vec4);
+  }, 20000);
+});
+
+describe("GLSL_GRAMMAR", () => {
+  it("is a grammar for the scope the C++ grammar embeds, built on the C grammar", () => {
+    expect(GLSL_GRAMMAR).toMatchObject({ name: "glsl", scopeName: "source.glsl", embeddedLangs: ["c"] });
+    expect(GLSL_GRAMMAR.patterns.at(-1)).toEqual({ include: "source.c" });
+  });
+});
+
 describe("withoutExcludedGrammars", () => {
+  it("puts Browsitory's own glsl grammar in place of the excluded one", () => {
+    const grammar = (name: string, embeddedLangs?: string[]) =>
+      ({ name, scopeName: `source.${name}`, patterns: [], repository: {}, embeddedLangs }) as never;
+    const upstream = grammar("glsl", ["c"]);
+    const result = withoutExcludedGrammars([grammar("c"), upstream, grammar("cpp", ["cpp-macro", "glsl"])]);
+    expect(result).not.toContain(upstream);
+    expect(result[0]).toBe(GLSL_GRAMMAR);
+    expect(result.map((l) => l.name)).toEqual(["glsl", "c", "cpp"]);
+    expect(result[2].embeddedLangs).toEqual(["cpp-macro", "glsl"]);
+  });
+
+  it("adds the own glsl grammar only where something embeds glsl", () => {
+    const grammar = (name: string, embeddedLangs?: string[]) =>
+      ({ name, scopeName: `source.${name}`, patterns: [], repository: {}, embeddedLangs }) as never;
+    expect(withoutExcludedGrammars([grammar("rust")]).map((l) => l.name)).toEqual(["rust"]);
+    expect(withoutExcludedGrammars([grammar("glsl")]).map((l) => l.name)).toEqual([]);
+  });
+
   it("drops excluded grammars and the embedded references to them", () => {
     const grammar = (name: string, embeddedLangs?: string[]) =>
       ({ name, scopeName: `source.${name}`, patterns: [], repository: {}, embeddedLangs }) as never;
