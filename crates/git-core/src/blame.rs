@@ -266,10 +266,28 @@ fn changed_hunks(old: &[u8], new: &[u8]) -> Result<Vec<Hunk>, git2::Error> {
         .collect()
 }
 
-/// Drops the 1 KiB blocks both versions end with, then gives back the part of the last block
-/// up to its first newline (xdiff's `trim_common_tail`, which blame applies before diffing).
+/// Drops the 1 KiB blocks both versions end with, then gives back the dropped part up to and
+/// including its first newline, or all of it without one (xdiff's `trim_common_tail`, which
+/// blame applies before diffing).
 fn trim_common_tail<'a>(old: &'a [u8], new: &'a [u8]) -> (&'a [u8], &'a [u8]) {
-    (old, new)
+    const BLOCK: usize = 1024;
+    let smaller = old.len().min(new.len());
+    let mut trimmed = 0;
+    while trimmed + BLOCK <= smaller
+        && old[old.len() - trimmed - BLOCK..old.len() - trimmed]
+            == new[new.len() - trimmed - BLOCK..new.len() - trimmed]
+    {
+        trimmed += BLOCK;
+    }
+    let tail = &old[old.len() - trimmed..];
+    let recovered = tail
+        .iter()
+        .position(|&b| b == b'\n')
+        .map_or(trimmed, |newline| newline + 1);
+    (
+        &old[..old.len() - trimmed + recovered],
+        &new[..new.len() - trimmed + recovered],
+    )
 }
 
 /// Splits `lines` (line numbers in the new version, with their blamed-file index) into those
