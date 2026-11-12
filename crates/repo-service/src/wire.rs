@@ -3033,6 +3033,26 @@ impl From<AppearanceSettingsDto> for config::AppearanceSettings {
     }
 }
 
+/// An installed font family (#858), for the code font suggestions: the name CSS knows it by,
+/// and whether it's monospaced.
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "FontFamily"))]
+#[serde(rename_all = "camelCase")]
+pub struct FontFamilyDto {
+    pub name: String,
+    pub monospace: bool,
+}
+
+impl From<crate::fonts::FontFamily> for FontFamilyDto {
+    fn from(f: crate::fonts::FontFamily) -> Self {
+        Self {
+            name: f.name,
+            monospace: f.monospace,
+        }
+    }
+}
+
 /// The `[updates]` preferences (desktop app only, #630): `checkAutomatically` checks for a new
 /// version at start and every few hours; off, only "Check for updates" checks.
 #[derive(Debug, Serialize, Deserialize)]
@@ -3446,6 +3466,7 @@ mod ts_bindings {
             CommitMessageSettingsDto,
             FetchSettingsDto,
             AppearanceSettingsDto,
+            FontFamilyDto,
             UiSizeDto,
             DateFormatDto,
             UpdateSettingsDto,

@@ -37,6 +37,7 @@ import { repoNameOf } from "../lib/repoName";
 import { THEME_PREFERENCES, type ThemePreference } from "../lib/theme";
 import styles from "./PreferencesDialog.module.css";
 import { Field } from "./primitives/Field";
+import { CodeFontField } from "./CodeFontField";
 import { FormDialog } from "./primitives/FormDialog";
 
 export type { PreferencesGroupId } from "../lib/preferencesGroup";
@@ -514,7 +515,7 @@ export function AppearanceSection({
 }: {
   theme?: { preference: ThemePreference; onChange: (preference: ThemePreference) => void };
 } = {}) {
-  const { settings, update, error, dismissError } = useAppearanceSettingsContext();
+  const { settings, update, error, dismissError, listFontFamilies } = useAppearanceSettingsContext();
   return (
     <PreferencesSection title="Appearance">
       {theme !== undefined && (
@@ -534,12 +535,10 @@ export function AppearanceSection({
           )}
         </Field>
       )}
-      <CommitOnBlurField
-        label="Code font"
-        type="text"
-        placeholder="Default monospace font"
+      <CodeFontField
         value={settings.codeFont ?? ""}
         onCommit={(text) => update({ codeFont: text === "" ? null : text })}
+        loadFamilies={listFontFamilies}
       />
       <CommitOnBlurField
         label="Code font size (px)"
@@ -597,8 +596,8 @@ export function AppearanceSection({
       />
       <p className={styles.hint}>
         {theme !== undefined && "System follows your operating system's light or dark setting. "}
-        The code font and its size apply to diffs, blame, the file viewer and conflicts; a font that
-        is not installed falls back to the default. Leave them empty for the defaults. The tab size
+        The code font and its size apply to diffs, blame, the file viewer and conflicts; typing
+        suggests installed fonts, and a font that is not installed falls back to the default. Leave them empty for the defaults. The tab size
         is in columns. System dates use your operating system's date and time format.
       </p>
       {error !== null && (

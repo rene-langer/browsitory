@@ -2481,6 +2481,50 @@ pub(crate) fn read_beneath(workdir: &Path, rel: &str) -> io::Result<Option<Leaf>
     beneath::read(workdir, Path::new(rel), &mut no_step)
 }
 
+/// [`read_beneath`], with a file held open rather than read (#212): the caller reads it from
+/// the handle, in pieces, so a big file is never held in memory. Found and opened exactly as
+/// [`read_beneath`] finds and opens it.
+pub(crate) fn open_leaf_beneath(workdir: &Path, rel: &str) -> io::Result<Option<Opened>> {
+    if !plain_relative(Path::new(rel)) {
+        return Ok(None);
+    }
+    beneath::open(workdir, Path::new(rel), &mut no_step)
+}
+
+/// A work-tree file or link as [`open_leaf_beneath`] found it.
+pub(crate) enum Opened {
+    File {
+        /// Opened as [`read_beneath`] opens it: no link followed, never a FIFO.
+        file: std::fs::File,
+        executable: bool,
+        /// Taken from the opened descriptor, before anything was read.
+        stat: FileStat,
+    },
+    Link {
+        target: Vec<u8>,
+        stat: FileStat,
+    },
+}
+
+impl Opened {
+    /// Reads a file to the end, as [`Leaf::File`]; a file over `limit` bytes is [`TooLarge`].
+    #[cfg(any(unix, windows))]
+    fn read(self, limit: u64) -> io::Result<Leaf> {
+        Ok(match self {
+            Opened::File {
+                file,
+                executable,
+                stat,
+            } => Leaf::File {
+                bytes: read_capped(file, limit)?,
+                executable,
+                stat,
+            },
+            Opened::Link { target, stat } => Leaf::Link { target, stat },
+        })
+    }
+}
+
 /// What [`probe_beneath`] found at a path, judged without following a link at any component.
 pub(crate) enum Probe {
     /// Missing, or a component on the way is a file.

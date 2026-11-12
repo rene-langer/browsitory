@@ -1,6 +1,7 @@
 import type {
   AmendOptions,
   AppearanceSettings,
+  FontFamily,
   ChangeStamp,
   StatusWithStamp,
   GraphPage,
@@ -412,6 +413,7 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
     setFetchSettings: (settings: FetchSettings) => call<void>("set_fetch_settings", { settings }),
     getAppearanceSettings: () => call<AppearanceSettings>("get_appearance_settings"),
     setAppearanceSettings: (settings: AppearanceSettings) => call<void>("set_appearance_settings", { settings }),
+    listFontFamilies: () => call<FontFamily[]>("list_font_families"),
     getUpdateSettings: () => call<UpdateSettings>("get_update_settings"),
     setUpdateSettings: (settings: UpdateSettings) => call<void>("set_update_settings", { settings }),
     getUndoState: (repoPath: string) => call<UndoState>("get_undo_state", { repoPath }),

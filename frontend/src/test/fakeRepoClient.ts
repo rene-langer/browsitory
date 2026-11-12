@@ -124,6 +124,7 @@ export const EMPTY_RESULTS: Partial<RepoClient> = {
   setFetchSettings: async () => {},
   getAppearanceSettings: async () => ({ codeFont: null, codeFontSize: null, uiSize: "Normal" as const, tabSize: 4, dateFormat: "Iso" as const }),
   setAppearanceSettings: async () => {},
+  listFontFamilies: async () => [],
   getUpdateSettings: async () => ({ checkAutomatically: true }),
   setUpdateSettings: async () => {},
 };

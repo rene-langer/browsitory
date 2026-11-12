@@ -9,8 +9,8 @@ use tauri_plugin_dialog::DialogExt;
 
 use repo_service::wire::{
     hook_progress_dto, transfer_progress_dto, AppearanceSettingsDto, CommitMessageSettingsDto,
-    DiffSettingsDto, ErrorDto, FetchSettingsDto, OpenRepoEntryDto, OpenRepoEntryInput,
-    TransferProgressDto, UpdateSettingsDto, WorkspaceDto,
+    DiffSettingsDto, ErrorDto, FetchSettingsDto, FontFamilyDto, OpenRepoEntryDto,
+    OpenRepoEntryInput, TransferProgressDto, UpdateSettingsDto, WorkspaceDto,
 };
 use repo_service::worker::{HookEvent, ReadHandle, TransferEvent, WorkerHandle, WorkerRegistry};
 
@@ -441,6 +441,20 @@ pub fn get_appearance_settings() -> Result<AppearanceSettingsDto, ErrorDto> {
 #[tauri::command]
 pub fn set_appearance_settings(settings: AppearanceSettingsDto) -> Result<(), ErrorDto> {
     config::set_appearance_settings(&settings.into()).map_err(ErrorDto::from_error)
+}
+
+/// The installed font families for the code font suggestions (#858), read from the system's
+/// font folders off the async runtime (a few hundred font files can take a moment).
+#[tauri::command]
+pub async fn list_font_families() -> Result<Vec<FontFamilyDto>, ErrorDto> {
+    off_runtime(|| {
+        repo_service::fonts::installed_font_families()
+            .into_iter()
+            .map(FontFamilyDto::from)
+            .collect()
+    })
+    .await
+    .map_err(ErrorDto::from)
 }
 
 #[tauri::command]

@@ -2305,6 +2305,31 @@ describe("DiffPane external tools", () => {
     expect(screen.getByRole("menuitem", { name: "Open in merge tool" })).toBeDisabled();
   });
 
+  it("a stash's file rows open in the editor and the diff tool, each against its own commit (#129)", async () => {
+    const externalTools = tools();
+    const stash = { index: 0, message: "On main: wip", commitId: "s0", branch: "main", timestamp: 1700000000, fileCount: 2, hasStagedChanges: false };
+    const client = fakeClient({
+      getStashFiles: vi.fn(async () => ({ tracked: ["a.txt"], untracked: ["new.txt"], untrackedCommitId: "u1" })),
+      getCommitDiff: vi.fn(async () => []),
+      getBlame: async () => [],
+    });
+    renderCommit(client, "s0", {
+      stashes: [stash],
+      stashActions: { onApply: vi.fn(), onPop: vi.fn(), onDrop: vi.fn(), blockers: { apply: null, drop: null } },
+      externalTools,
+    });
+    await screen.findByText("Changes (1)");
+
+    pick("a.txt", "Open in editor");
+    expect(externalTools.openInEditor).toHaveBeenCalledWith("a.txt", null);
+    pick("a.txt", "Reveal in file manager");
+    expect(externalTools.reveal).toHaveBeenCalledWith("a.txt");
+    pick("a.txt", "Open in diff tool");
+    expect(externalTools.openDiffTool).toHaveBeenCalledWith("a.txt", { kind: "Commit", commitId: "s0", oldPath: null });
+    pick("new.txt", "Open in diff tool");
+    expect(externalTools.openDiffTool).toHaveBeenCalledWith("new.txt", { kind: "Commit", commitId: "u1", oldPath: null });
+  });
+
   it("shows the merge tool result and marks the file resolved", async () => {
     const externalTools = tools({ mergeToolResults: new Map([["c.txt", "Resolved"]]) });
     const onMarkResolved = vi.fn(async () => "Resolved" as const);

@@ -389,6 +389,8 @@ describe("tauriRepoClient transfer progress subscription", () => {
     expect(invoke).toHaveBeenLastCalledWith("set_appearance_settings", {
       settings: { codeFont: "Mono", codeFontSize: 14, uiSize: "Large", tabSize: 2, dateFormat: "System" },
     });
+    await tauriRepoClient.listFontFamilies();
+    expect(invoke).toHaveBeenLastCalledWith("list_font_families", undefined);
     await tauriRepoClient.getUpdateSettings();
     expect(invoke).toHaveBeenLastCalledWith("get_update_settings", undefined);
     await tauriRepoClient.setUpdateSettings({ checkAutomatically: false });
