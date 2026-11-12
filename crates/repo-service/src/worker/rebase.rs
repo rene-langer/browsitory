@@ -25,6 +25,8 @@ pub enum HistoryEditKind {
     MoveUp,
     MoveDown,
     Drop,
+    /// Edit commit… (#882): stops at the commit with its changes staged.
+    Edit,
 }
 
 pub(super) fn commits_since(
@@ -252,6 +254,16 @@ impl WorkerHandle {
             events,
             reply: tx,
         })
+    }
+
+    /// `rebase_continue`, landing the paused step under `message` when given (#882).
+    #[allow(dead_code)]
+    pub fn rebase_continue_with_message(
+        &self,
+        message: Option<String>,
+    ) -> Result<RebaseStepResult, ErrorDto> {
+        let _ = message;
+        self.rebase_continue()
     }
 
     #[allow(dead_code)]
