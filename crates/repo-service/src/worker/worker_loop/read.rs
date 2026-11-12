@@ -74,6 +74,7 @@ pub(super) fn dispatch(
     match command {
         Command::GetStatus { reply } => status::get_status(repo, reply),
         Command::GetChangeStamp { reply } => status::get_change_stamp(repo, reply),
+        Command::GetStatusWithStamp { reply } => status::get_status_with_stamp(repo, reply),
         Command::GetCommitGraph {
             limit,
             selection,

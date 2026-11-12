@@ -6,6 +6,28 @@ import { graphPage } from "../test/fakeRepoClient";
 import { TEST_REPO_PATH, remote, upstream, transferClient } from "./useAppStateTestClient";
 
 describe("useAppState", () => {
+  // #841: the status and the change stamp come from one scan of the work tree.
+  it("a refresh reads the status and the stamp with one combined read", async () => {
+    const entry: StatusEntry = { path: "a.txt", oldPath: null, staged: false, kind: "Modified" };
+    const getStatusWithStamp = vi.fn(async () => ({ status: [entry], stamp: { refs: "r", workTree: "w" } }));
+    const getStatus = vi.fn(async () => []);
+    const getChangeStamp = vi.fn(async () => ({ refs: "r", workTree: "w" }));
+    const client = transferClient({ getStatusWithStamp, getStatus, getChangeStamp });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    await act(() => result.current.refresh());
+
+    expect(getStatusWithStamp).toHaveBeenCalledTimes(1);
+    expect(getStatus).not.toHaveBeenCalled();
+    expect(getChangeStamp).not.toHaveBeenCalled();
+    expect(result.current.state.status).toEqual([entry]);
+
+    // The stamp it read is the one a check compares with: unchanged, no refresh.
+    await act(() => result.current.checkForChanges());
+    expect(getChangeStamp).toHaveBeenCalledTimes(1);
+    expect(getStatusWithStamp).toHaveBeenCalledTimes(1);
+  });
+
   it("reports a failed remote-auth mutation to dependent callers", async () => {
     const client = transferClient({
       setRemoteAuthMode: async () => {

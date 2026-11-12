@@ -185,6 +185,15 @@ with each changed file's size and modification time; the index entries without t
 HEAD, references, the stash reflog, the configuration, the files of an operation in progress and
 each linked worktree's HEAD). Ignored files and the rest of the git folder (objects, reflogs,
 `FETCH_HEAD`) don't count. `get_change_stamp` is an ordinary worker read on both transports.
+
+A status read (`get_status`, `get_status_with_stamp`) writes refreshed stat data back to the index
+as `git status` does (#841, `git_core::index_refresh`), so a file whose times changed but whose
+content didn't is hashed once, not on every read. libgit2's own `update_index` would write the
+index it read at the start of the scan without checking that the file is still that index, so the
+scan reads a hard-linked scratch copy in the git folder, libgit2 writes its refresh there, and the
+real index is replaced under `index.lock` only while it is still the one the copy was made from. A
+held lock, a changed index or any error skips the write; the read never waits or fails for it. An
+index with an intent-to-add entry isn't refreshed (libgit2 would drop the mark).
 The stamp has two parts (`ChangeStamp`, `{ refs, workTree }`, #685): `refs` covers HEAD, the
 references, the stash list, the configuration, the operation files and the linked worktrees;
 `workTree` the index and the work tree. `refresh()` keeps the history reads (the graph and its
@@ -195,12 +204,13 @@ status, the stashes, the worktree, submodule and remote lists, HEAD and undo sta
 command (`refresh({ full: true })`), a failed refresh and a missing stamp read everything. Refreshes
 are coalesced per tab (#222): one runs and at most one waits; a call while one runs shares the
 waiting one, which starts after the running one ends, so it still sees the caller's change.
-`useAppState.refresh()` reads the stamp before its other reads (a change landing during them then
-differs), and `checkForChanges()` refreshes only when the current stamp differs from that one, so
+`useAppState.refresh()` reads the stamp together with the status, from one scan of the work tree
+(`get_status_with_stamp`, `git_core::change_stamp::status_with_stamp`, #841), before its other
+reads (a change landing during them then differs), and `checkForChanges()` refreshes only when the current stamp differs from that one, so
 the app's own action, whose refresh already read the new stamp, causes no second refresh.
 `useExternalChanges` calls it while the tab is shown, the app visible and nothing of the tab
 running: every 3 s, stretched to ten times the last check's duration (at most 60 s), and at once
-on window focus, on becoming visible again (the VSCode panel's visibility included) and when the
+on window focus (not while a watcher runs, #841), on becoming visible again (the VSCode panel's visibility included) and when the
 tab is shown. At most one check runs at a time, and none while a refresh runs.
 
 A file system watcher says when to check (#756). `repo_service::watch::RepoWatchers` keeps one

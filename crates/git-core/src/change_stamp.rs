@@ -63,6 +63,28 @@ pub struct ChangeStamp {
     pub work_tree: String,
 }
 
+/// A status read and the stamp from one scan of the work tree (#841).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusWithStamp {
+    pub status: Vec<crate::status::StatusEntry>,
+    pub stamp: ChangeStamp,
+}
+
+/// [`crate::status::status`] and [`change_stamp`] in one read, which scans the work tree once
+/// and refreshes the index's stat data on the way (#841).
+pub fn status_with_stamp(repo: &git2::Repository) -> Result<StatusWithStamp, git2::Error> {
+    let refs = refs_stamp(repo)?;
+    let (statuses, index) = crate::index_refresh::scan(repo)?;
+    let workdir = repo.workdir().unwrap_or(Path::new(""));
+    Ok(StatusWithStamp {
+        status: crate::status::entries(&statuses),
+        stamp: ChangeStamp {
+            refs,
+            work_tree: hash_work_tree(Some(&index), Some((&statuses, workdir))),
+        },
+    })
+}
+
 /// The stamp of `repo` as it is now; see the module documentation for what it covers.
 pub fn change_stamp(repo: &git2::Repository) -> Result<ChangeStamp, git2::Error> {
     Ok(ChangeStamp {
@@ -118,23 +140,43 @@ fn refs_stamp(repo: &git2::Repository) -> Result<String, git2::Error> {
 
 /// [`ChangeStamp::work_tree`].
 fn work_tree_stamp(repo: &git2::Repository) -> Result<String, git2::Error> {
+    let index_path = repo.path().join("index");
+    let index = if index_path.exists() {
+        Some(git2::Index::open(&index_path)?)
+    } else {
+        None
+    };
+    let statuses = match repo.workdir() {
+        Some(workdir) => Some((
+            repo.statuses(Some(&mut crate::status::status_options()))?,
+            workdir,
+        )),
+        None => None,
+    };
+    Ok(hash_work_tree(
+        index.as_ref(),
+        statuses
+            .as_ref()
+            .map(|(statuses, workdir)| (statuses, *workdir)),
+    ))
+}
+
+/// The hash of the index's entries and of a status scan of the work tree at `workdir`.
+fn hash_work_tree(
+    index: Option<&git2::Index>,
+    scan: Option<(&git2::Statuses<'_>, &Path)>,
+) -> String {
     let mut hasher = DefaultHasher::new();
-    let git_dir = repo.path();
-    let index_path = git_dir.join("index");
-    if index_path.exists() {
-        let index = git2::Index::open(&index_path)?;
-        for entry in index.iter() {
-            entry.path.hash(&mut hasher);
-            entry.id.as_bytes().hash(&mut hasher);
-            entry.mode.hash(&mut hasher);
-            // The conflict stage and intent-to-add live in the flags; the stat cache doesn't.
-            entry.flags.hash(&mut hasher);
-            entry.flags_extended.hash(&mut hasher);
-        }
+    for entry in index.into_iter().flat_map(git2::Index::iter) {
+        entry.path.hash(&mut hasher);
+        entry.id.as_bytes().hash(&mut hasher);
+        entry.mode.hash(&mut hasher);
+        // The conflict stage and intent-to-add live in the flags; the stat cache doesn't.
+        entry.flags.hash(&mut hasher);
+        entry.flags_extended.hash(&mut hasher);
     }
 
-    if let Some(workdir) = repo.workdir() {
-        let statuses = repo.statuses(Some(&mut crate::status::status_options()))?;
+    if let Some((statuses, workdir)) = scan {
         for entry in statuses.iter() {
             let flags = entry.status();
             entry.path_bytes().hash(&mut hasher);
@@ -147,7 +189,7 @@ fn work_tree_stamp(repo: &git2::Repository) -> Result<String, git2::Error> {
         }
     }
 
-    Ok(format!("{:016x}", hasher.finish()))
+    format!("{:016x}", hasher.finish())
 }
 
 /// A file's content, or `None` when it can't be read (most often: it doesn't exist).

@@ -11,7 +11,16 @@ pub(super) fn get_status(
     repo: &git2::Repository,
     reply: Sender<Result<Vec<StatusEntry>, ErrorDto>>,
 ) {
-    let _ = reply.send(git_core::status::status(repo).map_err(ErrorDto::from_error));
+    let _ =
+        reply.send(git_core::status::status_refreshing_index(repo).map_err(ErrorDto::from_error));
+}
+
+pub(super) fn get_status_with_stamp(
+    repo: &git2::Repository,
+    reply: Sender<Result<git_core::change_stamp::StatusWithStamp, ErrorDto>>,
+) {
+    let _ =
+        reply.send(git_core::change_stamp::status_with_stamp(repo).map_err(ErrorDto::from_error));
 }
 
 pub(super) fn get_change_stamp(
@@ -642,6 +651,14 @@ impl ReadHandle {
     /// The repository's change stamp (#650); see `git_core::change_stamp`.
     pub fn get_change_stamp(&self) -> Result<git_core::change_stamp::ChangeStamp, ErrorDto> {
         self.read(|tx| Command::GetChangeStamp { reply: tx })
+    }
+
+    /// The status and the change stamp from one scan of the work tree (#841), which also
+    /// refreshes the index's stat data; see `git_core::change_stamp::status_with_stamp`.
+    pub fn get_status_with_stamp(
+        &self,
+    ) -> Result<git_core::change_stamp::StatusWithStamp, ErrorDto> {
+        self.read(|tx| Command::GetStatusWithStamp { reply: tx })
     }
 
     /// One page of the graph of `selection` (#685), from `cursor` on (`None`: the first commit).

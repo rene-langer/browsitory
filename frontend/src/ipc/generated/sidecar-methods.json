@@ -82,6 +82,7 @@
   "get_root_files",
   "get_stash_files",
   "get_status",
+  "get_status_with_stamp",
   "get_switch_conflicts",
   "get_undo_state",
   "get_update_settings",

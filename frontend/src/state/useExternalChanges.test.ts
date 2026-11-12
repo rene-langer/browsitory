@@ -214,6 +214,21 @@ describe("useExternalChanges with a watcher (#756)", () => {
     expect(checkForChanges).toHaveBeenCalledTimes(2);
   });
 
+  // #841: the watcher reports what changed while the window was away; the slow poll covers what
+  // it misses.
+  it("doesn't check when the window gets the focus back while watched", async () => {
+    const { client } = watchedClient();
+    const { checkForChanges } = setup({ client });
+    await settle();
+    await settle();
+    expect(checkForChanges).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    expect(checkForChanges).toHaveBeenCalledTimes(1);
+  });
+
   it("ignores reports for other repositories", async () => {
     const { client, report } = watchedClient();
     const { checkForChanges } = setup({ client });

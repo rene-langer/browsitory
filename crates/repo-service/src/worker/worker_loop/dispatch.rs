@@ -31,6 +31,7 @@ where
         match command {
             Command::GetStatus { .. }
             | Command::GetChangeStamp { .. }
+            | Command::GetStatusWithStamp { .. }
             | Command::GetCommitGraph { .. }
             | Command::LocateCommit { .. }
             | Command::GetMergedCommits { .. }

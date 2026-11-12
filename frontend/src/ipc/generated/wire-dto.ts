@@ -315,6 +315,8 @@ oldPath: string | null, staged: boolean, kind: StatusKind, };
 
 export type StatusKind = "New" | "Modified" | "Deleted" | "Renamed" | "TypeChange" | "Conflicted";
 
+export type StatusWithStamp = { status: Array<StatusEntry>, stamp: ChangeStamp, };
+
 export type SubmoduleInfo = { path: string, url: string | null, gitlinkId: string | null, initialized: boolean, headId: string | null, 
 /**
  * Absolute path of the checked-out submodule, the folder its tab opens; `null` when it

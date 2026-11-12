@@ -2,6 +2,7 @@ use repo_service::wire::ChangeStampDto;
 use repo_service::wire::CommitDetailsDto;
 use repo_service::wire::CommitStatsEntryDto;
 use repo_service::wire::ErrorDto;
+use repo_service::wire::StatusWithStampDto;
 use repo_service::wire::{
     to_trailers, BlameLineDto, CommitLocationDto, CommitOutcomeDto, CommitSignatureDto,
     DiffHunkDto, DiffOptionsDto, FileHistoryEntryDto, GraphPageDto, GraphSelectionDto,
@@ -21,6 +22,15 @@ use super::{
 pub(super) fn get_change_stamp(params: RepoPathParams, repos: &Repos) -> Result<Value, ErrorDto> {
     let stamp = worker_handle(repos, &params.repo_path)?.get_change_stamp()?;
     serde_json::to_value(ChangeStampDto::from(stamp)).map_err(ErrorDto::from_error)
+}
+
+/// A refresh's status and change stamp from one scan of the work tree (#841).
+pub(super) fn get_status_with_stamp(
+    params: RepoPathParams,
+    repos: &Repos,
+) -> Result<Value, ErrorDto> {
+    let read = worker_handle(repos, &params.repo_path)?.get_status_with_stamp()?;
+    serde_json::to_value(StatusWithStampDto::from(read)).map_err(ErrorDto::from_error)
 }
 
 pub(super) fn get_status(params: RepoPathParams, repos: &Repos) -> Result<Value, ErrorDto> {

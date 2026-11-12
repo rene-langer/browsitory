@@ -222,6 +222,11 @@ pub fn shared_wire_cases(s: &mut impl WireCases) {
         ChangeStampDto::from,
     );
     s.add(
+        "StatusWithStamp",
+        fixtures::statuses_with_stamps(),
+        StatusWithStampDto::from,
+    );
+    s.add(
         "CommitSignature",
         fixtures::commit_signatures(),
         CommitSignatureDto::from,
