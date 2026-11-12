@@ -1,5 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { DEFAULT_APPEARANCE_SETTINGS, type AppearanceSettings, type RepoClient } from "../ipc/RepoClient";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { DEFAULT_APPEARANCE_SETTINGS, type AppearanceSettings, type FontFamily, type RepoClient } from "../ipc/RepoClient";
 import { clampAppearance } from "../lib/appearance";
 
 export interface AppearanceSettingsApi {
@@ -7,6 +7,8 @@ export interface AppearanceSettingsApi {
   update(partial: Partial<AppearanceSettings>): void;
   error: string | null;
   dismissError(): void;
+  /** The installed font families (#858), listed on the first call and kept for the session. */
+  listFontFamilies(): Promise<FontFamily[]>;
 }
 
 /** The app-wide appearance settings (`[appearance]`, #615), loaded once, clamped, and saved on every update. */
@@ -55,7 +57,24 @@ export function useAppearanceSettings(client: RepoClient): AppearanceSettingsApi
   );
 
   const dismissError = useCallback(() => setError(null), []);
-  return { settings, update, error, dismissError };
+
+  const fonts = useRef<{ client: RepoClient; families: Promise<FontFamily[]> } | null>(null);
+  const listFontFamilies = useCallback(() => {
+    if (fonts.current?.client !== client) {
+      const families = Promise.resolve().then(() => client.listFontFamilies());
+      fonts.current = { client, families };
+      // A failed listing is tried again on the next call.
+      families.catch(() => {
+        if (fonts.current?.families === families) fonts.current = null;
+      });
+    }
+    return fonts.current.families;
+  }, [client]);
+
+  return useMemo(
+    () => ({ settings, update, error, dismissError, listFontFamilies }),
+    [settings, update, error, dismissError, listFontFamilies],
+  );
 }
 
 const fallback: AppearanceSettingsApi = {
@@ -63,6 +82,7 @@ const fallback: AppearanceSettingsApi = {
   update: () => {},
   error: null,
   dismissError: () => {},
+  listFontFamilies: async () => [],
 };
 
 export const AppearanceSettingsContext = createContext<AppearanceSettingsApi>(fallback);
