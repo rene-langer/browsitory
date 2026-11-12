@@ -348,3 +348,35 @@ fn many_tags_above_an_old_commit_are_all_checked_within_the_budget() {
     assert_eq!(details.tags.len(), 3_000);
     assert_eq!(details.branches, vec!["main"]);
 }
+
+/// #842: the walk follows no commit dated more than a day before the commit asked about (git
+/// name-rev's slop), so a ref above such a commit is not listed; one dated exactly a day
+/// before is still followed. The owner accepted this cut-off for the one walk.
+#[test]
+fn commits_dated_more_than_a_day_before_the_commit_are_not_followed() {
+    let (_dir, repo) = init_repo();
+    const DAY: i64 = 24 * 60 * 60;
+    let target = commit_at(&repo, &[], 1_000_000, "target");
+    let too_old = commit_at(
+        &repo,
+        &[target],
+        1_000_000 - DAY - 1,
+        "a day and a second before",
+    );
+    let above_too_old = commit_at(&repo, &[too_old], 1_000_100, "above it");
+    let edge = commit_at(&repo, &[target], 1_000_000 - DAY, "exactly a day before");
+    let above_edge = commit_at(&repo, &[edge], 1_000_100, "above the edge");
+    for (name, id) in [
+        ("too-old", too_old),
+        ("above-too-old", above_too_old),
+        ("edge", edge),
+        ("above-edge", above_edge),
+    ] {
+        repo.reference(&format!("refs/heads/{name}"), id, true, "test")
+            .unwrap();
+    }
+
+    let details = commit_details(&repo, &target.to_string(), BUDGET).unwrap();
+    assert!(details.complete);
+    assert_eq!(details.branches, vec!["above-edge", "edge"]);
+}
