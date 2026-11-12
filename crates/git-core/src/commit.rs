@@ -241,6 +241,76 @@ fn valid_author(author: &SignatureInput) -> Option<(&str, &str)> {
     (name_ok && email_ok).then_some((name, email))
 }
 
+/// What [`recent_authors_cached`] keeps between calls (#140): the authors found for one HEAD.
+/// The worker keeps one per repository, so opening "Add co-author" again doesn't walk again.
+#[derive(Default)]
+pub struct RecentAuthorsCache {
+    kept: Option<(RecentAuthorsKey, Vec<SignatureInput>)>,
+    walks: usize,
+}
+
+/// What the authors depend on: the repository, HEAD's commit, the current user's email (left
+/// out of the list) and how many were asked for. The walk's commits never change, so the same
+/// HEAD gives the same authors.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RecentAuthorsKey {
+    repository: std::path::PathBuf,
+    head: git2::Oid,
+    me: Option<String>,
+    limit: usize,
+}
+
+impl RecentAuthorsCache {
+    /// How many times the history was walked: for tests and measurements.
+    pub fn walks(&self) -> usize {
+        self.walks
+    }
+}
+
+/// [`recent_authors`], walked again only when HEAD, the current user's email or `limit`
+/// changed since the cache's last walk.
+pub fn recent_authors_cached(
+    repo: &git2::Repository,
+    cache: &mut RecentAuthorsCache,
+    limit: usize,
+) -> Result<Vec<SignatureInput>, CommitError> {
+    let head = match repo.head() {
+        Ok(head) => head.peel_to_commit()?.id(),
+        Err(error)
+            if matches!(
+                error.code(),
+                git2::ErrorCode::UnbornBranch | git2::ErrorCode::NotFound
+            ) =>
+        {
+            return Ok(Vec::new())
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let key = RecentAuthorsKey {
+        repository: repo.commondir().to_path_buf(),
+        head,
+        me: current_email(repo),
+        limit,
+    };
+    if let Some((kept, authors)) = &cache.kept {
+        if *kept == key {
+            return Ok(authors.clone());
+        }
+    }
+    cache.walks += 1;
+    let authors = recent_authors(repo, limit)?;
+    cache.kept = Some((key, authors.clone()));
+    Ok(authors)
+}
+
+/// The current user's email (`repo.signature()`'s), lowercased: the author `recent_authors`
+/// leaves out.
+fn current_email(repo: &git2::Repository) -> Option<String> {
+    repo.signature()
+        .ok()
+        .and_then(|s| s.email().ok().map(str::to_lowercase))
+}
+
 /// How many commits from HEAD `recent_authors` looks at, at most.
 pub const RECENT_AUTHORS_WALK_LIMIT: usize = 1000;
 
@@ -267,10 +337,7 @@ pub fn recent_authors(
         }
         Err(error) => return Err(error.into()),
     }
-    let me = repo
-        .signature()
-        .ok()
-        .and_then(|s| s.email().ok().map(str::to_lowercase));
+    let me = current_email(repo);
     let mut seen = std::collections::HashSet::new();
     let mut walk = repo.revwalk()?;
     // Unsorted on purpose: any sort mode makes libgit2 walk (and sort) the whole history before

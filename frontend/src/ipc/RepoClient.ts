@@ -119,6 +119,12 @@ export interface AppearanceSettings {
   dateFormat: DateFormat;
 }
 
+/** An installed font family (#858): the name CSS knows it by, and whether it's monospaced. */
+export interface FontFamily {
+  name: string;
+  monospace: boolean;
+}
+
 /**
  * Update settings (`[updates]`, desktop app only, #630): `checkAutomatically` checks for a new
  * version at start and every few hours; off, only "Check for updates" checks.
@@ -1486,6 +1492,11 @@ export interface RepoClient {
   setFetchSettings(settings: FetchSettings): Promise<void>;
   getAppearanceSettings(): Promise<AppearanceSettings>;
   setAppearanceSettings(settings: AppearanceSettings): Promise<void>;
+  /**
+   * The installed font families, sorted by name, for the code font suggestions (#858). Listed
+   * by the backend (the webview can't); read from this computer only, never stored or sent.
+   */
+  listFontFamilies(): Promise<FontFamily[]>;
   /** Only the desktop app uses these; the VS Code extension updates through its marketplace. */
   getUpdateSettings(): Promise<UpdateSettings>;
   setUpdateSettings(settings: UpdateSettings): Promise<void>;

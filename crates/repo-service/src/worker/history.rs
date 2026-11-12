@@ -247,13 +247,15 @@ pub(super) fn amend(
     op.clear();
     let _ = reply.send(super::status::commit_reply(result));
 }
-/// The commit box's co-author suggestions.
+/// The commit box's co-author suggestions, walked again only when HEAD moved (#140).
 pub(super) fn recent_authors(
     repo: &git2::Repository,
+    cache: &mut git_core::commit::RecentAuthorsCache,
     reply: Sender<Result<Vec<git_core::commit::SignatureInput>, ErrorDto>>,
 ) {
     let _ = reply.send(
-        git_core::commit::recent_authors(repo, RECENT_AUTHORS_LIMIT).map_err(ErrorDto::from_error),
+        git_core::commit::recent_authors_cached(repo, cache, RECENT_AUTHORS_LIMIT)
+            .map_err(ErrorDto::from_error),
     );
 }
 

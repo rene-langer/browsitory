@@ -45,6 +45,17 @@ fn set_local(repo: &Repository, entries: &[(&str, &str)]) {
     }
 }
 
+/// Turns on `core.autocrlf` through the repository's own config handle. libgit2 caches
+/// `core.autocrlf` per open repository (filled by the commit before) and drops that cache only
+/// when a config owned by the repository changes; `set_local` writes through a level opened
+/// apart from it, which a still-open repository wouldn't notice.
+fn set_autocrlf(repo: &Repository) {
+    repo.config()
+        .unwrap()
+        .set_bool("core.autocrlf", true)
+        .unwrap();
+}
+
 fn read(path: &Path) -> String {
     std::fs::read_to_string(path).unwrap()
 }
@@ -336,6 +347,87 @@ fn file_versions_come_from_head_index_commits_and_parents() {
     }
 }
 
+/// #130: a file version reads as `git checkout` would write it, so with `core.autocrlf=true` a
+/// side file matches the CRLF work tree file line for line.
+#[test]
+fn file_versions_get_the_checkout_line_endings_of_core_autocrlf() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "one\ntwo\n");
+    std::fs::write(dir.path().join("bin.dat"), b"x\0y\nz\n").unwrap();
+    commit_all(&repo, "base");
+    set_autocrlf(&repo);
+
+    for version in [FileVersion::Head, FileVersion::Index] {
+        assert_eq!(
+            file_version_contents(&repo, "a.txt", &version, usize::MAX)
+                .unwrap()
+                .unwrap(),
+            b"one\r\ntwo\r\n",
+            "{version:?}"
+        );
+    }
+    // Binary content is never converted, like git's checkout.
+    assert_eq!(
+        file_version_contents(&repo, "bin.dat", &FileVersion::Head, usize::MAX)
+            .unwrap()
+            .unwrap(),
+        b"x\0y\nz\n"
+    );
+}
+
+/// #130: the `ident` attribute expands `$Id$` to the blob id, and `eol=crlf` converts, as on
+/// checkout.
+#[test]
+fn file_versions_apply_the_ident_and_eol_attributes() {
+    let (dir, repo) = init_repo();
+    write_file(
+        dir.path(),
+        ".gitattributes",
+        "id.txt ident\ncrlf.txt text eol=crlf\n",
+    );
+    write_file(dir.path(), "id.txt", "$Id$\n");
+    write_file(dir.path(), "crlf.txt", "a\nb\n");
+    commit_all(&repo, "base");
+    let blob = repo
+        .head()
+        .unwrap()
+        .peel_to_tree()
+        .unwrap()
+        .get_path(Path::new("id.txt"))
+        .unwrap()
+        .id();
+
+    let get = |path: &str| {
+        String::from_utf8(
+            file_version_contents(&repo, path, &FileVersion::Head, usize::MAX)
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap()
+    };
+    assert_eq!(get("id.txt"), format!("$Id: {blob} $\n"));
+    assert_eq!(get("crlf.txt"), "a\r\nb\r\n");
+}
+
+/// #130: the converted size counts against the limit, so a caller never gets more than it asked.
+#[test]
+fn the_size_limit_applies_to_the_converted_contents() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "1\n2\n3\n");
+    commit_all(&repo, "base");
+    set_autocrlf(&repo);
+    assert_eq!(
+        file_version_contents(&repo, "a.txt", &FileVersion::Head, 9)
+            .unwrap()
+            .unwrap(),
+        b"1\r\n2\r\n3\r\n"
+    );
+    assert!(matches!(
+        file_version_contents(&repo, "a.txt", &FileVersion::Head, 8),
+        Err(ToolError::TooLarge(p)) if p == "a.txt"
+    ));
+}
+
 /// Any existing program: preparing a launch resolves it, but these tests never run it. Using a
 /// preset with `.path` keeps them independent of `sh` (Windows CI).
 fn some_program() -> String {
@@ -403,6 +495,46 @@ fn unstaged_diff_compares_the_index_with_the_real_work_tree_file() {
     for (_, value) in &prepared.invocation.env {
         assert!(Path::new(value).is_absolute());
     }
+}
+
+/// #130: with `core.autocrlf=true` the index side matches the CRLF work tree file, so an
+/// unchanged line doesn't show as changed.
+#[test]
+fn diff_tool_side_files_get_the_checkout_line_endings() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "same\nold\n");
+    commit_all(&repo, "base");
+    set_autocrlf(&repo);
+    write_file(dir.path(), "a.txt", "same\r\nnew\r\n");
+    let (_c, config) = diff_config(&repo);
+    let root = TempDir::new().unwrap();
+
+    let unstaged = prepare(&repo, &config, "a.txt", DiffSource::Unstaged, root.path());
+    assert_eq!(
+        read(&env(&unstaged.invocation.env, "LOCAL")),
+        "same\r\nold\r\n"
+    );
+
+    let head = repo.head().unwrap().target().unwrap().to_string();
+    let range = prepare(
+        &repo,
+        &config,
+        "a.txt",
+        DiffSource::Range {
+            from_id: head.clone(),
+            to_id: Some(head),
+            old_path: None,
+        },
+        root.path(),
+    );
+    assert_eq!(
+        read(&env(&range.invocation.env, "LOCAL")),
+        "same\r\nold\r\n"
+    );
+    assert_eq!(
+        read(&env(&range.invocation.env, "REMOTE")),
+        "same\r\nold\r\n"
+    );
 }
 
 #[cfg(unix)]
@@ -677,6 +809,117 @@ fn an_add_add_conflict_gets_an_empty_base() {
     assert!(prepared.trust_exit_code);
 }
 
+/// #130: the three sides are written as checkout would write them (here `eol=crlf`).
+#[test]
+fn merge_tool_side_files_get_the_checkout_line_endings() {
+    let (dir, repo) = conflicted_repo();
+    write_file(dir.path(), ".gitattributes", "*.txt text eol=crlf\n");
+    let (_c, config) = preset_merge_config(&repo, false);
+    let root = TempDir::new().unwrap();
+
+    let prepared = prepare_merge_tool_with(&repo, &config, "shared.txt", root.path()).unwrap();
+
+    let e = &prepared.invocation.env;
+    assert_eq!(read(&env(e, "LOCAL")), "ours\r\n");
+    assert_eq!(read(&env(e, "REMOTE")), "theirs\r\n");
+    assert_eq!(read(&env(e, "BASE")), "base\r\n");
+}
+
+/// An add/add conflict on `added.txt` between `ours` (the checked-out branch) and `theirs`.
+fn add_add_repo(ours: &str, theirs: &str) -> (TempDir, Repository) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "base\n");
+    commit_all(&repo, "base");
+    let main = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    write_file(dir.path(), "added.txt", theirs);
+    commit_all(&repo, "feature");
+    git_core::branch::switch_branch(&repo, &main).unwrap();
+    write_file(dir.path(), "added.txt", ours);
+    commit_all(&repo, "main");
+    git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+        .unwrap();
+    (dir, repo)
+}
+
+fn p4merge_config(repo: &Repository) -> (TempDir, Config) {
+    let program = some_program();
+    user_config(
+        Some(repo),
+        &[
+            ("merge.tool", "p4merge"),
+            ("mergetool.p4merge.path", &program),
+        ],
+    )
+}
+
+/// #159: like git's `mergetools/p4merge`, an add/add conflict gets a virtual base: LOCAL with
+/// every line REMOTE doesn't share removed, so p4merge highlights only the real differences.
+#[test]
+fn p4merge_gets_a_virtual_base_of_the_shared_lines_for_an_add_add_conflict() {
+    let (_dir, repo) = add_add_repo("a\nb\nc\nd\ne\n", "a\nB\nc\nd\ne\nf\n");
+    let (_c, config) = p4merge_config(&repo);
+    let root = TempDir::new().unwrap();
+
+    let prepared = prepare_merge_tool_with(&repo, &config, "added.txt", root.path()).unwrap();
+
+    let e = &prepared.invocation.env;
+    assert_eq!(read(&env(e, "BASE")), "a\nc\nd\ne\n");
+    assert_eq!(read(&env(e, "LOCAL")), "a\nb\nc\nd\ne\n");
+    assert_eq!(read(&env(e, "REMOTE")), "a\nB\nc\nd\ne\nf\n");
+    // p4merge keeps its base argument: git's order is base, theirs, ours, result.
+    let base = env(e, "BASE").display().to_string();
+    assert_eq!(prepared.invocation.args[0], base);
+}
+
+/// #159: git empties the virtual base when less than half of LOCAL (by size) is shared: too
+/// little common material for a useful three-way view.
+#[test]
+fn p4merge_gets_an_empty_base_when_the_sides_share_too_little() {
+    let (_dir, repo) = add_add_repo("x\ny\nz\nw\n", "x\n1\n2\n3\n");
+    let (_c, config) = p4merge_config(&repo);
+    let root = TempDir::new().unwrap();
+
+    let prepared = prepare_merge_tool_with(&repo, &config, "added.txt", root.path()).unwrap();
+
+    assert_eq!(read(&env(&prepared.invocation.env, "BASE")), "");
+}
+
+/// #159: exactly half of LOCAL shared is still too little (git keeps the base only when LOCAL is
+/// smaller than twice the base); a line ending without a newline is shared only when REMOTE's
+/// matching line ends the same way.
+#[test]
+fn p4merge_virtual_base_follows_gits_size_rule_and_line_ends() {
+    let (_dir, repo) = add_add_repo("a\nb\n", "a\nc\n");
+    let (_c, config) = p4merge_config(&repo);
+    let root = TempDir::new().unwrap();
+    let half = prepare_merge_tool_with(&repo, &config, "added.txt", root.path()).unwrap();
+    assert_eq!(read(&env(&half.invocation.env, "BASE")), "");
+
+    let (_dir, repo) = add_add_repo("a\nb\nc\nd", "a\nb\nc\nd\n");
+    let (_c, config) = p4merge_config(&repo);
+    let prepared = prepare_merge_tool_with(&repo, &config, "added.txt", root.path()).unwrap();
+    assert_eq!(read(&env(&prepared.invocation.env, "BASE")), "a\nb\nc\n");
+}
+
+/// #159: a conflict with a real ancestor keeps it for p4merge, and other presets (here meld)
+/// still get an empty base for add/add, as in git.
+#[test]
+fn only_p4merge_add_add_conflicts_get_a_virtual_base() {
+    let (_dir, repo) = conflicted_repo();
+    let (_c, config) = p4merge_config(&repo);
+    let root = TempDir::new().unwrap();
+    let prepared = prepare_merge_tool_with(&repo, &config, "shared.txt", root.path()).unwrap();
+    assert_eq!(read(&env(&prepared.invocation.env, "BASE")), "base\n");
+
+    let (_dir, repo) = add_add_repo("a\nb\nc\nd\ne\n", "a\nB\nc\nd\ne\n");
+    let (_c, config) = preset_merge_config(&repo, false);
+    let prepared = prepare_merge_tool_with(&repo, &config, "added.txt", root.path()).unwrap();
+    assert_eq!(read(&env(&prepared.invocation.env, "BASE")), "");
+}
+
 #[test]
 fn without_a_base_kdiff3_and_beyond_compare_get_no_base_argument() {
     let (_dir, repo) = conflicted_repo();
@@ -765,6 +1008,47 @@ fn sweep_removes_only_old_tool_dirs() {
     sweep_stale_tool_dirs(root.path(), Duration::ZERO);
     assert!(!root.path().join("browsitory-tool-old").exists());
     assert!(root.path().join("someone-elses-dir").exists());
+}
+
+/// #129: a tool directory whose tool is still running (its PID in `.browsitory-tool.pid` is a
+/// live process) is kept however old it is; a dead PID, garbage or no file sweeps as before.
+#[test]
+fn sweep_keeps_the_directory_of_a_tool_that_is_still_running() {
+    let root = TempDir::new().unwrap();
+    let live = root.path().join("browsitory-tool-live");
+    std::fs::create_dir(&live).unwrap();
+    std::fs::write(
+        live.join(".browsitory-tool.pid"),
+        format!("{}\n", std::process::id()),
+    )
+    .unwrap();
+
+    // A process that has exited: this test binary listing its tests.
+    let dead_pid = std::process::Command::new(std::env::current_exe().unwrap())
+        .arg("--list")
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .map(|mut child| {
+            child.wait().unwrap();
+            child.id()
+        })
+        .unwrap();
+    let dead = root.path().join("browsitory-tool-dead");
+    std::fs::create_dir(&dead).unwrap();
+    std::fs::write(dead.join(".browsitory-tool.pid"), dead_pid.to_string()).unwrap();
+    let garbage = root.path().join("browsitory-tool-garbage");
+    std::fs::create_dir(&garbage).unwrap();
+    std::fs::write(garbage.join(".browsitory-tool.pid"), "not a pid").unwrap();
+    let zero = root.path().join("browsitory-tool-zero");
+    std::fs::create_dir(&zero).unwrap();
+    std::fs::write(zero.join(".browsitory-tool.pid"), "0").unwrap();
+
+    sweep_stale_tool_dirs(root.path(), Duration::ZERO);
+
+    assert!(live.exists());
+    assert!(!dead.exists());
+    assert!(!garbage.exists());
+    assert!(!zero.exists());
 }
 
 #[cfg(unix)]
@@ -882,6 +1166,47 @@ mod spawning {
         let err = launch_diff_tool(prepared, Duration::from_secs(5)).unwrap_err();
         assert_eq!(err.to_string(), "The diff tool failed (exit 7): broken");
         assert!(!temp_dir.exists());
+    }
+
+    /// #129: a running diff tool's directory survives a sweep, and is removed once it exits.
+    #[test]
+    fn a_running_diff_tools_side_files_survive_the_sweep() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "a\n");
+        commit_all(&repo, "base");
+        let (_c, config) = user_config(
+            Some(&repo),
+            &[("diff.tool", "t"), ("difftool.t.cmd", "sleep 2")],
+        );
+        let root = TempDir::new().unwrap();
+        let prepared = prepare(&repo, &config, "a.txt", DiffSource::Unstaged, root.path());
+        let temp_dir = prepared.temp_dir.clone();
+        launch_diff_tool(prepared, Duration::from_millis(200)).unwrap();
+
+        sweep_stale_tool_dirs(root.path(), Duration::ZERO);
+        assert!(temp_dir.join("a_LOCAL.txt").exists());
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while temp_dir.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(!temp_dir.exists());
+    }
+
+    /// #129: a merge tool's side files survive a sweep while it runs.
+    #[test]
+    fn a_running_merge_tools_side_files_survive_the_sweep() {
+        let (_dir, repo) = conflicted_repo();
+        let (_c, config) = merge_config(&repo, "sleep 2", false);
+        let root = TempDir::new().unwrap();
+        let prepared = prepare_merge_tool_with(&repo, &config, "shared.txt", root.path()).unwrap();
+        let base = env(&prepared.invocation.env, "BASE");
+        let running = std::thread::spawn(move || run_merge_tool(prepared));
+
+        std::thread::sleep(Duration::from_millis(500));
+        sweep_stale_tool_dirs(root.path(), Duration::ZERO);
+        assert!(base.exists());
+        running.join().unwrap().unwrap();
     }
 
     #[test]

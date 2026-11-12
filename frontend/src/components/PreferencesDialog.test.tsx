@@ -440,7 +440,7 @@ describe("AppearanceSection (#615)", () => {
 
   it("keeps the built-in look by default", async () => {
     const group = renderAppearance({ getAppearanceSettings: async () => defaults });
-    expect(within(group).getByRole("textbox", { name: "Code font" })).toHaveValue("");
+    expect(within(group).getByRole("combobox", { name: "Code font" })).toHaveValue("");
     expect(within(group).getByRole("spinbutton", { name: "Code font size (px)" })).toHaveValue(null);
     expect(within(group).getByRole("combobox", { name: "Interface size" })).toHaveValue("Normal");
     expect(within(group).getByRole("spinbutton", { name: "Tab size" })).toHaveValue(4);
@@ -456,7 +456,7 @@ describe("AppearanceSection (#615)", () => {
     });
     const size = within(group).getByRole("spinbutton", { name: "Code font size (px)" });
     await waitFor(() => expect(size).toHaveValue(24));
-    expect(within(group).getByRole("textbox", { name: "Code font" })).toHaveValue("Example Mono");
+    expect(within(group).getByRole("combobox", { name: "Code font" })).toHaveValue("Example Mono");
     await waitFor(() => expect(root.style.getPropertyValue("--font-mono")).toBe('"Example Mono", var(--font-mono-default)'));
     await waitFor(() => expect(root.style.getPropertyValue("--code-font-size")).toBe("24px"));
     await waitFor(() => expect(root.style.getPropertyValue("--tab-size")).toBe("2"));
@@ -466,7 +466,7 @@ describe("AppearanceSection (#615)", () => {
   it("saves and applies the code font on blur, and clears it", async () => {
     const setAppearanceSettings = vi.fn(async () => {});
     const group = renderAppearance({ getAppearanceSettings: async () => defaults, setAppearanceSettings });
-    const font = within(group).getByRole("textbox", { name: "Code font" });
+    const font = within(group).getByRole("combobox", { name: "Code font" });
     fireEvent.change(font, { target: { value: " Example Mono, monospace " } });
     expect(setAppearanceSettings).not.toHaveBeenCalled();
     fireEvent.blur(font);
@@ -557,6 +557,190 @@ describe("AppearanceSection (#615)", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("read-only config");
     expect(within(group).getByRole("combobox", { name: "Interface size" })).toHaveValue("Normal");
     await waitFor(() => expect(root.dataset.uiSize).toBeUndefined());
+  });
+
+  describe("code font suggestions (#858)", () => {
+    const installed = [
+      { name: "Arial", monospace: false },
+      { name: "Courier New", monospace: true },
+      { name: "Fira Sans", monospace: false },
+      { name: "Fira Code", monospace: true },
+    ];
+    const suggestions = () => within(screen.getByRole("listbox", { name: "Installed fonts" })).getAllByRole("option");
+    const optionNames = () => suggestions().map((option) => option.dataset.family);
+
+    it("loads the installed fonts when the field is focused, once", async () => {
+      const listFontFamilies = vi.fn(async () => installed);
+      const group = renderAppearance({ getAppearanceSettings: async () => defaults, listFontFamilies });
+      const font = within(group).getByRole("combobox", { name: "Code font" });
+      expect(listFontFamilies).not.toHaveBeenCalled();
+
+      fireEvent.focus(font);
+      fireEvent.blur(font);
+      fireEvent.focus(font);
+
+      await waitFor(() => expect(listFontFamilies).toHaveBeenCalledTimes(1));
+    });
+
+    it("suggests the fonts containing what's typed, ignoring case, monospace ones first and marked", async () => {
+      const group = renderAppearance({ getAppearanceSettings: async () => defaults, listFontFamilies: async () => installed });
+      const font = within(group).getByRole("combobox", { name: "Code font" });
+      expect(font).toHaveAttribute("aria-autocomplete", "list");
+      expect(font).toHaveAttribute("aria-expanded", "false");
+      fireEvent.focus(font);
+
+      fireEvent.change(font, { target: { value: "IR" } });
+
+      const list = await screen.findByRole("listbox", { name: "Installed fonts" });
+      expect(font).toHaveAttribute("aria-expanded", "true");
+      expect(font).toHaveAttribute("aria-controls", list.id);
+      expect(optionNames()).toEqual(["Fira Code", "Fira Sans"]);
+      const [code, sans] = suggestions();
+      expect(code).toHaveAccessibleName("Fira Code, monospace");
+      expect(sans).toHaveAccessibleName("Fira Sans");
+      // Each suggestion is shown in its own font, as a preview.
+      expect(code.querySelector("[data-preview]")).toHaveStyle({ fontFamily: '"Fira Code"' });
+    });
+
+    it("shows no list when nothing matches", async () => {
+      const listFontFamilies = vi.fn(async () => installed);
+      const group = renderAppearance({ getAppearanceSettings: async () => defaults, listFontFamilies });
+      const font = within(group).getByRole("combobox", { name: "Code font" });
+      fireEvent.focus(font);
+      await waitFor(() => expect(listFontFamilies).toHaveBeenCalled());
+
+      fireEvent.change(font, { target: { value: "Nothing like it" } });
+
+      expect(screen.queryByRole("listbox")).toBeNull();
+      expect(font).toHaveAttribute("aria-expanded", "false");
+    });
+
+    it("picks a suggestion with the arrow keys and Enter, and saves it", async () => {
+      const setAppearanceSettings = vi.fn(async () => {});
+      const group = renderAppearance({
+        getAppearanceSettings: async () => defaults,
+        setAppearanceSettings,
+        listFontFamilies: async () => installed,
+      });
+      const font = within(group).getByRole("combobox", { name: "Code font" });
+      fireEvent.focus(font);
+      fireEvent.change(font, { target: { value: "a" } });
+      await screen.findByRole("listbox", { name: "Installed fonts" });
+      expect(optionNames()).toEqual(["Fira Code", "Arial", "Fira Sans"]);
+      expect(font).not.toHaveAttribute("aria-activedescendant");
+
+      fireEvent.keyDown(font, { key: "ArrowDown" });
+      fireEvent.keyDown(font, { key: "ArrowDown" });
+      fireEvent.keyDown(font, { key: "ArrowDown" });
+      fireEvent.keyDown(font, { key: "ArrowUp" });
+
+      const arial = suggestions()[1];
+      expect(font).toHaveAttribute("aria-activedescendant", arial.id);
+      expect(arial).toHaveAttribute("aria-selected", "true");
+
+      fireEvent.keyDown(font, { key: "Enter" });
+
+      expect(font).toHaveValue("Arial");
+      expect(screen.queryByRole("listbox")).toBeNull();
+      await waitFor(() => expect(setAppearanceSettings).toHaveBeenLastCalledWith({ ...defaults, codeFont: "Arial" }));
+    });
+
+    it("picks a suggestion with a click, and saves it", async () => {
+      const setAppearanceSettings = vi.fn(async () => {});
+      const group = renderAppearance({
+        getAppearanceSettings: async () => defaults,
+        setAppearanceSettings,
+        listFontFamilies: async () => installed,
+      });
+      const font = within(group).getByRole("combobox", { name: "Code font" });
+      fireEvent.focus(font);
+      fireEvent.change(font, { target: { value: "cour" } });
+
+      fireEvent.click(await screen.findByRole("option", { name: "Courier New, monospace" }));
+
+      expect(font).toHaveValue("Courier New");
+      await waitFor(() => expect(setAppearanceSettings).toHaveBeenLastCalledWith({ ...defaults, codeFont: "Courier New" }));
+    });
+
+    it("suggests for the last family of a list and replaces only that one", async () => {
+      const setAppearanceSettings = vi.fn(async () => {});
+      const group = renderAppearance({
+        getAppearanceSettings: async () => defaults,
+        setAppearanceSettings,
+        listFontFamilies: async () => installed,
+      });
+      const font = within(group).getByRole("combobox", { name: "Code font" });
+      fireEvent.focus(font);
+      fireEvent.change(font, { target: { value: "Example Mono, cou" } });
+
+      await screen.findByRole("listbox", { name: "Installed fonts" });
+      expect(optionNames()).toEqual(["Courier New"]);
+      fireEvent.keyDown(font, { key: "ArrowDown" });
+      fireEvent.keyDown(font, { key: "Enter" });
+
+      expect(font).toHaveValue("Example Mono, Courier New");
+      await waitFor(() =>
+        expect(setAppearanceSettings).toHaveBeenLastCalledWith({ ...defaults, codeFont: "Example Mono, Courier New" }),
+      );
+    });
+
+    it("closes the suggestions on Escape and keeps the typed text unsaved", async () => {
+      const setAppearanceSettings = vi.fn(async () => {});
+      const onClose = vi.fn();
+      render(
+        <AppearanceSettingsProvider
+          client={fakeRepoClient({ getAppearanceSettings: async () => defaults, setAppearanceSettings, listFontFamilies: async () => installed })}
+        >
+          <PreferencesDialog onClose={onClose} groups={[{ id: "appearance", label: "Appearance", content: <AppearanceSection /> }]} />
+        </AppearanceSettingsProvider>,
+      );
+      const font = screen.getByRole("combobox", { name: "Code font" });
+      fireEvent.focus(font);
+      fireEvent.change(font, { target: { value: "fira" } });
+      await screen.findByRole("listbox", { name: "Installed fonts" });
+
+      fireEvent.keyDown(font, { key: "Escape" });
+
+      expect(screen.queryByRole("listbox")).toBeNull();
+      expect(font).toHaveValue("fira");
+      expect(onClose).not.toHaveBeenCalled();
+      expect(setAppearanceSettings).not.toHaveBeenCalled();
+    });
+
+    it("keeps typed text free: Enter without a picked suggestion saves it as typed", async () => {
+      const setAppearanceSettings = vi.fn(async () => {});
+      const group = renderAppearance({
+        getAppearanceSettings: async () => defaults,
+        setAppearanceSettings,
+        listFontFamilies: async () => installed,
+      });
+      const font = within(group).getByRole("combobox", { name: "Code font" });
+      fireEvent.focus(font);
+      fireEvent.change(font, { target: { value: "Fira" } });
+      await screen.findByRole("listbox", { name: "Installed fonts" });
+
+      fireEvent.keyDown(font, { key: "Enter" });
+
+      expect(font).toHaveValue("Fira");
+      await waitFor(() => expect(setAppearanceSettings).toHaveBeenLastCalledWith({ ...defaults, codeFont: "Fira" }));
+    });
+
+    it("still takes typed text when the fonts can't be listed", async () => {
+      const setAppearanceSettings = vi.fn(async () => {});
+      const listFontFamilies = vi.fn(async () => {
+        throw new Error("no fonts");
+      });
+      const group = renderAppearance({ getAppearanceSettings: async () => defaults, setAppearanceSettings, listFontFamilies });
+      const font = within(group).getByRole("combobox", { name: "Code font" });
+      fireEvent.focus(font);
+      await waitFor(() => expect(listFontFamilies).toHaveBeenCalled());
+
+      fireEvent.change(font, { target: { value: "Example Mono" } });
+      fireEvent.blur(font);
+
+      expect(screen.queryByRole("listbox")).toBeNull();
+      await waitFor(() => expect(setAppearanceSettings).toHaveBeenLastCalledWith({ ...defaults, codeFont: "Example Mono" }));
+    });
   });
 
   it("offers no theme when the host has no theme setting (VSCode)", () => {

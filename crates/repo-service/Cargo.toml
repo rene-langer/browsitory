@@ -44,6 +44,9 @@ url = "2.5"
 # ReadDirectoryChangesW. CC0-1.0, a per-crate owner exception (deny.toml, about.toml,
 # docs/LICENSE_COMPLIANCE.md).
 notify = "8.2"
+# Lists the installed font families for the code font suggestions (#858): reads the system's
+# font folders (on Linux the ones fontconfig names), pure Rust. MIT.
+fontdb = "0.24"
 ts-rs = { version = "12", optional = true }
 
 [dev-dependencies]

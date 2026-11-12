@@ -53,6 +53,8 @@ FileSides/old-Loaded-not-an-image key-order
 FileSides/old-Loaded-png key-order
 FileSides/old-Missing key-order
 FileSides/old-TooLarge key-order
+FontFamily/monospace key-order
+FontFamily/proportional key-order
 ForgeRepository/Bitbucket key-order
 ForgeRepository/GitHub key-order
 GitTools/diff-tool-Global key-order
