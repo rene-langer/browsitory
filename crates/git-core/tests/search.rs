@@ -1075,6 +1075,21 @@ fn case_insensitive_matching_follows_unicode_lowercasing() {
     assert_eq!(summaries(&repo, "k"), ["Temperature in \u{212A}"]);
     assert_eq!(summaries(&repo, "message:K"), ["Temperature in \u{212A}"]);
     assert_eq!(summaries(&repo, "\u{212A}"), ["Temperature in \u{212A}"]);
+    // The same for a name: U+212A in a committer name matches "k".
+    commit_as(
+        &repo,
+        dir.path(),
+        "d.txt",
+        "d",
+        "by the kelvin committer",
+        ("Test User", "test@example.com"),
+        ("Lord \u{212A}elvin", "lord@example.com"),
+        at(T0 + 180, 0),
+    );
+    assert_eq!(
+        summaries(&repo, "committer:kelvin"),
+        ["by the kelvin committer"]
+    );
     assert_eq!(summaries(&repo, "SUBJECT"), ["plain ascii Subject"]);
     assert_eq!(summaries(&repo, "author:ölaf"), ["ÄRGER im Büro"]);
     assert_eq!(summaries(&repo, "author:ÜNAL"), ["ÄRGER im Büro"]);

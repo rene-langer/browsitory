@@ -1291,6 +1291,25 @@ mod tests {
         assert_eq!(search("path:src"), (2, 2), "(matches, diffs built)");
         // A glob still needs a diff per commit.
         assert_eq!(search("path:src/*.rs"), (2, 21), "(matches, diffs built)");
+        // A path that is in no commit: no diff either.
+        assert_eq!(
+            search("path:nowhere/at/all"),
+            (0, 0),
+            "(matches, diffs built)"
+        );
+        // A cheaper term that rules every commit out runs first: the glob builds no diff.
+        assert_eq!(
+            search("path:src/*.rs author:nobody"),
+            (0, 0),
+            "(matches, diffs built)"
+        );
+        // Whitespace is pathspec syntax to libgit2: such a path keeps the diff (which finds
+        // nothing for a trailing space).
+        assert_eq!(
+            search("path:\"src/lib.rs \""),
+            (0, 21),
+            "(matches, diffs built)"
+        );
     }
 
     /// The query's terms when it is a plain AND of terms.
