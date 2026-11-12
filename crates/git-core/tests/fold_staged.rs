@@ -354,3 +354,94 @@ fn a_fold_refuses_a_commit_that_is_not_on_the_branch() {
         [("a.txt".to_string(), git2::Status::INDEX_MODIFIED)]
     );
 }
+
+/// Makes HEAD a merge of `side` (a commit adding side.txt off HEAD's parent) and returns it.
+fn merge_side_into_head(repo: &git2::Repository) -> String {
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let base = head.parent(0).unwrap();
+    let signature = repo.signature().unwrap();
+    let mut builder = repo.treebuilder(Some(&base.tree().unwrap())).unwrap();
+    let blob = repo.blob(b"side\n").unwrap();
+    builder.insert("side.txt", blob, 0o100644).unwrap();
+    let side_tree = repo.find_tree(builder.write().unwrap()).unwrap();
+    let side = repo
+        .commit(None, &signature, &signature, "side", &side_tree, &[&base])
+        .unwrap();
+    let side = repo.find_commit(side).unwrap();
+    let mut merged = repo.merge_commits(&head, &side, None).unwrap();
+    let tree = repo.find_tree(merged.write_tree_to(repo).unwrap()).unwrap();
+    let merge = repo
+        .commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            "merge",
+            &tree,
+            &[&head, &side],
+        )
+        .unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    merge.to_string()
+}
+
+#[test]
+fn a_fold_refuses_a_merge_commit_and_a_commit_below_one() {
+    let (dir, repo) = init_repo();
+    let (_, a, _, _) = base_a_b(dir.path(), &repo);
+    let merge = merge_side_into_head(&repo);
+    write_file(dir.path(), "a.txt", "a, staged\n");
+    stage(&repo, "a.txt");
+
+    let into_merge = fold(&repo, &merge).unwrap_err();
+    let below_merge = fold(&repo, &a).unwrap_err();
+
+    assert!(
+        matches!(&into_merge, RebaseError::InvalidPlan(m) if m.contains("merge commits can't")),
+        "{into_merge:?}"
+    );
+    assert!(
+        matches!(&below_merge, RebaseError::InvalidPlan(m) if m.contains("comes after")),
+        "{below_merge:?}"
+    );
+    assert_eq!(common::head_id(&repo).to_string(), merge);
+    assert_eq!(
+        statuses(&repo),
+        [("a.txt".to_string(), git2::Status::INDEX_MODIFIED)]
+    );
+}
+
+#[test]
+fn a_fold_refuses_an_unstaged_deletion_and_names_it() {
+    let (dir, repo) = init_repo();
+    let (_, a, _, _) = base_a_b(dir.path(), &repo);
+    write_file(dir.path(), "a.txt", "a, staged\n");
+    stage(&repo, "a.txt");
+    std::fs::remove_file(dir.path().join("b.txt")).unwrap();
+
+    let error = fold(&repo, &a).unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "You have unstaged changes to b.txt. Stage or stash them before folding staged changes \
+         into a commit."
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn a_fold_refuses_an_unstaged_type_change() {
+    let (dir, repo) = init_repo();
+    let (_, a, _, _) = base_a_b(dir.path(), &repo);
+    write_file(dir.path(), "a.txt", "a, staged\n");
+    stage(&repo, "a.txt");
+    std::fs::remove_file(dir.path().join("b.txt")).unwrap();
+    std::os::unix::fs::symlink("f.txt", dir.path().join("b.txt")).unwrap();
+
+    let error = fold(&repo, &a).unwrap_err();
+
+    match error {
+        RebaseError::UnstagedChanges { paths } => assert_eq!(paths, ["b.txt"]),
+        other => panic!("{other:?}"),
+    }
+}
