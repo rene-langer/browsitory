@@ -21,7 +21,11 @@ A conflicted file opens the **Resolve conflict** pane:
   version on the left, the result in the middle and their version on the right, each with its
   own line numbers. The unchanged lines stay level across the panes and the panes scroll
   together; each conflicting block sits between them with its choices, our lines, the editable
-  result and their lines. **Blocks** shows each conflicting block on its own, our lines and
+  result and their lines. The arrow next to a block's lines in the ours pane (**Take ours**) or
+  the theirs pane (**Take theirs**) puts those lines into the result; taking the other side
+  then adds its lines after them, the same as **Ours then theirs** or **Theirs then ours**.
+  Over the base or a result you typed, an arrow replaces it with that side. An arrow is
+  disabled while its side is in the result; **Reset** undoes it. **Blocks** shows each conflicting block on its own, our lines and
   their lines side by side above its result. When the pane is too narrow for three panes (the
   VS Code side panel, for example), the merge editor shows the blocks. **Show base** adds the common ancestor's lines ("Empty: no common lines" when there
   are none, for example when both sides added the file). For each block choose **Accept ours**,

@@ -3,6 +3,7 @@
    the line numbers. */
 .panes {
   --merge-line-height: 1.5;
+  --merge-arrow: 26px;
   font-size: var(--code-font-size, var(--text-sm));
 }
 
@@ -30,10 +31,22 @@
 }
 
 .cell {
+  position: relative;
   min-width: 0;
   display: flex;
   flex-direction: column;
   border-left: 3px solid transparent;
+}
+
+/* Room for a block's take-side arrow (#876) on the edge next to the result, in every row so the
+   lines stay level. */
+.cell[data-pane="ours"] {
+  padding-right: var(--merge-arrow);
+}
+
+.cell[data-pane="theirs"],
+[data-pane-header="theirs"] {
+  padding-left: var(--merge-arrow);
 }
 
 .chosen {
@@ -140,4 +153,24 @@
 .expand {
   margin: var(--space-1) 0;
   font-size: var(--text-sm);
+}
+
+/* A block's take-side arrow (#876), in the room its cell keeps next to the result. */
+.take {
+  position: absolute;
+  top: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(var(--merge-arrow) - 4px);
+  padding: 2px 0;
+  line-height: 1;
+}
+
+.takeOurs {
+  right: 2px;
+}
+
+.takeTheirs {
+  left: 2px;
 }

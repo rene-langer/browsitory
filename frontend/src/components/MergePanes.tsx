@@ -1,7 +1,8 @@
+import { ArrowLeft, ArrowRight } from "lucide-react";
 import { Fragment, type CSSProperties, type ReactNode } from "react";
 import type { ConflictSegment } from "../ipc/RepoClient";
 import { segmentLines, type ConflictTokens } from "../lib/conflictHighlight";
-import { blockResult, type BlockState, type ConflictBlock } from "../lib/conflictMerge";
+import { blockResult, sideTaken, type BlockState, type ConflictBlock } from "../lib/conflictMerge";
 import type { Token } from "../lib/highlight";
 import styles from "./MergePanes.module.css";
 
@@ -103,6 +104,10 @@ export interface MergePanesProps {
   /** The block's focusable section, with its title and choices, around `children`. */
   renderBlock(segment: ConflictBlock, index: number, className: string, children: ReactNode): ReactNode;
   onEdit(index: number, text: string): void;
+  /** Takes a side into the block's result: the panes' arrows (#876). */
+  onTake(index: number, side: "ours" | "theirs"): void;
+  /** The block's title, e.g. "Conflict 1 of 3", for its arrows. */
+  blockTitle(index: number): string;
 }
 
 export function MergePanes({
@@ -116,6 +121,8 @@ export function MergePanes({
   contextLines,
   renderBlock,
   onEdit,
+  onTake,
+  blockTitle,
 }: MergePanesProps) {
   const results = segments.map((segment, index) =>
     segment.kind === "Clean" ? null : blockResult(segment, stateAt(index)),
@@ -172,6 +179,30 @@ export function MergePanes({
       <Lines text={text} tokens={sideTokens} start={start} />
     );
 
+  /** A block's side with its arrow (#876) on the edge next to the result. */
+  const sideWithArrow = (segment: ConflictBlock, index: number, which: "ours" | "theirs") => {
+    const taken = sideTaken(stateAt(index), which);
+    const lines = which === "ours" ? "our" : "their";
+    return (
+      <>
+        {side(segment[which], tokens?.[which][index], starts[index][which])}
+        <button
+          className={`${styles.take} ${which === "ours" ? styles.takeOurs : styles.takeTheirs}`}
+          aria-label={which === "ours" ? "Take ours" : "Take theirs"}
+          disabled={taken}
+          title={
+            taken
+              ? `${blockTitle(index)}: ${lines} lines are in the result.`
+              : `${blockTitle(index)}: put ${lines} lines into the result, after the other side's if it is taken.`
+          }
+          onClick={() => onTake(index, which)}
+        >
+          {which === "ours" ? <ArrowRight size={14} aria-hidden="true" /> : <ArrowLeft size={14} aria-hidden="true" />}
+        </button>
+      </>
+    );
+  };
+
   const renderConflict = (segment: ConflictBlock, index: number) => {
     const state = stateAt(index);
     const result = results[index] ?? null;
@@ -199,7 +230,7 @@ export function MergePanes({
         {row(
           "panes",
           {
-            ours: side(segment.ours, tokens?.ours[index], start.ours),
+            ours: sideWithArrow(segment, index, "ours"),
             result: (
               <>
                 <div className={styles.resultLines}>
@@ -224,7 +255,7 @@ export function MergePanes({
                 {result === "" && <p className={styles.placeholder}>Empty: the block&apos;s lines are removed.</p>}
               </>
             ),
-            theirs: side(segment.theirs, tokens?.theirs[index], start.theirs),
+            theirs: sideWithArrow(segment, index, "theirs"),
           },
           chosen,
         )}

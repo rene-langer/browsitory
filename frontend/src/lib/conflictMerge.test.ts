@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assembleResult, blockResult, hasConflictMarkers } from "./conflictMerge";
+import { assembleResult, blockResult, hasConflictMarkers, sideTaken, takeSide, type BlockState } from "./conflictMerge";
 
 const block = { kind: "Conflict" as const, ours: "o\n", base: "b\n", theirs: "t\n" };
 
@@ -29,5 +29,33 @@ describe("conflictMerge", () => {
     expect(hasConflictMarkers("<<<<<<<< eight\n")).toBe(false);
     expect(hasConflictMarkers("x <<<<<<< ours\n")).toBe(false);
     expect(hasConflictMarkers("<<<<<<<x\n")).toBe(false);
+  });
+
+  // #876: the take-side arrows. The second side taken goes after the first.
+  it("takes a side, and the other one after it", () => {
+    const unchosen: BlockState = { kind: "unchosen" };
+    expect(takeSide(unchosen, "ours")).toEqual({ kind: "chosen", choice: "ours" });
+    expect(takeSide(unchosen, "theirs")).toEqual({ kind: "chosen", choice: "theirs" });
+    expect(takeSide({ kind: "chosen", choice: "ours" }, "theirs")).toEqual({ kind: "chosen", choice: "oursThenTheirs" });
+    expect(takeSide({ kind: "chosen", choice: "theirs" }, "ours")).toEqual({ kind: "chosen", choice: "theirsThenOurs" });
+    // A side already in the result stays as it is.
+    expect(takeSide({ kind: "chosen", choice: "ours" }, "ours")).toEqual({ kind: "chosen", choice: "ours" });
+    expect(takeSide({ kind: "chosen", choice: "oursThenTheirs" }, "theirs")).toEqual({
+      kind: "chosen",
+      choice: "oursThenTheirs",
+    });
+    // Over the base or a typed result, a side replaces it, as the Accept buttons do.
+    expect(takeSide({ kind: "chosen", choice: "base" }, "theirs")).toEqual({ kind: "chosen", choice: "theirs" });
+    expect(takeSide({ kind: "edited", text: "x\n" }, "ours")).toEqual({ kind: "chosen", choice: "ours" });
+  });
+
+  it("says whether a side is in the result", () => {
+    expect(sideTaken({ kind: "unchosen" }, "ours")).toBe(false);
+    expect(sideTaken({ kind: "chosen", choice: "ours" }, "ours")).toBe(true);
+    expect(sideTaken({ kind: "chosen", choice: "ours" }, "theirs")).toBe(false);
+    expect(sideTaken({ kind: "chosen", choice: "oursThenTheirs" }, "theirs")).toBe(true);
+    expect(sideTaken({ kind: "chosen", choice: "theirsThenOurs" }, "ours")).toBe(true);
+    expect(sideTaken({ kind: "chosen", choice: "base" }, "ours")).toBe(false);
+    expect(sideTaken({ kind: "edited", text: "o\n" }, "ours")).toBe(false);
   });
 });
