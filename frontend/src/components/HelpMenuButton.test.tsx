@@ -4,7 +4,7 @@ import { HelpMenuButton } from "./HelpMenuButton";
 import { onWorkspaceRequest } from "../lib/workspaceRequests";
 
 describe("HelpMenuButton (#647)", () => {
-  function setup(shortcuts = true) {
+  function setup(shortcuts = true, onCheckForUpdates?: () => void) {
     const onOpenUserGuide = vi.fn();
     const onShowReleaseNotes = vi.fn();
     render(
@@ -13,6 +13,7 @@ describe("HelpMenuButton (#647)", () => {
         shortcuts={shortcuts}
         onOpenUserGuide={onOpenUserGuide}
         onShowReleaseNotes={onShowReleaseNotes}
+        onCheckForUpdates={onCheckForUpdates}
       />,
     );
     return { onOpenUserGuide, onShowReleaseNotes, button: screen.getByRole("button", { name: "Help" }) };
@@ -59,6 +60,27 @@ describe("HelpMenuButton (#647)", () => {
     const { button } = setup(false);
     fireEvent.click(button);
     expect(screen.queryByRole("menuitem", { name: "Keyboard shortcuts" })).not.toBeInTheDocument();
+  });
+
+  it("offers Check for updates last, where there is an updater (#852)", () => {
+    const onCheckForUpdates = vi.fn();
+    const { button } = setup(true, onCheckForUpdates);
+    fireEvent.click(button);
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "User guide",
+      "Keyboard shortcuts?",
+      "What’s new",
+      "Check for updates",
+    ]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Check for updates" }));
+    expect(onCheckForUpdates).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("leaves out Check for updates without an updater (#852)", () => {
+    const { button } = setup(true);
+    fireEvent.click(button);
+    expect(screen.queryByRole("menuitem", { name: "Check for updates" })).not.toBeInTheDocument();
   });
 
   it("closes on a second click of the button", () => {
