@@ -143,6 +143,97 @@ describe("useFileHistory", () => {
     expect(getFileHistory).toHaveBeenLastCalledWith("/repo", "../x", FILE_HISTORY_PAGE_SIZE);
   });
 
+  describe("paging within the backend's time budget (#860)", () => {
+    it("keeps asking until the page is full or the history ends, showing entries as they come", async () => {
+      const second = deferred<FileHistoryPage>();
+      const getFileHistory = vi
+        .fn<RepoClient["getFileHistory"]>()
+        .mockResolvedValueOnce(page([entry("c3")], false))
+        .mockReturnValueOnce(second.promise)
+        .mockResolvedValueOnce(page([entry("c3"), entry("c2"), entry("c1")]));
+      const { result, selectRow } = setup(getFileHistory);
+
+      act(() => result.current.open("f.txt"));
+      await waitFor(() => expect(getFileHistory).toHaveBeenCalledTimes(2));
+      expect(result.current.history?.entries.map((e) => e.commit.id)).toEqual(["c3"]);
+      expect(result.current.history?.loading).toBe(true);
+      expect(selectRow).toHaveBeenCalledWith({ commitId: "c3" });
+      await act(async () => second.resolve(page([entry("c3"), entry("c2")], false)));
+
+      await waitFor(() => expect(result.current.history?.loading).toBe(false));
+      expect(getFileHistory).toHaveBeenCalledTimes(3);
+      for (const call of getFileHistory.mock.calls) expect(call).toEqual(["/repo", "f.txt", FILE_HISTORY_PAGE_SIZE]);
+      expect(result.current.history?.entries.map((e) => e.commit.id)).toEqual(["c3", "c2", "c1"]);
+      expect(result.current.history?.hasMore).toBe(false);
+      expect(selectRow).toHaveBeenCalledTimes(1);
+    });
+
+    it("stops asking once the history is closed", async () => {
+      const second = deferred<FileHistoryPage>();
+      const getFileHistory = vi
+        .fn<RepoClient["getFileHistory"]>()
+        .mockResolvedValueOnce(page([entry("c2")], false))
+        .mockReturnValueOnce(second.promise)
+        .mockResolvedValue(page([entry("c2"), entry("c1")]));
+      const { result } = setup(getFileHistory);
+
+      act(() => result.current.open("f.txt"));
+      await waitFor(() => expect(getFileHistory).toHaveBeenCalledTimes(2));
+      act(() => result.current.close());
+      await act(async () => second.resolve(page([entry("c2")], false)));
+
+      expect(getFileHistory).toHaveBeenCalledTimes(2);
+      expect(result.current.history).toBeNull();
+    });
+
+    it("stops asking for the old file once another one is opened", async () => {
+      const second = deferred<FileHistoryPage>();
+      const getFileHistory = vi.fn((_repo: string, path: string) =>
+        path === "b.txt" ? Promise.resolve(page([entry("b1", "b.txt")])) : getFileHistory.mock.calls.length <= 1
+          ? Promise.resolve(page([entry("a2", "a.txt")], false))
+          : second.promise,
+      );
+      const { result } = setup(getFileHistory);
+
+      act(() => result.current.open("a.txt"));
+      await waitFor(() => expect(getFileHistory).toHaveBeenCalledTimes(2));
+      act(() => result.current.open("b.txt"));
+      await waitFor(() => expect(result.current.history?.loading).toBe(false));
+      await act(async () => second.resolve(page([entry("a2", "a.txt")], false)));
+
+      expect(getFileHistory.mock.calls.map((call) => call[1])).toEqual(["a.txt", "a.txt", "b.txt"]);
+      expect(result.current.history?.entries.map((e) => e.commit.id)).toEqual(["b1"]);
+    });
+
+    it("offers Load more only for a full page of an incomplete history", async () => {
+      const full = Array.from({ length: FILE_HISTORY_PAGE_SIZE }, (_, i) => entry(`c${i}`));
+      const { result } = setup(vi.fn(async () => page(full, true)));
+
+      act(() => result.current.open("f.txt"));
+
+      await waitFor(() => expect(result.current.history?.loading).toBe(false));
+      expect(result.current.history?.entries).toHaveLength(FILE_HISTORY_PAGE_SIZE);
+      expect(result.current.history?.hasMore).toBe(false);
+    });
+
+    it("continues a line history the same way", async () => {
+      const line = (id: string) => ({ ...entry(id), startLine: 1, endLine: 2 });
+      const getLineHistory = vi
+        .fn<RepoClient["getLineHistory"]>()
+        .mockResolvedValueOnce({ entries: [line("c2")], truncated: false, complete: false })
+        .mockResolvedValueOnce({ entries: [line("c2"), line("c1")], truncated: false, complete: true });
+      const client = fakeRepoClient({ getLineHistory });
+      const { result } = renderHook(() => useFileHistory(client, "/repo", 0, "uncommitted", vi.fn()));
+
+      act(() => result.current.openLines("f.txt", "HEAD", 1, 2));
+
+      await waitFor(() => expect(result.current.history?.loading).toBe(false));
+      expect(getLineHistory).toHaveBeenCalledTimes(2);
+      expect(getLineHistory).toHaveBeenLastCalledWith("/repo", "HEAD", "f.txt", 1, 2, FILE_HISTORY_PAGE_SIZE);
+      expect(result.current.history?.entries.map((e) => e.commit.id)).toEqual(["c2", "c1"]);
+    });
+  });
+
   describe("line history (#447)", () => {
     function setupLines(getLineHistory: RepoClient["getLineHistory"], getFileHistory: RepoClient["getFileHistory"] = vi.fn()) {
       const client = fakeRepoClient({ getFileHistory, getLineHistory });

@@ -104,6 +104,20 @@ describe("FileHistoryList", () => {
     expect(screen.getByText(/No committed history for/)).toHaveTextContent("No committed history for f.txt.");
   });
 
+  it("says it is still searching older commits while more of the history loads (#860)", () => {
+    renderList(state({ entries: [entry("c2"), entry("c1")], loading: true }));
+
+    expect(screen.getByRole("status")).toHaveTextContent("Searching older commits… (2 changes so far)");
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+  });
+
+  it("counts one change in the singular while searching (#860)", () => {
+    renderList(state({ entries: [entry("c1")], loading: true, hasMore: true }));
+
+    expect(screen.getByRole("status")).toHaveTextContent("Searching older commits… (1 change so far)");
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+  });
+
   it("shows no empty state while loading", () => {
     renderList(state({ loading: true }));
 
