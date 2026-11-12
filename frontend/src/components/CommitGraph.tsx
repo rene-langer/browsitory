@@ -227,7 +227,7 @@ export function CommitGraph({
   );
   // The commit of an expanded merge each listed commit belongs to (#617), and the lanes.
   const ownLayout = useCommitGraphLayout(sharedLayout === undefined ? commits : NO_COMMITS, expandedMerges);
-  const { mergeOwners, layouts: commitLayouts } = sharedLayout ?? ownLayout;
+  const { mergeOwners, layouts: commitLayouts, laneCount } = sharedLayout ?? ownLayout;
   const [hoveredSegmentId, setHoveredSegmentId] = useState<number | null>(null);
   // `focusId` is the last focus the graph itself reported through `onSelectRow`. A focus that
   // differs from it came from outside (search, sidebar, refresh) and drops the multi-selection.
@@ -796,13 +796,6 @@ export function CommitGraph({
   // `null` means "show every remote badge" — skip building the membership set entirely in that
   // case rather than deriving one from `commits` just to have every `.includes()` check pass.
   const shownRemoteBranches = graphRemoteBranchSelection === null ? null : new Set(graphRemoteBranchSelection);
-  const laneCount =
-    Math.max(
-      0,
-      ...commitLayouts.map((l) => l.lane),
-      ...commitLayouts.flatMap((l) => l.passThroughLanes.map((entry) => entry.lane)),
-      ...commitLayouts.flatMap((l) => l.parentConnections.map((c) => c.lane)),
-    ) + 1;
 
   return (
     <>

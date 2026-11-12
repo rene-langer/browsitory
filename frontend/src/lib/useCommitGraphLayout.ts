@@ -1,12 +1,14 @@
 import { useMemo } from "react";
 import type { GraphCommit } from "../ipc/RepoClient";
-import { assignLanes, type CommitLayout } from "./commitGraphLayout";
+import { assignLanes, type CommitLayout, graphLaneCount } from "./commitGraphLayout";
 import { type BranchLaneColors, branchLaneColors } from "./laneColors";
 import { expandedFrom, type MergeExpansion } from "./mergeExpansion";
 
 export interface CommitGraphLayout {
   /** One per commit, in order. */
   layouts: CommitLayout[];
+  /** How many lanes the layouts draw, computed once per layout instead of on every render. */
+  laneCount: number;
   /** The merge each spliced-in commit of an expanded merge belongs to (#617). */
   mergeOwners: Map<string, string>;
   /** Each branch tip's lane colour (#673). */
@@ -21,6 +23,11 @@ export function useCommitGraphLayout(
   return useMemo(() => {
     const mergeOwners = expandedFrom(commits, expandedMerges);
     const layouts = assignLanes(commits, new Set(mergeOwners.keys()));
-    return { layouts, mergeOwners, branchColors: branchLaneColors(commits, layouts) };
+    return {
+      layouts,
+      laneCount: graphLaneCount(layouts),
+      mergeOwners,
+      branchColors: branchLaneColors(commits, layouts),
+    };
   }, [commits, expandedMerges]);
 }

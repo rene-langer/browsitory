@@ -106,6 +106,18 @@ export function assignLanes(commits: GraphCommit[], merged: ReadonlySet<string> 
   return layouts;
 }
 
+/** How many lanes `layouts` draw: one more than the highest lane any row uses. */
+export function graphLaneCount(layouts: readonly CommitLayout[]): number {
+  return (
+    Math.max(
+      0,
+      ...layouts.map((l) => l.lane),
+      ...layouts.flatMap((l) => l.passThroughLanes.map((entry) => entry.lane)),
+      ...layouts.flatMap((l) => l.parentConnections.map((c) => c.lane)),
+    ) + 1
+  );
+}
+
 // A squash group can only be a straight, unbranched chain: each commit in the range (other than
 // the oldest) must be the sole parent of the one above it. That single check also rejects both
 // ways a range can be non-linear — a merge commit inside it (more than one parent) and a fork
