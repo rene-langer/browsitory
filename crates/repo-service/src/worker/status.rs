@@ -3,7 +3,7 @@ use crate::wire::ErrorDto;
 use git_core::blame::BlameLine;
 use git_core::commit_stats::{commit_stats_batch, CommitStatsEntry, StatsBudget};
 use git_core::diff::DiffHunk;
-use git_core::graph::{GraphCommit, GraphSelection};
+use git_core::graph::{GraphCommit, GraphSelection, WalkCache};
 use git_core::status::StatusEntry;
 use std::sync::mpsc::Sender;
 
@@ -41,37 +41,42 @@ pub(super) fn get_change_stamp(
 
 pub(super) fn get_commit_graph(
     repo: &git2::Repository,
+    cache: &mut WalkCache,
     limit: usize,
     selection: GraphSelection,
     cursor: Option<String>,
     reply: Sender<Result<git_core::graph::GraphPage, ErrorDto>>,
 ) {
     let _ = reply.send(
-        git_core::graph::graph_page(repo, &selection, cursor.as_deref(), limit)
+        git_core::graph::graph_page_cached(repo, cache, &selection, cursor.as_deref(), limit)
             .map_err(ErrorDto::from_error),
     );
 }
 
 pub(super) fn locate_commit(
     repo: &git2::Repository,
+    cache: &mut WalkCache,
     revision: String,
     selection: GraphSelection,
     reply: Sender<Result<Option<git_core::locate::CommitLocation>, ErrorDto>>,
 ) {
     let _ = reply.send(
-        git_core::locate::locate_commit(repo, &revision, &selection).map_err(ErrorDto::from_error),
+        git_core::locate::locate_commit_cached(repo, cache, &revision, &selection)
+            .map_err(ErrorDto::from_error),
     );
 }
 
 /// The commits merge `merge_id` brought in, at most `limit` (#617): a collapsed merge expanded.
 pub(super) fn get_merged_commits(
     repo: &git2::Repository,
+    cache: &mut WalkCache,
     merge_id: String,
     limit: usize,
     reply: Sender<Result<Vec<GraphCommit>, ErrorDto>>,
 ) {
     let _ = reply.send(
-        git_core::graph::merged_commits(repo, &merge_id, limit).map_err(ErrorDto::from_error),
+        git_core::graph::merged_commits_cached(repo, cache, &merge_id, limit)
+            .map_err(ErrorDto::from_error),
     );
 }
 

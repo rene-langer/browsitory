@@ -1,12 +1,10 @@
 //! "Go to commit" (#441): where a revision's commit sits in the graph, or why the graph does not
 //! show it.
 
-use std::collections::HashMap;
-
 use git2::{BranchType, ErrorCode, Oid, ReferenceType, Repository, Sort};
 use thiserror::Error;
 
-use crate::graph::GraphSelection;
+use crate::graph::{GraphSelection, WalkCache};
 
 #[derive(Debug, Error)]
 pub enum LocateError {
@@ -55,28 +53,32 @@ pub fn locate_commit(
     revision: &str,
     selection: &GraphSelection,
 ) -> Result<Option<CommitLocation>, LocateError> {
+    locate_commit_cached(repo, &mut WalkCache::default(), revision, selection)
+}
+
+/// [`locate_commit`], with the graph's walk order kept in `cache` (#835): "Go to" finds the row
+/// in the order the graph's pages already sorted.
+pub fn locate_commit_cached(
+    repo: &Repository,
+    cache: &mut WalkCache,
+    revision: &str,
+    selection: &GraphSelection,
+) -> Result<Option<CommitLocation>, LocateError> {
     let Some(target) = resolve(repo, revision.trim())? else {
         return Ok(None);
     };
 
-    let mut revwalk = repo.revwalk()?;
-    revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
-    if selection.walks_first_parent() {
-        revwalk.simplify_first_parent()?;
-    }
-    for oid in selection.start_oids(repo)? {
-        revwalk.push(oid)?;
-    }
-    let mut position = None;
-    let mut rows = HashMap::new();
-    for (index, oid) in revwalk.enumerate() {
-        let oid = oid?;
-        if oid == target {
-            position = Some(index);
-            break;
-        }
-        rows.insert(oid, index);
-    }
+    let order = cache
+        .order(
+            repo,
+            &selection.start_oids(repo)?,
+            selection.walks_first_parent(),
+            &|| false,
+        )?
+        .expect("a walk that is never cancelled");
+    let position = order.iter().position(|oid| *oid == target);
+    // When the target has no row, every commit of the walk has one.
+    let rows = |oid: Oid| order.iter().position(|row| *row == oid);
 
     let (branches, remote_branches) = if position.is_some() {
         (Vec::new(), Vec::new())
@@ -108,7 +110,7 @@ fn collapsed_merge(
     repo: &Repository,
     target: Oid,
     tips: &[Oid],
-    rows: &HashMap<Oid, usize>,
+    rows: &dyn Fn(Oid) -> Option<usize>,
 ) -> Result<Option<CollapsedMerge>, git2::Error> {
     let reaches = |oid: Oid| -> Result<bool, git2::Error> {
         Ok(oid == target || repo.graph_descendant_of(oid, target)?)
@@ -134,7 +136,7 @@ fn collapsed_merge(
             }
         }
         let merge = repo.find_commit(line[low])?;
-        let Some(&merge_position) = rows.get(&merge.id()) else {
+        let Some(merge_position) = rows(merge.id()) else {
             continue;
         };
         if merge.parent_count() < 2 {

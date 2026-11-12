@@ -1,14 +1,14 @@
 //! Commit search: a small query language parsed once (`parse_query`) into a boolean expression
 //! over per-commit terms, and a paged, cancellable revwalk over it (`search_commits`).
 
-use git2::{DiffLineType, DiffOptions, ErrorCode, Oid, Repository, Sort};
+use git2::{DiffLineType, DiffOptions, ErrorCode, Oid, Repository};
 use std::cell::OnceCell;
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
-use crate::graph::{walk_fingerprint, GraphCommit, GraphSelection, RefDecorations};
+use crate::graph::{walk_fingerprint, GraphCommit, GraphSelection, WalkCache};
 use crate::history::HistoryError;
 use crate::line_history::{line_history_ids, LineRange};
 
@@ -88,8 +88,7 @@ pub struct PageLimits {
     pub matches: usize,
     pub scan: usize,
     /// Wall-clock budget for scanning one page, counted from when the walk stands at the
-    /// cursor: the set-up before (sorting the history, skipping to the cursor) is not charged
-    /// to it (#834). Checked after each scanned commit, so a page always scans at least one
+    /// cursor: the set-up before (sorting the history) is not charged to it (#834). Checked after each scanned commit, so a page always scans at least one
     /// commit (a zero budget still makes progress). Keeps a page with expensive
     /// `path:`/`contents:` diffs from holding the single repo worker for long.
     pub time: Duration,
@@ -102,9 +101,6 @@ impl PageLimits {
         time: Duration::from_millis(250),
     };
 }
-
-/// While skipping to a cursor's offset, `cancel` is polled once every this many commits.
-const SKIP_CANCEL_INTERVAL: usize = 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchPage {
@@ -606,10 +602,33 @@ pub(crate) fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 /// scanned commit while any remain.
 /// `cursor` resumes a previous page; it is rejected as `StaleCursor` when the walk's start
 /// points moved since it was issued. `cancel` is polled once before the walk, every
-/// `SKIP_CANCEL_INTERVAL` commits while skipping to the cursor, and before each scanned
-/// commit; when it returns `true` the search stops with `Cancelled`.
+/// [`crate::graph::CANCEL_INTERVAL`] commits while the walk is sorted (not when a
+/// [`WalkCache`] already holds it), and before each scanned commit; when it returns `true`
+/// the search stops with `Cancelled`.
 pub fn search_commits(
     repo: &Repository,
+    query: &SearchQuery,
+    selection: &GraphSelection,
+    cursor: Option<&str>,
+    limits: PageLimits,
+    cancel: &dyn Fn() -> bool,
+) -> Result<SearchPage, SearchError> {
+    search_commits_cached(
+        repo,
+        &mut WalkCache::default(),
+        query,
+        selection,
+        cursor,
+        limits,
+        cancel,
+    )
+}
+
+/// [`search_commits`], with the walk order and the badges kept in `cache` (#835): a later page
+/// of the same walk starts at its cursor without walking again.
+pub fn search_commits_cached(
+    repo: &Repository,
+    cache: &mut WalkCache,
     query: &SearchQuery,
     selection: &GraphSelection,
     cursor: Option<&str>,
@@ -653,30 +672,13 @@ pub fn search_commits(
         })
         .collect();
 
-    let mut revwalk = repo.revwalk()?;
-    revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
-    if first_parent {
-        revwalk.simplify_first_parent()?;
-    }
-    for oid in &starts {
-        revwalk.push(*oid)?;
-    }
-    let decorations = RefDecorations::load(repo)?;
+    let Some(order) = cache.order(repo, &starts, first_parent, cancel)? else {
+        return Err(SearchError::Cancelled);
+    };
+    let decorations = cache.decorations(repo)?;
 
-    let mut walk = revwalk.peekable();
-    for skipped in 0..offset {
-        if skipped % SKIP_CANCEL_INTERVAL == 0 && cancel() {
-            return Err(SearchError::Cancelled);
-        }
-        if walk.next().is_none() {
-            break;
-        }
-    }
-    // The time budget starts here, once the walk stands at the cursor (#834). Sorting the
-    // history (libgit2 does it on the first `next`, hence the `peek`) and skipping to the
-    // cursor grow with the history and are paid again on every page; charged to the budget,
-    // they left a large repository one scanned commit per page.
-    walk.peek();
+    // The time budget starts here, once the walk stands at the cursor (#834): sorting the
+    // history (or finding it in `cache`) grows with the history and is not charged to it.
     let started = Instant::now();
     let mut trees = TreeCache::default();
     let mut position = offset;
@@ -689,10 +691,10 @@ pub fn search_commits(
         if cancel() {
             return Err(SearchError::Cancelled);
         }
-        let Some(oid) = walk.next() else {
+        let Some(&oid) = order.get(position) else {
             break;
         };
-        let commit = repo.find_commit(oid?)?;
+        let commit = repo.find_commit(oid)?;
         position += 1;
         scanned_here += 1;
         if Subject::new(repo, &commit, &paths, &mut trees).eval(&node)? {
@@ -700,10 +702,7 @@ pub fn search_commits(
         }
     }
 
-    let next_cursor = walk
-        .peek()
-        .is_some()
-        .then(|| format!("{position}:{fingerprint}"));
+    let next_cursor = (position < order.len()).then(|| format!("{position}:{fingerprint}"));
     Ok(SearchPage {
         commits,
         next_cursor,
