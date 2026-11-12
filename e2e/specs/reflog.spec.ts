@@ -57,16 +57,16 @@ describe("Browsitory reflog recovery", () => {
               const list = document.querySelector("[data-active-repo='true'] section[aria-label='Reflog'] ul");
               list?.scrollIntoView({ block: "nearest" });
             });
-            return (await (await $$(`button=Restore ${branchRef}`)).length) >= 2;
+            return (await (await $$(`button=Restore ${branchName}`)).length) >= 2;
           },
           { timeoutMsg: "expected reflog entries for both fixture commits" },
         ),
       sidebarState,
     );
-    const restoreButtons = await $$(`button=Restore ${branchRef}`);
+    const restoreButtons = await $$(`button=Restore ${branchName}`);
     await restoreButtons[1].click();
 
-    const dialog = await $(`aria/Restore ${branchRef}`);
+    const dialog = await $(`aria/Restore ${branchName}`);
     await dialog.waitForExist();
     await expect(dialog).toHaveText(expect.stringContaining(firstCommitId));
     // In the page (`clickInPage`): the button sits at the window's bottom edge, where

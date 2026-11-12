@@ -45,7 +45,7 @@ describe("ReflogPanel", () => {
   it("shows an empty state when the selected reference has no reflog entries", () => {
     renderPanel({ entries: [] });
 
-    expect(screen.getByText("No reflog entries for refs/heads/main.")).toBeInTheDocument();
+    expect(screen.getByText("No reflog entries for main.")).toBeInTheDocument();
   });
 
   it("lists HEAD and local branches with each selected entry's recovery details", () => {
@@ -53,8 +53,8 @@ describe("ReflogPanel", () => {
 
     const selector = screen.getByRole("combobox", { name: "Reflog reference" });
     expect(within(selector).getByRole("option", { name: "HEAD" })).toBeInTheDocument();
-    expect(within(selector).getByRole("option", { name: "refs/heads/main" })).toBeInTheDocument();
-    expect(within(selector).queryByRole("option", { name: "refs/remotes/origin/main" })).not.toBeInTheDocument();
+    expect(within(selector).getByRole("option", { name: "main" })).toBeInTheDocument();
+    expect(within(selector).queryByRole("option", { name: "origin/main" })).not.toBeInTheDocument();
     // #775: two lines, with the full IDs, email, time and summary in the tooltip.
     expect(screen.getByText(entry.message)).toBeInTheDocument();
     expect(screen.getByText(`1111111 → 2222222 · Ada Lovelace · ${formatShortDate(entry.timestamp)}`)).toBeInTheDocument();
@@ -64,32 +64,44 @@ describe("ReflogPanel", () => {
     expect(details).toContain("Ada Lovelace <ada@example.com>");
     expect(details).toContain(new Date(entry.timestamp * 1000).toLocaleString());
     expect(details).toContain(entry.summary!);
-    expect(screen.getByRole("button", { name: `Restore refs/heads/main to ${entry.newId}` })).toBeEnabled();
+    expect(screen.getByRole("button", { name: `Restore main to ${entry.newId}` })).toBeEnabled();
+  });
+
+  it("shows short names but selects by the full reference (#682)", () => {
+    const onSelectReference = vi.fn().mockResolvedValue(undefined);
+    renderPanel({ onSelectReference });
+
+    const selector = screen.getByRole("combobox", { name: "Reflog reference" });
+    expect(within(selector).getByRole("option", { name: "main" })).toHaveValue("refs/heads/main");
+    expect(selector).toHaveValue("refs/heads/main");
+    fireEvent.change(selector, { target: { value: "HEAD" } });
+    expect(onSelectReference).toHaveBeenCalledWith("HEAD");
+    expect(screen.queryByText(/refs\/heads\//)).not.toBeInTheDocument();
   });
 
   it("requires a named dialog confirmation that identifies the target before restoring", () => {
     const onRestore = vi.fn().mockResolvedValue(undefined);
     renderPanel({ onRestore });
 
-    fireEvent.click(screen.getByRole("button", { name: `Restore refs/heads/main to ${entry.newId}` }));
+    fireEvent.click(screen.getByRole("button", { name: `Restore main to ${entry.newId}` }));
 
     expect(onRestore).not.toHaveBeenCalled();
-    const dialog = screen.getByRole("dialog", { name: "Restore refs/heads/main" });
-    expect(within(dialog).getByText("Restore refs/heads/main to 2222222222222222222222222222222222222222?")).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", { name: "Restore main" });
+    expect(within(dialog).getByText("Restore main to 2222222222222222222222222222222222222222?")).toBeInTheDocument();
     // #287: Restore moves only the ref.
     expect(within(dialog).getByText("Your files and staged changes stay as they are.")).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(onRestore).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: `Restore refs/heads/main to ${entry.newId}` }));
-    fireEvent.click(within(screen.getByRole("dialog", { name: "Restore refs/heads/main" })).getByRole("button", { name: "Restore reflog entry" }));
+    fireEvent.click(screen.getByRole("button", { name: `Restore main to ${entry.newId}` }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Restore main" })).getByRole("button", { name: "Restore reflog entry" }));
     expect(onRestore).toHaveBeenCalledWith("refs/heads/main", entry.newId);
   });
 
   it("disables restore controls while a repository mutation is pending", () => {
     renderPanel({ operationDisabled: true });
 
-    expect(screen.getByRole("button", { name: `Restore refs/heads/main to ${entry.newId}` })).toBeDisabled();
+    expect(screen.getByRole("button", { name: `Restore main to ${entry.newId}` })).toBeDisabled();
   });
 
   it("keeps repeated local-ref transitions distinct with labeled targets and unique restore controls", () => {
@@ -105,8 +117,8 @@ describe("ReflogPanel", () => {
 
     expect(screen.getByTitle(new RegExp(`^Old ID: ${entry.oldId}\\s`))).toBeInTheDocument();
     expect(screen.getByTitle(new RegExp(`^Old ID: ${olderEntry.oldId}\\s`))).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: `Restore refs/heads/main to ${entry.newId}` })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: `Restore refs/heads/main to ${olderEntry.newId}` })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: `Restore main to ${entry.newId}` })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: `Restore main to ${olderEntry.newId}` })).toBeInTheDocument();
   });
 });
 
@@ -131,8 +143,8 @@ describe("ReflogPanel — rows", () => {
         entry.summary,
       ].join("\n"),
     );
-    expect(within(row).getByRole("button", { name: `Restore refs/heads/main to ${entry.newId}` })).toHaveTextContent(
-      "Restore refs/heads/main",
+    expect(within(row).getByRole("button", { name: `Restore main to ${entry.newId}` })).toHaveTextContent(
+      "Restore main",
     );
   });
 
@@ -206,9 +218,9 @@ describe("ReflogPanel — windowed rows", () => {
       expect(rendered.at(-1)).toHaveAttribute("data-row-index", "529");
       expect(rendered[0].parentElement!.style.paddingTop).toBe(`${480 * ROW}px`);
 
-      fireEvent.click(screen.getByRole("button", { name: `Restore refs/heads/main to ${many[505].newId}` }));
+      fireEvent.click(screen.getByRole("button", { name: `Restore main to ${many[505].newId}` }));
       fireEvent.click(
-        within(screen.getByRole("dialog", { name: "Restore refs/heads/main" })).getByRole("button", {
+        within(screen.getByRole("dialog", { name: "Restore main" })).getByRole("button", {
           name: "Restore reflog entry",
         }),
       );
