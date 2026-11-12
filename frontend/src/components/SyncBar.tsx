@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { autoFetchLabel } from "../lib/autoFetch";
-import { formatRelativeDate } from "../lib/formatDate";
+import { formatAbsoluteDate, formatRelativeDate } from "../lib/formatDate";
+import { useDateFormat } from "../state/useDateFormat";
 import type { PullStrategy, RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { shortcutLabel } from "../lib/keybindings";
 import { upstreamPushBranch } from "../lib/pushTarget";
@@ -212,14 +213,15 @@ const PULL_STRATEGIES: [PullStrategy, string][] = [
 
 /** "Fetched 5 minutes ago", refreshed every 30 seconds. */
 function LastFetch({ at, autoFetchMinutes }: { at: number; autoFetchMinutes: number }) {
+  const dateFormat = useDateFormat();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
   }, []);
   // A newer fetch than the last tick (`now - at` < 0) is "just now" too.
-  const label = now - at < 60_000 ? "just now" : formatRelativeDate(at / 1000, now, "en");
-  const when = `Last fetch: ${new Date(at).toLocaleString()}`;
+  const label = now - at < 60_000 ? "just now" : formatRelativeDate(at / 1000, now);
+  const when = `Last fetch: ${formatAbsoluteDate(at / 1000, dateFormat)}`;
   const title = autoFetchMinutes > 0 ? `${when}. Fetches automatically ${autoFetchLabel(autoFetchMinutes).toLowerCase()}.` : when;
   return (
     <span className={styles.lastFetch} title={title}>

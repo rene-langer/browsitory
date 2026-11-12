@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { KeyboardEvent, RefObject } from "react";
-import { formatShortDate } from "../lib/formatDate";
+import { formatAbsoluteDate, formatShortDate } from "../lib/formatDate";
+import { useDateFormat } from "../state/useDateFormat";
 import { searchStatusText } from "../lib/searchStatus";
 import type { VisitKind } from "../lib/navigationHistory";
 import type { SelectedRow } from "../state/useAppState";
@@ -37,6 +38,7 @@ export function CommitSearchResults({
   /** F3 / Shift+F3: the next / previous match (#687). */
   onStepMatch?: (direction: -1 | 1) => void;
 }) {
+  const dateFormat = useDateFormat();
   const selectedId = typeof selectedRow === "object" ? selectedRow.commitId : null;
   const selectedIndex = results.commits.findIndex((c) => c.id === selectedId);
 
@@ -118,8 +120,8 @@ export function CommitSearchResults({
             <span className={graphStyles.author} title={commit.authorEmail}>
               {commit.authorName}
             </span>
-            <span className={graphStyles.date} title={new Date(commit.timestamp * 1000).toLocaleString()}>
-              {formatShortDate(commit.timestamp)}
+            <span className={graphStyles.date} title={formatAbsoluteDate(commit.timestamp, dateFormat)}>
+              {formatShortDate(commit.timestamp, dateFormat)}
             </span>
           </ListRow>
         ))}

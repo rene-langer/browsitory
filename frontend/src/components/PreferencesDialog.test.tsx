@@ -418,7 +418,7 @@ describe("Fetch preferences", () => {
 });
 
 describe("AppearanceSection (#615)", () => {
-  const defaults = { codeFont: null, codeFontSize: null, uiSize: "Normal" as const, tabSize: 4 };
+  const defaults = { codeFont: null, codeFontSize: null, uiSize: "Normal" as const, tabSize: 4, dateFormat: "Iso" as const };
   const root = document.documentElement;
 
   afterEach(() => {
@@ -452,7 +452,7 @@ describe("AppearanceSection (#615)", () => {
 
   it("shows and applies the stored settings, clamped", async () => {
     const group = renderAppearance({
-      getAppearanceSettings: async () => ({ codeFont: "Example Mono", codeFontSize: 99, uiSize: "Small" as const, tabSize: 2 }),
+      getAppearanceSettings: async () => ({ codeFont: "Example Mono", codeFontSize: 99, uiSize: "Small" as const, tabSize: 2, dateFormat: "Iso" as const }),
     });
     const size = within(group).getByRole("spinbutton", { name: "Code font size (px)" });
     await waitFor(() => expect(size).toHaveValue(24));
@@ -511,6 +511,23 @@ describe("AppearanceSection (#615)", () => {
     await waitFor(() => expect(root.dataset.uiSize).toBe("large"));
     fireEvent.change(uiSize, { target: { value: "Normal" } });
     await waitFor(() => expect(root.dataset.uiSize).toBeUndefined());
+  });
+
+  // #675: ISO by default; System uses the operating system's (or webview's) locale.
+  it("saves the date format, with an example of each", async () => {
+    const setAppearanceSettings = vi.fn(async () => {});
+    const group = renderAppearance({ getAppearanceSettings: async () => defaults, setAppearanceSettings });
+    const select = within(group).getByRole("combobox", { name: "Date format" });
+    expect(select).toHaveValue("Iso");
+    const example = new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" }).format(
+      new Date(2026, 10, 11, 14, 5),
+    );
+    expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "ISO (2026-11-11 14:05)",
+      `System (${example})`,
+    ]);
+    fireEvent.change(select, { target: { value: "System" } });
+    await waitFor(() => expect(setAppearanceSettings).toHaveBeenLastCalledWith({ ...defaults, dateFormat: "System" }));
   });
 
   it("saves and applies the tab size, clamped, and ignores an empty one", async () => {

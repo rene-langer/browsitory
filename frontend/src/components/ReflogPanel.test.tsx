@@ -1,9 +1,11 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ReflogEntry } from "../ipc/RepoClient";
-import { formatShortDate } from "../lib/formatDate";
+import { formatAbsoluteDate, formatShortDate } from "../lib/formatDate";
 import { layoutInPane, ROW } from "../test/virtualLayout";
 import { ReflogPanel } from "./ReflogPanel";
+import { AppearanceSettingsContext } from "../state/useAppearanceSettings";
+import { DEFAULT_APPEARANCE_SETTINGS } from "../ipc/RepoClient";
 
 const entry: ReflogEntry = {
   reference: "refs/heads/main",
@@ -62,7 +64,7 @@ describe("ReflogPanel", () => {
     expect(details).toContain(`Old ID: ${entry.oldId}`);
     expect(details).toContain(`New ID: ${entry.newId}`);
     expect(details).toContain("Ada Lovelace <ada@example.com>");
-    expect(details).toContain(new Date(entry.timestamp * 1000).toLocaleString());
+    expect(details).toContain(formatAbsoluteDate(entry.timestamp));
     expect(details).toContain(entry.summary!);
     expect(screen.getByRole("button", { name: `Restore main to ${entry.newId}` })).toBeEnabled();
   });
@@ -138,7 +140,7 @@ describe("ReflogPanel — rows", () => {
         `Old ID: ${entry.oldId}`,
         `New ID: ${entry.newId}`,
         "Ada Lovelace <ada@example.com>",
-        new Date(entry.timestamp * 1000).toLocaleString(),
+        formatAbsoluteDate(entry.timestamp),
         entry.message,
         entry.summary,
       ].join("\n"),
@@ -156,7 +158,7 @@ describe("ReflogPanel — rows", () => {
         `Old ID: ${entry.oldId}`,
         `New ID: ${entry.newId}`,
         "Ada Lovelace <ada@example.com>",
-        new Date(entry.timestamp * 1000).toLocaleString(),
+        formatAbsoluteDate(entry.timestamp),
         entry.message,
       ].join("\n"),
     );
@@ -228,5 +230,33 @@ describe("ReflogPanel — windowed rows", () => {
     } finally {
       restore();
     }
+  });
+});
+
+// #675: the row's date and the tooltip's time follow Preferences → Appearance → Date format.
+describe("ReflogPanel — date format", () => {
+  it("shows the system's short date and time when the date format is System", () => {
+    localStorage.removeItem("sidebar-reflog");
+    render(
+      <AppearanceSettingsContext.Provider
+        value={{ settings: { ...DEFAULT_APPEARANCE_SETTINGS, dateFormat: "System" }, update: vi.fn(), error: null, dismissError: vi.fn() }}
+      >
+        <ReflogPanel
+          references={["HEAD", "refs/heads/main"]}
+          selectedReference="refs/heads/main"
+          entries={[entry]}
+          onSelectReference={vi.fn().mockResolvedValue(undefined)}
+          onRestore={vi.fn().mockResolvedValue(undefined)}
+          operationDisabled={false}
+        />
+      </AppearanceSettingsContext.Provider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Reflog" }));
+
+    const date = new Date(entry.timestamp * 1000);
+    const day = new Intl.DateTimeFormat(undefined, { dateStyle: "short" }).format(date);
+    const time = new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" }).format(date);
+    expect(screen.getByText(`1111111 → 2222222 · Ada Lovelace · ${day}`)).toBeInTheDocument();
+    expect(screen.getByTitle(/^Old ID: /).getAttribute("title")).toContain(`\n${time}\n`);
   });
 });

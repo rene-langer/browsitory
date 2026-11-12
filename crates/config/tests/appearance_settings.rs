@@ -1,6 +1,6 @@
 use config::{
     get_appearance_settings_at, set_appearance_settings_at, set_last_seen_version_at,
-    AppearanceSettings, UiSize,
+    AppearanceSettings, DateFormat, UiSize,
 };
 
 #[test]
@@ -15,6 +15,7 @@ fn keeps_the_built_in_look_when_never_set() {
             code_font_size: None,
             ui_size: UiSize::Normal,
             tab_size: 4,
+            date_format: DateFormat::Iso,
         }
     );
     assert_eq!(settings, AppearanceSettings::default());
@@ -38,6 +39,7 @@ fn round_trips_and_coexists_with_other_keys_and_tables() {
         code_font_size: Some(15),
         ui_size: UiSize::Large,
         tab_size: 8,
+        date_format: DateFormat::System,
     };
 
     set_appearance_settings_at(&file, &wanted).unwrap();
@@ -78,6 +80,7 @@ fn clamps_out_of_range_sizes_and_drops_a_blank_font_on_write() {
                 code_font_size: Some(font_size),
                 ui_size: UiSize::Small,
                 tab_size,
+                date_format: DateFormat::Iso,
             },
         )
         .unwrap();
@@ -121,6 +124,7 @@ fn clamps_a_hand_edited_file_on_read() {
             code_font_size: Some(24),
             ui_size: UiSize::Normal,
             tab_size: 1,
+            date_format: DateFormat::Iso,
         }
     );
 }
@@ -134,4 +138,23 @@ fn an_empty_appearance_table_means_the_defaults() {
         get_appearance_settings_at(&file).unwrap(),
         AppearanceSettings::default()
     );
+}
+
+// #675: the date format is stored as `date_format = "iso"` or `"system"`, ISO by default. Written
+// as TOML text so the test reads the file the way a user (or an older version) would.
+#[test]
+fn keeps_the_date_format_and_writes_iso_by_default() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let read = dir.path().join("read.toml");
+    let written = dir.path().join("written.toml");
+    std::fs::write(&read, "[appearance]\ndate_format = \"system\"\n").unwrap();
+
+    let settings = get_appearance_settings_at(&read).unwrap();
+    set_appearance_settings_at(&written, &settings).unwrap();
+    let text = std::fs::read_to_string(&written).unwrap();
+    assert!(text.contains("date_format = \"system\"\n"), "{text}");
+
+    set_appearance_settings_at(&written, &AppearanceSettings::default()).unwrap();
+    let text = std::fs::read_to_string(&written).unwrap();
+    assert!(text.contains("date_format = \"iso\"\n"), "{text}");
 }

@@ -2533,20 +2533,20 @@ fn appearance_settings_round_trip_through_the_sidecar_clamped() {
     let unset = sidecar.call(1, "get_appearance_settings", serde_json::json!({}));
     assert_eq!(
         unset["result"],
-        serde_json::json!({"codeFont": null, "codeFontSize": null, "uiSize": "Normal", "tabSize": 4})
+        serde_json::json!({"codeFont": null, "codeFontSize": null, "uiSize": "Normal", "tabSize": 4, "dateFormat": "Iso"})
     );
     let set = sidecar.call(
         2,
         "set_appearance_settings",
         serde_json::json!({
-            "settings": {"codeFont": " Example Mono ", "codeFontSize": 99, "uiSize": "Large", "tabSize": 2}
+            "settings": {"codeFont": " Example Mono ", "codeFontSize": 99, "uiSize": "Large", "tabSize": 2, "dateFormat": "System"}
         }),
     );
     assert_eq!(set["result"], serde_json::Value::Null, "{set}");
     let got = sidecar.call(3, "get_appearance_settings", serde_json::json!({}));
     assert_eq!(
         got["result"],
-        serde_json::json!({"codeFont": "Example Mono", "codeFontSize": 24, "uiSize": "Large", "tabSize": 2})
+        serde_json::json!({"codeFont": "Example Mono", "codeFontSize": 24, "uiSize": "Large", "tabSize": 2, "dateFormat": "System"})
     );
 }
 

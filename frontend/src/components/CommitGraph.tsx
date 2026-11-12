@@ -31,7 +31,8 @@ import { rowsEqual, type SelectedRow } from "../state/useAppState";
 import { useCopyToClipboard } from "../state/useCopyToClipboard";
 import { useCommitDrag } from "../state/useCommitDrag";
 import { CommitLaneGraphic, WorkingTreeLaneGraphic } from "./CommitLaneGraphic";
-import { formatShortDate } from "../lib/formatDate";
+import { formatAbsoluteDate, formatShortDate } from "../lib/formatDate";
+import { useDateFormat } from "../state/useDateFormat";
 import { ListRow } from "./primitives/ListRow";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { isMenuKey, menuAnchor } from "../lib/menuKeys";
@@ -211,6 +212,7 @@ export function CommitGraph({
   /** Also set to the list, so the search field's ↓ can move into it (#687). */
   listRef?: RefObject<HTMLUListElement | null>;
 }) {
+  const dateFormat = useDateFormat();
   const [contextMenu, setContextMenu] = useState<{
     commitId: string;
     x: number;
@@ -894,9 +896,9 @@ export function CommitGraph({
           <span
             className={styles.date}
             data-testid="commit-date"
-            title={new Date(commit.timestamp * 1000).toLocaleString()}
+            title={formatAbsoluteDate(commit.timestamp, dateFormat)}
           >
-            {formatShortDate(commit.timestamp)}
+            {formatShortDate(commit.timestamp, dateFormat)}
           </span>
         </ListRow>
         );

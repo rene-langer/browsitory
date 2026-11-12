@@ -1,7 +1,7 @@
 // Generated from the shared wire DTOs (crates/repo-service/src/wire.rs) by ts-rs.
 // Do not edit. Regenerate: UPDATE_TRANSPORT_METHODS=1 cargo test -p repo-service wire_bindings_are_current
 
-export type AppearanceSettings = { codeFont: string | null, codeFontSize: number | null, uiSize: UiSize, tabSize: number, };
+export type AppearanceSettings = { codeFont: string | null, codeFontSize: number | null, uiSize: UiSize, tabSize: number, dateFormat: DateFormat, };
 
 export type BisectInfo = { 
 /**
@@ -68,6 +68,8 @@ export type ConflictSegment = { "kind": "Clean", content: string, } | { "kind": 
 export type ConflictSide = "Ours" | "Theirs";
 
 export type CreatePullRequest = { title: string, description: string | null, sourceBranch: string, targetBranch: string, };
+
+export type DateFormat = "Iso" | "System";
 
 export type DiffAlgorithm = "Default" | "Patience" | "Minimal";
 

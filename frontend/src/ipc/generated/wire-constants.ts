@@ -15,7 +15,7 @@ export const DEFAULT_COMMIT_MESSAGE_SETTINGS: CommitMessageSettings = {"summaryL
 /** `config::FetchSettings::default()`. */
 export const DEFAULT_FETCH_SETTINGS: FetchSettings = {"autoFetchMinutes":0};
 /** `config::AppearanceSettings::default()`. */
-export const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {"codeFont":null,"codeFontSize":null,"uiSize":"Normal","tabSize":4};
+export const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {"codeFont":null,"codeFontSize":null,"uiSize":"Normal","tabSize":4,"dateFormat":"Iso"};
 /** `config::CODE_FONT_SIZES`: the range the code font size is clamped to, in px. */
 export const CODE_FONT_SIZES = { min: 10, max: 24 } as const;
 /** `config::TAB_SIZES`: the range the tab size is clamped to, in columns. */

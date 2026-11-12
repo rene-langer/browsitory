@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import type { KeyboardEvent } from "react";
-import { formatShortDate } from "../lib/formatDate";
+import { formatAbsoluteDate, formatShortDate } from "../lib/formatDate";
+import { useDateFormat } from "../state/useDateFormat";
 import { lineRangeLabel } from "../lib/selectedLines";
 import type { VisitKind } from "../lib/navigationHistory";
 import type { SelectedRow } from "../state/useAppState";
@@ -31,6 +32,7 @@ export function FileHistoryList({
   onLoadMore: () => void;
   onRetry: () => void;
 }) {
+  const dateFormat = useDateFormat();
   const selectedId = typeof selectedRow === "object" ? selectedRow.commitId : null;
   const selectedIndex = history.entries.findIndex((e) => e.commit.id === selectedId);
 
@@ -117,8 +119,8 @@ export function FileHistoryList({
             <span className={graphStyles.author} title={entry.commit.authorEmail}>
               {entry.commit.authorName}
             </span>
-            <span className={graphStyles.date} title={new Date(entry.commit.timestamp * 1000).toLocaleString()}>
-              {formatShortDate(entry.commit.timestamp)}
+            <span className={graphStyles.date} title={formatAbsoluteDate(entry.commit.timestamp, dateFormat)}>
+              {formatShortDate(entry.commit.timestamp, dateFormat)}
             </span>
           </ListRow>
         ))}

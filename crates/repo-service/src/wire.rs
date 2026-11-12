@@ -2831,6 +2831,34 @@ pub struct AppearanceSettingsDto {
     pub code_font_size: Option<u32>,
     pub ui_size: UiSizeDto,
     pub tab_size: u32,
+    pub date_format: DateFormatDto,
+}
+
+/// `config::DateFormat` (#675).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "DateFormat"))]
+pub enum DateFormatDto {
+    Iso,
+    System,
+}
+
+impl From<config::DateFormat> for DateFormatDto {
+    fn from(f: config::DateFormat) -> Self {
+        match f {
+            config::DateFormat::Iso => DateFormatDto::Iso,
+            config::DateFormat::System => DateFormatDto::System,
+        }
+    }
+}
+
+impl From<DateFormatDto> for config::DateFormat {
+    fn from(f: DateFormatDto) -> Self {
+        match f {
+            DateFormatDto::Iso => config::DateFormat::Iso,
+            DateFormatDto::System => config::DateFormat::System,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -2869,6 +2897,7 @@ impl From<config::AppearanceSettings> for AppearanceSettingsDto {
             code_font_size: s.code_font_size,
             ui_size: s.ui_size.into(),
             tab_size: s.tab_size,
+            date_format: s.date_format.into(),
         }
     }
 }
@@ -2880,6 +2909,7 @@ impl From<AppearanceSettingsDto> for config::AppearanceSettings {
             code_font_size: d.code_font_size,
             ui_size: d.ui_size.into(),
             tab_size: d.tab_size,
+            date_format: d.date_format.into(),
         }
     }
 }
@@ -3293,6 +3323,7 @@ mod ts_bindings {
             FetchSettingsDto,
             AppearanceSettingsDto,
             UiSizeDto,
+            DateFormatDto,
             UpdateSettingsDto,
         );
         test_support::assert_generated_file(

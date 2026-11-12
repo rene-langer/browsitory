@@ -12,6 +12,7 @@ import { useVirtualRows } from "./useVirtualRows";
 import { menuItem } from "../lib/actions/action";
 import { stashActions, stashDetails, stashTitle, type StashBlockers } from "../lib/actions/stashActions";
 import { formatAbsoluteDate } from "../lib/formatDate";
+import { useDateFormat } from "../state/useDateFormat";
 
 // `returnFocusTo`: the "…" button or row it was opened from by the pointer (WebKit focuses
 // neither); `undefined` for a key, so `ContextMenu` returns focus to what had it (as BranchTree).
@@ -50,6 +51,7 @@ export function StashPanel({
   /** Expands and scrolls to the section (`useSidebarReveal`, #494). */
   revealRequest?: number;
 }) {
+  const dateFormat = useDateFormat();
   const [pendingDrop, setPendingDrop] = useState<StashEntry | null>(null);
   const [menu, setMenu] = useState<StashMenu | null>(null);
   // The menu and the drop confirmation act on the stash they were opened for, looked up again by
@@ -163,7 +165,7 @@ export function StashPanel({
                   onOpenMenu={(anchor, trigger) => openMenu({ stash, ...anchor, returnFocusTo: trigger })}
                 >
                   <Archive size={14} aria-hidden="true" className={styles.rowIcon} />
-                  <span className={styles.text} title={`${stash.message}\n${formatAbsoluteDate(stash.timestamp)}`}>
+                  <span className={styles.text} title={`${stash.message}\n${formatAbsoluteDate(stash.timestamp, dateFormat)}`}>
                     <span className={styles.message}>{title}</span>
                     <span className={styles.details}>{details}</span>
                   </span>
