@@ -27,9 +27,11 @@ pub(super) fn list_branches(
 
 pub(super) fn current_upstream(
     repo: &git2::Repository,
+    cache: &mut git_core::ahead_behind::AheadBehindCache,
     reply: Sender<Result<Option<UpstreamInfo>, ErrorDto>>,
 ) {
-    let _ = reply.send(git_core::remote::current_upstream(repo).map_err(ErrorDto::from_error));
+    let _ = reply
+        .send(git_core::remote::current_upstream_cached(repo, cache).map_err(ErrorDto::from_error));
 }
 
 pub(super) fn add(
@@ -68,11 +70,13 @@ pub(super) fn update_urls(
 }
 pub(super) fn upstreams(
     repo: &git2::Repository,
+    cache: &mut git_core::ahead_behind::AheadBehindCache,
     name: String,
     reply: Sender<Result<Vec<UpstreamInfo>, ErrorDto>>,
 ) {
-    let _ =
-        reply.send(git_core::remote::remote_upstreams(repo, &name).map_err(ErrorDto::from_error));
+    let _ = reply.send(
+        git_core::remote::remote_upstreams_cached(repo, &name, cache).map_err(ErrorDto::from_error),
+    );
 }
 pub(super) fn auth_mode(
     repo: &git2::Repository,

@@ -40,6 +40,8 @@ pub(super) struct WorkerLoop<S: CredentialStore, A: ForgeApi> {
     // The clean merge this worker staged, so its commit runs `git merge`'s hooks
     // (#124). Memory only: see `merge::CleanMerge` for the fallback (D2-A).
     clean_merge: Option<merge::CleanMerge>,
+    // The branches' ahead/behind counts, counted again only for moved tips (#112).
+    ahead_behind: git_core::ahead_behind::AheadBehindCache,
     // Undo bookkeeping is shared with other processes on this repository (#172).
     state_lock: state_lock::StateLock,
     logged_busy: bool,
@@ -144,6 +146,7 @@ where
                 rebase_memory: gate::RebaseMemory::default(),
             },
             clean_merge: None,
+            ahead_behind: git_core::ahead_behind::AheadBehindCache::default(),
             state_lock,
             logged_busy: false,
             logged_unavailable: false,
@@ -185,6 +188,7 @@ where
                 undo_recorder: &mut self.undo_recorder,
                 operations: &self.operations,
                 clean_merge: &self.clean_merge,
+                ahead_behind: &mut self.ahead_behind,
             },
         };
         (host, &self.credential_service, &self.background_memory)

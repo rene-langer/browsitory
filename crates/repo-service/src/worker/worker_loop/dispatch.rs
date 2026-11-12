@@ -24,6 +24,7 @@ where
             undo_recorder: &mut self.undo_recorder,
             operations: &self.operations,
             clean_merge: &self.clean_merge,
+            ahead_behind: &mut self.ahead_behind,
         };
         let Some(command) = read::dispatch(&mut self.repo, &mut state, command) else {
             return;
