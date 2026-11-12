@@ -322,7 +322,7 @@ fn track(tracked: &mut HashMap<Oid, Tracked>, parent: Oid, next: Tracked) {
 }
 
 /// Lines in `content` as a diff counts them: a last line without a newline still counts.
-fn line_count(content: &[u8]) -> usize {
+pub(crate) fn line_count(content: &[u8]) -> usize {
     let newlines = content.iter().filter(|&&b| b == b'\n').count();
     newlines + usize::from(content.last().is_some_and(|&b| b != b'\n'))
 }

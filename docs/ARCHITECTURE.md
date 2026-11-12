@@ -106,7 +106,7 @@ more `RepoClient` implementation — no UI rewrite.
 
 ## Why git2 (libgit2 bindings), not gitoxide
 
-`git2` is mature and complete: native blame, native interactive rebase primitives, native
+`git2` is mature and complete: native interactive rebase primitives, native
 merge conflict handling, native stash/cherry-pick, native remote transports. The pure-Rust
 alternative (`gitoxide`/`gix`) is a closer license fit (no GPL exception needed at all), but
 its write-side operations (merge, rebase) are less mature as of this writing. `git2` is the
@@ -130,6 +130,22 @@ writes are still hashed to get their ids. The setting is process-wide (it can't 
 to one repository or lane). Tests run with libgit2's default unless they call the function
 (`crates/git-core/tests/hash_verification.rs`, and the sidecar's
 `the_sidecar_reads_objects_without_rehashing_them`, which pins that the binary calls it).
+
+### Blame and the history walks
+
+File history, line history and blame share one walk (`git_core::history`, #838/#839): each
+tracked commit carries its path's tree entries (`PathEntries`), and a parent's are compared
+top-down, so only folders whose ids differ are read. A lookup scans the one entry in the
+tree's stored form (`tree_entry`) instead of parsing the whole tree (libgit2's tree parsing of
+big root trees was most of the walk). Blame is computed on this walk (`git_core::blame`) and
+no longer uses libgit2's `git_blame_file`: libgit2 1.9 diffs both commits' trees at every
+commit of history (about a minute on a 130k-commit repository, where `git blame` needs about
+a second; the upstream fix, libgit2/libgit2#7472, is unreleased). It assigns lines as git and
+libgit2 do: whole-file passes to an identical parent, then zero-context blob diffs (after
+xdiff's `trim_common_tail`) per parent, renames via libgit2's rename detection, no move or
+copy detection. Its owners match libgit2's on this repository's files, except where libgit2
+loses a file's origin (it then agrees with `git blame`). Like libgit2, it doesn't use git's
+indent heuristic, so a few ambiguous lines differ from `git blame`.
 
 ## The `RepoClient` IPC boundary
 
