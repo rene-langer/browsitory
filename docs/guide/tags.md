@@ -24,7 +24,7 @@ selected and pushes them: **Push to ⟨remote⟩**, or, with several remotes, pi
 **Push**. **Clear selection** unticks them. To push one tag, use **Push ⟨tag⟩ to ⟨remote⟩** in its
 menu; **Push all tags to ⟨remote⟩** in the command palette pushes every tag. A tag's other actions are in its menu: the **…** button (it appears when you point at or tab into
 the row), a right-click, or the Menu key or Shift+F10 on the row, its checkbox or its **…**. The menu has the same items as the tag's
-badge in the graph: push to a remote, **Branch from tag**, **Checkout (detached)**, **Copy tag
+badge in the graph: push to a remote, **Branch from tag**, **Switch to (detached)**, **Copy tag
 name**, **Delete from remote…** and **Delete tag…** (the local tag, after a confirmation).
 
 ## Delete a tag on a remote
@@ -42,6 +42,6 @@ Tags appear as outlined badges (with a tag icon) on commit rows in the graph, fi
 search results. Right-click a badge in the graph to push that tag to a remote, create a branch
 from it (**Branch from tag**), check out its commit (detached), delete the tag on a remote, or
 delete the local tag. The Tags panel remains the keyboard path for pushing and deleting tags;
-**Check out tag … (detached)** in the command palette checks out a tag's commit.
+**Switch to tag … (detached)** in the command palette checks out a tag's commit.
 
 ![The Tags section](assets/tags.png)

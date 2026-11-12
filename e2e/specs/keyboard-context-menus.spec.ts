@@ -65,7 +65,7 @@ describe("Browsitory keyboard context menus", () => {
     // not open a second one. Give it a moment to arrive before counting.
     await browser.pause(300);
     expect(await $$("[role='menu']")).toHaveLength(1);
-    // Checkout is disabled on the current branch, so Rename is the first focusable item.
+    // Switch to is disabled on the current branch, so Rename is the first focusable item.
     expect(await browser.execute(() => document.activeElement?.textContent)).toBe("Rename");
 
     await browser.keys(["ArrowDown"]);

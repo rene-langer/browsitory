@@ -151,7 +151,7 @@ describe("ReleaseNotesModal", () => {
   it("names the dialog itself", () => {
     render(<ReleaseNotesModal entries={ENTRIES} onClose={vi.fn()} />);
 
-    expect(screen.getByRole("dialog", { name: "Release notes" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "What’s new" })).toBeInTheDocument();
   });
 
   it("shows a fallback message when there are no entries", () => {
@@ -220,7 +220,7 @@ describe("ReleaseNotesModal", () => {
         <ReleaseNotesModal entries={ENTRIES} onClose={vi.fn()} onOpenUserGuide={vi.fn()} onOpenThirdPartyLicences={vi.fn()} />,
       );
 
-      const notes = screen.getByRole("region", { name: "Release notes text" });
+      const notes = screen.getByRole("region", { name: "What’s new text" });
       expect(within(notes).getByText("Feature A")).toBeInTheDocument();
       for (const name of ["Close", "User guide", "Third-party licences"]) {
         expect(notes).not.toContainElement(screen.getByRole("button", { name }));
@@ -234,7 +234,7 @@ describe("ReleaseNotesModal", () => {
 
         // The notes region comes first, so the initial focus (and the scroll that follows it)
         // stays at the top: the newest release is what the user sees.
-        const notes = screen.getByRole("region", { name: "Release notes text" });
+        const notes = screen.getByRole("region", { name: "What’s new text" });
         expect(notes).toHaveFocus();
         expect(notes.scrollTop).toBe(0);
       } finally {
@@ -246,7 +246,7 @@ describe("ReleaseNotesModal", () => {
     it("closes on a click on the backdrop, but not on a click inside", () => {
       const onClose = vi.fn();
       render(<ReleaseNotesModal entries={ENTRIES} onClose={onClose} />);
-      const dialog = screen.getByRole("dialog", { name: "Release notes" });
+      const dialog = screen.getByRole("dialog", { name: "What’s new" });
       dialog.getBoundingClientRect = () => new DOMRect(100, 100, 400, 300);
 
       fireEvent.mouseDown(screen.getByText("Feature A"));
@@ -265,7 +265,7 @@ describe("ReleaseNotesModal", () => {
       const onClose = vi.fn();
       render(<ReleaseNotesModal entries={ENTRIES} onClose={onClose} />);
 
-      screen.getByRole("dialog", { name: "Release notes" }).dispatchEvent(new Event("close"));
+      screen.getByRole("dialog", { name: "What’s new" }).dispatchEvent(new Event("close"));
 
       expect(onClose).toHaveBeenCalledOnce();
     });

@@ -110,7 +110,7 @@ describe("TagPanel", () => {
       "Push v1.0.0 to origin",
       "Push v1.0.0 to backup",
       "Branch from tag",
-      "Checkout (detached)",
+      "Switch to (detached)",
       "Copy tag name",
       "Delete from remote…",
       "Delete tag…",
@@ -123,7 +123,7 @@ describe("TagPanel", () => {
     expect(p.onBranchFromCommit).toHaveBeenCalledWith("abc123");
 
     openMenu("v1.0.0");
-    fireEvent.click(screen.getByRole("menuitem", { name: "Checkout (detached)" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Switch to (detached)" }));
     expect(p.onCheckoutCommit).toHaveBeenCalledWith("abc123");
 
     openMenu("v1.0.0");
@@ -148,7 +148,7 @@ describe("TagPanel", () => {
     renderPanel({ tags: [{ ...tag, commitId: null }] });
     openMenu("v1.0.0");
     expect(screen.queryByRole("menuitem", { name: "Branch from tag" })).toBeNull();
-    expect(screen.queryByRole("menuitem", { name: "Checkout (detached)" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Switch to (detached)" })).toBeNull();
   });
 
   it("selects the tag's commit when its row is clicked or activated by key (#441)", () => {
@@ -210,7 +210,7 @@ describe("TagPanel", () => {
     renderPanel({ pushDisabled: true, operationDisabledReason: "A transfer is in progress." });
     openMenu("v1.0.0");
 
-    for (const name of ["Push v1.0.0 to origin", "Checkout (detached)", "Delete from remote…", "Delete tag…"]) {
+    for (const name of ["Push v1.0.0 to origin", "Switch to (detached)", "Delete from remote…", "Delete tag…"]) {
       const item = screen.getByRole("menuitem", { name });
       expect(item).toBeDisabled();
       expect(item).toHaveAttribute("title", "A transfer is in progress.");

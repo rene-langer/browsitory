@@ -1248,7 +1248,7 @@ describe("history commands", () => {
       expect(label("cherry-pick-selected")).toBe("Cherry-pick old1234");
       expect(label("revert-selected")).toBe("Revert old1234");
       expect(label("reset-selected")).toBe("Reset to old1234…");
-      expect(label("checkout-selected")).toBe("Checkout old1234 (detached)");
+      expect(label("checkout-selected")).toBe("Switch to old1234 (detached)");
       expect(label("create-tag-selected")).toBe("Create tag at old1234…");
       commands.find((c) => c.id === "cherry-pick-selected")!.run();
       commands.find((c) => c.id === "revert-selected")!.run();
@@ -1336,7 +1336,7 @@ describe("history commands", () => {
     const pairs: [string, string][] = [
       ["Cherry-pick", "cherry-pick-selected"],
       ["Revert", "revert-selected"],
-      ["Checkout (detached)", "checkout-selected"],
+      ["Switch to (detached)", "checkout-selected"],
       ["Create tag…", "create-tag-selected"],
     ];
 
@@ -1985,7 +1985,7 @@ describe("remote and tag palette entries", () => {
     const command = commandsFor(appState, { sidebar: sidebar({ ...allVisible, tags: false }), tabs: tabs({ onOpenRepoTab: vi.fn(), onSwitchRepoTab: vi.fn() }) }).find(
       (c) => c.id === "checkout-tag:v1",
     );
-    expect(command?.label).toBe("Check out tag v1 (detached)");
+    expect(command?.label).toBe("Switch to tag v1 (detached)");
     command?.run();
     expect(appState.checkoutCommit).toHaveBeenCalledWith("c1");
     expect(command?.group).toBe("Branches");
@@ -2355,12 +2355,12 @@ describe("agree with the branch, remote, stash and worktree menus (#509)", () =>
     const ids = commandsFor(appState, { tabs: tabs({ onOpenRepoTab: vi.fn() }) }).map((command) => command.id);
 
     expectAgreement(menu(branchTree(state), "Actions for feature"), ids, [
-      ["Checkout", "switch-branch:feature"],
+      ["Switch to", "switch-branch:feature"],
       ["Merge into current branch…", "merge-branch:feature"],
       ["Rebase current branch onto feature…", "rebase-onto-branch:feature"],
     ], state);
     expectAgreement(menu(branchTree(state), "Actions for main"), ids, [
-      ["Checkout", "switch-branch:main"],
+      ["Switch to", "switch-branch:main"],
       ["Merge into current branch…", "merge-branch:main"],
       ["Push to…", "push-branch-to"],
     ], state);
