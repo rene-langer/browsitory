@@ -261,6 +261,29 @@ describe("empty states and conflicts (#665)", () => {
     expect(within(unstaged).getAllByRole("option")[0]).toHaveAccessibleName(/^z\.txt/);
   });
 
+  // #832: the heading's actions wrap as one group under the title and the conflict badge, so no
+  // single button ends up alone on a line of its own.
+  it("keeps the Changes heading's actions together in one group, the conflict badge outside it", () => {
+    const withConflicts = [
+      entry("a.txt", false),
+      entry("n.txt", false, "New"),
+      entry("z.txt", false, "Conflicted"),
+      entry("c.txt", true, "New"),
+    ];
+    render(<Pane client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")} status={withConflicts} />);
+    const actions = screen.getByRole("group", { name: "Changes actions" });
+    expect(within(actions).getAllByRole("button").map((button) => button.textContent)).toEqual([
+      "Stage all",
+      "Stage modified",
+      "Discard all…",
+      "Delete untracked…",
+    ]);
+    expect(within(actions).queryByText("1 conflict")).not.toBeInTheDocument();
+    expect(screen.getByText("1 conflict")).toBeInTheDocument();
+    const stagedActions = screen.getByRole("group", { name: "Staged actions" });
+    expect(within(stagedActions).getByRole("button", { name: "Unstage all" })).toBeInTheDocument();
+  });
+
   it("Go to conflict makes the first conflict the current file, then hands the request back", async () => {
     const onConflictRequestHandled = vi.fn();
     const withConflicts = [entry("a.txt", false), entry("z.txt", false, "Conflicted")];
