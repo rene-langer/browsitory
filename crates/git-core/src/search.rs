@@ -87,9 +87,11 @@ impl SearchQuery {
 pub struct PageLimits {
     pub matches: usize,
     pub scan: usize,
-    /// Wall-clock budget for one page. Checked after each scanned commit, so a page always
-    /// scans at least one commit (a zero budget still makes progress). Keeps a page with
-    /// expensive `path:`/`contents:` diffs from holding the single repo worker for long.
+    /// Wall-clock budget for scanning one page, counted from when the walk stands at the
+    /// cursor: the set-up before (sorting the history, skipping to the cursor) is not charged
+    /// to it (#834). Checked after each scanned commit, so a page always scans at least one
+    /// commit (a zero budget still makes progress). Keeps a page with expensive
+    /// `path:`/`contents:` diffs from holding the single repo worker for long.
     pub time: Duration,
 }
 
@@ -599,8 +601,9 @@ pub(crate) fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 /// merge holds (#617).
 ///
 /// A page ends after `limits.matches` matches, `limits.scan` commits scanned in this call, or
-/// once `limits.time` has elapsed (checked after each commit, so at least one is scanned); in
-/// every case `next_cursor` resumes right after the last scanned commit while any remain.
+/// once `limits.time` has elapsed since the walk reached the cursor (checked after each commit,
+/// so at least one is scanned); in every case `next_cursor` resumes right after the last
+/// scanned commit while any remain.
 /// `cursor` resumes a previous page; it is rejected as `StaleCursor` when the walk's start
 /// points moved since it was issued. `cancel` is polled once before the walk, every
 /// `SKIP_CANCEL_INTERVAL` commits while skipping to the cursor, and before each scanned
@@ -616,7 +619,6 @@ pub fn search_commits(
     let starts = start_points(repo, query, selection)?;
     let first_parent = query.branch().is_none() && selection.isolates_one_branch();
     let fingerprint = walk_fingerprint(&starts, first_parent)?;
-    let started = Instant::now();
     let offset = match cursor {
         None => 0,
         Some(cursor) => {
@@ -670,6 +672,12 @@ pub fn search_commits(
             break;
         }
     }
+    // The time budget starts here, once the walk stands at the cursor (#834). Sorting the
+    // history (libgit2 does it on the first `next`, hence the `peek`) and skipping to the
+    // cursor grow with the history and are paid again on every page; charged to the budget,
+    // they left a large repository one scanned commit per page.
+    walk.peek();
+    let started = Instant::now();
     let mut position = offset;
     let mut scanned_here = 0;
     let mut commits = Vec::new();

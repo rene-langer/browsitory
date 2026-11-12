@@ -936,7 +936,8 @@ certificate.
   once per page and tested per commit, so it composes under `not`/`or`; `contents:` stays
   scoped to the top-level AND `path:` terms. A page ends at 100 matches, after 20,000 scanned commits, or after a
   250 ms time budget (`PageLimits::time`, checked after each commit so a page always makes
-  progress) — so a commit/stage queued on the single in-order repo worker never waits behind
+  progress; it starts once the walk stands at the cursor, so sorting the history and skipping
+  to the cursor, paid again on every page, don't use it up, #834) — so a commit/stage queued on the single in-order repo worker never waits behind
   thousands of `path:`/`contents:` tree diffs; a time-boxed page just returns `next_cursor`
   and the frontend's paging round continues.
 - The graph and a search without a `branch:` term walk the same start points,

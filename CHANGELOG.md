@@ -51,6 +51,11 @@ opening the workspace's repository.
 - Changed: a branch's dot in the sidebar and its badges in the graph now have the colour the
   graph draws that branch in; a branch whose latest commit isn't loaded has a grey dot, and
   only the checked-out branch's badge is filled (#673).
+- Fixed: the window went blank after scrolling the commit graph past about 30,000 commits (#836).
+- Fixed: a commit search that matches few or no commits no longer stalls on a large repository:
+  each page spent its time budget re-reading the history up to where the last page ended and
+  then looked at one commit, so the search crawled on for hours; a page now gets its full budget
+  for searching (#834).
 
 ### Long lists
 
