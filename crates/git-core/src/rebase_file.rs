@@ -177,5 +177,6 @@ fn to_state(stored: StoredRebase, repo: &Repository) -> Result<RebaseState, Stri
             StoredStop::Edit => RebaseStop::Edit,
             StoredStop::Error => RebaseStop::Error,
         },
+        fold_base: None,
     })
 }

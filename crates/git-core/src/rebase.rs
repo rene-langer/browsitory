@@ -73,6 +73,27 @@ pub enum RebaseError {
     /// (#882); nothing was changed.
     #[error("The commit message is empty. Write a message, then continue.")]
     EmptyMessage,
+    /// Fold staged changes with nothing staged (#883).
+    #[error("Nothing is staged. Stage the changes to fold in first.")]
+    NothingStaged,
+    /// Fold staged changes with unstaged changes to tracked files, sorted by path (#883): the
+    /// rebase would discard them on Abort, as for any rebase.
+    #[error("{}", unstaged_changes_message(paths))]
+    UnstagedChanges { paths: Vec<String> },
+}
+
+/// The refusal copy for [`RebaseError::UnstagedChanges`].
+fn unstaged_changes_message(paths: &[String]) -> String {
+    const ADVICE: &str = "Stage or stash them before folding staged changes into a commit.";
+    let first = paths.first().map(String::as_str).unwrap_or("");
+    match paths.len() {
+        0 | 1 => format!("You have unstaged changes to {first}. {ADVICE}"),
+        2 => format!("You have unstaged changes to {first} and 1 other file. {ADVICE}"),
+        n => format!(
+            "You have unstaged changes to {first} and {} other files. {ADVICE}",
+            n - 1
+        ),
+    }
 }
 
 /// The refusal copy for [`RebaseError::OperationPaused`] (#265).
@@ -308,6 +329,10 @@ pub struct RebaseState {
     /// continuing would commit the rebased step onto whatever ref happened to be checked out.
     pub expected_head: Oid,
     pub stop: RebaseStop,
+    /// Fold staged changes (#883): the branch tip before the fold committed the staged changes
+    /// (as `original_tip`, the fixup commit). Abort puts the branch back here with the changes
+    /// staged again. `None` for any other rebase.
+    pub fold_base: Option<Oid>,
 }
 
 impl RebaseState {
@@ -467,6 +492,7 @@ pub fn start_rebase_with(
         group_start_parent: None,
         expected_head: onto_commit.id(),
         stop: RebaseStop::Error,
+        fold_base: None,
     };
 
     // Everything past the detach above must roll back on failure: an `Err` escaping here would

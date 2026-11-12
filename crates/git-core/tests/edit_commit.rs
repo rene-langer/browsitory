@@ -322,6 +322,7 @@ fn a_paused_edit_rebuilt_after_a_restart_continues_with_the_new_message() {
         group_start_parent: state.group_start_parent,
         expected_head: state.expected_head,
         stop: state.stop,
+        fold_base: state.fold_base,
     };
     drop(repo);
     let repo = git2::Repository::open(dir.path()).unwrap();

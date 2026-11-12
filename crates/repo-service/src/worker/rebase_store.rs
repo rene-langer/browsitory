@@ -88,6 +88,7 @@ mod tests {
             group_start_parent: Some(ids[0]),
             expected_head: ids[1],
             stop: RebaseStop::Conflict,
+            fold_base: None,
         }
     }
 
@@ -114,6 +115,7 @@ mod tests {
             cursor: 1,
             group_start_parent: None,
             stop: RebaseStop::Edit,
+            fold_base: None,
             ..state(&ids)
         };
         store.save(&every_action).unwrap();
@@ -255,6 +257,7 @@ mod tests {
         let finishing = RebaseState {
             cursor: 2,
             stop: RebaseStop::Error,
+            fold_base: None,
             ..state(&ids)
         };
         store.save(&finishing).unwrap();
