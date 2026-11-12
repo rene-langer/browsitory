@@ -1140,6 +1140,22 @@ fn undo_error(error: crate::undo::UndoError) -> MergeError {
 /// A line starting with `<<<<<<<` or `>>>>>>>` followed by a space or the line end. `=======`
 /// alone is not a marker (it is also a Markdown/RST underline). Binary files (a NUL in the
 /// first 8000 bytes, git's heuristic) are never reported.
+/// [`has_conflict_markers`] fed a file in pieces (#212). Stub: keeps every byte.
+#[derive(Default)]
+pub(crate) struct MarkerScan {
+    bytes: Vec<u8>,
+}
+
+impl MarkerScan {
+    pub(crate) fn feed(&mut self, bytes: &[u8]) {
+        self.bytes.extend_from_slice(bytes);
+    }
+
+    pub(crate) fn finish(self) -> bool {
+        has_conflict_markers(&self.bytes)
+    }
+}
+
 pub(crate) fn has_conflict_markers(content: &[u8]) -> bool {
     if content.iter().take(8000).any(|b| *b == 0) {
         return false;
@@ -1503,5 +1519,70 @@ mod tests {
         assert!(!has_conflict_markers(b"x <<<<<<< y\n"));
         assert!(!has_conflict_markers(b"<<<<<<<<< nine\n"));
         assert!(!has_conflict_markers(b"\0binary\n<<<<<<< x\n"));
+    }
+
+    /// The marker check as it was before it streamed (#212), as an oracle.
+    fn whole_file_oracle(content: &[u8]) -> bool {
+        if content.iter().take(8000).any(|b| *b == 0) {
+            return false;
+        }
+        content.split(|b| *b == b'\n').any(|line| {
+            let line = line.strip_suffix(b"\r").unwrap_or(line);
+            [&b"<<<<<<<"[..], &b">>>>>>>"[..]].iter().any(|marker| {
+                line.strip_prefix(*marker)
+                    .is_some_and(|rest| rest.is_empty() || rest[0] == b' ')
+            })
+        })
+    }
+
+    /// Fed in pieces of any size, split anywhere, the scan answers as the whole-file check.
+    #[test]
+    fn marker_scan_in_pieces_matches_the_whole_file_check() {
+        let long = "y".repeat(7_990);
+        let samples: Vec<Vec<u8>> = [
+            "a\n<<<<<<< HEAD\nb\n",
+            "a\r\n>>>>>>>\r\n",
+            ">>>>>>>",
+            "<<<<<<<\r",
+            "<<<<<<<\rx\n",
+            "<<<<<<< \r\n",
+            "<<<<<<<x\n>>>>>>>y\n",
+            "Title\n=======\n",
+            "x <<<<<<< y\n",
+            "<<<<<<<<< nine\n",
+            "\0binary\n<<<<<<< x\n",
+            "<<<<<<< x\n\0 later binary\n",
+            "\r\n\r\n<<<<<<<\n",
+            "",
+            "\n",
+        ]
+        .iter()
+        .map(|s| s.as_bytes().to_vec())
+        .chain([
+            format!("{long}\n<<<<<<< x\n\0").into_bytes(),
+            format!("{long}{long}\n\0\n<<<<<<< x\n").into_bytes(),
+        ])
+        .collect();
+        for sample in &samples {
+            let expected = whole_file_oracle(sample);
+            for piece in 1..=sample.len().clamp(1, 12) {
+                let mut scan = MarkerScan::default();
+                for chunk in sample.chunks(piece) {
+                    scan.feed(chunk);
+                }
+                assert_eq!(
+                    scan.finish(),
+                    expected,
+                    "{:?} in pieces of {piece}",
+                    String::from_utf8_lossy(sample)
+                );
+            }
+            let mut empty_pieces = MarkerScan::default();
+            empty_pieces.feed(b"");
+            empty_pieces.feed(sample);
+            empty_pieces.feed(b"");
+            assert_eq!(empty_pieces.finish(), expected);
+            assert_eq!(has_conflict_markers(sample), expected);
+        }
     }
 }
