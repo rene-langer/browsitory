@@ -2083,6 +2083,34 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   `.gitignore`, then writes it once. Each is one worker command and so one undo step ("Stage 3
   files", "Ignore 2 patterns"; one path keeps the single-path label).
 
+## Syntax highlighting
+
+Shiki tokenizes in a Web Worker, not on the page (#843): a 2,000-line TypeScript file took 1 to
+2 s in V8 and about 5 s in WebKitGTK, all of it a frozen UI. `highlight.ts` keeps the page's API
+(`highlightLines`, `useHunkTokens`; the merge editor's `conflictHighlight.ts`) and hands the
+work to a `HighlightTransport` (`highlightWorkerProtocol.ts`):
+
+- The tokenizer (`highlightTokenizer.ts`: grammars, Shiki, the JavaScript regex engine) works
+  in chunks of 200 lines, carrying Shiki's grammar state from chunk to chunk, and gives the
+  event loop a turn between chunks. A caller that moves on (another file, an unmounted view)
+  aborts its `AbortSignal`; `highlightLines` shares one request between callers asking for the
+  same text and cancels it once none wants it, and the worker drops it after its current chunk.
+- The entry points pick the transport. The desktop app (`main.tsx`) starts a module worker with
+  `new Worker(new URL("./lib/highlight.worker.ts", import.meta.url), { type: "module" })`; its
+  grammars stay separate chunks that load on first use (`vite.config.ts`'s `worker` options,
+  with the excluded-grammar check). Tauri's CSP needs nothing more: workers fall back to
+  `default-src 'self'`.
+- A VSCode webview can start a worker only from a `blob:` (or `data:`) URL and the worker can't
+  import further code, and the bundle is a classic script without `import.meta`. So
+  `vite.vscodeWorker.ts` builds the worker as one self-contained script with every grammar,
+  `dist-vscode/assets/highlight-worker.js`, and `vscode-main.tsx` fetches it next to its own
+  script, wraps it in a blob and starts it (`highlightBlobWorker.ts`). The webview CSP allows
+  `worker-src blob:` for this and nothing else (`extension/src/webviewHtml.ts`).
+- If the worker can't be created or fails to load, pending and later requests fall back to
+  the page (`highlightInProcess.ts`): the same chunked tokenizer, so the page blocks for one
+  chunk at a time instead of the whole file. Vitest uses that fallback too (jsdom has no
+  `Worker`); the protocol has its own tests with a fake worker.
+
 ## Image preview
 
 - `git_core::diff::file_sides(repo, &DiffSource, path, cap)` returns both sides of a diff as

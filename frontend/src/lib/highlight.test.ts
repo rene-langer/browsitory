@@ -1,5 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { highlightLines, loadedLanguages, withoutExcludedGrammars } from "./highlight";
+import { renderHook } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { DiffHunk } from "../ipc/RepoClient";
+import {
+  highlightLines,
+  loadedLanguages,
+  setHighlightTransport,
+  useHunkTokens,
+  withoutExcludedGrammars,
+  type Token,
+} from "./highlight";
+import type { HighlightTransport } from "./highlightWorkerProtocol";
 
 describe("highlightLines", () => {
   it("tokenizes per line with css-variable colors", async () => {
@@ -40,5 +50,87 @@ describe("withoutExcludedGrammars", () => {
     ]);
     expect(result.map((l) => l.name)).toEqual(["c", "ruby"]);
     expect(result[1].embeddedLangs).toEqual(["c", "yaml"]);
+  });
+});
+
+// #843: highlighting runs off the main thread (a Web Worker in the app, a fake here). A request
+// whose caller moved on is cancelled, so a stale file doesn't hold up the next one.
+describe("highlightLines with a transport", () => {
+  let restore: HighlightTransport | undefined;
+  afterEach(() => {
+    if (restore !== undefined) setHighlightTransport(restore);
+    restore = undefined;
+  });
+
+  /** A transport whose requests stay pending until the test resolves them. */
+  function pendingTransport() {
+    const requests: { code: string; signal?: AbortSignal; resolve: (tokens: Token[][]) => void }[] = [];
+    const transport: HighlightTransport = {
+      tokenize: vi.fn(
+        (_lang: string, code: string, signal?: AbortSignal) =>
+          new Promise<Token[][]>((resolve) => requests.push({ code, signal, resolve })),
+      ),
+      loadedLanguages: vi.fn().mockResolvedValue([]),
+    };
+    return { transport, requests };
+  }
+
+  it("rejects and cancels the request when its caller aborts", async () => {
+    const { transport, requests } = pendingTransport();
+    restore = setHighlightTransport(transport);
+    const controller = new AbortController();
+
+    const result = highlightLines("rust", "fn aborted() {}", controller.signal);
+    controller.abort();
+
+    await expect(result).rejects.toMatchObject({ name: "AbortError" });
+    expect(requests[0].signal?.aborted).toBe(true);
+  });
+
+  it("keeps a request two callers share until both abort", async () => {
+    const { transport, requests } = pendingTransport();
+    restore = setHighlightTransport(transport);
+    const first = new AbortController();
+    const second = new AbortController();
+
+    const a = highlightLines("rust", "fn shared() {}", first.signal);
+    const b = highlightLines("rust", "fn shared() {}", second.signal);
+    expect(transport.tokenize).toHaveBeenCalledTimes(1);
+    first.abort();
+    await expect(a).rejects.toMatchObject({ name: "AbortError" });
+    expect(requests[0].signal?.aborted).toBe(false);
+
+    requests[0].resolve([[{ content: "fn", color: undefined }]]);
+    await expect(b).resolves.toEqual([[{ content: "fn", color: undefined }]]);
+  });
+
+  it("asks the transport which grammars are loaded", async () => {
+    const { transport } = pendingTransport();
+    restore = setHighlightTransport(transport);
+    await loadedLanguages();
+    expect(transport.loadedLanguages).toHaveBeenCalled();
+  });
+
+  it("cancels a diff's requests when the diff goes away", async () => {
+    const { transport, requests } = pendingTransport();
+    restore = setHighlightTransport(transport);
+    const hunks: DiffHunk[] = [
+      {
+        oldStart: 1,
+        oldLines: 1,
+        newStart: 1,
+        newLines: 1,
+        lines: [
+          { origin: "Remove", content: "let gone = 1;\n" },
+          { origin: "Add", content: "let unmounted = 2;\n" },
+        ],
+      },
+    ];
+
+    const { unmount } = renderHook(() => useHunkTokens(hunks, "typescript", true));
+    await vi.waitFor(() => expect(requests).toHaveLength(2));
+    unmount();
+
+    expect(requests.map((r) => r.signal?.aborted)).toEqual([true, true]);
   });
 });

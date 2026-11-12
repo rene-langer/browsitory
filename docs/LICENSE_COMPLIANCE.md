@@ -280,7 +280,7 @@ routine update doesn't break CI; a new crate under the same licence still fails)
 The diff view's syntax highlighting bundles TextMate grammars from Shiki (`@shikijs/langs`,
 built from `tm-grammars`). Each grammar keeps its upstream licence, so
 `scripts/generate-third-party-notices.py` works out which grammars ship (the loaders in
-`frontend/src/lib/highlight.ts` plus the grammars they import) and copies their licence texts
+`frontend/src/lib/highlightTokenizer.ts` plus the grammars they import) and copies their licence texts
 from `tm-grammars`' `NOTICE` into `THIRD_PARTY_NOTICES.md`. It fails on a shipped grammar
 whose licence is not allowed and has no entry below. Almost all shipped grammars are MIT.
 

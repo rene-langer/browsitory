@@ -117,6 +117,7 @@ function packageFiles({ version = "1.2.3", target = "linux-x64", preRelease = tr
     { name: "extension/webview/favicon.svg", data: "<svg/>" },
     { name: "extension/webview/assets/vscode-main.js", data: "main();" },
     { name: "extension/webview/assets/vscode-main.css", data: "body{}" },
+    { name: "extension/webview/assets/highlight-worker.js", data: "worker();" },
     { name: "extension/webview/third-party-notices.md", data: "# Notices\n" },
     { name: `extension/bin/${sidecar.name}`, data: sidecar.data, mode: 0o100755 },
     { name: "extension/icon.png", data: Buffer.from([0x89, 0x50, 0x4e, 0x47]) },
@@ -237,6 +238,11 @@ test("reports missing webview notices, but no other Markdown in the webview", ()
 test("reports a missing webview stylesheet", () => {
   const files = packageFiles().filter((file) => file.name !== "extension/webview/assets/vscode-main.css");
   assert.match(check(files).join("\n"), /missing extension\/webview\/assets\/vscode-main\.css/);
+});
+
+test("reports a missing highlight worker", () => {
+  const files = packageFiles().filter((file) => file.name !== "extension/webview/assets/highlight-worker.js");
+  assert.match(check(files).join("\n"), /missing extension\/webview\/assets\/highlight-worker\.js/);
 });
 
 test("reports a missing icon file", () => {

@@ -6,8 +6,18 @@ import { UpdateBanner } from './components/UpdateBanner'
 import { installGlobalErrorLogging } from './lib/logger'
 import { tauriRepoClient } from './ipc/tauriRepoClient'
 import { thirdPartyNoticesLoader, thirdPartyNoticesUrl } from './lib/thirdPartyNotices'
+import { setHighlightTransport } from './lib/highlight'
+import { inProcessTransport } from './lib/highlightInProcess'
+import { workerTransport } from './lib/highlightWorkerProtocol'
 
 installGlobalErrorLogging(tauriRepoClient)
+// Syntax highlighting runs in a Web Worker (#843); on the page in chunks if it can't start.
+setHighlightTransport(
+  workerTransport(
+    () => new Worker(new URL('./lib/highlight.worker.ts', import.meta.url), { type: 'module' }),
+    inProcessTransport(),
+  ),
+)
 
 const loadThirdPartyNotices = thirdPartyNoticesLoader(thirdPartyNoticesUrl(null, document.baseURI))
 
