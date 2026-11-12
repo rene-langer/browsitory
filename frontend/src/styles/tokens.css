@@ -87,6 +87,19 @@
   --color-lane-5: #c13f3a;
   --color-lane-6: #26807f;
 
+  /* Where a merge result line came from (#878): a bar in the colour, a faint tint behind it.
+     Hues, not red/green: neither side is "removed" (#654). */
+  --color-merge-ours: var(--color-lane-3);
+  --color-merge-theirs: var(--color-lane-4);
+  --color-merge-base: var(--color-lane-6);
+  --color-merge-edited: var(--color-warning-text);
+  --color-merge-conflict: var(--color-danger-text);
+  --color-merge-ours-tint: color-mix(in srgb, var(--color-merge-ours) 12%, transparent);
+  --color-merge-theirs-tint: color-mix(in srgb, var(--color-merge-theirs) 12%, transparent);
+  --color-merge-base-tint: color-mix(in srgb, var(--color-merge-base) 12%, transparent);
+  --color-merge-edited-tint: color-mix(in srgb, var(--color-merge-edited) 12%, transparent);
+  --color-merge-conflict-tint: color-mix(in srgb, var(--color-merge-conflict) 12%, transparent);
+
   /* Overlays */
   --color-scrim: rgba(20, 20, 18, 0.28);
   --color-checker: color-mix(in srgb, var(--color-border) 55%, transparent);

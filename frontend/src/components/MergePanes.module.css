@@ -144,29 +144,33 @@
 /* Where each result line came from (#878): a side taken, typed, or still in conflict. A bar on
    the line's edge and a faint tint, both by origin. */
 .line[data-origin] {
-  --origin: transparent;
-  background: color-mix(in srgb, var(--origin) 12%, transparent);
+  background: var(--origin-tint);
   box-shadow: inset 3px 0 var(--origin);
 }
 
 .line[data-origin="ours"] {
-  --origin: var(--color-lane-3);
+  --origin: var(--color-merge-ours);
+  --origin-tint: var(--color-merge-ours-tint);
 }
 
 .line[data-origin="theirs"] {
-  --origin: var(--color-lane-4);
+  --origin: var(--color-merge-theirs);
+  --origin-tint: var(--color-merge-theirs-tint);
 }
 
 .line[data-origin="base"] {
-  --origin: var(--color-lane-6);
+  --origin: var(--color-merge-base);
+  --origin-tint: var(--color-merge-base-tint);
 }
 
 .line[data-origin="edited"] {
-  --origin: var(--color-warning-text);
+  --origin: var(--color-merge-edited);
+  --origin-tint: var(--color-merge-edited-tint);
 }
 
 .line[data-origin="conflict"] {
-  --origin: var(--color-danger-text);
+  --origin: var(--color-merge-conflict);
+  --origin-tint: var(--color-merge-conflict-tint);
 }
 
 .placeholder {
