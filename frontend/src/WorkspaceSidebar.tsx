@@ -172,6 +172,8 @@ export function WorkspaceSidebar({
           onBranchFromCommit={appState.openCreateBranchDraft}
           onCheckoutCommit={announce((commitId) => `Checked out ${commitId.slice(0, 7)}`, appState.checkoutCommit, { undoable: true })}
           onGoToTag={(tag) => void goTo.goToTag(tag.name, tag.commitId)}
+          onCompareTag={compare.compareBranch}
+          currentBranch={appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null}
           pushDisabled={repositoryOperationDisabled}
           operationDisabledReason={operationDisabledReason}
           revealRequest={sectionRevealRequest(revealRequest, "tags")}

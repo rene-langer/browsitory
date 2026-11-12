@@ -151,6 +151,41 @@ describe("TagPanel", () => {
     expect(screen.queryByRole("menuitem", { name: "Switch to (detached)" })).toBeNull();
   });
 
+  it("compares the tag with the current branch from the row menu, by its full ref (#119)", () => {
+    const onCompareTag = vi.fn();
+    renderPanel({ onCompareTag, currentBranch: "main" });
+
+    openMenu("v1.0.0");
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "Push v1.0.0 to origin",
+      "Branch from tag",
+      "Switch to (detached)",
+      "Compare with current branch",
+      "Copy tag name",
+      "Delete from remote…",
+      "Delete tag…",
+    ]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Compare with current branch" }));
+
+    expect(onCompareTag).toHaveBeenCalledWith("refs/tags/v1.0.0", "v1.0.0");
+  });
+
+  it("offers Compare with HEAD on a detached HEAD, and no compare for a tag that doesn't point at a commit (#119)", () => {
+    renderPanel({
+      tags: [tag, { ...tag, name: "tree-tag", commitId: null }],
+      onCompareTag: vi.fn(),
+      currentBranch: null,
+    });
+
+    openMenu("v1.0.0");
+    expect(screen.getByRole("menuitem", { name: "Compare with HEAD" })).toBeEnabled();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+
+    openMenu("tree-tag");
+    expect(screen.queryByRole("menuitem", { name: "Compare with HEAD" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Compare with current branch" })).toBeNull();
+  });
+
   it("selects the tag's commit when its row is clicked or activated by key (#441)", () => {
     const { props: given } = renderPanel();
     const row = tagRow("v1.0.0");
