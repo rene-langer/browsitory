@@ -1568,6 +1568,39 @@ describe("CommitGraph — tag badges", () => {
     expect(onDeleteTagFromRemote).toHaveBeenCalledWith("v2.0");
   });
 
+  it("compares a tag badge's tag with the current branch, by its full ref (#119)", () => {
+    const onCompareTag = vi.fn();
+    renderGraph({ remotes, onPushTag: vi.fn(), onDeleteTag: vi.fn(async () => {}), onCompareTag });
+
+    fireEvent.contextMenu(screen.getByTitle("Tag v2.0"));
+    const labels = screen.getAllByRole("menuitem").map((item) => item.textContent);
+    expect(labels.indexOf("Compare with current branch")).toBe(labels.indexOf("Switch to (detached)") + 1);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Compare with current branch" }));
+
+    expect(onCompareTag).toHaveBeenCalledWith("refs/tags/v2.0", "v2.0");
+  });
+
+  it("offers Compare with HEAD on a tag badge while HEAD is detached, also while an operation runs (#119)", () => {
+    const onCompareTag = vi.fn();
+    renderGraph({
+      remotes,
+      onPushTag: vi.fn(),
+      onDeleteTag: vi.fn(async () => {}),
+      onCompareTag,
+      currentBranch: null,
+      operationsBlocked: true,
+      operationsBlockedReason: "A transfer is in progress.",
+    });
+
+    fireEvent.contextMenu(screen.getByTitle("Tag v2.0"));
+    expect(screen.queryByRole("menuitem", { name: "Compare with current branch" })).toBeNull();
+    const item = screen.getByRole("menuitem", { name: "Compare with HEAD" });
+    expect(item).toBeEnabled();
+    fireEvent.click(item);
+
+    expect(onCompareTag).toHaveBeenCalledWith("refs/tags/v2.0", "v2.0");
+  });
+
   it("disables Delete from remote… without remotes", () => {
     renderGraph({ remotes: [], onPushTag: vi.fn(), onDeleteTag: vi.fn(async () => {}), onDeleteTagFromRemote: vi.fn() });
     fireEvent.contextMenu(screen.getByTitle("Tag v2.0"));
