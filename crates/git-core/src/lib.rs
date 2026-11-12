@@ -12,6 +12,7 @@ pub mod graph;
 mod hardlink;
 pub mod history;
 pub mod hooks;
+mod index_refresh;
 pub mod launch;
 pub mod line_history;
 mod line_patch;

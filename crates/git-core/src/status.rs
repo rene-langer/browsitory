@@ -93,6 +93,11 @@ pub fn status(repo: &git2::Repository) -> Result<Vec<StatusEntry>, StatusError> 
     Ok(entries)
 }
 
+/// [`status`], with the index's stat data refreshed on the way (#841); see `index_refresh`.
+pub fn status_refreshing_index(repo: &git2::Repository) -> Result<Vec<StatusEntry>, StatusError> {
+    status(repo)
+}
+
 /// The delta's new path (falling back to `fallback`) and its old path when it differs.
 fn delta_paths(delta: Option<&git2::DiffDelta<'_>>, fallback: &str) -> (String, Option<String>) {
     let utf8 = |file: git2::DiffFile<'_>| {

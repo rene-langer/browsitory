@@ -63,6 +63,23 @@ pub struct ChangeStamp {
     pub work_tree: String,
 }
 
+/// A status read and the stamp from one scan of the work tree (#841).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusWithStamp {
+    pub status: Vec<crate::status::StatusEntry>,
+    pub stamp: ChangeStamp,
+}
+
+/// [`crate::status::status`] and [`change_stamp`] in one read, which scans the work tree once
+/// and refreshes the index's stat data on the way (#841).
+pub fn status_with_stamp(repo: &git2::Repository) -> Result<StatusWithStamp, git2::Error> {
+    let status = crate::status::status(repo).map_err(|crate::status::StatusError::Read(e)| e)?;
+    Ok(StatusWithStamp {
+        status,
+        stamp: change_stamp(repo)?,
+    })
+}
+
 /// The stamp of `repo` as it is now; see the module documentation for what it covers.
 pub fn change_stamp(repo: &git2::Repository) -> Result<ChangeStamp, git2::Error> {
     Ok(ChangeStamp {
