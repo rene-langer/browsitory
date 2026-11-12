@@ -862,6 +862,53 @@ pub fn spawn(spec: &SpawnSpec) -> Result<Child, LaunchError> {
     })
 }
 
+/// Whether a process with this id is running (#129). `false` for 0 and ids no process can
+/// have. A reused id reads as running: callers use this only to keep something longer.
+#[cfg(unix)]
+pub(crate) fn process_alive(pid: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return false;
+    };
+    if pid <= 0 {
+        return false;
+    }
+    // SAFETY: signal 0 sends nothing; it only checks that the process exists.
+    let result = unsafe { libc::kill(pid, 0) };
+    // EPERM: it exists but belongs to someone else.
+    result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+/// Whether a process with this id is running (#129). `false` for 0 and ids no process can
+/// have. A reused id reads as running: callers use this only to keep something longer.
+#[cfg(windows)]
+pub(crate) fn process_alive(pid: u32) -> bool {
+    use std::ffi::c_void;
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut c_void;
+        fn GetExitCodeProcess(process: *mut c_void, code: *mut u32) -> i32;
+        fn CloseHandle(handle: *mut c_void) -> i32;
+    }
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    const STILL_ACTIVE: u32 = 259;
+    const ERROR_ACCESS_DENIED: i32 = 5;
+    if pid == 0 {
+        return false;
+    }
+    // SAFETY: plain Win32 calls; the handle is closed before returning.
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            // A process we may not query still exists; anything else (no such id) doesn't.
+            return std::io::Error::last_os_error().raw_os_error() == Some(ERROR_ACCESS_DENIED);
+        }
+        let mut code = 0;
+        let ok = GetExitCodeProcess(handle, &mut code);
+        CloseHandle(handle);
+        ok != 0 && code == STILL_ACTIVE
+    }
+}
+
 /// Spawns and reaps on a background thread, so no zombie is left behind.
 pub fn spawn_detached(spec: &SpawnSpec) -> Result<(), LaunchError> {
     let mut child = spawn(spec)?;

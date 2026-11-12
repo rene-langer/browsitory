@@ -2221,7 +2221,12 @@ work to a `HighlightTransport` (`highlightWorkerProtocol.ts`):
   `LOCAL`/`REMOTE`/`BASE` files into a fresh `browsitory-tool-*` directory in the temp dir
   (random name, 0700, files created `O_EXCL` with sanitized names). The Tauri command spawns the
   tool and, for the merge tool, waits on `off_runtime` (the blocking pool), so a tool window that stays open for
-  hours never blocks the repo's command queue. Stale directories are swept after 24 hours.
+  hours never blocks the repo's command queue. Stale directories are swept after 24 hours,
+  except one whose tool is still running (#129): the spawned tool's PID is written to
+  `.browsitory-tool.pid` in its directory, and the sweep keeps the directory while that process
+  is alive (`process::process_alive`), even after Browsitory has quit. A PID file rather than
+  touching the directory while the tool runs, because tools are detached and outlive the app,
+  which would stop touching. A reused PID only keeps a directory longer.
 - VSCode reads historical file contents through the `browsitory-file:` content provider, which
   calls the sidecar's internal `read_file_version`. No temp files are needed there. Before
   opening VSCode's merge editor the host calls the internal `check_merge_target`, the same
