@@ -21,6 +21,7 @@ where
     pub(super) fn dispatch(&mut self, command: Command, guard: Option<&StateGuard>) {
         let mut state = ReadState {
             search_generation: &self.search_generation,
+            walk_cache: &mut self.walk_cache,
             undo_recorder: &mut self.undo_recorder,
             operations: &self.operations,
             clean_merge: &self.clean_merge,

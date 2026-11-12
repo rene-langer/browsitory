@@ -817,3 +817,210 @@ fn a_cursor_of_another_walk_or_garbage_is_stale() {
             .stale
     );
 }
+
+/// Two branches with interleaved commit times, a merge, commits with equal times (the walk's tie
+/// order) and tags, so the order of the walk is not simply the commits' age. Returns `main`'s
+/// tip.
+fn branchy_history(repo: &git2::Repository) -> git2::Oid {
+    let mut main = commit_at(repo, &[], "root", 1_000);
+    let mut side = main;
+    for i in 0..20_i64 {
+        main = commit_at(repo, &[main], &format!("main {i}"), 1_100 + i * 10);
+        // Every third side commit ties with the main commit made at the same time.
+        let skew = if i % 3 == 0 { 0 } else { 5 };
+        side = commit_at(repo, &[side], &format!("side {i}"), 1_100 + i * 10 + skew);
+        if i % 7 == 6 {
+            main = commit_at(
+                repo,
+                &[main, side],
+                &format!("merge {i}"),
+                1_100 + i * 10 + 7,
+            );
+        }
+    }
+    repo.reference("refs/heads/main", main, true, "test")
+        .unwrap();
+    repo.reference("refs/heads/side", side, true, "test")
+        .unwrap();
+    repo.set_head("refs/heads/main").unwrap();
+    let signature = repo.signature().unwrap();
+    let tagged = repo.find_object(side, None).unwrap();
+    repo.tag("v1", &tagged, &signature, "v1", false).unwrap();
+    main
+}
+
+/// Every page of `selection` from `cache`, `limit` rows each, concatenated.
+fn all_pages(
+    repo: &git2::Repository,
+    cache: &mut git_core::graph::WalkCache,
+    selection: &GraphSelection,
+    limit: usize,
+) -> Vec<git_core::graph::GraphCommit> {
+    let mut rows = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let page =
+            git_core::graph::graph_page_cached(repo, cache, selection, cursor.as_deref(), limit)
+                .unwrap();
+        assert!(!page.stale);
+        rows.extend(page.commits);
+        cursor = page.next_cursor;
+        if cursor.is_none() {
+            return rows;
+        }
+    }
+}
+
+// #835: pages served from a cached walk order are the rows of the uncached walk.
+#[test]
+fn cached_pages_are_the_rows_of_the_uncached_graph() {
+    let (_dir, repo) = init_repo();
+    branchy_history(&repo);
+    for selection in [
+        GraphSelection::default(),
+        collapsed(None),
+        local(&["side"]),
+        local(&["main"]),
+    ] {
+        let whole = git_core::graph::graph_log(&repo, 1_000, &selection).unwrap();
+        for limit in [1, 3, 7, 1_000] {
+            let mut cache = git_core::graph::WalkCache::default();
+            assert_eq!(
+                all_pages(&repo, &mut cache, &selection, limit),
+                whole,
+                "{selection:?}, pages of {limit}"
+            );
+        }
+    }
+}
+
+// #835: every page of one walk comes from a single sorted walk and a single read of the badges.
+#[test]
+fn later_pages_of_the_same_walk_neither_walk_nor_peel_again() {
+    let (_dir, repo) = init_repo();
+    branchy_history(&repo);
+    let mut cache = git_core::graph::WalkCache::default();
+    let selection = GraphSelection::default();
+
+    let rows = all_pages(&repo, &mut cache, &selection, 5);
+    assert!(rows.len() > 20);
+    assert_eq!(cache.stats().walks, 1);
+    assert_eq!(cache.stats().decorations, 1);
+    // A first page again (a refresh with nothing changed) reuses both.
+    git_core::graph::graph_page_cached(&repo, &mut cache, &selection, None, 5).unwrap();
+    assert_eq!(cache.stats().walks, 1);
+    assert_eq!(cache.stats().decorations, 1);
+}
+
+// #835: "Go to" and a search of the same walk use the order the graph's pages sorted.
+#[test]
+fn go_to_and_search_reuse_the_graph_walk() {
+    let (_dir, repo) = init_repo();
+    branchy_history(&repo);
+    let mut cache = git_core::graph::WalkCache::default();
+    let selection = GraphSelection::default();
+    let first = git_core::graph::graph_page_cached(&repo, &mut cache, &selection, None, 5).unwrap();
+
+    let side = repo.revparse_single("side~3").unwrap().id().to_string();
+    let cached =
+        git_core::locate::locate_commit_cached(&repo, &mut cache, &side, &selection).unwrap();
+    let uncached = git_core::locate::locate_commit(&repo, &side, &selection).unwrap();
+    assert_eq!(cached, uncached);
+    assert!(cached.unwrap().position.is_some());
+
+    let query = git_core::search::parse_query("side").unwrap();
+    let page = git_core::search::search_commits_cached(
+        &repo,
+        &mut cache,
+        &query,
+        &selection,
+        None,
+        git_core::search::PageLimits {
+            time: std::time::Duration::MAX,
+            ..git_core::search::PageLimits::DEFAULT
+        },
+        &|| false,
+    )
+    .unwrap();
+    assert_eq!(page.commits.len(), 20);
+    assert_eq!(
+        cache.stats().walks,
+        1,
+        "one walk for pages, Go to and search"
+    );
+    assert_eq!(cache.stats().decorations, 1);
+    assert_eq!(first.commits.len(), 5);
+}
+
+// #835: a moved branch starts a new walk; the old cursor is stale and the new walk pages on
+// correctly from its own cursors.
+#[test]
+fn a_moved_branch_rebuilds_the_walk_and_its_cursor_pages_on() {
+    let (_dir, repo) = init_repo();
+    let main = branchy_history(&repo);
+    let mut cache = git_core::graph::WalkCache::default();
+    let selection = GraphSelection::default();
+    let old = git_core::graph::graph_page_cached(&repo, &mut cache, &selection, None, 4).unwrap();
+    let old_cursor = old.next_cursor.unwrap();
+
+    let newer = commit_at(&repo, &[main], "newer", 5_000);
+    repo.reference("refs/heads/main", newer, true, "test")
+        .unwrap();
+    let stale =
+        git_core::graph::graph_page_cached(&repo, &mut cache, &selection, Some(&old_cursor), 4)
+            .unwrap();
+    assert!(stale.stale);
+
+    let whole = git_core::graph::graph_log(&repo, 1_000, &selection).unwrap();
+    assert_eq!(whole[0].summary, "newer");
+    assert_eq!(all_pages(&repo, &mut cache, &selection, 4), whole);
+    assert_eq!(cache.stats().walks, 2, "the old walk and the new one");
+}
+
+// #835: the badges are read again when a ref changes, also one that moves no start point (a new
+// tag), and not otherwise.
+#[test]
+fn a_new_tag_shows_on_the_next_page_without_a_new_walk() {
+    let (_dir, repo) = init_repo();
+    let main = branchy_history(&repo);
+    let mut cache = git_core::graph::WalkCache::default();
+    let selection = GraphSelection::default();
+    git_core::graph::graph_page_cached(&repo, &mut cache, &selection, None, 4).unwrap();
+
+    let tagged = repo.find_object(main, None).unwrap();
+    repo.tag_lightweight("fresh", &tagged, false).unwrap();
+    let page = git_core::graph::graph_page_cached(&repo, &mut cache, &selection, None, 4).unwrap();
+    let row = page
+        .commits
+        .iter()
+        .find(|row| row.id == main.to_string())
+        .expect("main's tip is on the first page");
+    assert_eq!(row.tags, ["fresh"]);
+    assert_eq!(cache.stats().walks, 1);
+    assert_eq!(cache.stats().decorations, 2);
+}
+
+// #835: a cache holds the walks it was asked for most recently, so the graph and a search with
+// another start point don't push each other out.
+#[test]
+fn the_graph_walk_and_a_branch_search_walk_are_both_kept() {
+    let (_dir, repo) = init_repo();
+    branchy_history(&repo);
+    let mut cache = git_core::graph::WalkCache::default();
+    let selection = GraphSelection::default();
+    let query = git_core::search::parse_query("branch:side side").unwrap();
+    for _ in 0..3 {
+        git_core::graph::graph_page_cached(&repo, &mut cache, &selection, None, 4).unwrap();
+        git_core::search::search_commits_cached(
+            &repo,
+            &mut cache,
+            &query,
+            &selection,
+            None,
+            git_core::search::PageLimits::DEFAULT,
+            &|| false,
+        )
+        .unwrap();
+    }
+    assert_eq!(cache.stats().walks, 2);
+}
