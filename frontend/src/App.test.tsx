@@ -434,6 +434,16 @@ describe("App", () => {
     expect(await screen.findByText("Couldn't open the user guide: no browser")).toBeInTheDocument();
   });
 
+  it("names the release notes button as its tooltip does, \"What’s new\" (#681, WCAG 2.5.3)", async () => {
+    const { container } = render(<App client={guideClient(vi.fn())} />);
+    await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+
+    const button = screen.getByRole("button", { name: "What’s new" });
+    expect(button).toHaveAttribute("title", "What’s new");
+    fireEvent.click(button);
+    expect(await screen.findByRole("dialog", { name: "What’s new" })).toBeInTheDocument();
+  });
+
   it("closes the release notes before opening the user guide, so a failure is visible (#320)", async () => {
     const openExternalUrl = vi.fn().mockRejectedValue(new Error("no browser"));
     const { container } = render(<App client={guideClient(openExternalUrl)} />);
