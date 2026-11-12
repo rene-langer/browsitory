@@ -1151,8 +1151,16 @@ fn refuse_case_only_rename(
 }
 
 /// The refusal for a stashed `path` renamed from `other`, two names the drive takes for one.
+/// Names whose NFC forms match differ only in how accented letters are encoded (#404); any
+/// other pair (a case change, `ß` → `ss`, also one combined with a normalization change) is
+/// case-only.
 fn rename_refusal(path: String, other: String) -> StashError {
-    StashError::CaseOnlyRename { path, other }
+    use unicode_normalization::UnicodeNormalization;
+    if path.nfc().eq(other.nfc()) {
+        StashError::NormalizationOnlyRename { path, other }
+    } else {
+        StashError::CaseOnlyRename { path, other }
+    }
 }
 
 /// Stash all's form of `refuse_case_only_rename` (#370): where names fold, refuses when the
