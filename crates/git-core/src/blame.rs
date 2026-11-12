@@ -345,14 +345,15 @@ mod tests {
     }
 
     #[test]
-    fn a_common_block_without_a_newline_is_trimmed_whole() {
+    fn a_common_block_without_a_newline_is_given_back_whole() {
+        // xdiff gives the trimmed blocks back up to their first newline; with none, all of it.
         let tail = "x".repeat(1024);
         let old = format!("A\n{tail}");
         let new = format!("B\n{tail}");
 
-        assert_eq!(
-            trim_common_tail(old.as_bytes(), new.as_bytes()),
-            (&b"A\n"[..], &b"B\n"[..])
-        );
+        let (trimmed_old, trimmed_new) = trim_common_tail(old.as_bytes(), new.as_bytes());
+
+        assert_eq!(trimmed_old, old.as_bytes());
+        assert_eq!(trimmed_new, new.as_bytes());
     }
 }
