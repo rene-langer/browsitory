@@ -137,6 +137,9 @@ Each change shows at once, without a restart:
 - **Code font size (px)**: the size of file content in diffs, blame, the file viewer and
   conflicts, from 10 to 24 pixels. Empty keeps each view's built-in size.
 - **Interface size**: Small, Normal or Large text for the rest of the window.
+- **Date format**: **ISO** (2026-11-11 14:05, the default) or **System**, your operating
+  system's short date and time. Every date follows it: the history, search results, file
+  history, the Reflog, stashes and commit details. "3 days ago" labels stay in English.
 - **Tab size**: how many columns a tab character takes in file content, from 1 to 16 (4 at
   first).
 - The sparkle button (**What's new**) opens the **Release notes**: what changed in each version. They also open
