@@ -16,8 +16,14 @@ A conflicted file opens the **Resolve conflict** pane:
 
 - For text conflicts the pane is a merge editor. It shows the file with each conflicting block
   in place; long runs of unchanged lines are collapsed to the three lines next to a conflict
-  (**Show N unchanged lines** shows the rest). Each block shows our lines and their lines side
-  by side; **Show base** adds the common ancestor's lines ("Empty: no common lines" when there
+  (**Show N unchanged lines** shows the rest). It has two layouts, and remembers the one you
+  pick. **Three panes**, the default, shows the whole file three times side by side: our
+  version on the left, the result in the middle and their version on the right, each with its
+  own line numbers. The unchanged lines stay level across the panes and the panes scroll
+  together; each conflicting block sits between them with its choices, our lines, the editable
+  result and their lines. **Blocks** shows each conflicting block on its own, our lines and
+  their lines side by side above its result. When the pane is too narrow for three panes (the
+  VS Code side panel, for example), the merge editor shows the blocks. **Show base** adds the common ancestor's lines ("Empty: no common lines" when there
   are none, for example when both sides added the file). For each block choose **Accept ours**,
   **Accept theirs**, **Ours then theirs**, **Theirs then ours** or **Accept base**, or type the
   block's **Result** yourself: the result field is editable, and typing in it marks the block

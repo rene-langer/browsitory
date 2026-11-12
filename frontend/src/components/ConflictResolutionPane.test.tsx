@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RepoError, type ConflictSegment, type RepoClient } from "../ipc/RepoClient";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import { fakeRepoClient } from "../test/fakeRepoClient";
@@ -9,6 +9,12 @@ import { DiffSettingsContext } from "../state/useDiffSettings";
 import { MergeEditorContext, useMergeEditorRegistry, type MergeEditorRegistry } from "../state/useCurrentMergeEditor";
 
 const TEST_REPO_PATH = "/repo";
+
+// These tests describe the block view (#720). The three-pane view is the default since #875;
+// the block view stays behind the layout switch, remembered per viewer in localStorage.
+beforeEach(() => {
+  localStorage.setItem("mergeEditor.view", "blocks");
+});
 
 function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
   return fakeRepoClient(overrides, "empty");
