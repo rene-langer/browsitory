@@ -678,6 +678,7 @@ pub fn search_commits(
     // they left a large repository one scanned commit per page.
     walk.peek();
     let started = Instant::now();
+    let mut trees = TreeCache::default();
     let mut position = offset;
     let mut scanned_here = 0;
     let mut commits = Vec::new();
@@ -694,7 +695,7 @@ pub fn search_commits(
         let commit = repo.find_commit(oid?)?;
         position += 1;
         scanned_here += 1;
-        if Subject::new(repo, &commit, &paths).eval(&node)? {
+        if Subject::new(repo, &commit, &paths, &mut trees).eval(&node)? {
             commits.push(decorations.graph_commit(&commit));
         }
     }
@@ -743,7 +744,12 @@ enum Prepared {
         sha: bool,
     },
     Message(String),
-    Path(String),
+    Path {
+        pattern: String,
+        /// The pattern as a plain path (no glob, no pathspec syntax), compared by tree
+        /// entries instead of a diff (#848).
+        literal: Option<String>,
+    },
     Contents(String),
 }
 
@@ -754,7 +760,7 @@ impl Prepared {
             Prepared::After(_) | Prepared::Before(_) => 1,
             Prepared::Author(_) | Prepared::Committer(_) => 2,
             Prepared::Text { .. } | Prepared::Message(_) => 3,
-            Prepared::Path(_) => 4,
+            Prepared::Path { .. } => 4,
             Prepared::Contents(_) => 5,
         }
     }
@@ -840,7 +846,10 @@ impl PrepareContext<'_> {
             SearchTerm::Committer(t) => Prepared::Committer(t.to_lowercase()),
             SearchTerm::Message(t) => Prepared::Message(t.to_lowercase()),
             SearchTerm::Commit(t) => Prepared::Commit(t.to_lowercase()),
-            SearchTerm::Path(t) => Prepared::Path(t.clone()),
+            SearchTerm::Path(t) => Prepared::Path {
+                pattern: t.clone(),
+                literal: literal_path(t).map(str::to_string),
+            },
             SearchTerm::Contents(t) => Prepared::Contents(t.to_lowercase()),
             SearchTerm::After(d) => Prepared::After(*d),
             SearchTerm::Before(d) => Prepared::Before(*d),
@@ -891,76 +900,214 @@ fn line_term_commits(
 }
 
 fn signature_contains(signature: &git2::Signature, needle: &str) -> bool {
-    signature
-        .name()
-        .ok()
-        .unwrap_or_default()
-        .to_lowercase()
-        .contains(needle)
-        || signature
-            .email()
-            .ok()
-            .unwrap_or_default()
-            .to_lowercase()
-            .contains(needle)
+    contains_ignoring_case(signature.name().ok().unwrap_or_default(), needle)
+        || contains_ignoring_case(signature.email().ok().unwrap_or_default(), needle)
 }
 
-/// Diff of `commit` against its first parent (the empty tree for a root commit), limited to
-/// `paths` when non-empty.
+/// Whether `haystack` lowercased contains `needle` (already lowercased), as
+/// `haystack.to_lowercase().contains(needle)` says, without lowercasing a copy of an ASCII
+/// haystack (#848). A non-ASCII haystack still takes Unicode lowercasing: a letter such as
+/// U+212A KELVIN SIGN lowercases to an ASCII one.
+fn contains_ignoring_case(haystack: &str, needle: &str) -> bool {
+    if haystack.is_ascii() && needle.is_ascii() {
+        ascii_contains_ignoring_case(haystack.as_bytes(), needle.as_bytes())
+    } else {
+        haystack.to_lowercase().contains(needle)
+    }
+}
+
+/// Whether ASCII `haystack` contains the lowercase ASCII `needle`, comparing letters
+/// without case.
+fn ascii_contains_ignoring_case(haystack: &[u8], needle: &[u8]) -> bool {
+    needle.is_empty()
+        || haystack
+            .windows(needle.len())
+            .any(|window| window.eq_ignore_ascii_case(needle))
+}
+
+/// Whether the hexadecimal form of `id` starts with `prefix` (lowercase hex), without
+/// formatting the id (#848).
+fn id_starts_with(id: Oid, prefix: &str) -> bool {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let bytes = id.as_bytes();
+    prefix.len() <= bytes.len() * 2
+        && prefix.bytes().enumerate().all(|(index, digit)| {
+            let byte = bytes[index / 2];
+            let nibble = if index % 2 == 0 {
+                byte >> 4
+            } else {
+                byte & 0x0f
+            };
+            HEX[usize::from(nibble)] == digit
+        })
+}
+
+/// `pattern` as a plain path when a `path:` term with it matches exactly the changes to that
+/// file or to everything under that folder (#848): no wildcard or escape (`*?[]\\`), no
+/// leading `!`, `#` or `/`, no whitespace or control character, no empty, `.` or `..`
+/// component. One trailing `/` is dropped, as libgit2's pathspec does. Anything else keeps
+/// the diff with the pathspec.
+fn literal_path(pattern: &str) -> Option<&str> {
+    let path = pattern.strip_suffix('/').unwrap_or(pattern);
+    let plain = !path.is_empty()
+        && !path.starts_with(['/', '!', '#'])
+        && !path.bytes().any(|byte| {
+            matches!(byte, b'*' | b'?' | b'[' | b']' | b'\\')
+                || byte.is_ascii_whitespace()
+                || byte.is_ascii_control()
+        })
+        && path
+            .split('/')
+            .all(|component| !matches!(component, "" | "." | ".."));
+    plain.then_some(path)
+}
+
+/// Whether `commit` changes `path` (a [`literal_path`]) against its first parent (the empty
+/// tree for a root commit), read from the tree entries at `path` on both sides; `None` when
+/// they can't tell without a diff. The same entry on both sides, or no entry on either, is no
+/// change; a file (blob) on one side with a different one or none on the other is a change.
+/// Folders that differ, submodules and a mode-only change are left to the diff, so its rules
+/// (an empty folder, a normalized mode) keep deciding.
+fn path_changed(new: &git2::Tree, old: Option<&git2::Tree>, path: &str) -> Option<bool> {
+    type Entry = Option<(Oid, i32, Option<git2::ObjectType>)>;
+    // `Err` when the lookup failed for another reason than a missing path: left to the diff.
+    let entry = |tree: &git2::Tree| -> Result<Entry, ()> {
+        match tree.get_path(std::path::Path::new(path)) {
+            Ok(entry) => Ok(Some((entry.id(), entry.filemode_raw(), entry.kind()))),
+            Err(error) if error.code() == ErrorCode::NotFound => Ok(None),
+            Err(_) => Err(()),
+        }
+    };
+    if old.map(git2::Tree::id) == Some(new.id()) {
+        return Some(false);
+    }
+    let new = entry(new).ok()?;
+    let old = match old {
+        Some(tree) => entry(tree).ok()?,
+        None => None,
+    };
+    let blob = |side: &Entry| matches!(side, Some((_, _, Some(git2::ObjectType::Blob))));
+    match (&old, &new) {
+        (None, None) => Some(false),
+        (Some(a), Some(b)) if a == b => Some(false),
+        (Some((a, _, _)), Some((b, _, _))) if blob(&old) && blob(&new) && a != b => Some(true),
+        (None, Some(_)) if blob(&new) => Some(true),
+        (Some(_), None) if blob(&old) => Some(true),
+        _ => None,
+    }
+}
+
+/// Diff of a commit's tree `new` against its first parent's `old` (`None`, the empty tree, for
+/// a root commit), limited to `paths` when non-empty.
 fn first_parent_diff<'r>(
     repo: &'r Repository,
-    commit: &git2::Commit,
+    new: &git2::Tree,
+    old: Option<&git2::Tree>,
     paths: &[&str],
 ) -> Result<git2::Diff<'r>, git2::Error> {
     #[cfg(test)]
     tests::DIFFS_BUILT.with(|count| count.set(count.get() + 1));
-    let tree = commit.tree()?;
-    let parent_tree = match commit.parent(0) {
-        Ok(parent) => Some(parent.tree()?),
-        Err(_) => None,
-    };
     let mut opts = DiffOptions::new();
     for path in paths {
         opts.pathspec(path);
     }
-    repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut opts))
+    repo.diff_tree_to_tree(old, Some(new), Some(&mut opts))
+}
+
+/// The last trees a search read (#848). Walking newest first, a commit's first parent is
+/// usually the next commit scanned, so its tree, read as the parent's side of one commit, is
+/// the next commit's own: a large root tree is read once instead of twice (libgit2 doesn't
+/// cache trees above a few kilobytes).
+#[derive(Default)]
+struct TreeCache<'r> {
+    trees: Vec<git2::Tree<'r>>,
+}
+
+impl<'r> TreeCache<'r> {
+    const KEPT: usize = 2;
+
+    fn tree(&mut self, repo: &'r Repository, id: Oid) -> Result<git2::Tree<'r>, git2::Error> {
+        if let Some(tree) = self.trees.iter().find(|tree| tree.id() == id) {
+            return Ok(tree.clone());
+        }
+        let tree = repo.find_tree(id)?;
+        self.trees.insert(0, tree.clone());
+        self.trees.truncate(Self::KEPT);
+        Ok(tree)
+    }
 }
 
 /// One commit being matched, with what several terms share computed at most once.
 struct Subject<'a, 'r> {
     repo: &'r Repository,
     commit: &'a git2::Commit<'r>,
-    id: String,
+    /// The message lowercased, for a message that isn't ASCII; built at most once.
     message: OnceCell<String>,
     day: i64,
     /// The top-level `path:` patterns; `contents:` looks only at their files.
     paths: &'a [&'a str],
     /// Diff against the first parent limited to `paths`; built at most once.
     scoped: Option<git2::Diff<'r>>,
+    trees: &'a mut TreeCache<'r>,
+    /// The commit's tree and its first parent's (`None` for a root commit); read at most once.
+    sides: Option<(git2::Tree<'r>, Option<git2::Tree<'r>>)>,
 }
 
 impl<'a, 'r> Subject<'a, 'r> {
-    fn new(repo: &'r Repository, commit: &'a git2::Commit<'r>, paths: &'a [&'a str]) -> Self {
+    fn new(
+        repo: &'r Repository,
+        commit: &'a git2::Commit<'r>,
+        paths: &'a [&'a str],
+        trees: &'a mut TreeCache<'r>,
+    ) -> Self {
         let when = commit.time();
         Self {
             repo,
             commit,
-            id: commit.id().to_string(),
             message: OnceCell::new(),
             day: (when.seconds() + i64::from(when.offset_minutes()) * 60).div_euclid(86_400),
             paths,
             scoped: None,
+            trees,
+            sides: None,
         }
     }
 
-    fn message(&self) -> &str {
+    /// The commit's tree and its first parent's: `None` for a root commit, or when the parent
+    /// isn't there (a shallow clone's boundary).
+    fn sides(&mut self) -> Result<(git2::Tree<'r>, Option<git2::Tree<'r>>), git2::Error> {
+        if self.sides.is_none() {
+            let new = self.trees.tree(self.repo, self.commit.tree_id())?;
+            let old = match self.commit.parent(0) {
+                Ok(parent) => Some(self.trees.tree(self.repo, parent.tree_id())?),
+                Err(_) => None,
+            };
+            self.sides = Some((new, old));
+        }
+        Ok(self.sides.clone().expect("sides just read"))
+    }
+
+    /// Whether the message (as lossy UTF-8) lowercased contains `needle` (already lowercased):
+    /// an ASCII message is compared in place, any other lowercased once (#848).
+    fn message_contains(&self, needle: &str) -> bool {
+        let bytes = self.commit.message_bytes();
+        if bytes.is_ascii() && needle.is_ascii() {
+            return ascii_contains_ignoring_case(bytes, needle.as_bytes());
+        }
         self.message
-            .get_or_init(|| String::from_utf8_lossy(self.commit.message_bytes()).to_lowercase())
+            .get_or_init(|| String::from_utf8_lossy(bytes).to_lowercase())
+            .contains(needle)
     }
 
     fn scoped_diff(&mut self) -> Result<&git2::Diff<'r>, git2::Error> {
         if self.scoped.is_none() {
-            self.scoped = Some(first_parent_diff(self.repo, self.commit, self.paths)?);
+            let (new, old) = self.sides()?;
+            self.scoped = Some(first_parent_diff(
+                self.repo,
+                &new,
+                old.as_ref(),
+                self.paths,
+            )?);
         }
         Ok(self.scoped.as_ref().expect("diff just built"))
     }
@@ -992,7 +1139,7 @@ impl<'a, 'r> Subject<'a, 'r> {
         let commit = self.commit;
         Ok(match term {
             Prepared::Lines(ids) => ids.contains(&commit.id()),
-            Prepared::Commit(prefix) => self.id.starts_with(prefix.as_str()),
+            Prepared::Commit(prefix) => id_starts_with(commit.id(), prefix),
             Prepared::Merges(MergeFilter::OnlyMerges) => commit.parent_count() > 1,
             Prepared::Merges(MergeFilter::NoMerges) => commit.parent_count() <= 1,
             Prepared::After(d) => self.day >= *d,
@@ -1000,15 +1147,20 @@ impl<'a, 'r> Subject<'a, 'r> {
             Prepared::Author(n) => signature_contains(&commit.author(), n),
             Prepared::Committer(n) => signature_contains(&commit.committer(), n),
             Prepared::Text { needle, sha } => {
-                (*sha && self.id.starts_with(needle.as_str()))
-                    || self.message().contains(needle.as_str())
+                (*sha && id_starts_with(commit.id(), needle)) || self.message_contains(needle)
             }
-            Prepared::Message(t) => self.message().contains(t.as_str()),
-            Prepared::Path(pattern) => {
-                if self.paths == [pattern.as_str()] {
+            Prepared::Message(t) => self.message_contains(t),
+            Prepared::Path { pattern, literal } => {
+                let (new, old) = self.sides()?;
+                let changed = literal
+                    .as_deref()
+                    .and_then(|path| path_changed(&new, old.as_ref(), path));
+                if let Some(changed) = changed {
+                    changed
+                } else if self.paths == [pattern.as_str()] {
                     self.scoped_diff()?.deltas().len() > 0
                 } else {
-                    first_parent_diff(self.repo, commit, &[pattern.as_str()])?
+                    first_parent_diff(self.repo, &new, old.as_ref(), &[pattern.as_str()])?
                         .deltas()
                         .len()
                         > 0
