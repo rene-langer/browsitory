@@ -25,7 +25,7 @@ describe("commitActions", () => {
     }
     expect(actions.cherryPick).toMatchObject({ label: "Cherry-pick", paletteLabel: "Cherry-pick abc1234", needsParent: false });
     expect(actions.revert).toMatchObject({ label: "Revert", paletteLabel: "Revert abc1234" });
-    expect(actions.checkout).toMatchObject({ label: "Checkout (detached)", paletteLabel: "Checkout abc1234 (detached)" });
+    expect(actions.checkout).toMatchObject({ label: "Switch to (detached)", paletteLabel: "Switch to abc1234 (detached)" });
     expect(actions.reset).toMatchObject({ label: "Reset main to here…", paletteLabel: "Reset to abc1234…" });
     expect(actions.createTag).toMatchObject({ label: "Create tag…", paletteLabel: "Create tag at abc1234…" });
   });

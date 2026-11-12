@@ -13,8 +13,8 @@ describe("Browsitory VSCode extension third-party licences", () => {
     try {
       // `connectToWebview` returns once the webview has a document, not once the app rendered
       // into it: clicking at once could find no header yet (#182). Wait for each button.
-      await webview.waitForSelector('button[aria-label="Release notes"]', 15000);
-      await webview.click('button[aria-label="Release notes"]');
+      await webview.waitForSelector('button[aria-label="What’s new"]', 15000);
+      await webview.click('button[aria-label="What’s new"]');
       await webview.waitForText("button", "Third-party licences", 15000);
       await webview.clickByText("button", "Third-party licences");
       // The text region renders only once third-party-notices.md was fetched from the

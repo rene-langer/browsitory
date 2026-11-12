@@ -10,7 +10,7 @@ const feature = { name: "feature", isCurrent: false };
 describe("branchActions", () => {
   it("offers switching to and merging another branch, under palette labels naming it", () => {
     const actions = branchActions({ blockers: free, remoteCount: 1, upstream }, feature);
-    expect(actions.checkout).toEqual({ label: "Checkout", paletteLabel: "Switch to feature", enabled: true, reason: undefined });
+    expect(actions.checkout).toEqual({ label: "Switch to", paletteLabel: "Switch to feature", enabled: true, reason: undefined });
     expect(actions.merge).toMatchObject({ paletteLabel: "Merge feature into current branch…", enabled: true });
     expect(actions.pushToUpstream).toBeNull();
     expect(actions.setUpstream).toBeNull();

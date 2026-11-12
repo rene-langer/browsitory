@@ -100,7 +100,7 @@ describe("NewBranchForm (in BranchTree)", () => {
   // #656: checked out by default, in the create itself (one undo step), and remembered.
   it("checks out the new branch by default, and only creates it when unticked, remembering that", async () => {
     const { props, unmount } = renderTree({ createBranchDraft: { startPoint: "HEAD" } });
-    const checkbox = screen.getByRole("checkbox", { name: "Check out after creating" });
+    const checkbox = screen.getByRole("checkbox", { name: "Switch to it after creating" });
     expect(checkbox).toBeChecked();
     fireEvent.click(checkbox);
     fireEvent.change(screen.getByRole("textbox", { name: "Branch name" }), { target: { value: "feat/x" } });
@@ -109,7 +109,7 @@ describe("NewBranchForm (in BranchTree)", () => {
     expect(props.onSwitchBranch).not.toHaveBeenCalled();
     unmount();
     renderTree({ createBranchDraft: { startPoint: "HEAD" } });
-    expect(screen.getByRole("checkbox", { name: "Check out after creating" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Switch to it after creating" })).not.toBeChecked();
   });
 
   // #561: Create follows `operationBlockers`, not only a rebase run here.
@@ -145,11 +145,11 @@ describe("NewBranchForm (in BranchTree)", () => {
     const props = treeProps({ createBranchDraft: { startPoint: "HEAD" } });
     const { rerender } = render(<BranchTree {...props} />);
     fireEvent.change(screen.getByRole("textbox", { name: "Branch name" }), { target: { value: "feat/x" } });
-    fireEvent.click(screen.getByRole("checkbox", { name: "Check out after creating" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Switch to it after creating" }));
     rerender(<BranchTree {...props} createBranchDraft={null} />);
     expect(screen.queryByRole("form", { name: "New branch" })).toBeNull();
     rerender(<BranchTree {...props} />);
     expect(screen.getByRole("textbox", { name: "Branch name" })).toHaveValue("feat/x");
-    expect(screen.getByRole("checkbox", { name: "Check out after creating" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Switch to it after creating" })).not.toBeChecked();
   });
 });

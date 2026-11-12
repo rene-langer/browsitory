@@ -439,7 +439,7 @@ describe("App", () => {
     const { container } = render(<App client={guideClient(openExternalUrl)} />);
     await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
 
-    fireEvent.click(screen.getByRole("button", { name: "Release notes" }));
+    fireEvent.click(screen.getByRole("button", { name: "What’s new" }));
     fireEvent.click(await screen.findByRole("button", { name: "User guide" }));
 
     expect(await screen.findByText("Couldn't open the user guide: no browser")).toBeInTheDocument();
@@ -2089,7 +2089,7 @@ describe("App", () => {
         const row = (await screen.findByText(/c1 one/)).closest("li")!;
         fireEvent.click(row);
         fireEvent.contextMenu(row);
-        for (const name of ["Cherry-pick", "Revert", "Checkout (detached)"]) {
+        for (const name of ["Cherry-pick", "Revert", "Switch to (detached)"]) {
           const item = screen.getByRole("menuitem", { name });
           expect(item).toBeDisabled();
           expect(item).toHaveAttribute("title", "A rebase started in a terminal is in progress.");
@@ -2100,7 +2100,7 @@ describe("App", () => {
         fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), { target: { value: "c1" } });
         const results = await screen.findByRole("listbox", { name: "Command results" });
         // Listed as unavailable, with the reason, never runnable (#644).
-        for (const name of ["Cherry-pick c1", "Revert c1", "Checkout c1 (detached)", "Reset to c1…"]) {
+        for (const name of ["Cherry-pick c1", "Revert c1", "Switch to c1 (detached)", "Reset to c1…"]) {
           const option = within(results).getByRole("option", { name });
           expect(option).toHaveAttribute("aria-disabled", "true");
           expect(option).toHaveAccessibleDescription("A rebase started in a terminal is in progress.");
@@ -3143,11 +3143,11 @@ describe("App external tools", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("region", { name: "Licence texts" })).toBeNull());
 
-    fireEvent.click(screen.getByRole("button", { name: "Release notes" }));
+    fireEvent.click(screen.getByRole("button", { name: "What’s new" }));
     fireEvent.click(await screen.findByRole("button", { name: "Third-party licences" }));
     expect(await screen.findByRole("region", { name: "Licence texts" })).toBeInTheDocument();
     // The licences replace the release notes instead of stacking a second dialog on top.
-    expect(screen.queryByRole("region", { name: "Release notes" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "What’s new" })).toBeNull();
   });
 
   it("the palette opens Edit remote while the Branches section is collapsed", async () => {
@@ -3446,7 +3446,7 @@ describe("App release notes on a new version", () => {
         render(
           <App client={fakeClient({ getAppVersion: async () => "0.5.0", getLastSeenVersion: async () => "0.3.5" })} />,
         );
-        const dialog = await screen.findByRole("dialog", { name: "Release notes" });
+        const dialog = await screen.findByRole("dialog", { name: "What’s new" });
         expect(within(dialog).getByText("Notes for 0.5.0")).toBeInTheDocument();
         expect(within(dialog).getByText("Notes for 0.4.0")).toBeInTheDocument();
         expect(within(dialog).queryByText("Notes for 0.3.0")).toBeNull();
@@ -3469,7 +3469,7 @@ describe("App release notes on a new version", () => {
         />,
       );
       const welcome = await screen.findByRole("region", { name: "Welcome to Browsitory" });
-      expect(screen.queryByRole("dialog", { name: "Release notes" })).toBeNull();
+      expect(screen.queryByRole("dialog", { name: "What’s new" })).toBeNull();
       expect(within(welcome).getByRole("button", { name: "Open folder" })).toBeInTheDocument();
       fireEvent.click(within(welcome).getByRole("button", { name: "User guide" }));
       expect(openExternalUrl).toHaveBeenCalledOnce();
@@ -3533,7 +3533,7 @@ describe("App release notes on a new version", () => {
         render(
           <App client={fakeClient({ getAppVersion: async () => "0.5.0", getLastSeenVersion: async () => "0.0.1" })} />,
         );
-        const dialog = await screen.findByRole("dialog", { name: "Release notes" });
+        const dialog = await screen.findByRole("dialog", { name: "What’s new" });
         expect(within(dialog).getByText("Notes for 0.4.0")).toBeInTheDocument();
         expect(within(dialog).queryByText("Notes for 0.3.0")).toBeNull();
       },
@@ -3555,10 +3555,10 @@ describe("App release notes on a new version", () => {
       );
       expect(await screen.findByText("Browsitory was updated to 0.5.0")).toBeInTheDocument();
       await waitFor(() => expect(setLastSeenVersion).toHaveBeenCalledWith("0.5.0"));
-      expect(screen.queryByRole("dialog", { name: "Release notes" })).toBeNull();
+      expect(screen.queryByRole("dialog", { name: "What’s new" })).toBeNull();
 
       fireEvent.click(screen.getByRole("button", { name: "What’s new" }));
-      const dialog = await screen.findByRole("dialog", { name: "Release notes" });
+      const dialog = await screen.findByRole("dialog", { name: "What’s new" });
       expect(within(dialog).getByText("Notes for 0.5.0")).toBeInTheDocument();
       expect(within(dialog).queryByText("Notes for 0.4.0")).toBeNull();
     });
@@ -3577,7 +3577,7 @@ describe("App release notes on a new version", () => {
         />,
       );
       await waitFor(() => expect(setLastSeenVersion).toHaveBeenCalledWith("0.3.5"));
-      expect(screen.queryByRole("dialog", { name: "Release notes" })).toBeNull();
+      expect(screen.queryByRole("dialog", { name: "What’s new" })).toBeNull();
     });
   });
 });

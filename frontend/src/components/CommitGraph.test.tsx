@@ -1273,7 +1273,7 @@ describe("CommitGraph — history actions", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Revert" }));
     expect(onRevert).toHaveBeenCalledWith("B", null);
     openMenu("B");
-    fireEvent.click(screen.getByRole("menuitem", { name: "Checkout (detached)" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Switch to (detached)" }));
     expect(onCheckoutCommit).toHaveBeenCalledWith("B");
     openMenu("B");
     fireEvent.click(screen.getByRole("menuitem", { name: "Reset main to here…" }));
@@ -1344,7 +1344,7 @@ describe("CommitGraph — history actions", () => {
   it("disables the new actions while pending", () => {
     const { openMenu } = setup({ operationsBlocked: true });
     openMenu("B");
-    for (const name of ["Cherry-pick", "Revert", "Checkout (detached)", "Reset main to here…"]) {
+    for (const name of ["Cherry-pick", "Revert", "Switch to (detached)", "Reset main to here…"]) {
       expect(screen.getByRole("menuitem", { name })).toBeDisabled();
     }
   });
@@ -1524,7 +1524,7 @@ describe("CommitGraph — tag badges", () => {
     fireEvent.contextMenu(screen.getByTitle("Tag v2.0"));
     expect(screen.getByRole("menuitem", { name: "Push v2.0 to origin" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Cherry-pick" })).toBeNull();
-    fireEvent.click(screen.getByRole("menuitem", { name: "Checkout (detached)" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Switch to (detached)" }));
     expect(onCheckoutCommit).toHaveBeenCalledWith(tagged[0].id);
 
     fireEvent.contextMenu(screen.getByTitle("Tag v2.0"));
