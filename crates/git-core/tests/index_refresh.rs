@@ -7,7 +7,7 @@ mod common;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
-use common::{commit_all, init_repo, write_file};
+use common::{commit_all, git_ok, init_repo, write_file};
 use git2::Repository;
 use git_core::change_stamp::{change_stamp, status_with_stamp};
 use git_core::status::{status, status_refreshing_index};
@@ -251,4 +251,39 @@ fn ignore_case_repositories_read_the_same_status() {
 
     assert_eq!(refreshed, plain);
     assert_eq!(indexed_mtime(&repo, "dir/b.txt"), seconds(when));
+}
+
+/// The scan reads a scratch copy of the index; afterwards the repository has its own index back.
+#[test]
+fn the_repository_keeps_its_own_index() {
+    let (dir, repo) = committed_repo();
+    backdate(dir.path(), "a.txt");
+
+    status_refreshing_index(&repo).unwrap();
+    status_with_stamp(&repo).unwrap();
+
+    let index = repo.index().unwrap();
+    assert_eq!(
+        index.path().map(Path::to_path_buf),
+        Some(repo.path().join("index"))
+    );
+}
+
+/// libgit2 would drop the intent-to-add mark of an entry it refreshes; git keeps it. Such an
+/// index is left as it is.
+#[test]
+fn an_intent_to_add_entry_keeps_its_mark() {
+    let (dir, repo) = committed_repo();
+    write_file(dir.path(), "later.txt", "");
+    git_ok(dir.path(), &["add", "-N", "later.txt"]);
+    backdate(dir.path(), "later.txt");
+    backdate(dir.path(), "a.txt");
+    let content = index_content(&repo);
+
+    status_refreshing_index(&repo).unwrap();
+
+    assert_eq!(index_content(&repo), content);
+    let index = git2::Index::open(&repo.path().join("index")).unwrap();
+    let entry = index.get_path(Path::new("later.txt"), 0).unwrap();
+    assert_ne!(entry.flags_extended & (1 << 13), 0, "intent-to-add kept");
 }
