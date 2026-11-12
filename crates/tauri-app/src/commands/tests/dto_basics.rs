@@ -119,6 +119,7 @@ fn status_entry_dto_always_serializes_old_path() {
         old_path: None,
         staged: false,
         kind: StatusKind::Modified,
+        untracked_folder: false,
     });
     assert_eq!(
         serde_json::to_value(plain).unwrap(),
@@ -129,6 +130,7 @@ fn status_entry_dto_always_serializes_old_path() {
         old_path: Some("old.txt".into()),
         staged: true,
         kind: StatusKind::Renamed,
+        untracked_folder: false,
     });
     assert_eq!(
         serde_json::to_value(renamed).unwrap()["oldPath"],

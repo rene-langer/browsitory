@@ -28,6 +28,8 @@ use crate::worker::{
 /// borrows, so a transfer's host can lend it out.
 pub(super) struct ReadState<'a> {
     pub(super) search_generation: &'a SearchGeneration,
+    // The walk orders and ref badges of the graph, search and "Go to" (#835).
+    pub(super) walk_cache: &'a mut git_core::graph::WalkCache,
     pub(super) undo_recorder: &'a mut UndoRecorder,
     pub(super) operations: &'a Operations,
     pub(super) clean_merge: &'a Option<merge::CleanMerge>,
@@ -77,22 +79,25 @@ pub(super) fn dispatch(
         Command::GetStatus { reply } => status::get_status(repo, reply),
         Command::GetChangeStamp { reply } => status::get_change_stamp(repo, reply),
         Command::GetStatusWithStamp { reply } => status::get_status_with_stamp(repo, reply),
+        Command::ListUntrackedFolder { folder, reply } => {
+            status::list_untracked_folder(repo, &folder, reply)
+        }
         Command::GetCommitGraph {
             limit,
             selection,
             cursor,
             reply,
-        } => status::get_commit_graph(repo, limit, selection, cursor, reply),
+        } => status::get_commit_graph(repo, state.walk_cache, limit, selection, cursor, reply),
         Command::LocateCommit {
             revision,
             selection,
             reply,
-        } => status::locate_commit(repo, revision, selection, reply),
+        } => status::locate_commit(repo, state.walk_cache, revision, selection, reply),
         Command::GetMergedCommits {
             merge_id,
             limit,
             reply,
-        } => status::get_merged_commits(repo, merge_id, limit, reply),
+        } => status::get_merged_commits(repo, state.walk_cache, merge_id, limit, reply),
         Command::GetWorkingDiff {
             path,
             staged,
@@ -147,6 +152,7 @@ pub(super) fn dispatch(
             reply,
         } => search::search_commits(
             repo,
+            state.walk_cache,
             state.search_generation,
             generation,
             query,
@@ -282,8 +288,10 @@ mod tests {
         let mut ahead_behind = git_core::ahead_behind::AheadBehindCache::default();
         let clean_merge: Option<merge::CleanMerge> = None;
         let search_generation = SearchGeneration::default();
+        let mut walk_cache = git_core::graph::WalkCache::default();
         let mut state = ReadState {
             search_generation: &search_generation,
+            walk_cache: &mut walk_cache,
             undo_recorder: &mut undo_recorder,
             operations: &operations,
             clean_merge: &clean_merge,

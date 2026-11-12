@@ -147,3 +147,236 @@ fn an_unknown_or_malformed_commit_id_is_an_error() {
     let malformed = commit_details(&repo, "not-a-sha", BUDGET);
     assert!(matches!(malformed, Err(CommitDetailsError::Git(_))));
 }
+
+/// A commit with an empty tree at `time` (Unix seconds) on `parents`, written without moving
+/// any ref.
+fn commit_at(
+    repo: &git2::Repository,
+    parents: &[git2::Oid],
+    time: i64,
+    message: &str,
+) -> git2::Oid {
+    let tree = {
+        let builder = repo.treebuilder(None).unwrap();
+        let id = builder.write().unwrap();
+        repo.find_tree(id).unwrap()
+    };
+    let signature =
+        git2::Signature::new("Test User", "test@example.com", &git2::Time::new(time, 0)).unwrap();
+    let parents: Vec<git2::Commit> = parents
+        .iter()
+        .map(|id| repo.find_commit(*id).unwrap())
+        .collect();
+    let parents: Vec<&git2::Commit> = parents.iter().collect();
+    repo.commit(None, &signature, &signature, message, &tree, &parents)
+        .unwrap()
+}
+
+/// What the details list for `target`, checked ref by ref with libgit2's
+/// `graph_descendant_of`: `(branches, remote_branches, tags)`, each sorted.
+fn expected_containment(
+    repo: &git2::Repository,
+    target: git2::Oid,
+) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let contains = |tip: git2::Oid| tip == target || repo.graph_descendant_of(tip, target).unwrap();
+    let mut branches = Vec::new();
+    let mut remote_branches = Vec::new();
+    let mut tags = Vec::new();
+    for reference in repo.references().unwrap() {
+        let reference = reference.unwrap();
+        if reference.kind() != Some(git2::ReferenceType::Direct) {
+            continue;
+        }
+        let name = reference.name().unwrap().to_string();
+        let Ok(tip) = reference.peel_to_commit() else {
+            continue;
+        };
+        if !contains(tip.id()) {
+            continue;
+        }
+        if let Some(short) = name.strip_prefix("refs/heads/") {
+            branches.push(short.to_string());
+        } else if let Some(short) = name.strip_prefix("refs/remotes/") {
+            remote_branches.push(short.to_string());
+        } else if let Some(short) = name.strip_prefix("refs/tags/") {
+            tags.push(short.to_string());
+        }
+    }
+    branches.sort();
+    remote_branches.sort();
+    tags.sort();
+    (branches, remote_branches, tags)
+}
+
+/// A history with merges, criss-cross merges, a side line whose commit times run backwards
+/// (clock skew), an unrelated root and refs of every kind on many of its commits. Returns
+/// every commit.
+fn merge_history(repo: &git2::Repository) -> Vec<git2::Oid> {
+    let mut all = Vec::new();
+    let mut main = commit_at(repo, &[], 1_000_000, "root");
+    all.push(main);
+    for step in 0..12_i64 {
+        let time = 1_000_000 + step * 100;
+        let fork = main;
+        let mut side = fork;
+        for n in 0..3_i64 {
+            // Every other side line is committed with a clock running behind its fork point.
+            let skew = if step % 2 == 0 { 50 + n } else { -5_000 - n };
+            side = commit_at(repo, &[side], time + skew, &format!("side {step}.{n}"));
+            all.push(side);
+        }
+        main = commit_at(repo, &[main], time + 10, &format!("main {step}"));
+        all.push(main);
+        if step % 3 == 2 {
+            // A side line left unmerged, with a branch on it.
+            repo.reference(&format!("refs/heads/topic-{step}"), side, true, "test")
+                .unwrap();
+        } else if step == 6 {
+            // Criss-cross: main and the side line merge each other, then main merges both.
+            let criss = commit_at(repo, &[main, side], time + 60, "criss");
+            let cross = commit_at(repo, &[side, main], time + 70, "cross");
+            all.push(criss);
+            all.push(cross);
+            main = commit_at(repo, &[criss, cross], time + 80, "criss-cross merge");
+            all.push(main);
+        } else {
+            main = commit_at(repo, &[main, side], time + 60, &format!("merge {step}"));
+            all.push(main);
+        }
+    }
+    repo.reference("refs/heads/main", main, true, "test")
+        .unwrap();
+    let unrelated = commit_at(repo, &[], 2_000_000, "unrelated root");
+    let unrelated_tip = commit_at(repo, &[unrelated], 2_000_001, "unrelated tip");
+    all.push(unrelated);
+    all.push(unrelated_tip);
+    repo.reference("refs/heads/pages", unrelated_tip, true, "test")
+        .unwrap();
+    let signature = repo.signature().unwrap();
+    for (index, id) in all.clone().into_iter().enumerate() {
+        let object = repo.find_object(id, None).unwrap();
+        match index % 5 {
+            0 => {
+                repo.tag_lightweight(&format!("light-{index}"), &object, false)
+                    .unwrap();
+            }
+            1 => {
+                repo.tag(
+                    &format!("annotated-{index}"),
+                    &object,
+                    &signature,
+                    "t",
+                    false,
+                )
+                .unwrap();
+            }
+            2 => {
+                repo.reference(&format!("refs/remotes/origin/r-{index}"), id, true, "test")
+                    .unwrap();
+            }
+            3 => {
+                repo.reference(&format!("refs/heads/b-{index}"), id, true, "test")
+                    .unwrap();
+            }
+            _ => {}
+        }
+    }
+    all
+}
+
+#[test]
+fn every_commit_lists_the_same_refs_as_checking_each_ref_on_its_own() {
+    let (_dir, repo) = init_repo();
+    let all = merge_history(&repo);
+
+    for id in all {
+        let details = commit_details(&repo, &id.to_string(), BUDGET).unwrap();
+        let (branches, remote_branches, tags) = expected_containment(&repo, id);
+        assert!(details.complete, "{id}");
+        assert_eq!(details.branches, branches, "branches of {id}");
+        assert_eq!(
+            details.remote_branches, remote_branches,
+            "remote branches of {id}"
+        );
+        assert_eq!(details.tags, tags, "tags of {id}");
+    }
+}
+
+#[test]
+fn a_tag_on_a_tag_counts_by_the_commit_it_finally_names() {
+    let (_dir, repo) = init_repo();
+    let ids = history(&repo);
+    let signature = repo.signature().unwrap();
+    let middle = repo.find_object(ids[1], None).unwrap();
+    let inner = repo
+        .tag("inner", &middle, &signature, "inner", false)
+        .unwrap();
+    let inner = repo.find_object(inner, None).unwrap();
+    repo.tag("outer", &inner, &signature, "outer", false)
+        .unwrap();
+
+    let base = commit_details(&repo, &ids[0].to_string(), BUDGET).unwrap();
+    assert_eq!(base.tags, vec!["inner", "outer"]);
+    let side = commit_details(&repo, &ids[3].to_string(), BUDGET).unwrap();
+    assert!(side.tags.is_empty());
+}
+
+/// #842: 3,000 tags on a 3,000-commit line, the commit asked about at its root. Checked one
+/// ref at a time this walks about 4.5 million commits and runs far past a second; one walk for
+/// all refs covers the 3,000 commits once.
+#[test]
+fn many_tags_above_an_old_commit_are_all_checked_within_the_budget() {
+    let (_dir, repo) = init_repo();
+    let root = commit_at(&repo, &[], 1_000_000, "root");
+    let mut tip = root;
+    repo.tag_lightweight("t-0000", &repo.find_object(root, None).unwrap(), false)
+        .unwrap();
+    for n in 1..3_000_i64 {
+        tip = commit_at(&repo, &[tip], 1_000_000 + n, &format!("c{n}"));
+        repo.tag_lightweight(
+            &format!("t-{n:04}"),
+            &repo.find_object(tip, None).unwrap(),
+            false,
+        )
+        .unwrap();
+    }
+    repo.reference("refs/heads/main", tip, true, "test")
+        .unwrap();
+
+    let details = commit_details(&repo, &root.to_string(), Duration::from_secs(1)).unwrap();
+    assert!(details.complete, "the scan ran out of its budget");
+    assert_eq!(details.tags.len(), 3_000);
+    assert_eq!(details.branches, vec!["main"]);
+}
+
+/// #842: the walk follows no commit dated more than a day before the commit asked about (git
+/// name-rev's slop), so a ref above such a commit is not listed; one dated exactly a day
+/// before is still followed. The owner accepted this cut-off for the one walk.
+#[test]
+fn commits_dated_more_than_a_day_before_the_commit_are_not_followed() {
+    let (_dir, repo) = init_repo();
+    const DAY: i64 = 24 * 60 * 60;
+    let target = commit_at(&repo, &[], 1_000_000, "target");
+    let too_old = commit_at(
+        &repo,
+        &[target],
+        1_000_000 - DAY - 1,
+        "a day and a second before",
+    );
+    let above_too_old = commit_at(&repo, &[too_old], 1_000_100, "above it");
+    let edge = commit_at(&repo, &[target], 1_000_000 - DAY, "exactly a day before");
+    let above_edge = commit_at(&repo, &[edge], 1_000_100, "above the edge");
+    for (name, id) in [
+        ("too-old", too_old),
+        ("above-too-old", above_too_old),
+        ("edge", edge),
+        ("above-edge", above_edge),
+    ] {
+        repo.reference(&format!("refs/heads/{name}"), id, true, "test")
+            .unwrap();
+    }
+
+    let details = commit_details(&repo, &target.to_string(), BUDGET).unwrap();
+    assert!(details.complete);
+    assert_eq!(details.branches, vec!["above-edge", "edge"]);
+}

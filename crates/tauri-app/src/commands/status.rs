@@ -37,6 +37,21 @@ pub async fn get_change_stamp(
         .await
 }
 
+/// The files of an untracked folder listed as one entry (#845); `path` is the folder (`dir/`).
+#[tauri::command]
+pub async fn list_untracked_folder(
+    repo_path: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<StatusEntryDto>, ErrorDto> {
+    Ok(repo_worker(&state, &repo_path)?
+        .read(move |w| w.list_untracked_folder(path))
+        .await?
+        .into_iter()
+        .map(StatusEntryDto::from)
+        .collect())
+}
+
 /// A refresh's status and change stamp from one scan of the work tree (#841).
 #[tauri::command]
 pub async fn get_status_with_stamp(

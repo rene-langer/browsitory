@@ -31,6 +31,8 @@ pub(super) struct WorkerLoop<S: CredentialStore, A: ForgeApi> {
     // lane); they run, in order, before anything still in `queue` (#734).
     deferred: VecDeque<Command>,
     search_generation: SearchGeneration,
+    // The walk orders and ref badges the graph, search and "Go to" reuse (#835).
+    walk_cache: git_core::graph::WalkCache,
     // Shared with background fetch helpers (see `background_fetch`).
     credential_service: Arc<CredentialService<S>>,
     background_memory: background_fetch::Memory,
@@ -136,6 +138,7 @@ where
             queue,
             deferred: VecDeque::new(),
             search_generation,
+            walk_cache: git_core::graph::WalkCache::default(),
             credential_service,
             background_memory,
             pull_request_service,
@@ -185,6 +188,7 @@ where
             deferred: &mut self.deferred,
             state: read::ReadState {
                 search_generation: &self.search_generation,
+                walk_cache: &mut self.walk_cache,
                 undo_recorder: &mut self.undo_recorder,
                 operations: &self.operations,
                 clean_merge: &self.clean_merge,

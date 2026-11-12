@@ -75,12 +75,13 @@ pub struct StatusWithStamp {
 pub fn status_with_stamp(repo: &git2::Repository) -> Result<StatusWithStamp, git2::Error> {
     let refs = refs_stamp(repo)?;
     let (statuses, index) = crate::index_refresh::scan(repo)?;
+    let expansion = crate::untracked::expand(repo, &statuses);
     let workdir = repo.workdir().unwrap_or(Path::new(""));
     Ok(StatusWithStamp {
-        status: crate::status::entries(&statuses),
+        status: crate::status::entries(&statuses, &expansion),
         stamp: ChangeStamp {
             refs,
-            work_tree: hash_work_tree(Some(&index), Some((&statuses, workdir))),
+            work_tree: hash_work_tree(Some(&index), Some((&statuses, &expansion, workdir))),
         },
     })
 }
@@ -146,25 +147,25 @@ fn work_tree_stamp(repo: &git2::Repository) -> Result<String, git2::Error> {
     } else {
         None
     };
-    let statuses = match repo.workdir() {
-        Some(workdir) => Some((
-            repo.statuses(Some(&mut crate::status::status_options()))?,
-            workdir,
-        )),
+    let scan = match repo.workdir() {
+        Some(workdir) => {
+            let statuses = repo.statuses(Some(&mut crate::status::status_options()))?;
+            let expansion = crate::untracked::expand(repo, &statuses);
+            Some((statuses, expansion, workdir))
+        }
         None => None,
     };
     Ok(hash_work_tree(
         index.as_ref(),
-        statuses
-            .as_ref()
-            .map(|(statuses, workdir)| (statuses, *workdir)),
+        scan.as_ref()
+            .map(|(statuses, expansion, workdir)| (statuses, expansion, *workdir)),
     ))
 }
 
 /// The hash of the index's entries and of a status scan of the work tree at `workdir`.
 fn hash_work_tree(
     index: Option<&git2::Index>,
-    scan: Option<(&git2::Statuses<'_>, &Path)>,
+    scan: Option<(&git2::Statuses<'_>, &crate::untracked::Expansion, &Path)>,
 ) -> String {
     let mut hasher = DefaultHasher::new();
     for entry in index.into_iter().flat_map(git2::Index::iter) {
@@ -176,13 +177,30 @@ fn hash_work_tree(
         entry.flags_extended.hash(&mut hasher);
     }
 
-    if let Some((statuses, workdir)) = scan {
-        for entry in statuses.iter() {
-            let flags = entry.status();
-            entry.path_bytes().hash(&mut hasher);
+    if let Some((statuses, expansion, workdir)) = scan {
+        // The small untracked folders by their files (#845), as `status` lists them.
+        let scanned: Vec<(Vec<u8>, git2::Status)> = statuses
+            .iter()
+            .filter(|entry| {
+                !entry
+                    .path()
+                    .is_ok_and(|path| expansion.small.contains(path))
+            })
+            .map(|entry| (entry.path_bytes().to_vec(), entry.status()))
+            .collect();
+        let files = expansion
+            .files
+            .iter()
+            .map(|path| (path.as_bytes(), git2::Status::WT_NEW));
+        for (path, flags) in scanned
+            .iter()
+            .map(|(path, flags)| (path.as_slice(), *flags))
+            .chain(files)
+        {
+            path.hash(&mut hasher);
             flags.bits().hash(&mut hasher);
             if flags.intersects(WORKDIR_CHANGES) {
-                if let Ok(path) = std::str::from_utf8(entry.path_bytes()) {
+                if let Ok(path) = std::str::from_utf8(path) {
                     file_version(&workdir.join(path)).hash(&mut hasher);
                 }
             }

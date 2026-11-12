@@ -9,6 +9,7 @@ import { testWorkspaceActions } from "../test/workspaceActions";
 import { fakeRepoClient } from "../test/fakeRepoClient";
 import { DiffPane, type DiscardRequest } from "./DiffPane";
 import { NO_HEAD_INFO } from "./diffPaneShared";
+import { layoutInPane } from "../test/virtualLayout";
 
 const REPO = "/repo";
 
@@ -33,7 +34,9 @@ function Pane({
   conflictRequest = false,
   onConflictRequestHandled,
   headInfo,
+  refreshGeneration = 0,
 }: {
+  refreshGeneration?: number;
   client: RepoClient;
   status: StatusEntry[];
   actions?: Partial<WorkspaceActions>;
@@ -60,6 +63,7 @@ function Pane({
           conflictRequest={conflictRequest}
           onConflictRequestHandled={onConflictRequestHandled}
           headInfo={headInfo}
+          refreshGeneration={refreshGeneration}
         />
       </WorkspaceActionsContext.Provider>
     </DiffSettingsContext.Provider>
@@ -259,6 +263,29 @@ describe("empty states and conflicts (#665)", () => {
     expect(within(others).getByRole("option", { name: /^a\.txt/ })).toBeInTheDocument();
     // Keyboard order follows the display: the conflict first.
     expect(within(unstaged).getAllByRole("option")[0]).toHaveAccessibleName(/^z\.txt/);
+  });
+
+  // #832: the heading's actions wrap as one group under the title and the conflict badge, so no
+  // single button ends up alone on a line of its own.
+  it("keeps the Changes heading's actions together in one group, the conflict badge outside it", () => {
+    const withConflicts = [
+      entry("a.txt", false),
+      entry("n.txt", false, "New"),
+      entry("z.txt", false, "Conflicted"),
+      entry("c.txt", true, "New"),
+    ];
+    render(<Pane client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")} status={withConflicts} />);
+    const actions = screen.getByRole("group", { name: "Changes actions" });
+    expect(within(actions).getAllByRole("button").map((button) => button.textContent)).toEqual([
+      "Stage all",
+      "Stage modified",
+      "Discard all…",
+      "Delete untracked…",
+    ]);
+    expect(within(actions).queryByText("1 conflict")).not.toBeInTheDocument();
+    expect(screen.getByText("1 conflict")).toBeInTheDocument();
+    const stagedActions = screen.getByRole("group", { name: "Staged actions" });
+    expect(within(stagedActions).getByRole("button", { name: "Unstage all" })).toBeInTheDocument();
   });
 
   it("Go to conflict makes the first conflict the current file, then hands the request back", async () => {
@@ -478,5 +505,153 @@ describe("file tree and path filter (#729)", () => {
     fireEvent.change(filter(), { target: { value: ".ts" } });
     fireEvent.keyDown(unstagedList(), { key: "a", ctrlKey: true });
     expect(within(bar()).getByText("2 selected")).toBeInTheDocument();
+  });
+});
+
+// #845: an untracked folder with more than 500 files is one entry; its files load on demand.
+describe("untracked folder entries (#845)", () => {
+  beforeEach(() => localStorage.clear());
+
+  const folder: StatusEntry = { path: "big/", oldPath: null, staged: false, kind: "New", untrackedFolder: true };
+  const withFolder = [entry("a.txt", false), folder, entry("c.txt", true, "New")];
+  const unstagedList = () => screen.getByRole("listbox", { name: "Unstaged changes" });
+  const folderFiles = [entry("big/x.js", false, "New"), entry("big/y/z.js", false, "New")];
+  const folderOption = () => within(unstagedList()).getByRole("option", { name: /^big\/ ?\(New\)/ });
+
+  it("shows the folder as one row with a note, counted once in the heading", () => {
+    render(<Pane client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")} status={withFolder} />);
+    expect(folderOption()).toHaveTextContent("untracked folder, more than 500 files");
+    expect(screen.getByText("Changes (2)")).toBeInTheDocument();
+    expect(within(folderOption()).getByRole("button", { name: "Show files in big/" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("loads the folder's files on demand and lists them under it", async () => {
+    const listUntrackedFolder = vi.fn(async () => folderFiles);
+    render(
+      <Pane client={fakeRepoClient({ getWorkingDiff: diffNamingFile, listUntrackedFolder }, "empty")} status={withFolder} />,
+    );
+    fireEvent.click(within(folderOption()).getByRole("button", { name: "Show files in big/" }));
+    expect(await within(unstagedList()).findByRole("option", { name: /^big\/y\/z\.js/ })).toBeInTheDocument();
+    expect(listUntrackedFolder).toHaveBeenCalledWith(REPO, "big/");
+    const names = within(unstagedList())
+      .getAllByRole("option")
+      .map((option) => option.getAttribute("aria-label") ?? option.textContent);
+    expect(names.findIndex((name) => name?.includes("big/x.js"))).toBeGreaterThan(
+      names.findIndex((name) => name?.startsWith("big/")),
+    );
+    // Collapsing hides them again.
+    fireEvent.click(within(folderOption()).getByRole("button", { name: "Hide files in big/" }));
+    expect(within(unstagedList()).queryByRole("option", { name: /^big\/x\.js/ })).toBeNull();
+  });
+
+  it("reads an expanded folder's files again on refresh", async () => {
+    const listUntrackedFolder = vi.fn(async () => folderFiles);
+    const client = fakeRepoClient({ getWorkingDiff: diffNamingFile, listUntrackedFolder }, "empty");
+    const { rerender } = render(<Pane client={client} status={withFolder} />);
+    fireEvent.click(within(folderOption()).getByRole("button", { name: "Show files in big/" }));
+    await within(unstagedList()).findByRole("option", { name: /^big\/x\.js/ });
+    rerender(<Pane client={client} status={withFolder} refreshGeneration={1} />);
+    await waitFor(() => expect(listUntrackedFolder).toHaveBeenCalledTimes(2));
+  });
+
+  it("expands with ArrowRight and collapses with ArrowLeft on the folder row", async () => {
+    const listUntrackedFolder = vi.fn(async () => folderFiles);
+    render(
+      <Pane client={fakeRepoClient({ getWorkingDiff: diffNamingFile, listUntrackedFolder }, "empty")} status={withFolder} />,
+    );
+    fireEvent.click(folderOption());
+    fireEvent.keyDown(unstagedList(), { key: "ArrowRight" });
+    expect(await within(unstagedList()).findByRole("option", { name: /^big\/x\.js/ })).toBeInTheDocument();
+    fireEvent.keyDown(unstagedList(), { key: "ArrowLeft" });
+    expect(within(unstagedList()).queryByRole("option", { name: /^big\/x\.js/ })).toBeNull();
+  });
+
+  it("shows the folder's actions instead of a diff, acting on the folder", async () => {
+    const onStageFile = vi.fn();
+    const onIgnorePath = vi.fn();
+    const onDiscardFile = vi.fn();
+    const getWorkingDiff = vi.fn(diffNamingFile);
+    render(
+      <Pane
+        client={fakeRepoClient({ getWorkingDiff }, "empty")}
+        status={withFolder}
+        actions={{ onStageFile, onIgnorePath, onDiscardFile }}
+      />,
+    );
+    fireEvent.click(folderOption());
+    const panel = screen.getByRole("region", { name: "Untracked folder big/" });
+    expect(panel).toHaveTextContent("big/ is a new folder with more than 500 files that git doesn't ignore.");
+    fireEvent.click(within(panel).getByRole("button", { name: "Stage folder" }));
+    expect(onStageFile).toHaveBeenCalledWith("big/");
+    fireEvent.click(within(panel).getByRole("button", { name: "Ignore folder" }));
+    expect(onIgnorePath).toHaveBeenCalledWith("/big/");
+    fireEvent.click(within(panel).getByRole("button", { name: "Delete folder…" }));
+    const dialog = screen.getByRole("dialog", { name: "Discard changes" });
+    expect(dialog).toHaveTextContent("Delete the untracked folder big/ (more than 500 files)?");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete folder" }));
+    await waitFor(() => expect(onDiscardFile).toHaveBeenCalledWith("big/"));
+    expect(getWorkingDiff).not.toHaveBeenCalledWith(REPO, "big/", expect.anything(), expect.anything());
+  });
+
+  it("stages the folder with s and includes it in Stage all and Delete untracked…", () => {
+    const onStageFile = vi.fn();
+    const onStageAllFiles = vi.fn();
+    render(
+      <Pane
+        client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")}
+        status={withFolder}
+        actions={{ onStageFile, onStageAllFiles }}
+      />,
+    );
+    fireEvent.click(folderOption());
+    fireEvent.keyDown(unstagedList(), { key: "s" });
+    expect(onStageFile).toHaveBeenCalledWith("big/");
+    fireEvent.click(screen.getByRole("button", { name: "Stage all" }));
+    expect(onStageAllFiles).toHaveBeenCalledWith(expect.arrayContaining(["a.txt", "big/"]));
+    fireEvent.click(screen.getByRole("button", { name: "Delete untracked…" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete untracked files" });
+    expect(dialog).toHaveTextContent("Delete 1 untracked folder with more than 500 files?");
+  });
+
+  it("offers Stage folder, Ignore folder and Delete folder… in the row's menu", () => {
+    render(<Pane client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")} status={withFolder} />);
+    fireEvent.click(within(folderOption()).getByRole("button", { name: "Actions for big/" }));
+    const labels = screen.getAllByRole("menuitem").map((item) => item.textContent);
+    expect(labels).toEqual(expect.arrayContaining(["Stage folder", "Ignore folder", "Delete folder…"]));
+    expect(labels).not.toContain("Stash file…");
+  });
+
+  it("shows the folder as one row in the tree layout too", async () => {
+    const listUntrackedFolder = vi.fn(async () => folderFiles);
+    render(
+      <Pane client={fakeRepoClient({ getWorkingDiff: diffNamingFile, listUntrackedFolder }, "empty")} status={withFolder} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Tree" }));
+    expect(within(unstagedList()).queryByRole("group", { name: /big/ })).toBeNull();
+    fireEvent.click(within(folderOption()).getByRole("button", { name: "Show files in big/" }));
+    expect(await within(unstagedList()).findByRole("option", { name: /^big\/y\/z\.js/ })).toBeInTheDocument();
+  });
+});
+
+// #845: the flat Changes list renders the rows in view, not every changed file.
+describe("windowed change list (#845)", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("renders only the rows in view of a long list", () => {
+    const many = Array.from({ length: 3000 }, (_, i) => entry(`file${String(i).padStart(4, "0")}.txt`, false));
+    const { pane, restore } = layoutInPane(260);
+    try {
+      render(<Pane client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")} status={many} />, {
+        container: pane,
+      });
+      const rendered = within(screen.getByRole("listbox", { name: "Unstaged changes" })).getAllByRole("option");
+      expect(rendered.length).toBeLessThan(200);
+      expect(screen.getByText("Changes (3000)")).toBeInTheDocument();
+    } finally {
+      restore();
+    }
   });
 });

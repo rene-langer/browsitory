@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use git2::{BranchType, ObjectType, Oid, ReferenceType, Repository, Sort};
 use thiserror::Error;
@@ -112,6 +113,169 @@ impl RefDecorations {
             id,
         }
     }
+}
+
+/// What the graph, commit search and "Go to" keep between calls (#835): the order of the
+/// walks asked for most recently and the ref badges. The worker keeps one per repository; a
+/// fresh one (as the plain [`graph_page`], [`crate::search::search_commits`] and
+/// [`crate::locate::locate_commit`] use) walks and loads again.
+///
+/// A cached order is exactly the walk libgit2 would sort again: a walk depends only on its
+/// start commits, whether it follows first parents, and the parents git reads for each commit,
+/// which only the shallow and graft files can change (commits never change). Those make up its
+/// key, with the repository's folder. The badges are keyed by every branch, remote branch and
+/// tag with what it points at (a tag object never changes either).
+#[derive(Default)]
+pub struct WalkCache {
+    /// Most recently used first, at most [`WALKS_KEPT`].
+    walks: Vec<(WalkKey, Arc<[Oid]>)>,
+    decorations: Option<(RefsKey, Arc<RefDecorations>)>,
+    stats: WalkCacheStats,
+}
+
+/// How many walk orders a [`WalkCache`] keeps: the graph's and a search's with other start
+/// points (a `branch:` term, or "Collapse merges", which the search doesn't follow). About
+/// 20 bytes a commit each.
+const WALKS_KEPT: usize = 2;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WalkKey {
+    repository: std::path::PathBuf,
+    starts: Vec<Oid>,
+    first_parent: bool,
+    /// The shallow and the graft file (`None`: no such file), which change parents.
+    grafts: [Option<Vec<u8>>; 2],
+}
+
+impl WalkKey {
+    fn new(repo: &Repository, starts: &[Oid], first_parent: bool) -> Self {
+        let common = repo.commondir();
+        let read = |path: std::path::PathBuf| std::fs::read(path).ok();
+        Self {
+            repository: common.to_path_buf(),
+            starts: starts.to_vec(),
+            first_parent,
+            grafts: [
+                read(common.join("shallow")),
+                read(common.join("info").join("grafts")),
+            ],
+        }
+    }
+}
+
+/// How often a [`WalkCache`] did the work it saves: for tests and measurements.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WalkCacheStats {
+    /// Full walks sorted (`TOPOLOGICAL | TIME`).
+    pub walks: usize,
+    /// Times every tag was peeled for the badges.
+    pub decorations: usize,
+}
+
+impl WalkCache {
+    pub fn stats(&self) -> WalkCacheStats {
+        self.stats
+    }
+
+    /// Every commit of the walk from `starts` (`TOPOLOGICAL | TIME`, first parents only with
+    /// `first_parent`), in order; `None` when `cancel` returned `true`. `cancel` is polled
+    /// once every [`CANCEL_INTERVAL`] commits while a walk that isn't cached is sorted.
+    pub(crate) fn order(
+        &mut self,
+        repo: &Repository,
+        starts: &[Oid],
+        first_parent: bool,
+        cancel: &dyn Fn() -> bool,
+    ) -> Result<Option<Arc<[Oid]>>, git2::Error> {
+        let key = WalkKey::new(repo, starts, first_parent);
+        if let Some(index) = self.walks.iter().position(|(cached, _)| *cached == key) {
+            let entry = self.walks.remove(index);
+            let order = Arc::clone(&entry.1);
+            self.walks.insert(0, entry);
+            return Ok(Some(order));
+        }
+        self.stats.walks += 1;
+        let Some(order) = walk_order(repo, starts, first_parent, cancel)? else {
+            return Ok(None);
+        };
+        self.walks.insert(0, (key, Arc::clone(&order)));
+        self.walks.truncate(WALKS_KEPT);
+        Ok(Some(order))
+    }
+
+    /// The ref badges as they are now; read again only when a branch, remote branch or tag
+    /// was added, removed or moved.
+    pub(crate) fn decorations(
+        &mut self,
+        repo: &Repository,
+    ) -> Result<Arc<RefDecorations>, git2::Error> {
+        let key = refs_key(repo)?;
+        if let Some((cached, decorations)) = &self.decorations {
+            if *cached == key {
+                return Ok(Arc::clone(decorations));
+            }
+        }
+        self.stats.decorations += 1;
+        let decorations = Arc::new(RefDecorations::load(repo)?);
+        self.decorations = Some((key, Arc::clone(&decorations)));
+        Ok(decorations)
+    }
+}
+
+/// Every reference under `refs/heads/`, `refs/remotes/` and `refs/tags/` (name, target id,
+/// symbolic target), sorted.
+type RefsKey = Vec<(Vec<u8>, Option<Oid>, Option<Vec<u8>>)>;
+
+/// Every reference under `refs/heads/`, `refs/remotes/` and `refs/tags/` with
+/// what it points at (an id, or a ref for a symbolic one): what [`RefDecorations`] reads.
+fn refs_key(repo: &Repository) -> Result<RefsKey, git2::Error> {
+    let mut references = Vec::new();
+    for reference in repo.references()? {
+        let reference = reference?;
+        let name = reference.name_bytes();
+        if !(name.starts_with(b"refs/heads/")
+            || name.starts_with(b"refs/remotes/")
+            || name.starts_with(b"refs/tags/"))
+        {
+            continue;
+        }
+        references.push((
+            name.to_vec(),
+            reference.target(),
+            reference.symbolic_target_bytes().map(<[u8]>::to_vec),
+        ));
+    }
+    references.sort();
+    Ok(references)
+}
+
+/// While a walk is sorted into a [`WalkCache`], its `cancel` is polled once every this many
+/// commits.
+pub(crate) const CANCEL_INTERVAL: usize = 1024;
+
+/// The whole walk from `starts`, as [`WalkCache::order`] describes it.
+fn walk_order(
+    repo: &Repository,
+    starts: &[Oid],
+    first_parent: bool,
+    cancel: &dyn Fn() -> bool,
+) -> Result<Option<Arc<[Oid]>>, git2::Error> {
+    let mut revwalk = repo.revwalk()?;
+    revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
+    if first_parent {
+        revwalk.simplify_first_parent()?;
+    }
+    for oid in starts {
+        revwalk.push(*oid)?;
+    }
+    let mut order = Vec::new();
+    for (index, oid) in revwalk.enumerate() {
+        if index % CANCEL_INTERVAL == 0 && cancel() {
+            return Ok(None);
+        }
+        order.push(oid?);
+    }
+    Ok(Some(order.into()))
 }
 
 /// The branches the graph walks, and a commit search without a `branch:` term (#385).
@@ -229,11 +393,24 @@ pub struct GraphPage {
 /// its other parents are usually not in the result, and it carries its
 /// [`GraphCommit::merged_count`].
 ///
-/// The cursor is `<offset>:<fingerprint>`, as commit search's (#685): resuming walks again and
-/// skips `offset` commits, so only the page's own rows are built and sent. A cursor whose
+/// The cursor is `<offset>:<fingerprint>`, as commit search's (#685): resuming starts at
+/// `offset` in the walk's order (sorted again here; [`graph_page_cached`] keeps it), so only the
+/// page's own rows are built and sent. A cursor whose
 /// fingerprint isn't this walk's, or that doesn't parse, answers [`GraphPage::stale`].
 pub fn graph_page(
     repo: &Repository,
+    selection: &GraphSelection,
+    cursor: Option<&str>,
+    limit: usize,
+) -> Result<GraphPage, GraphError> {
+    graph_page_cached(repo, &mut WalkCache::default(), selection, cursor, limit)
+}
+
+/// [`graph_page`], with the walk order and the badges kept in `cache` (#835): a later page of
+/// the same walk only builds its own rows.
+pub fn graph_page_cached(
+    repo: &Repository,
+    cache: &mut WalkCache,
     selection: &GraphSelection,
     cursor: Option<&str>,
     limit: usize,
@@ -254,34 +431,24 @@ pub fn graph_page(
             }
         },
     };
-    let decorations = RefDecorations::load(repo)?;
+    let decorations = cache.decorations(repo)?;
+    let order = cache
+        .order(repo, &starts, first_parent, &|| false)?
+        .expect("a walk that is never cancelled");
 
-    let mut revwalk = repo.revwalk()?;
-    revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
-    if first_parent {
-        revwalk.simplify_first_parent()?;
-    }
-    for oid in &starts {
-        revwalk.push(*oid)?;
-    }
-
-    let mut walk = revwalk.skip(offset).peekable();
-    let mut commits = Vec::new();
-    while commits.len() < limit {
-        let Some(oid_result) = walk.next() else {
-            break;
-        };
-        let commit = repo.find_commit(oid_result?)?;
+    let page = order.get(offset..).unwrap_or_default();
+    let page = &page[..page.len().min(limit)];
+    let mut commits = Vec::with_capacity(page.len());
+    for oid in page {
+        let commit = repo.find_commit(*oid)?;
         let mut row = decorations.graph_commit(&commit);
         if first_parent && commit.parent_count() > 1 {
             row.merged_count = Some(merged_walk(repo, &commit)?.count());
         }
         commits.push(row);
     }
-    let next_cursor = walk
-        .peek()
-        .is_some()
-        .then(|| format!("{}:{fingerprint}", offset + commits.len()));
+    let next = offset + commits.len();
+    let next_cursor = (next < order.len()).then(|| format!("{next}:{fingerprint}"));
     Ok(GraphPage {
         commits,
         next_cursor,
@@ -327,11 +494,21 @@ pub fn merged_commits(
     merge_id: &str,
     limit: usize,
 ) -> Result<Vec<GraphCommit>, GraphError> {
+    merged_commits_cached(repo, &mut WalkCache::default(), merge_id, limit)
+}
+
+/// [`merged_commits`], with the badges kept in `cache` (#835).
+pub fn merged_commits_cached(
+    repo: &Repository,
+    cache: &mut WalkCache,
+    merge_id: &str,
+    limit: usize,
+) -> Result<Vec<GraphCommit>, GraphError> {
     let merge = repo.find_commit(Oid::from_str(merge_id)?)?;
     if merge.parent_count() < 2 {
         return Ok(Vec::new());
     }
-    let decorations = RefDecorations::load(repo)?;
+    let decorations = cache.decorations(repo)?;
     let mut revwalk = merged_walk(repo, &merge)?;
     revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
     let mut commits = Vec::new();

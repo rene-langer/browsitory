@@ -2,7 +2,7 @@ use crate::wire::ErrorDto;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::Sender;
 
-use git_core::graph::GraphSelection;
+use git_core::graph::{GraphSelection, WalkCache};
 use git_core::search::{PageLimits, SearchPage};
 
 use super::{Command, ReadHandle, SearchGeneration, WorkerHandle};
@@ -13,8 +13,10 @@ use super::{Command, ReadHandle, SearchGeneration, WorkerHandle};
 /// `PageLimits::DEFAULT` time-boxes the page's scan (~250 ms, after the walk reaches the
 /// cursor), so a queued commit/stage command never waits long behind an expensive
 /// `path:`/`contents:` scan; the frontend pages on through `next_cursor`.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn search_commits(
     repo: &git2::Repository,
+    cache: &mut WalkCache,
     current: &SearchGeneration,
     generation: u64,
     query: String,
@@ -23,8 +25,9 @@ pub(super) fn search_commits(
     reply: Sender<Result<SearchPage, ErrorDto>>,
 ) {
     let result = git_core::search::parse_query(&query).and_then(|parsed| {
-        git_core::search::search_commits(
+        git_core::search::search_commits_cached(
             repo,
+            cache,
             &parsed,
             &selection,
             cursor.as_deref(),

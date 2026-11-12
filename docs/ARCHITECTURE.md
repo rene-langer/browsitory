@@ -210,6 +210,14 @@ scan reads a hard-linked scratch copy in the git folder, libgit2 writes its refr
 real index is replaced under `index.lock` only while it is still the one the copy was made from. A
 held lock, a changed index or any error skips the write; the read never waits or fails for it. An
 index with an intent-to-add entry isn't refreshed (libgit2 would drop the mark).
+
+The status scan doesn't recurse into a wholly untracked folder (#845): libgit2 reports it as one
+`dir/` entry, and `git_core::untracked` walks it, stopping one file past
+`UNTRACKED_FOLDER_THRESHOLD` (500). A smaller folder is listed file by file from that walk (the
+stamp hashes those files too); a larger one stays one `StatusEntry` with `untracked_folder`,
+whose files `list_untracked_folder` reads on demand. Staging (`stage_file("dir/")`) and deleting
+(`discard_file("dir/")`) such an entry act on its non-ignored files, never on a nested repository
+in it. Changes inside a collapsed folder don't move the stamp.
 The stamp has two parts (`ChangeStamp`, `{ refs, workTree }`, #685): `refs` covers HEAD, the
 references, the stash list, the configuration, the operation files and the linked worktrees;
 `workTree` the index and the work tree. `refresh()` keeps the history reads (the graph and its
