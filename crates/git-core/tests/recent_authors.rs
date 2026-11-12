@@ -127,3 +127,15 @@ fn an_unborn_head_has_no_cached_authors() {
         .unwrap()
         .is_empty());
 }
+
+#[test]
+fn a_broken_head_is_an_error_not_an_empty_list() {
+    let (dir, repo) = common::init_repo();
+    commit_as(&repo, dir.path(), "Ada", "ada@x.org", "1");
+    let branch = repo.head().unwrap().name().unwrap().to_string();
+    drop(repo);
+    std::fs::write(dir.path().join(".git").join(&branch), "not an id\n").unwrap();
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    let mut cache = RecentAuthorsCache::default();
+    assert!(recent_authors_cached(&repo, &mut cache, 20).is_err());
+}
