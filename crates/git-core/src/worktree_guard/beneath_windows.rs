@@ -59,7 +59,7 @@ use super::walk_types::{
 };
 #[cfg(test)]
 use super::Step;
-use super::{Content, HeldFolder, Kind, Leaf, OnLink, OnMissing, Probe, StepFn, Walk};
+use super::{Content, HeldFolder, Kind, Leaf, OnLink, OnMissing, Opened, Probe, StepFn, Walk};
 
 const FILE_LIST_DIRECTORY: u32 = 0x0001;
 const FILE_READ_ATTRIBUTES: u32 = 0x0080;
@@ -1623,6 +1623,11 @@ pub(super) fn read(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<O
     )
 }
 
+/// See `worktree_guard::open_leaf_beneath`.
+pub(super) fn open(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<Option<Opened>> {
+    open_walked(walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, step))
+}
+
 /// A folder held open by its handle (see `worktree_guard::HeldFolder`), without sharing delete,
 /// so it can't be renamed or replaced while held.
 pub(super) struct Folder(File);
@@ -1749,6 +1754,13 @@ fn open_dir_in(parent: &File, name: &OsStr) -> io::Result<File> {
 
 /// [`read`] after the walk; a file over `limit` bytes is `worktree_guard::TooLarge`.
 fn read_walked(walked: io::Result<Walk<Beneath>>, limit: u64) -> io::Result<Option<Leaf>> {
+    open_walked(walked)?
+        .map(|opened| opened.read(limit))
+        .transpose()
+}
+
+/// [`open`] after the walk: a link's target, or the file opened for reading.
+fn open_walked(walked: io::Result<Walk<Beneath>>) -> io::Result<Option<Opened>> {
     let at = match walked {
         Ok(Walk::Found(at)) => at,
         Ok(_) => return Ok(None),
@@ -1764,7 +1776,7 @@ fn read_walked(walked: io::Result<Walk<Beneath>>, limit: u64) -> io::Result<Opti
     match found {
         Found::Dir => Ok(None),
         // From the handle just checked to be in the held parent: never followed.
-        Found::Link => Ok(link_target(&leaf).ok().map(|target| Leaf::Link {
+        Found::Link => Ok(link_target(&leaf).ok().map(|target| Opened::Link {
             target,
             stat: super::FileStat::default(),
         })),
@@ -1774,9 +1786,8 @@ fn read_walked(walked: io::Result<Walk<Beneath>>, limit: u64) -> io::Result<Opti
                 return Ok(None);
             };
             let stat = super::FileStat::of(&file.metadata()?);
-            let bytes = super::read_capped(file, limit)?;
-            Ok(Some(Leaf::File {
-                bytes,
+            Ok(Some(Opened::File {
+                file,
                 executable: false,
                 stat,
             }))
