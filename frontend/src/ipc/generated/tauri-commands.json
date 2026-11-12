@@ -110,6 +110,7 @@
   "list_stashes",
   "list_submodules",
   "list_tags",
+  "list_untracked_folder",
   "list_workspaces",
   "list_worktrees",
   "locate_commit",

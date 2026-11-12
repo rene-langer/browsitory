@@ -41,6 +41,7 @@ pub mod submodule;
 pub mod tools;
 pub mod tree;
 pub mod undo;
+mod untracked;
 pub mod worktree;
 pub(crate) mod worktree_guard;
 pub use file_folder::FileFolderConflict;

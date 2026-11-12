@@ -306,6 +306,8 @@ fn discard_all_caps_the_names_it_lists() {
     let (dir, repo) = common::init_repo();
     let paths: Vec<String> = (1..=5)
         .map(|i| {
+            // Nested repositories: an untracked folder's files are deleted with it (#845).
+            git2::Repository::init(dir.path().join(format!("d{i}"))).unwrap();
             common::write_file(dir.path(), &format!("d{i}/x.txt"), "x\n");
             format!("d{i}/")
         })

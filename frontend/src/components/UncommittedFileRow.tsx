@@ -1,4 +1,4 @@
-import { Minus, MoreHorizontal, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, Minus, MoreHorizontal, Plus } from "lucide-react";
 import { useRef, useState, type MouseEvent } from "react";
 import type { StatusEntry } from "../ipc/RepoClient";
 import { menuAnchor, rectAnchor } from "../lib/menuKeys";
@@ -36,7 +36,13 @@ export function UncommittedFileRow({
   editorLine,
   rowRef,
   name,
+  folderFiles,
 }: {
+  /**
+   * An untracked folder listed as one entry (#845): whether its files are listed under it, and
+   * the chevron that lists or hides them.
+   */
+  folderFiles?: { shown: boolean; onToggle: () => void };
   entry: StatusEntry;
   /** In the tree layout (#729), the file's name in its folder: shown instead of the whole path. */
   name?: string;
@@ -68,6 +74,8 @@ export function UncommittedFileRow({
     : { kind: "Unstaged" as const };
   const onPickFileAction = (action: FileAction) => {
     switch (action.kind) {
+      case "stage":
+        return onStageFile(entry.path);
       case "discard":
         return onRequestDiscardFile(entry.path);
       case "stash":
@@ -151,7 +159,28 @@ export function UncommittedFileRow({
             </span>
           </span>
         )}
+        {entry.untrackedFolder === true && (
+          <span className={styles.folderNote}>untracked folder, more than 500 files</span>
+        )}
         <div className={styles.rowActions}>
+          {folderFiles !== undefined && (
+            <button
+              type="button"
+              className={styles.stageToggle}
+              aria-label={`${folderFiles.shown ? "Hide" : "Show"} files in ${entry.path}`}
+              aria-expanded={folderFiles.shown}
+              onClick={(event) => {
+                event.stopPropagation();
+                folderFiles.onToggle();
+              }}
+            >
+              {folderFiles.shown ? (
+                <ChevronDown size={14} aria-hidden="true" />
+              ) : (
+                <ChevronRight size={14} aria-hidden="true" />
+              )}
+            </button>
+          )}
           {hasFileActions && (
             <button
               type="button"
