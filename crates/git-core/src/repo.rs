@@ -708,7 +708,14 @@ impl RebaseInfo {
             current_step: progress.current_step,
             total_steps: progress.total_steps,
             health,
-            editing: None,
+            editing: state
+                .plan
+                .get(state.cursor)
+                .filter(|entry| {
+                    state.stop == crate::rebase::RebaseStop::Edit
+                        && entry.action == crate::rebase::RebaseAction::Edit
+                })
+                .map(|entry| entry.commit_id.clone()),
         }
     }
 }
