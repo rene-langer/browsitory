@@ -1272,3 +1272,54 @@ fn a_refresh_the_cache_cannot_continue_reads_the_loaded_rows_again() {
     assert_eq!(page.refresh, None);
     assert_eq!(page.commits.len(), 20);
 }
+
+// #835: new rows next to each other make one segment; a refresh that reaches the end of the walk
+// has no cursor.
+#[test]
+fn new_rows_together_are_one_segment_and_the_end_has_no_cursor() {
+    let (_dir, repo) = init_repo();
+    let main = branchy_history(&repo);
+    let mut cache = git_core::graph::WalkCache::default();
+    let selection = local(&["main"]);
+    let (rows, loaded) = load_rows(&repo, &mut cache, &selection, 1_000);
+
+    let one = commit_at(&repo, &[main], "one", 5_000);
+    let two = commit_at(&repo, &[one], "two", 5_001);
+    repo.reference("refs/heads/main", two, true, "test")
+        .unwrap();
+    let page = refresh(&repo, &mut cache, &selection, &rows, &loaded);
+
+    let refresh = page.refresh.expect("the loaded rows continue");
+    assert_eq!(
+        refresh.layout,
+        [
+            git_core::graph::GraphSegment::New { count: 2 },
+            git_core::graph::GraphSegment::Kept {
+                from: 0,
+                count: rows.len()
+            },
+        ]
+    );
+    assert_eq!(page.next_cursor, None);
+}
+
+// #835: rows whose badges are two ref changes old can't be compared any more: every loaded row
+// is read again.
+#[test]
+fn badges_two_ref_changes_old_are_read_again() {
+    let (_dir, repo) = init_repo();
+    let main = branchy_history(&repo);
+    let mut cache = git_core::graph::WalkCache::default();
+    let selection = GraphSelection::default();
+    let (rows, loaded) = load_rows(&repo, &mut cache, &selection, 20);
+    let tip = repo.find_object(main, None).unwrap();
+
+    for tag in ["first", "second"] {
+        repo.tag_lightweight(tag, &tip, false).unwrap();
+        // Something else reads the badges (a later page, a search).
+        git_core::graph::graph_page_cached(&repo, &mut cache, &selection, None, 1).unwrap();
+    }
+    let page = refresh(&repo, &mut cache, &selection, &rows, &loaded);
+    assert_eq!(page.refresh, None);
+    assert_eq!(page.commits.len(), 20);
+}
