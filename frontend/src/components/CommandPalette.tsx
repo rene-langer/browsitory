@@ -1,9 +1,8 @@
 import {
   Fragment,
-  useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
-  useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -20,6 +19,7 @@ import {
 } from "../lib/commands";
 import { matchItem, type MatchRange } from "../lib/fuzzyMatch";
 import { shortcutLabel } from "../lib/keybindings";
+import { useWindowedListbox } from "./useWindowedListbox";
 import styles from "./CommandPalette.module.css";
 
 /** How many recently used commands head the unfiltered list (#644). */
@@ -107,16 +107,23 @@ export function CommandPalette({
   const activeDescendantId =
     results.length === 0 ? undefined : `${listboxId}-option-${clampedIndex}`;
 
-  // Keep the highlighted row visible as the keys, paging or a new query move it (#643).
-  const listRef = useRef<HTMLUListElement>(null);
-  useEffect(() => {
+  // Only the options in view are rendered (#864): the top level lists a few commands per
+  // branch, thousands with many branches. A state, not a ref, so the windowing sees the list.
+  const [listElement, setListElement] = useState<HTMLUListElement | null>(null);
+  const headingIndexes = useMemo(() => [...headings.keys()].sort((a, b) => a - b), [headings]);
+  const windowing = useWindowedListbox(listElement, results.length, headingIndexes);
+  const { scrollToIndex } = windowing;
+
+  // Keep the highlighted row visible as the keys, paging or a new query move it (#643); before
+  // paint, so it is rendered when `aria-activedescendant` names it.
+  useLayoutEffect(() => {
     if (activeDescendantId === undefined) return;
-    document.getElementById(activeDescendantId)?.scrollIntoView?.({ block: "nearest" });
-  }, [activeDescendantId, results]);
+    scrollToIndex(clampedIndex);
+  }, [activeDescendantId, clampedIndex, results, scrollToIndex]);
 
   /** Rows per PageUp/PageDown: as many as the list shows at once. */
   function pageSize(): number {
-    const list = listRef.current;
+    const list = listElement;
     const row = list?.querySelector<HTMLElement>('[role="option"]');
     if (list == null || row == null || row.offsetHeight === 0) return FALLBACK_PAGE;
     return Math.max(1, Math.floor(list.clientHeight / row.offsetHeight) - 1);
@@ -197,12 +204,22 @@ export function CommandPalette({
         aria-activedescendant={activeDescendantId}
       />
       <ul
-        ref={listRef}
+        ref={setListElement}
         className={styles.list}
         id={listboxId}
         role="listbox"
+        // The options outside the window take their space as padding, on top of the list's own.
+        style={
+          windowing.windowed
+            ? {
+                paddingTop: `calc(var(--space-1) + ${windowing.padTop}px)`,
+                paddingBottom: `calc(var(--space-1) + ${windowing.padBottom}px)`,
+              }
+            : undefined
+        }
         onMouseMove={handleMouseMove} aria-label={picker === undefined ? "Command results" : "Results"}>
-        {results.map((command, index) => {
+        {results.slice(windowing.start, windowing.end).map((command, offset) => {
+          const index = windowing.start + offset;
           const heading = headings.get(index);
           const disabledReason = "disabledReason" in command ? command.disabledReason : undefined;
           const shortcut = "shortcut" in command ? command.shortcut : undefined;
@@ -220,6 +237,8 @@ export function CommandPalette({
                 id={optionId}
                 className={disabledReason === undefined ? styles.option : `${styles.option} ${styles.unavailable}`}
                 selected={index === clampedIndex}
+                rowIndex={index}
+                setSize={results.length}
                 disabled={disabledReason !== undefined}
                 describedBy={disabledReason === undefined ? undefined : `${optionId}-reason`}
                 onClick={() => runCommand(command)}

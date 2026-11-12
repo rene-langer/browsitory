@@ -1045,7 +1045,9 @@ certificate.
   (`components/useVirtualRows.ts`: one row height, measured from the first row; padding on the
   list for the others; `aria-setsize`/`aria-posinset` on the rows) and asks for the next page
   when the rows in view come within `LOAD_AHEAD_ROWS` of the last one. Without layout (a hidden
-  tab, jsdom) every row renders.
+  tab, jsdom) every row renders. The command palette's listbox, its own scroller with group
+  headings of another height between the options, windows the same way with
+  `components/useWindowedListbox.ts` (#864): its top level lists a few commands per branch.
 - Branch colours (#673): `useCommitGraphLayout` computes the lanes once per commit list in
   `RepoWorkspace`, for `CommitGraph` and for the sidebar: a branch's swatch, and the stripe on
   its badges, is the colour of the lane its tip's row sits on (`laneColors.branchLaneColors`); a
