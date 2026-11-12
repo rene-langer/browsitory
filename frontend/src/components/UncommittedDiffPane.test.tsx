@@ -516,7 +516,7 @@ describe("untracked folder entries (#845)", () => {
   const withFolder = [entry("a.txt", false), folder, entry("c.txt", true, "New")];
   const unstagedList = () => screen.getByRole("listbox", { name: "Unstaged changes" });
   const folderFiles = [entry("big/x.js", false, "New"), entry("big/y/z.js", false, "New")];
-  const folderOption = () => within(unstagedList()).getByRole("option", { name: /^big\// });
+  const folderOption = () => within(unstagedList()).getByRole("option", { name: /^big\/ ?\(New\)/ });
 
   it("shows the folder as one row with a note, counted once in the heading", () => {
     render(<Pane client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")} status={withFolder} />);
