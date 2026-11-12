@@ -1911,6 +1911,38 @@ fn get_blame_round_trips_through_the_sidecar() {
     assert_eq!(lines[0]["content"], "hello");
 }
 
+/// #840: the sidecar turns off libgit2's per-read object hash check at startup, as git does on
+/// ordinary reads, so a blob whose content doesn't hash to its id is read, not refused.
+#[test]
+fn the_sidecar_reads_objects_without_rehashing_them() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "real\n");
+    commit_all(&repo, "initial commit");
+    let real_id = repo.blob(b"real\n").unwrap();
+    let stand_in_id = repo.blob(b"stand-in\n").unwrap();
+    let loose = |id: git2::Oid| {
+        let hex = id.to_string();
+        repo.path().join("objects").join(&hex[..2]).join(&hex[2..])
+    };
+    let mut permissions = std::fs::metadata(loose(real_id)).unwrap().permissions();
+    #[allow(clippy::permissions_set_readonly_false)]
+    permissions.set_readonly(false);
+    std::fs::set_permissions(loose(real_id), permissions).unwrap();
+    std::fs::copy(loose(stand_in_id), loose(real_id)).unwrap();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let blame = sidecar.call(
+        2,
+        "get_blame",
+        serde_json::json!({"repoPath": repo_path, "commitId": "HEAD", "path": "file.txt"}),
+    );
+    let lines = blame["result"].as_array().expect("blame lines");
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0]["content"], "stand-in");
+}
+
 #[test]
 fn merge_conflict_lifecycle_round_trips_through_the_sidecar() {
     let (dir, repo) = init_repo();

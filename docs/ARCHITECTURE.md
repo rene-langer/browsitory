@@ -116,6 +116,21 @@ characterize libgit2 behaviour, Renovate holds
 `git2`/`libgit2-sys` updates for Dependency Dashboard approval (`renovate.json`; see
 `AGENTS.md`'s Dependency updates section) — re-check those notes when approving one.
 
+### Process-wide libgit2 settings
+
+`git_core::repo::configure_libgit2()` runs first thing in `main` of both hosts (`tauri-app`,
+`vscode-sidecar`), before any repository is opened. It turns off libgit2's strict object hash
+verification (`git2::opts::strict_hash_verification(false)`, #840): by default libgit2 hashes
+every object it inflates again and compares it with its id, which cost up to two thirds of a
+history walk's time on a 130k-commit repository (file history 22 s to 8 s, blame 68 s to
+33 s). git checks object hashes in `git fsck` and when it receives objects, not on ordinary
+reads; with the check off a corrupted object reads as whatever it inflates to, as in git.
+libgit2 still checks the zlib stream and the pack index checksums, and objects the app
+writes are still hashed to get their ids. The setting is process-wide (it can't be limited
+to one repository or lane). Tests run with libgit2's default unless they call the function
+(`crates/git-core/tests/hash_verification.rs`, and the sidecar's
+`the_sidecar_reads_objects_without_rehashing_them`, which pins that the binary calls it).
+
 ## The `RepoClient` IPC boundary
 
 `frontend/src/ipc/RepoClient.ts` defines the interface every UI component depends on — see that
