@@ -144,10 +144,20 @@ describe("Browsitory VSCode extension external tools", () => {
         await new Promise((resolve) => setTimeout(resolve, 250));
       }
     } finally {
-      await webview.close();
-      await vscode.commands.executeCommand("workbench.action.closeAllEditors");
-      gitWith(cwd, ["merge", "--abort"], { stdio: "ignore" });
-      gitWith(cwd, ["branch", "-D", theirsBranch], { stdio: "ignore" });
+      try {
+        await webview.close();
+        // The merge editor fills its result (the work tree file) when it opens, so it is dirty:
+        // a plain close would ask to save, which VSCode refuses to show in tests. Revert and
+        // close it first; it is the active editor.
+        if (vscode.window.tabGroups.activeTabGroup.activeTab?.label === `Merging: ${name}`) {
+          await vscode.commands.executeCommand("workbench.action.revertAndCloseActiveEditor");
+        }
+        await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+      } finally {
+        // Later specs commit in this repository: never leave the merge in progress.
+        gitWith(cwd, ["merge", "--abort"], { stdio: "ignore" });
+        gitWith(cwd, ["branch", "-D", theirsBranch], { stdio: "ignore" });
+      }
     }
   });
 });
