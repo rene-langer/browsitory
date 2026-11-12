@@ -6,6 +6,184 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-12
+
+0.12.0 is the performance release. History, blame and file history read large repositories
+many times faster; status reads, the Changes list, the commit graph, commit search, syntax
+highlighting and the windows with many branches do far less work; and a render error no longer
+blanks the whole window. Besides: external tools get their files as `git checkout` writes them,
+the code font field suggests installed fonts, C++ is highlighted with its own grammar again, and
+tags offer "Compare with current branch".
+
+### History, blame and file history on large repositories
+
+- Changed: reading history no longer checks each Git object's hash again on every read, as Git
+  itself doesn't (it checks in `git fsck` and when objects arrive). File history, line history,
+  blame, the commit graph and ahead/behind counts read up to two to three times faster in large
+  repositories; a corrupted object now reads as Git would read it instead of failing (#840).
+- Changed: blame no longer uses libgit2's blame, which compared the whole folder trees of every
+  commit in the history; it now follows the file's own path and compares the file only where it
+  changed. On a repository with 130,000 commits, blaming a rarely changed file takes about 3 s
+  instead of over a minute, close to `git blame`. Lines get the same commits as before (#839).
+- Fixed: blame no longer gives every line to a commit whose unrelated folders couldn't be read
+  (libgit2 then lost the file's origin), and in a file whose history had other files renamed
+  or deleted next to it, lines are given to the commit `git blame` names (#839).
+- Changed: file history and line history read only the folders on the file's path that changed
+  between a commit and its parent, instead of looking the whole path up twice per commit. On a
+  repository with 130,000 commits, the history of a rarely changed file takes about 4 s instead
+  of a minute (#838).
+- Changed: file and line history keep their place between loads. "Load more" goes on from
+  where the last load stopped instead of searching from the newest commit again, and a refresh
+  while HEAD hasn't moved (after a fetch, say) answers at once instead of searching again
+  (#860).
+- Changed: a long search no longer holds up other actions. It runs a quarter of a second at a
+  time, the changes found so far show at once, and the list's footer reads "Searching older
+  commits… (N changes so far)" until a page of 300 is found or the history ends. Closing the
+  history stops the search (#860).
+- Fixed: "Load more" no longer appears under a history of exactly 300 changes (#860).
+
+### Commit graph, search and Contained in
+
+- Changed: the commit graph's later pages, "Go to" and further search pages no longer sort the
+  whole history again: the worker keeps the walk order and the branch and tag badges until a
+  ref or the selection changes, so scrolling through a large repository costs milliseconds a
+  page instead of a full walk each (#835).
+- Changed: after a commit, a fetch or a branch switch, the graph no longer reads and sends every
+  row already loaded again: the worker sends only the new rows, which loaded rows stay, and the
+  branch and tag badges that moved. With thousands of rows loaded a refresh costs about one page
+  (#835).
+- Changed: hovering a row in the commit graph redraws only the lines it dims or undims, and
+  scrolling no longer does work for every loaded commit. Loading the next page of history lays
+  out only the new rows (and, when they bring a merge's side branch, a few rows before it),
+  instead of every loaded row again (#837).
+- Changed: commit search checks each commit with less work: no id formatting or lowercased
+  copies for ASCII text, and a `path:` term naming a file or folder compares tree entries
+  instead of building a diff for every commit, so a page scans more history (#848).
+- Fixed: the commit details' "Contained in" checked one branch or tag at a time and, in
+  repositories with long history and many tags, never finished within its time budget. It now
+  checks all of them in one walk over the history above the commit (#842).
+
+### Status and the Changes list
+
+- Changed: a status read writes refreshed file times back to the index, as `git status` does, so
+  files whose times changed but whose content didn't (a `touch`, a formatter, a copied folder)
+  are read once instead of on every refresh. It skips the write when another program holds the
+  index lock or changed the index meanwhile (#841).
+- Changed: a refresh reads the status and the change stamp in one scan of the work tree instead
+  of two, and focusing the window no longer checks for changes while the repository is watched
+  (#841).
+- Changed: an untracked folder with more than 500 files (a `node_modules` or build output not yet
+  in `.gitignore`) is listed as one row, "untracked folder, more than 500 files", instead of file
+  by file; smaller folders are listed as before. Its chevron lists its files on demand; selected,
+  it offers Stage folder, Ignore folder and Delete folder…, and Stage all and Delete untracked…
+  include it (#845).
+- Changed: the flat Changes and Staged lists render only the rows in view, so thousands of
+  changed files no longer slow the window down (#845).
+- Fixed: during a conflict, "Delete untracked…" no longer wraps onto a line of its own under the
+  Changes heading; the heading's buttons move under the title together when the pane is narrow
+  (#832).
+- Changed: "Mark as resolved" streams the file into the repository while it checks it for
+  conflict markers, instead of reading the whole file into memory first. Resolving a conflict
+  in a multi-gigabyte file no longer needs that much memory (#212).
+
+### Many branches
+
+- Changed: the branch list and the upstream counts keep each branch's ahead/behind count until
+  the branch or its upstream moves, and the upstream reads of a refresh reuse the branch list's
+  counts instead of counting every pair again. A refresh with many diverged tracking branches no
+  longer holds up the repository's other reads for seconds (#112).
+- Fixed: undoing a branch delete puts the branch back into the graph's saved branch selection
+  (isolating it again if it was the isolated branch); redoing the delete takes it out again
+  (#112).
+- Changed: an update in one part of a repository's window (opening the command palette, a toast,
+  a refresh with nothing new) no longer draws the branch list, the commit graph, the worktree
+  panel and the diff again, and the branch list does its per-row work once per update instead of
+  once per row. With thousands of branches the sidebar stays responsive (#844).
+- Changed: the command palette draws only the commands in view. With 2,000 local branches its
+  list held more than 6,000 commands, and opening it drew every one; it now opens in about a
+  tenth of the time. Keys, search and what screen readers announce are unchanged (#864).
+
+### Syntax highlighting
+
+- Changed: syntax highlighting uses a WebAssembly build of the Oniguruma regular expression
+  library, about 4 times faster on TypeScript in the desktop app on Linux. The app's content
+  security policy now allows compiling WebAssembly (`'wasm-unsafe-eval'`), not `eval` (#843).
+- Fixed: syntax highlighting no longer freezes the window. It runs in a background worker, in
+  chunks, and stops working on a file you have already left; a 2,000-line TypeScript file used
+  to block the UI for 1 to 5 s (#843).
+- Changed: C++ files (`.cpp`, `.cc`, `.cxx`, `.hpp`, `.hxx`, `.hh`) are highlighted with the C++
+  grammar again, so templates, namespaces, `::` and raw strings look right. GLSL inside
+  `R"glsl(...)glsl"` raw strings uses a small grammar of Browsitory's own, in place of one that
+  has no licence. `.h` files stay C (#326).
+
+### External diff and merge tools
+
+- Fixed: the files handed to a diff or merge tool, and the versions VSCode's diff and merge
+  editors show, are now written as `git checkout` writes them: with `core.autocrlf` and the
+  `text`/`eol` attributes applied and `ident` expanded. With `core.autocrlf=true` an unchanged
+  line no longer shows as changed against the working tree file (#130).
+- Fixed: p4merge gets git's virtual base for a conflict where both sides added the file, so it
+  highlights only the real differences instead of every line (#159).
+- Fixed: a diff or merge tool left open for more than a day no longer loses its files to the
+  clean-up of old temporary files, even after Browsitory was closed (#129).
+- Added: a stash's file rows have the Open in editor, Reveal in file manager and Open in diff
+  tool items, like a commit's (#129).
+
+### Stashes
+
+- Changed: Stash all checks the working tree with one status pass and one read of HEAD's files,
+  instead of up to three passes and two reads. On a 20,000-file repository the checks take
+  about 180 ms less (#243).
+- Fixed: on macOS, stashing a staged rename between two encodings of the same accented name
+  (`Café` with `é` as one character, then as `e` plus an accent) was refused as differing "only
+  in case", though the names look identical. It is still refused, now saying the names differ
+  only in how their accented letters are encoded (#404).
+
+### Render errors
+
+- Fixed: a bug that stopped a view from being drawn blanked the whole window. Now that repository's
+  tab shows "Couldn't show …" with the error, **Reload tab**, **Copy details** and **Close tab**,
+  while the other tabs keep working; an error outside the tabs shows **Reload** for the whole
+  window. The error goes to the log (#846).
+
+### Preferences
+
+- Added: **Preferences → Appearance → Code font** suggests installed fonts while you type,
+  monospaced ones first and marked, each shown in its own font. Pick one with the arrow keys and
+  Enter or a click; free text, and a comma-separated list of fonts, still work (#858).
+
+### Compare from tags
+
+- Added: a tag's menu, on its badge in the graph and its row in the Tags section, offers
+  "Compare with current branch" ("Compare with HEAD" on a detached HEAD), like a branch's: what
+  the tag's commit changed since it diverged from HEAD (#119).
+
+### Co-author suggestions
+
+- Changed: "Add co-author" keeps its suggestions until HEAD moves, instead of reading the last
+  1,000 commits again each time it opens (#140).
+
+### Help menu
+
+- Added: **Check for updates** in the header's **Help** menu (desktop app), the same check as the
+  command palette's command (#852).
+
+### Merge editor
+
+- Fixed: a conflicted file with a run of more than about 120,000 lines threw an error when the
+  merge editor read it (#847).
+
+### Internal
+
+- Internal: end-to-end tests for external tools: in the desktop app, Open in editor and Open in
+  diff tool run a fake tool configured in Preferences and git config; in VSCode, the diff and
+  merge editor handoffs and the `browsitory-file:` content provider (#128).
+- Internal: the desktop app's external tools end-to-end test no longer fails now and then on a
+  diff tool launch it read while the fake tool was still writing it; a unit test of the fake
+  tool runs in CI's `e2e` job (`pnpm test:support` in `e2e/`) (#916).
+- Internal: tests pin that file history reuses the graph's walk of the same start, and that a
+  line history page walks no further than its last entry (#860, mutation testing).
+
 ## [0.11.0] - 2026-11-12
 
 Changes made outside the app now show by themselves, within about a second, and switching tabs

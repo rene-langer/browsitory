@@ -2,7 +2,8 @@
 
 ## Opening files
 
-Every changed file, every file of a commit and every file in a compare has a "…" button and a
+Every changed file, every file of a commit or a stash and every file in a compare has a "…"
+button and a
 right-click menu with **Open in editor**, **Reveal in file manager** and **Open in diff tool**
 (**Open in merge tool** for a conflicted file). The palette has "Open current file in editor"
 and "Open current file in diff tool".
@@ -99,6 +100,7 @@ What the tool compares:
 - a staged change: the last commit against the staged version (the old name for a staged
   rename)
 - a commit's file: the commit's first parent against the commit (the old name for a rename)
+- a stash's file: the commit the stash was made on against the stash (an untracked file is new)
 - a compare: the left side against the right side (or the working tree file)
 
 A missing side (a new or deleted file) is an empty file. The other sides are temporary copies,

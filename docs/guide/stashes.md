@@ -22,7 +22,9 @@ files"). The name is the message you gave it, or, for a stash without one, "WIP:
 it was made on. Hover over a stash to read its full message and the date.
 
 Click a stash to see what it holds: **Changes** (diffed against the commit it was made on) and,
-if it took any, **Untracked** files. From there or from the panel you can **Apply** it (keep the
+if it took any, **Untracked** files. Each file's "…" menu opens it in your editor or
+[diff tool](external-tools.md) or reveals it in the file manager. From there or from the panel
+you can **Apply** it (keep the
 stash), **Pop** it (apply, then drop it) or drop it (**Drop…**). In the panel these are menu
 items in the stash's menu: open it with the **…** button that shows when you point at or tab to
 the stash, by right-clicking the stash, or with the Menu key or Shift+F10.
