@@ -45,8 +45,14 @@ pub(crate) fn status_options() -> git2::StatusOptions {
     options
 }
 
+/// The status of `repo`, read only: the index's stat data stays as it is (the internal reads of
+/// write commands use it). The app's own status reads use [`status_refreshing_index`].
 pub fn status(repo: &git2::Repository) -> Result<Vec<StatusEntry>, StatusError> {
-    let statuses = repo.statuses(Some(&mut status_options()))?;
+    Ok(entries(&repo.statuses(Some(&mut status_options()))?))
+}
+
+/// The entries of a scan made with [`status_options`].
+pub(crate) fn entries(statuses: &git2::Statuses<'_>) -> Vec<StatusEntry> {
     let mut entries = Vec::new();
 
     for entry in statuses.iter() {
@@ -90,12 +96,13 @@ pub fn status(repo: &git2::Repository) -> Result<Vec<StatusEntry>, StatusError> 
         }
     }
 
-    Ok(entries)
+    entries
 }
 
 /// [`status`], with the index's stat data refreshed on the way (#841); see `index_refresh`.
 pub fn status_refreshing_index(repo: &git2::Repository) -> Result<Vec<StatusEntry>, StatusError> {
-    status(repo)
+    let (statuses, _) = crate::index_refresh::scan(repo)?;
+    Ok(entries(&statuses))
 }
 
 /// The delta's new path (falling back to `fallback`) and its old path when it differs.
