@@ -620,11 +620,13 @@ where
                 let _ = reply.send(result);
             }
             Command::RebaseContinue {
+                message,
                 operation_id,
                 events,
                 reply,
             } => rebase::continue_rebase(
                 &self.repo,
+                message.as_deref(),
                 self.operations.rebase_slot(),
                 remote::TransferOp::new(operation_id),
                 events,

@@ -1048,7 +1048,7 @@ fn cancelling_a_rebase_steps_signer_stops_it() {
     let (events_tx, events) = mpsc::channel();
 
     let result = std::thread::scope(|scope| {
-        let continued = scope.spawn(|| handle.rebase_continue_reporting(events_tx));
+        let continued = scope.spawn(|| handle.rebase_continue_reporting(None, events_tx));
         let first = events.recv().unwrap();
         let super::super::HookEvent::Started {
             operation_id,

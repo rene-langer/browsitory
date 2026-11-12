@@ -53,14 +53,24 @@ pub(super) fn start_rebase<W: std::io::Write + Send + 'static>(
     serde_json::to_value(RebaseStepResultDto::from(result)).map_err(ErrorDto::from_error)
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct RebaseContinueParams {
+    repo_path: String,
+    /// Replaces the message of the step Continue lands (#882).
+    #[serde(default)]
+    message: Option<String>,
+}
+
 /// The signing program as for `start_rebase`.
 pub(super) fn rebase_continue<W: std::io::Write + Send + 'static>(
-    params: RepoPathParams,
+    params: RebaseContinueParams,
     repos: &Repos,
     out: &Arc<Mutex<W>>,
 ) -> Result<Value, ErrorDto> {
     let events = hook_relay(&params.repo_path, out);
-    let result = worker_handle(repos, &params.repo_path)?.rebase_continue_reporting(events)?;
+    let result = worker_handle(repos, &params.repo_path)?
+        .rebase_continue_reporting(params.message, events)?;
     serde_json::to_value(RebaseStepResultDto::from(result)).map_err(ErrorDto::from_error)
 }
 

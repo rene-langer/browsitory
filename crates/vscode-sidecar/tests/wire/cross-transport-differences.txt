@@ -96,6 +96,7 @@ RebaseInfo/Diverged-BranchMissing key-order
 RebaseInfo/Diverged-BranchMoved key-order
 RebaseInfo/Diverged-HeadMoved key-order
 RebaseInfo/Diverged-OtherOperation key-order
+RebaseInfo/Editing key-order
 RebaseInfo/Paused key-order
 RebasePlanCommit/plain key-order
 RebaseStepResult/Conflicted key-order

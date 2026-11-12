@@ -45,13 +45,14 @@ pub async fn start_rebase(
 #[tauri::command]
 pub async fn rebase_continue(
     repo_path: String,
+    message: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<RebaseStepResultDto, ErrorDto> {
     let events = hook_event_channel(app, &repo_path);
     Ok(RebaseStepResultDto::from(
         repo_worker(&state, &repo_path)?
-            .call(move |w| w.rebase_continue_reporting(events))
+            .call(move |w| w.rebase_continue_reporting(message, events))
             .await?,
     ))
 }

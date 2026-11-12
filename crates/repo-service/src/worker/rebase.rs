@@ -152,6 +152,7 @@ pub(super) fn start(
 
 pub(super) fn continue_rebase(
     repo: &git2::Repository,
+    message: Option<&str>,
     mut slot: RebaseSlot<'_>,
     op: super::remote::TransferOp,
     events: Sender<super::HookEvent>,
@@ -161,7 +162,7 @@ pub(super) fn continue_rebase(
         Some(loaded) => {
             let mut state = loaded.clone();
             let outcome = with_signing(&op, events, |hooks| {
-                git_core::rebase::rebase_continue_with(repo, &mut state, hooks)
+                git_core::rebase::rebase_continue_with_message(repo, &mut state, message, hooks)
             })
             .map_err(ErrorDto::from_error);
             if matches!(outcome, Ok(RebaseStepResult::Done)) {
@@ -241,15 +242,19 @@ impl WorkerHandle {
     /// `rebase_continue_reporting` without anyone listening to the signing program.
     #[allow(dead_code)]
     pub fn rebase_continue(&self) -> Result<RebaseStepResult, ErrorDto> {
-        self.rebase_continue_reporting(std::sync::mpsc::channel().0)
+        self.rebase_continue_reporting(None, std::sync::mpsc::channel().0)
     }
 
     /// Continues the paused rebase; the signing program as for `start_rebase_reporting`.
+    /// `message`, when given, replaces the message of the step Continue lands (Edit commit…,
+    /// #882).
     pub fn rebase_continue_reporting(
         &self,
+        message: Option<String>,
         events: Sender<super::HookEvent>,
     ) -> Result<RebaseStepResult, ErrorDto> {
         self.request(|tx| Command::RebaseContinue {
+            message,
             operation_id: self.cancelled.allocate("rebase"),
             events,
             reply: tx,
@@ -262,8 +267,7 @@ impl WorkerHandle {
         &self,
         message: Option<String>,
     ) -> Result<RebaseStepResult, ErrorDto> {
-        let _ = message;
-        self.rebase_continue()
+        self.rebase_continue_reporting(message, std::sync::mpsc::channel().0)
     }
 
     #[allow(dead_code)]
