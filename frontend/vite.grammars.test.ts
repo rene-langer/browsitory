@@ -16,12 +16,14 @@ function hooks() {
 describe("excludeGrammarsPlugin", () => {
   it("resolves an excluded grammar import from a Shiki language module to an empty list", () => {
     const { resolveId, load } = hooks();
-    const id = resolveId.call({}, "./cpp.mjs", `${LANGS}/ruby.mjs`, {});
+    const id = resolveId.call({}, "./glsl.mjs", `${LANGS}/cpp.mjs`, {});
     expect(typeof id).toBe("string");
     expect(load.call({}, id)).toBe("export default [];");
 
+    // #326: cpp ships again; only its glsl import is cut.
+    expect(resolveId.call({}, "./cpp.mjs", `${LANGS}/ruby.mjs`, {})).toBeNull();
     expect(resolveId.call({}, "./c.mjs", `${LANGS}/ruby.mjs`, {})).toBeNull();
-    expect(resolveId.call({}, "./cpp.mjs", "/repo/frontend/src/lib/highlight.ts", {})).toBeNull();
+    expect(resolveId.call({}, "./glsl.mjs", "/repo/frontend/src/lib/highlight.ts", {})).toBeNull();
     expect(load.call({}, `${LANGS}/c.mjs`)).toBeNull();
   });
 

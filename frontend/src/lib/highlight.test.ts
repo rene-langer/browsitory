@@ -25,15 +25,15 @@ describe("highlightLines", () => {
     expect(b).toBe(a);
   }, 20000);
 
-  it("loads Ruby without the C++ grammars its module brings along", async () => {
-    // Vitest doesn't run vite.grammars.ts, so shiki's ruby module still includes cpp, cpp-macro
-    // and glsl here: this checks that highlight.ts itself never registers them.
+  it("loads Ruby with the C++ grammars its module brings along, and a glsl grammar for them", async () => {
+    // #326: C++ ships again. Vitest doesn't run vite.grammars.ts, so shiki's ruby module still
+    // includes the unlicensed glsl grammar here; `withoutExcludedGrammars` swaps in Browsitory's
+    // own (see its tests below), so a `glsl` grammar is still registered.
     const lines = await highlightLines("ruby", "x = <<~CPP\n  int main() {}\nCPP\nputs x");
     expect(lines).toHaveLength(4);
     expect(lines[3].map((t) => t.content).join("")).toBe("puts x");
     const languages = await loadedLanguages();
-    expect(languages).toEqual(expect.arrayContaining(["ruby", "c", "yaml"]));
-    for (const excluded of ["cpp", "cpp-macro", "glsl"]) expect(languages).not.toContain(excluded);
+    expect(languages).toEqual(expect.arrayContaining(["ruby", "c", "yaml", "cpp", "cpp-macro", "glsl"]));
   }, 20000);
 });
 
@@ -48,8 +48,10 @@ describe("withoutExcludedGrammars", () => {
       grammar("c"),
       grammar("ruby", ["cpp", "c", "yaml"]),
     ]);
-    expect(result.map((l) => l.name)).toEqual(["c", "ruby"]);
-    expect(result[1].embeddedLangs).toEqual(["c", "yaml"]);
+    // #326: only the unlicensed glsl grammar is excluded now, and Browsitory's own replaces it.
+    expect(result.map((l) => l.name)).toEqual(["glsl", "cpp-macro", "cpp", "c", "ruby"]);
+    expect(result[2].embeddedLangs).toEqual(["glsl"]);
+    expect(result[4].embeddedLangs).toEqual(["cpp", "c", "yaml"]);
   });
 });
 

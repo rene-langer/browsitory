@@ -235,7 +235,7 @@ class GrammarTests(unittest.TestCase):
 
     def test_excluded_grammars_reads_the_typescript_list(self):
         source = gen.EXCLUDED_GRAMMARS_TS.read_text(encoding="utf-8")
-        self.assertEqual(gen.excluded_grammars(source), {"cpp", "cpp-macro", "glsl"})
+        self.assertEqual(gen.excluded_grammars(source), {"glsl"})
 
     def test_parse_notice_maps_each_file_to_its_section(self):
         notice = (
