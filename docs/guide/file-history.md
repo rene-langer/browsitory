@@ -16,6 +16,11 @@ Selecting a commit shows only that file's diff; **Show all N files** shows the w
 Use ↑/↓ (or j/k) to move, **Load more** for older changes, and **×** or Esc to return to the
 full history with your previous selection.
 
+The history loads 300 changes at a time. On a large repository, a file that rarely changes can
+take a few seconds to search: the changes found so far show at once, and the footer reads
+"Searching older commits… (N changes so far)" until the 300 are found or the history ends.
+Other actions don't wait for it, and closing the history stops the search.
+
 ## History of lines
 
 To see only the commits that changed some lines, select them with the mouse in a commit's diff

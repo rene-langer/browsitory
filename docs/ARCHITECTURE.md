@@ -147,6 +147,17 @@ copy detection. Its owners match libgit2's on this repository's files, except wh
 loses a file's origin (it then agrees with `git blame`). Like libgit2, it doesn't use git's
 indent heuristic, so a few ambiguous lines differ from `git blame`.
 
+File and line history keep their walk between calls (#860): the worker's `WalkCache` holds the
+two most recent file and two most recent line history walks (`history::HistoryWalks`), keyed
+by the start commit's walk (repository, start, grafts), the path and the lines. Each keeps the
+walk order (shared with a cached graph walk of the same start), the next position, the paths
+or ranges tracked at the frontier and the commits found so far (badges are added per answer
+from the cache's ref badges). A call answers the first `limit` entries and walks on only when
+fewer were found, for at most 250 ms after at least one commit (sorting the walk the first time
+isn't charged); `complete` says the history ended. So "Load more" continues the walk, a refresh
+with HEAD unchanged walks nothing, and a moved HEAD is a new walk. The panel asks again with
+the same limit until the page is full or `complete`, and stops when it closes.
+
 ## The `RepoClient` IPC boundary
 
 `frontend/src/ipc/RepoClient.ts` defines the interface every UI component depends on — see that
