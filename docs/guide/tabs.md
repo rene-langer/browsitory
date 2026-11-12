@@ -31,9 +31,9 @@ repository change, and then checks whether anything it displays has changed:
 files, staged changes, commits, branches, tags, stashes, remotes, or a merge or
 rebase in progress. When something has, it reloads the tab, usually within a
 second; when nothing has, it reads nothing more. It also checks at once when the
-window gets the focus back or comes into view (in VSCode, when the panel is
-shown again), when you switch to a tab, and every 30 seconds in case a change
-went unreported (some network drives report none). Files your `.gitignore`
+window comes into view (in VSCode, when the panel is shown again), when you
+switch to a tab, and every 30 seconds in case a change went unreported (some
+network drives report none). Files your `.gitignore`
 ignores don't count, and nothing is checked while one of the tab's own actions
 runs: its own reload follows when it is done. A tab in the background is checked
 when you switch to it.
@@ -43,7 +43,8 @@ seconds instead: on some network drives, when Linux has no file watches left
 (each folder of a repository needs one; see `fs.inotify.max_user_watches`), and
 in a repository with more than 20 000 folders that aren't ignored. In a very
 large repository, where a check takes longer, those checks come less often (at
-most one a minute). The **Refresh** command still reloads at once.
+most one a minute). It then also checks when the window gets the focus back.
+The **Refresh** command still reloads at once.
 Reopening Browsitory restores every tab you had open, workspace groupings
 included.
 
