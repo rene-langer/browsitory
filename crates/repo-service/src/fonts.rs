@@ -121,6 +121,31 @@ mod tests {
             assert!(!families.is_empty());
             assert!(families.iter().any(|f| f.monospace), "{families:?}");
         }
+        // Where fontconfig lists fonts, they are found too.
+        if cfg!(target_os = "linux") {
+            let listed = std::process::Command::new("fc-list")
+                .args([":", "family"])
+                .output()
+                .ok()
+                .filter(|out| out.status.success())
+                .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+                .unwrap_or_default();
+            // `fc-list` prints each family (with its localized names after commas) per line.
+            let first_names: Vec<&str> = listed
+                .lines()
+                .filter_map(|line| line.split(',').next())
+                .map(str::trim)
+                .filter(|name| !name.is_empty() && !name.starts_with('.'))
+                .collect();
+            if !first_names.is_empty() {
+                assert!(
+                    first_names
+                        .iter()
+                        .any(|name| families.iter().any(|f| f.name == *name)),
+                    "fc-list: {first_names:?}, found: {families:?}"
+                );
+            }
+        }
         assert!(families
             .iter()
             .all(|f| !f.name.is_empty() && !f.name.starts_with('.') && f.name.trim() == f.name));
