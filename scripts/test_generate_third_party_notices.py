@@ -235,7 +235,7 @@ class GrammarTests(unittest.TestCase):
 
     def test_excluded_grammars_reads_the_typescript_list(self):
         source = gen.EXCLUDED_GRAMMARS_TS.read_text(encoding="utf-8")
-        self.assertEqual(gen.excluded_grammars(source), {"cpp", "cpp-macro", "glsl"})
+        self.assertEqual(gen.excluded_grammars(source), {"glsl"})
 
     def test_parse_notice_maps_each_file_to_its_section(self):
         notice = (
@@ -294,6 +294,52 @@ class GrammarTests(unittest.TestCase):
         upstream = {"name": "x", "patterns": [1]}
         self.assertEqual(gen.grammar_drift({**upstream, "aliases": ["y"], "embeddedLangs": ["c"]}, upstream), [])
         self.assertEqual(gen.grammar_drift({"name": "x", "patterns": [2]}, upstream), ["patterns"])
+
+    def test_metadata_covers_grammars_and_injections(self):
+        # #326: cpp-macro, which cpp brings along, is listed among tm-grammars' injections.
+        metadata = gen.grammar_metadata([{"name": "cpp", "license": "MIT"}], [{"name": "cpp-macro", "license": "MIT"}])
+        self.assertEqual(metadata, {"cpp": {"name": "cpp", "license": "MIT"}, "cpp-macro": {"name": "cpp-macro", "license": "MIT"}})
+
+    def test_own_grammars_are_listed_with_browsitorys_licence(self):
+        # #326: Browsitory's own glsl grammar replaces the excluded upstream one.
+        entries, lines, problems = gen.own_grammar_entries(
+            {"glsl": "frontend/src/lib/grammars/glsl.ts"},
+            {"glsl"},
+            read_file=lambda path: 'export const GLSL_GRAMMAR = { name: "glsl", scopeName: "source.glsl" };',
+            license_text="MIT License\n\nCopyright (c) Browsitory\n",
+        )
+        self.assertEqual(problems, [])
+        self.assertEqual(entries, [("glsl", "MIT", "MIT License\n\nCopyright (c) Browsitory\n")])
+        self.assertEqual(
+            lines,
+            ["- glsl (`glsl`): Browsitory's own grammar, `frontend/src/lib/grammars/glsl.ts` (MIT, part of Browsitory)"],
+        )
+
+    def test_an_own_grammar_must_replace_an_excluded_one_and_name_itself(self):
+        _, _, problems = gen.own_grammar_entries(
+            {"glsl": "g.ts", "rust": "r.ts"},
+            {"glsl"},
+            read_file=lambda path: 'name: "other"' if path == "g.ts" else 'name: "rust"',
+            license_text="MIT",
+        )
+        self.assertEqual(
+            problems,
+            [
+                'own grammar g.ts does not declare name: "glsl"',
+                "own grammar rust is not in excludedGrammars.ts, so the upstream one would ship too",
+            ],
+        )
+
+    def test_the_real_own_grammars_exist_and_replace_excluded_ones(self):
+        excluded = gen.excluded_grammars(gen.EXCLUDED_GRAMMARS_TS.read_text(encoding="utf-8"))
+        _, _, problems = gen.own_grammar_entries(
+            gen.OWN_GRAMMARS,
+            excluded,
+            read_file=lambda path: (gen.ROOT / path).read_text(encoding="utf-8"),
+            license_text="MIT",
+        )
+        self.assertEqual(problems, [])
+        self.assertEqual(set(gen.OWN_GRAMMARS), {"glsl"})
 
     def test_shiki_grammar_reads_the_embedded_json(self):
         module = 'const lang = Object.freeze(JSON.parse("{\\"name\\":\\"x\\"}"))'

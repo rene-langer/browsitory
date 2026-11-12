@@ -6,8 +6,9 @@ const LANGS_DIST = /[\\/]@shikijs[\\/]langs[\\/]dist[\\/]/;
 
 /**
  * Keeps the grammars in `EXCLUDED_GRAMMARS` out of the build. Shiki's language modules import
- * the grammars they embed (`ruby.mjs` imports `./cpp.mjs`); this plugin resolves such an
- * import to an empty list instead, and `highlight.ts` drops the reference to it. The build
+ * the grammars they embed (`cpp.mjs` imports `./glsl.mjs`); this plugin resolves such an
+ * import to an empty list instead, and `highlightTokenizer.ts` puts Browsitory's own grammar in
+ * its place (`OWN_GRAMMARS` in excludedGrammars.ts, #326). The build
  * then fails if an excluded grammar's definition still made it into any output file, so a
  * Shiki update that pulls one in another way can't ship it unnoticed.
  *

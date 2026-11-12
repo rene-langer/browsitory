@@ -33,6 +33,7 @@ const LOADERS: Record<HighlightLanguage, () => Promise<unknown>> = {
   go: () => import("shiki/langs/go.mjs"),
   java: () => import("shiki/langs/java.mjs"),
   c: () => import("shiki/langs/c.mjs"),
+  cpp: () => import("shiki/langs/cpp.mjs"),
   csharp: () => import("shiki/langs/csharp.mjs"),
   css: () => import("shiki/langs/css.mjs"),
   scss: () => import("shiki/langs/scss.mjs"),
@@ -103,9 +104,16 @@ export function createTokenizer(): Tokenizer {
   const ensureLanguage = (h: HighlighterCore, lang: HighlightLanguage): Promise<void> => {
     let p = loaded.get(lang);
     if (p === undefined) {
-      p = LOADERS[lang]().then((mod) =>
-        h.loadLanguage(withoutExcludedGrammars((mod as { default: LanguageRegistration[] }).default)),
-      );
+      p = LOADERS[lang]().then(async (mod) => {
+        const langs = withoutExcludedGrammars((mod as { default: LanguageRegistration[] }).default);
+        // An own grammar can embed a language its module doesn't bring along (the own glsl
+        // grammar is built on C, #326): load that one first.
+        const missing = langs
+          .flatMap((l) => l.embeddedLangs ?? [])
+          .filter((name): name is HighlightLanguage => name in LOADERS && !langs.some((l) => l.name === name));
+        await Promise.all([...new Set(missing)].map((name) => ensureLanguage(h, name)));
+        await h.loadLanguage(langs);
+      });
       loaded.set(lang, p);
     }
     return p;
