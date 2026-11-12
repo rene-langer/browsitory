@@ -6,7 +6,7 @@ use repo_service::wire::ErrorDto;
 use repo_service::wire::StatusWithStampDto;
 use repo_service::wire::{
     to_trailers, BlameLineDto, CommitLocationDto, CommitOutcomeDto, CommitSignatureDto,
-    DiffHunkDto, DiffOptionsDto, FileHistoryEntryDto, GraphPageDto, GraphSelectionDto,
+    DiffHunkDto, DiffOptionsDto, FileHistoryPageDto, GraphPageDto, GraphSelectionDto,
     LineHistoryDto, StatusEntryDto, TrailerDto,
 };
 use std::path::Path;
@@ -254,13 +254,11 @@ pub async fn get_file_history(
     path: String,
     limit: usize,
     state: State<'_, AppState>,
-) -> Result<Vec<FileHistoryEntryDto>, ErrorDto> {
+) -> Result<FileHistoryPageDto, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
         .read(move |w| w.get_file_history(path, limit))
         .await?
-        .into_iter()
-        .map(FileHistoryEntryDto::from)
-        .collect())
+        .into())
 }
 
 #[tauri::command]

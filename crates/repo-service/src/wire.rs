@@ -618,6 +618,27 @@ impl From<git_core::history::FileHistoryEntry> for FileHistoryEntryDto {
     }
 }
 
+/// One answer of `get_file_history` (#860).
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "FileHistoryPage"))]
+#[serde(rename_all = "camelCase")]
+pub struct FileHistoryPageDto {
+    /// The first `limit` entries, or fewer when the call's time budget ran out first.
+    pub entries: Vec<FileHistoryEntryDto>,
+    /// The file's history ended: no older entry exists.
+    pub complete: bool,
+}
+
+impl From<git_core::history::FileHistoryPage> for FileHistoryPageDto {
+    fn from(page: git_core::history::FileHistoryPage) -> Self {
+        FileHistoryPageDto {
+            entries: page.entries.into_iter().map(Into::into).collect(),
+            complete: page.complete,
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[cfg_attr(any(test, feature = "ts"), ts(rename = "LineHistoryEntry"))]
@@ -652,6 +673,9 @@ pub struct LineHistoryDto {
     pub entries: Vec<LineHistoryEntryDto>,
     /// The walk stopped at its commit cap, so older changes may be missing.
     pub truncated: bool,
+    /// No older entry will come: the range's history ended, or the walk stopped at its cap.
+    /// Fewer than `limit` entries without it: the call's time budget ran out first (#860).
+    pub complete: bool,
 }
 
 impl From<git_core::line_history::LineHistory> for LineHistoryDto {
@@ -659,6 +683,7 @@ impl From<git_core::line_history::LineHistory> for LineHistoryDto {
         LineHistoryDto {
             entries: h.entries.into_iter().map(Into::into).collect(),
             truncated: h.truncated,
+            complete: h.complete,
         }
     }
 }
@@ -3256,6 +3281,7 @@ mod ts_bindings {
             BlameLineDto,
             GraphCommitDto,
             FileHistoryEntryDto,
+            FileHistoryPageDto,
             LineHistoryEntryDto,
             LineHistoryDto,
             SearchPageDto,

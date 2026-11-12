@@ -180,13 +180,15 @@ pub(crate) enum Command {
         path: String,
         reply: Sender<Result<Vec<BlameLine>, ErrorDto>>,
     },
+    /// The commits that changed `path` from HEAD, at most `limit`, continuing the worker's walk
+    /// for the same HEAD and path within a time budget (#860).
     GetFileHistory {
         path: String,
         limit: usize,
-        reply: Sender<Result<Vec<git_core::history::FileHistoryEntry>, ErrorDto>>,
+        reply: Sender<Result<git_core::history::FileHistoryPage, ErrorDto>>,
     },
     /// The commits that changed lines `start_line..=end_line` of `path` as it is in `revision`
-    /// (a commit id or "HEAD"), at most `limit` (#447).
+    /// (a commit id or "HEAD"), at most `limit` (#447), continuing like `GetFileHistory`.
     GetLineHistory {
         revision: String,
         path: String,

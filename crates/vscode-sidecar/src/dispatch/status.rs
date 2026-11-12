@@ -5,7 +5,7 @@ use repo_service::wire::ErrorDto;
 use repo_service::wire::StatusWithStampDto;
 use repo_service::wire::{
     to_trailers, BlameLineDto, CommitLocationDto, CommitOutcomeDto, CommitSignatureDto,
-    DiffHunkDto, DiffOptionsDto, FileHistoryEntryDto, GraphPageDto, GraphSelectionDto,
+    DiffHunkDto, DiffOptionsDto, FileHistoryPageDto, GraphPageDto, GraphSelectionDto,
     LineHistoryDto, StatusEntryDto,
 };
 use serde::Deserialize;
@@ -158,12 +158,10 @@ pub(super) fn get_file_history(
     params: GetFileHistoryParams,
     repos: &Repos,
 ) -> Result<Value, ErrorDto> {
-    let entries: Vec<FileHistoryEntryDto> = worker_handle(repos, &params.repo_path)?
+    let page: FileHistoryPageDto = worker_handle(repos, &params.repo_path)?
         .get_file_history(params.path, params.limit)?
-        .into_iter()
-        .map(FileHistoryEntryDto::from)
-        .collect();
-    serde_json::to_value(entries).map_err(ErrorDto::from_error)
+        .into();
+    serde_json::to_value(page).map_err(ErrorDto::from_error)
 }
 
 #[derive(Deserialize)]

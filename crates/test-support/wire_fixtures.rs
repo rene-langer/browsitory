@@ -389,6 +389,29 @@ pub fn file_history_entries() -> Cases<git_core::history::FileHistoryEntry> {
     ]
 }
 
+pub fn file_history_pages() -> Cases<git_core::history::FileHistoryPage> {
+    vec![
+        case(
+            "complete",
+            git_core::history::FileHistoryPage {
+                entries: vec![git_core::history::FileHistoryEntry {
+                    commit: graph_commit("Edit"),
+                    path: "a.txt".to_string(),
+                    old_path: None,
+                }],
+                complete: true,
+            },
+        ),
+        case(
+            "more",
+            git_core::history::FileHistoryPage {
+                entries: Vec::new(),
+                complete: false,
+            },
+        ),
+    ]
+}
+
 pub fn line_histories() -> Cases<git_core::line_history::LineHistory> {
     vec![
         case(
@@ -418,6 +441,14 @@ pub fn line_histories() -> Cases<git_core::line_history::LineHistory> {
                 entries: Vec::new(),
                 truncated: true,
                 complete: true,
+            },
+        ),
+        case(
+            "more",
+            git_core::line_history::LineHistory {
+                entries: Vec::new(),
+                truncated: false,
+                complete: false,
             },
         ),
     ]

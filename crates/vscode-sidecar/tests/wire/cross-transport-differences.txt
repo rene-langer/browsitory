@@ -43,6 +43,8 @@ DiffSettings/wrap-On key-order
 FileContent/Binary-png key-order
 FileHistoryEntry/no-old-path key-order
 FileHistoryEntry/renamed key-order
+FileHistoryPage/complete key-order
+FileHistoryPage/more key-order
 FileSides/new-Loaded-not-an-image key-order
 FileSides/new-Loaded-png key-order
 FileSides/new-Missing key-order
@@ -77,6 +79,8 @@ HookProgress/Started-Merge key-order
 HookProgress/Started-Patch key-order
 HookProgress/Started-Pick key-order
 LineHistory/complete key-order
+LineHistory/more key-order
+LineHistory/truncated key-order
 MergeOutcome/Conflicted key-order
 PatchApplyOutcome/HookFailed key-order
 PickOutcome/Committed key-order
