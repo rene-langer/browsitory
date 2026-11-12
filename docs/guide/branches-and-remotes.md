@@ -30,7 +30,7 @@ The menus offer:
     a short notification confirms the copy, or an error says why it failed.
 
     While a merge, rebase, cherry-pick or revert is in progress, or another action, a fetch,
-    pull or push runs, the branch and remote actions that change something (checkout, rename,
+    pull or push runs, the branch and remote actions that change something (switching, rename,
     merge, push, delete, setting or clearing the upstream, and a remote's fetch, edit,
     credentials and remove) are disabled with the reason, and the command palette leaves out
     their commands; an open confirmation or remote dialog says why and doesn't save. **New
@@ -144,10 +144,10 @@ remote already had everything.
     Fetch all (unreachable, missing credentials), the others are still fetched and the error
     names the ones that failed.
 
-    While a transfer runs, the window stays usable: you can scroll the history, look at what is
-    already shown and open the sidebar. Anything Browsitory still has to read from the
-    repository, such as the files of a commit you haven't opened yet, shows once the transfer
-    ends. Actions that change the repository wait too, and their buttons say why.
+    While a transfer runs, the window stays usable: you can scroll the history, open the
+    sidebar, and open a commit, a diff, blame, file history or a search, which show at once.
+    Only while a pull merges and runs its `post-merge` hook do these reads wait until it ends.
+    Actions that change the repository wait for the transfer, and their buttons say why.
 
     **Cancelling a fetch, pull or push.** Click **Cancel** next to its progress. While it is
     still connecting (a server that doesn't answer, a VPN that is down), Cancel stops it at once
