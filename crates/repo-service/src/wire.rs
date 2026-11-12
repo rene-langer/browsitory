@@ -1402,6 +1402,26 @@ pub struct ChangeStampDto {
     pub work_tree: String,
 }
 
+/// A refresh's status and change stamp from one scan (#841); see
+/// `git_core::change_stamp::status_with_stamp`.
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "StatusWithStamp"))]
+#[serde(rename_all = "camelCase")]
+pub struct StatusWithStampDto {
+    pub status: Vec<StatusEntryDto>,
+    pub stamp: ChangeStampDto,
+}
+
+impl From<git_core::change_stamp::StatusWithStamp> for StatusWithStampDto {
+    fn from(read: git_core::change_stamp::StatusWithStamp) -> Self {
+        Self {
+            status: read.status.into_iter().map(StatusEntryDto::from).collect(),
+            stamp: read.stamp.into(),
+        }
+    }
+}
+
 impl From<git_core::change_stamp::ChangeStamp> for ChangeStampDto {
     fn from(stamp: git_core::change_stamp::ChangeStamp) -> Self {
         Self {
@@ -3264,6 +3284,7 @@ mod ts_bindings {
             PickOutcomeDto,
             UndoStateDto,
             ChangeStampDto,
+            StatusWithStampDto,
             SignatureStatusDto,
             SignatureFormatDto,
             CommitSignatureDto,

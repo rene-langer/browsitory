@@ -3608,6 +3608,29 @@ fn get_change_stamp_reports_its_two_parts() {
     assert_ne!(edited["result"]["workTree"], clean["result"]["workTree"]);
 }
 
+/// `get_status_with_stamp` (#841) answers what `get_status` and `get_change_stamp` do.
+#[test]
+fn get_status_with_stamp_answers_the_status_and_the_stamp() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "first commit");
+    drop(repo);
+    write_file(dir.path(), "file.txt", "v2, longer");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+    let params = serde_json::json!({"repoPath": repo_path});
+
+    let read = sidecar.call(2, "get_status_with_stamp", params.clone());
+    let status = sidecar.call(3, "get_status", params.clone());
+    let stamp = sidecar.call(4, "get_change_stamp", params);
+
+    assert_eq!(read["result"]["status"][0]["path"], "file.txt", "{read}");
+    assert!(read["result"]["stamp"]["refs"].is_string(), "{read}");
+    assert_eq!(read["result"]["status"], status["result"], "{read}");
+    assert_eq!(read["result"]["stamp"], stamp["result"], "{read}");
+}
+
 /// `get_commit_graph` pages (#685): `nextCursor` resumes, an absent cursor starts at the top, and a
 /// cursor of another walk answers `stale`.
 #[test]

@@ -153,6 +153,7 @@ export type DtoContract = [
   Expect<Equal<Hand.UndoOutcome, Wire.UndoOutcome>>,
   Expect<Equal<Hand.UndoState, Wire.UndoState>>,
   Expect<Equal<Hand.ChangeStamp, Wire.ChangeStamp>>,
+  Expect<Equal<Hand.StatusWithStamp, Wire.StatusWithStamp>>,
   Expect<Equal<Hand.UpstreamInfo, Loosen<Wire.UpstreamInfo, "ahead" | "behind" | "pushBranch">>>,
   Expect<Equal<Hand.WordWrap, Wire.WordWrap>>,
   Expect<Equal<Hand.Workspace, Wire.Workspace>>,
