@@ -225,7 +225,11 @@ expanded merges, branches with ahead/behind, tags, the current and every remote'
 their key, the `refs` part plus the graph selection, "Collapse merges" and the limit, equals the
 one they were read with, so staging, unstaging, discarding or editing a file re-reads only the
 status, the stashes, the worktree, submodule and remote lists, HEAD and undo state. The Refresh
-command (`refresh({ full: true })`), a failed refresh and a missing stamp read everything. Refreshes
+command (`refresh({ full: true })`), a failed refresh and a missing stamp read everything. When the
+history reads do run, the worker keeps each branch's ahead/behind count by its pair of tips
+(`git_core::ahead_behind::AheadBehindCache`, #112): only a branch or upstream that moved is
+counted again, the upstream reads after the branch list count nothing, the branch list drops the
+pairs it no longer lists, and a changed shallow or graft file forgets every count. Refreshes
 are coalesced per tab (#222): one runs and at most one waits; a call while one runs shares the
 waiting one, which starts after the running one ends, so it still sees the caller's change.
 `useAppState.refresh()` reads the stamp together with the status, from one scan of the work tree
@@ -2232,9 +2236,14 @@ work to a `HighlightTransport` (`highlightWorkerProtocol.ts`):
   opening VSCode's merge editor the host calls the internal `check_merge_target`, the same
   guards `prepare_merge_tool` applies (text conflict, no symlink/submodule, work tree file
   inside the tree).
-- Side files and `read_file_version` return raw blob bytes: git2 0.21 exposes neither
-  `git_blob_filter` nor libgit2's filter lists, so CRLF/`ident`/filter-driver conversion is not
-  applied (documented for users in USER_GUIDE).
+- Side files and `read_file_version` hold a blob as checkout writes it (#130): git2 0.21
+  doesn't wrap `git_blob_filter`, so `tools::checkout_contents` declares it against the linked
+  libgit2 (as `index_refresh` does `git_index_set_caps`). That applies libgit2's built-in
+  filters, CRLF/eol (`core.autocrlf`, `core.eol`, `text`/`eol` attributes) and `ident`;
+  libgit2 runs no external filter driver (Git LFS shows its pointer). Binary blobs are returned
+  as stored. libgit2 caches `core.autocrlf` per open repository, so a change made outside the
+  app applies once the repository is opened again. For a p4merge add/add conflict,
+  `prepare_merge_tool` writes git's virtual base (`create_virtual_base`, #159).
 - A commit's file tree (#446, `git-core::tree`): `get_commit_tree` lists one folder per call
   (the frontend loads folders as they open) or, with a filter, walks the whole tree for matching
   paths (at most `MAX_TREE_MATCHES`). `get_file_at_commit` sends text, or a sniffed image's

@@ -29,7 +29,7 @@ function setup(outcome: UndoOutcome | Error) {
       return false;
     }
   });
-  const { result } = renderHook(() => useUndoActions(client, "/repo", runMutationWithOutcome, setState));
+  const { result } = renderHook(() => useUndoActions(client, "/repo", runMutationWithOutcome, setState, async () => {}));
   return { result, client, getState: () => state };
 }
 

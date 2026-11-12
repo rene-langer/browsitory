@@ -18,12 +18,16 @@
 //!
 //! See `docs/superpowers/specs/2026-10-27-parity-batch4f-design.md`.
 
-use std::ffi::OsString;
+use std::collections::HashSet;
+use std::ffi::{c_char, c_int, c_void, CString, OsString};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
-use git2::{Config, ConfigLevel, ErrorCode, ObjectType, Oid, Repository, Tree};
+use git2::{
+    Binding, Blob, Config, ConfigLevel, DiffLineType, ErrorCode, ObjectType, Oid, Patch,
+    Repository, Tree,
+};
 use thiserror::Error;
 
 use crate::launch::is_safe_relative;
@@ -213,6 +217,10 @@ pub fn preset(kind: ToolKind, name: &str) -> Option<(&'static str, &'static [&'s
 
 /// Presets that, like git, leave out the base when a conflict has none (add/add).
 const DROP_MISSING_BASE: &[&str] = &["kdiff3", "bc", "bc3", "bc4"];
+
+/// Presets that, like git's `mergetools/p4merge`, get a virtual base when a conflict has none
+/// (#159). git does this for p4merge only.
+const VIRTUAL_BASE: &[&str] = &["p4merge"];
 
 pub fn is_terminal_tool(name: &str) -> bool {
     TERMINAL_TOOLS.contains(&name)
@@ -725,7 +733,99 @@ pub fn file_version_contents(
     if size > limit {
         return Err(ToolError::TooLarge(path.to_string()));
     }
-    Ok(Some(repo.find_blob(id)?.content().to_vec()))
+    let contents = checkout_contents(&repo.find_blob(id)?, path)?;
+    // Line-ending conversion can grow the contents past the limit.
+    if contents.len() > limit {
+        return Err(ToolError::TooLarge(path.to_string()));
+    }
+    Ok(Some(contents))
+}
+
+/// libgit2 1.9's `git_blob_filter_options`. `attr_commit_id` has room for the largest object
+/// id (SHA-256), so the struct is never smaller than the one libgit2 was built with; it is
+/// only read with `GIT_BLOB_FILTER_ATTRIBUTES_FROM_COMMIT`, which this never sets.
+#[repr(C)]
+struct BlobFilterOptions {
+    version: c_int,
+    flags: u32,
+    commit_id: *mut c_void,
+    attr_commit_id: [u8; 32],
+}
+
+/// `GIT_BLOB_FILTER_OPTIONS_VERSION`.
+const BLOB_FILTER_OPTIONS_VERSION: c_int = 1;
+
+extern "C" {
+    /// libgit2's `git_blob_filter`, which git2 doesn't wrap (#130).
+    fn git_blob_filter(
+        out: *mut c_void,
+        blob: *mut c_void,
+        as_path: *const c_char,
+        opts: *mut BlobFilterOptions,
+    ) -> c_int;
+}
+
+/// A blob's contents as checkout writes them to `path` (#130), like git's
+/// `convert_to_working_tree` for difftool and mergetool: the built-in end-of-line conversion
+/// (`core.autocrlf`, `core.eol`, the `text`/`eol` attributes) and `ident`. libgit2 runs no
+/// external filter driver (`filter.<driver>.smudge`, such as Git LFS), so neither does this.
+fn checkout_contents(blob: &Blob, path: &str) -> Result<Vec<u8>, ToolError> {
+    // Binary content is never converted. (libgit2's `GIT_BLOB_FILTER_CHECK_FOR_BINARY` would
+    // skip it too, but hands back an empty buffer instead of the contents.)
+    if blob.is_binary() {
+        return Ok(blob.content().to_vec());
+    }
+    // `checked` paths never hold a NUL; this is only the C string conversion.
+    let as_path = CString::new(path).map_err(|_| ToolError::InvalidPath)?;
+    let out = git2::Buf::new();
+    let mut options = BlobFilterOptions {
+        version: BLOB_FILTER_OPTIONS_VERSION,
+        flags: 0,
+        commit_id: std::ptr::null_mut(),
+        attr_commit_id: [0; 32],
+    };
+    // SAFETY: `out` is an empty `git_buf` that `Buf` disposes of on drop, `blob` is a live blob
+    // of an open repository, `as_path` is a NUL-terminated string and `options` a valid,
+    // version-1 options struct; all outlive the call.
+    let code = unsafe {
+        git_blob_filter(
+            out.raw().cast(),
+            blob.raw().cast(),
+            as_path.as_ptr(),
+            &mut options,
+        )
+    };
+    if code < 0 {
+        return Err(git2::Error::last_error(code).into());
+    }
+    Ok(out.to_vec())
+}
+
+/// git's `create_virtual_base` (#159): LOCAL without the lines REMOTE doesn't share (a diff of
+/// the two applied with `git apply --no-add`), or empty when that keeps less than half of LOCAL,
+/// too little common material for a useful three-way view.
+fn virtual_base(local: &[u8], remote: &[u8]) -> Result<Vec<u8>, ToolError> {
+    let patch = Patch::from_buffers(local, None, remote, None, None)?;
+    let mut removed = HashSet::new();
+    for hunk in 0..patch.num_hunks() {
+        for index in 0..patch.num_lines_in_hunk(hunk)? {
+            let line = patch.line_in_hunk(hunk, index)?;
+            if line.origin_value() == DiffLineType::Deletion {
+                removed.extend(line.old_lineno());
+            }
+        }
+    }
+    let base: Vec<u8> = local
+        .split_inclusive(|&byte| byte == b'\n')
+        .zip(1..)
+        .filter(|(_, number)| !removed.contains(number))
+        .flat_map(|(line, _)| line.iter().copied())
+        .collect();
+    Ok(if local.len() < base.len() * 2 {
+        base
+    } else {
+        Vec::new()
+    })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1055,16 +1155,19 @@ pub fn prepare_merge_tool_with(
             args.retain(|arg| arg != "$BASE");
         }
     }
-    let blob =
-        |id: Oid| -> Result<Vec<u8>, ToolError> { Ok(repo.find_blob(id)?.content().to_vec()) };
+    let blob = |id: Oid| checkout_contents(&repo.find_blob(id)?, path);
     let ours = blob(ours.id)?;
     let theirs = blob(theirs.id)?;
-    let base = conflict
-        .ancestor
-        .as_ref()
-        .map(|a| blob(a.id))
-        .transpose()?
-        .unwrap_or_default();
+    let base = match &conflict.ancestor {
+        Some(ancestor) => blob(ancestor.id)?,
+        // Only the preset: a `cmd` runs as configured, as in git.
+        None if matches!(tool.command, ToolCommand::Preset { .. })
+            && VIRTUAL_BASE.contains(&tool.name.as_str()) =>
+        {
+            virtual_base(&ours, &theirs)?
+        }
+        None => Vec::new(),
+    };
     let merged_before = std::fs::read(&merged).unwrap_or_default();
     let temp_dir = new_tool_dir(root)?;
     let result = (|| {

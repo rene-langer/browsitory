@@ -781,6 +781,25 @@ pub fn appearance_settings() -> Cases<config::AppearanceSettings> {
     ]
 }
 
+pub fn font_families() -> Cases<repo_service::fonts::FontFamily> {
+    vec![
+        case(
+            "monospace",
+            repo_service::fonts::FontFamily {
+                name: "Example Mono".to_string(),
+                monospace: true,
+            },
+        ),
+        case(
+            "proportional",
+            repo_service::fonts::FontFamily {
+                name: "Example Sans".to_string(),
+                monospace: false,
+            },
+        ),
+    ]
+}
+
 pub fn update_settings() -> Cases<config::UpdateSettings> {
     vec![
         case(

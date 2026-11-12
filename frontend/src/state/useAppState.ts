@@ -761,7 +761,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
   const branchNames = useMemo(() => state.branches.map((branch) => branch.name), [state.branches]);
   const currentBranch = state.branches.find((branch) => branch.isCurrent)?.name ?? null;
 
-  const branches = useBranchActions(
+  const { afterUndoStep, ...branches } = useBranchActions(
     client,
     repoPath,
     runMutation,
@@ -857,7 +857,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     [commit, amendCommit, continueSequence, pushCurrentBranch, forcePushCurrentBranch, pushTags, pushBranch, deleteRemoteBranch, deleteRemoteTag, setState],
   );
 
-  const undoActions = useUndoActions(client, repoPath, runMutationWithOutcome, setState);
+  const undoActions = useUndoActions(client, repoPath, runMutationWithOutcome, setState, afterUndoStep);
 
   const forge = useForgeActions(client, repoPath, runMutation, runMutationWithOutcome, setState, forgeError);
   const dismissError = useCallback(() => {

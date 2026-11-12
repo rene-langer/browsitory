@@ -105,6 +105,8 @@ export type FileSides = { old: FileSide, new: FileSide, };
 
 export type FileStats = { path: string, insertions: number, deletions: number, binary: boolean, };
 
+export type FontFamily = { name: string, monospace: boolean, };
+
 export type ForgeProvider = "GitHub" | "Bitbucket";
 
 export type ForgeRepository = { provider: ForgeProvider, host: string, owner: string, name: string, remoteName: string, };
