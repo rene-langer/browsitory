@@ -14,6 +14,7 @@ import "webdriverio";
 import "@wdio/types";
 // Shared with the VSCode suite; see that file's header for why it lives there.
 import { initFixtureRepo, setTestIdentity } from "../extension/e2e/src/support/fixtureRepo";
+import { FAKE_TOOL_HOME, needsFakeToolHome, prepareFakeToolHome } from "./support/fakeTool";
 import { closeSharedForgeFixtureServer, startSharedForgeFixtureServer } from "./support/forgeFixtureServer";
 import { git } from "./support/git";
 import { registerDriverRestart } from "./support/session";
@@ -479,7 +480,7 @@ export const config: WebdriverIO.Config = {
 
   // Ensure `tauri-driver` is running before the session starts so we can proxy the WebDriver
   // requests to it (127.0.0.1:4444, matching `hostname`/`port` above).
-  beforeSession: async () => {
+  beforeSession: async (_config: unknown, _capabilities: unknown, specs: string[]) => {
     // Fresh webview storage per spec file (see E2E_DATA_HOME), wiped before the app launches.
     fs.rmSync(E2E_DATA_HOME, { recursive: true, force: true });
     fs.mkdirSync(E2E_DATA_HOME, { recursive: true });
@@ -491,6 +492,13 @@ export const config: WebdriverIO.Config = {
     // frame 0. Under Xvfb the same build renders normally. Harmless on CI (no Wayland session).
     driverEnv = { ...process.env, XDG_DATA_HOME: E2E_DATA_HOME, GDK_BACKEND: "x11" };
     delete driverEnv.WAYLAND_DISPLAY;
+    // external-tools.spec.ts (#128): the app reads its git diff tool from a HOME of its own
+    // (`support/fakeTool.ts`), never the developer's git config.
+    if (needsFakeToolHome(specs)) {
+      prepareFakeToolHome();
+      driverEnv.HOME = FAKE_TOOL_HOME;
+      driverEnv.XDG_CONFIG_HOME = path.join(FAKE_TOOL_HOME, ".config");
+    }
     resetFixtureRepo();
     await startTauriDriver();
     sessionRequestedAt = Date.now();

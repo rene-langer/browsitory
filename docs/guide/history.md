@@ -88,7 +88,9 @@ has **Isolate branch**, which shows only that branch. **Show all branches** in t
 the Branches section goes back to the graph you started with: every local branch, also ones you
 create later, no remote-only commits, and every remote branch's badge. Turning dots back on until
 every local branch is on does the same for the local branches; the remote branches you picked
-stay. Browsitory remembers the choice per repository.
+stay. Browsitory remembers the choice per repository. Deleting a branch takes it out of the
+choice (deleting the isolated branch shows every branch again); **Undo** of the delete puts it
+back in.
 
 When the graph shows a single branch, local or remote (after **Isolate branch**, for example),
 it shows only that branch's own line: the commits made directly on it and its merge commits, newest

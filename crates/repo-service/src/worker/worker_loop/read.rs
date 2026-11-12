@@ -33,6 +33,8 @@ pub(super) struct ReadState<'a> {
     pub(super) undo_recorder: &'a mut UndoRecorder,
     pub(super) operations: &'a Operations,
     pub(super) clean_merge: &'a Option<merge::CleanMerge>,
+    // The branches' ahead/behind counts (#112).
+    pub(super) ahead_behind: &'a mut git_core::ahead_behind::AheadBehindCache,
 }
 
 /// What a transfer borrows from the worker loop: the repository, and the queue it serves reads
@@ -202,7 +204,7 @@ pub(super) fn dispatch(
         }
         Command::GetPatch { source, reply } => patch::get_patch(repo, source, reply),
         Command::PreviewPatch { content, reply } => patch::preview_patch(repo, content, reply),
-        Command::ListBranches { reply } => branch::list(repo, reply),
+        Command::ListBranches { reply } => branch::list(repo, state.ahead_behind, reply),
         Command::GetSwitchConflicts { name, reply } => branch::switch_conflicts(repo, name, reply),
         Command::GetPullDefaults { reply } => remote::pull_defaults(repo, reply),
         Command::ListWorktrees { reply } => worktree::list(repo, reply),
@@ -213,8 +215,12 @@ pub(super) fn dispatch(
         Command::ListRemoteBranches { remote_name, reply } => {
             remote::list_branches(repo, remote_name, reply)
         }
-        Command::GetCurrentUpstream { reply } => remote::current_upstream(repo, reply),
-        Command::GetRemoteUpstreams { name, reply } => remote::upstreams(repo, name, reply),
+        Command::GetCurrentUpstream { reply } => {
+            remote::current_upstream(repo, state.ahead_behind, reply)
+        }
+        Command::GetRemoteUpstreams { name, reply } => {
+            remote::upstreams(repo, state.ahead_behind, name, reply)
+        }
         Command::GetRemoteAuthMode { name, reply } => remote::auth_mode(repo, name, reply),
         Command::ListTags { reply } => tag::list(repo, reply),
         Command::ListStashes { reply } => stash::list(repo, reply),
@@ -288,6 +294,7 @@ mod tests {
             rebase_store: RebaseStore::open(&repo),
             rebase_memory: gate::RebaseMemory::default(),
         };
+        let mut ahead_behind = git_core::ahead_behind::AheadBehindCache::default();
         let clean_merge: Option<merge::CleanMerge> = None;
         let search_generation = SearchGeneration::default();
         let mut walk_cache = git_core::graph::WalkCache::default();
@@ -297,6 +304,7 @@ mod tests {
             undo_recorder: &mut undo_recorder,
             operations: &operations,
             clean_merge: &clean_merge,
+            ahead_behind: &mut ahead_behind,
         };
         for ((name, command), _) in table() {
             if matches!(command, Command::PanicNow) {

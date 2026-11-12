@@ -2,8 +2,13 @@ use super::{Command, ReadHandle, WorkerHandle};
 use crate::wire::ErrorDto;
 use git_core::branch::{BranchInfo, StashSwitchOutcome};
 use std::sync::mpsc::Sender;
-pub(super) fn list(repo: &git2::Repository, reply: Sender<Result<Vec<BranchInfo>, ErrorDto>>) {
-    let _ = reply.send(git_core::branch::list_branches(repo).map_err(ErrorDto::from_error));
+pub(super) fn list(
+    repo: &git2::Repository,
+    cache: &mut git_core::ahead_behind::AheadBehindCache,
+    reply: Sender<Result<Vec<BranchInfo>, ErrorDto>>,
+) {
+    let _ = reply
+        .send(git_core::branch::list_branches_cached(repo, cache).map_err(ErrorDto::from_error));
 }
 pub(super) fn create(
     repo: &git2::Repository,

@@ -441,28 +441,50 @@ pub(crate) fn configured_upstream(
     Ok(Some((remote, branch)))
 }
 
-/// Ahead/behind of `local_branch` against `refs/remotes/<remote>/<remote_branch>`, or
-/// `(None, None)` when either side cannot be resolved.
-pub(crate) fn ahead_behind(
+/// The tips of `local_branch` and of `refs/remotes/<remote>/<remote_branch>`, or `None` when
+/// either cannot be resolved.
+pub(crate) fn tracking_pair(
     repo: &Repository,
     local_branch: &str,
     remote_name: &str,
     remote_branch: &str,
-) -> (Option<usize>, Option<usize>) {
+) -> Option<(git2::Oid, git2::Oid)> {
     let local = repo
         .find_reference(&format!("refs/heads/{local_branch}"))
         .ok()
-        .and_then(|r| r.target());
+        .and_then(|r| r.target())?;
     let remote = repo
         .find_reference(&format!("refs/remotes/{remote_name}/{remote_branch}"))
         .ok()
-        .and_then(|r| r.target());
-    match (local, remote) {
-        (Some(local), Some(remote)) => match repo.graph_ahead_behind(local, remote) {
+        .and_then(|r| r.target())?;
+    Some((local, remote))
+}
+
+/// Ahead/behind of `local_branch` against `refs/remotes/<remote>/<remote_branch>`, or
+/// `(None, None)` when either side cannot be resolved; counted once per pair of tips in `cache`.
+pub(crate) fn ahead_behind(
+    repo: &Repository,
+    cache: &mut crate::ahead_behind::AheadBehindCache,
+    local_branch: &str,
+    remote_name: &str,
+    remote_branch: &str,
+) -> (Option<usize>, Option<usize>) {
+    let pair = tracking_pair(repo, local_branch, remote_name, remote_branch);
+    pair_ahead_behind(repo, cache, pair)
+}
+
+/// Ahead/behind of a [`tracking_pair`]: `(None, None)` without one, or when the walk fails.
+pub(crate) fn pair_ahead_behind(
+    repo: &Repository,
+    cache: &mut crate::ahead_behind::AheadBehindCache,
+    pair: Option<(git2::Oid, git2::Oid)>,
+) -> (Option<usize>, Option<usize>) {
+    match pair {
+        Some((local, remote)) => match cache.count(repo, local, remote) {
             Ok((ahead, behind)) => (Some(ahead), Some(behind)),
             Err(_) => (None, None),
         },
-        _ => (None, None),
+        None => (None, None),
     }
 }
 
@@ -1506,6 +1528,14 @@ pub fn update_remote_urls(
 }
 
 pub fn current_upstream(repo: &Repository) -> Result<Option<UpstreamInfo>, RemoteError> {
+    current_upstream_cached(repo, &mut crate::ahead_behind::AheadBehindCache::default())
+}
+
+/// [`current_upstream`], with the ahead/behind counts kept in `cache` (#112).
+pub fn current_upstream_cached(
+    repo: &Repository,
+    cache: &mut crate::ahead_behind::AheadBehindCache,
+) -> Result<Option<UpstreamInfo>, RemoteError> {
     // Unlike `current_local_branch_name`'s other callers (pull, set/clear upstream — all
     // genuine user actions that don't make sense without a current branch), this is a read-only
     // status query polled on every `refresh()`. A detached HEAD (normal mid-rebase or mid-merge)
@@ -1519,7 +1549,8 @@ pub fn current_upstream(repo: &Repository) -> Result<Option<UpstreamInfo>, Remot
         return Ok(None);
     };
 
-    let (ahead, behind) = ahead_behind(repo, &local_branch, &remote_name, &remote_branch);
+    cache.begin(repo);
+    let (ahead, behind) = ahead_behind(repo, cache, &local_branch, &remote_name, &remote_branch);
     let push_branch = upstream_push_branch(&config, &local_branch, &remote_name, &remote_branch)?;
     Ok(Some(UpstreamInfo {
         local_branch,
@@ -1565,7 +1596,22 @@ pub fn remote_upstreams(
     repo: &Repository,
     remote_name: &str,
 ) -> Result<Vec<UpstreamInfo>, RemoteError> {
+    remote_upstreams_cached(
+        repo,
+        remote_name,
+        &mut crate::ahead_behind::AheadBehindCache::default(),
+    )
+}
+
+/// [`remote_upstreams`], with the ahead/behind counts kept in `cache` (#112): after the branch
+/// list of the same refresh, it counts nothing again.
+pub fn remote_upstreams_cached(
+    repo: &Repository,
+    remote_name: &str,
+    cache: &mut crate::ahead_behind::AheadBehindCache,
+) -> Result<Vec<UpstreamInfo>, RemoteError> {
     let config = repo.config()?;
+    cache.begin(repo);
     let mut upstreams = Vec::new();
     for entry in repo.branches(Some(BranchType::Local))? {
         let (branch, _) = entry?;
@@ -1581,7 +1627,7 @@ pub fn remote_upstreams(
             .strip_prefix("refs/heads/")
             .unwrap_or(&merge_ref)
             .to_string();
-        let (ahead, behind) = ahead_behind(repo, local_branch, remote_name, &remote_branch);
+        let (ahead, behind) = ahead_behind(repo, cache, local_branch, remote_name, &remote_branch);
         let push_branch = upstream_push_branch(&config, local_branch, remote_name, &remote_branch)?;
         upstreams.push(UpstreamInfo {
             local_branch: local_branch.to_string(),

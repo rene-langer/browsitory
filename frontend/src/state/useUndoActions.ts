@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import type { RepoClient, UndoOutcome } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
+import type { AfterUndoStep } from "./useBranchActions";
 import type { RunMutationWithOutcome } from "./useMutationRunner";
 
 export interface UndoActions {
@@ -29,12 +30,16 @@ export function useUndoActions(
   repoPath: string,
   runMutationWithOutcome: RunMutationWithOutcome,
   setState: (updater: (prev: AppState) => AppState) => void,
+  // Runs after a step that didn't throw, before the refresh (#112).
+  afterStep: AfterUndoStep,
 ): UndoActions {
   const step = useCallback(
     async (verb: "undo" | "redo"): Promise<UndoOutcome | null> => {
       let outcome: UndoOutcome | null = null;
       const ok = await runMutationWithOutcome(async () => {
-        outcome = verb === "undo" ? await client.undo(repoPath) : await client.redo(repoPath);
+        const result = verb === "undo" ? await client.undo(repoPath) : await client.redo(repoPath);
+        outcome = result;
+        await afterStep(verb, result);
       });
       if (!ok) {
         const prefix = verb === "undo" ? "Undo failed: " : "Redo failed: ";
@@ -45,7 +50,7 @@ export function useUndoActions(
       if (message !== null) setState((prev) => ({ ...prev, error: message }));
       return outcome;
     },
-    [client, repoPath, runMutationWithOutcome, setState],
+    [client, repoPath, runMutationWithOutcome, setState, afterStep],
   );
   const undo = useCallback(() => step("undo"), [step]);
   const redo = useCallback(() => step("redo"), [step]);

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { coversEveryBranch, withRenamedBranch, withoutBranch } from "../lib/graphSelection";
-import { errorKind, type RepoClient, type StashSwitchOutcome } from "../ipc/RepoClient";
+import { errorKind, type RepoClient, type StashSwitchOutcome, type UndoOutcome } from "../ipc/RepoClient";
 import { refNameClash, takenNameMessage } from "../lib/takenNames";
 import type { SavedGraphSelection } from "./graphSelection";
 import type { AppState } from "./useAppState";
@@ -45,6 +45,24 @@ export interface BranchActions {
   isolateGraphBranch(kind: "local" | "remote", name: string): Promise<void>;
 }
 
+/**
+ * What `useBranchActions` gives the undo actions besides `BranchActions`: after an undo or redo
+ * step ran, it puts the branch of an undone delete back into the saved graph selection, or takes
+ * the branch of a redone one out again (#112).
+ */
+export type AfterUndoStep = (verb: "undo" | "redo", outcome: UndoOutcome) => Promise<void>;
+
+/** The branch an undo step's label names when the step is a branch delete, else `null`. */
+function deletedBranch(label: string): string | null {
+  const prefix = "Delete branch ";
+  return label.startsWith(prefix) ? label.slice(prefix.length) : null;
+}
+
+function sameSelection(a: string[] | null, b: string[] | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.length === b.length && a.every((name, index) => name === b[index]);
+}
+
 export function useBranchActions(
   client: RepoClient,
   repoPath: string,
@@ -54,7 +72,7 @@ export function useBranchActions(
   setState: (updater: (prev: AppState) => AppState) => void,
   graphSelection: SavedGraphSelection,
   branchNames: string[],
-): BranchActions {
+): BranchActions & { afterUndoStep: AfterUndoStep } {
   // Read at mutation time, after the backend call succeeded (see deleteBranch/renameBranch).
   const selectionRef = useRef(graphSelection.local);
   const remoteSelectionRef = useRef(graphSelection.remote);
@@ -68,17 +86,58 @@ export function useBranchActions(
   // The branch operation already succeeded; a failure to rewrite the saved selection must not
   // report it as failed (the graph skips missing names anyway, #97), so it is only logged.
   const updateSelection = useCallback(
-    async (next: string[] | "clear", after: "delete" | "rename") => {
+    async (next: string[] | "clear", after: "a branch delete" | "a branch rename" | "undoing a branch delete") => {
       try {
         if (next === "clear") await client.clearGraphBranchSelection(repoPath);
         else await client.setGraphBranchSelection(repoPath, next);
       } catch (error) {
         void client
-          .logFrontendError(`Updating the graph branch selection after a branch ${after} failed`, error)
+          .logFrontendError(`Updating the graph branch selection after ${after} failed`, error)
           .catch(() => {});
       }
     },
     [client, repoPath],
+  );
+
+  // The saved selections a branch delete rewrote, by branch name: the one before and the one it
+  // left, so undoing the delete can put the branch back (#112). Memory only, like the toast
+  // that offers the undo.
+  const rewrittenByDelete = useRef(new Map<string, { before: string[]; after: string[] | null }>());
+
+  // After `name` was deleted (or its delete redone): a persisted selection naming it would
+  // otherwise linger (#97), and every branch left shown is the default graph, so the list is
+  // forgotten (#402).
+  const dropFromSelection = useCallback(
+    async (name: string) => {
+      const before = selectionRef.current;
+      const remaining = branchNamesRef.current.filter((candidate) => candidate !== name);
+      const next = withoutBranch(before, name, remaining);
+      if (next === null || before === null) return;
+      const after = coversEveryBranch(next, remaining) ? null : next;
+      await updateSelection(after ?? "clear", "a branch delete");
+      rewrittenByDelete.current.set(name, { before, after });
+    },
+    [updateSelection],
+  );
+
+  // An undone delete puts back the selection it rewrote, unless it was changed since; a redone
+  // one takes the branch out again.
+  const afterUndoStep = useCallback<AfterUndoStep>(
+    async (verb, outcome) => {
+      if (outcome.kind !== "Done") return;
+      const name = deletedBranch(outcome.label);
+      if (name === null) return;
+      if (verb === "redo") {
+        await dropFromSelection(name);
+        return;
+      }
+      const rewritten = rewrittenByDelete.current.get(name);
+      if (rewritten === undefined) return;
+      rewrittenByDelete.current.delete(name);
+      if (!sameSelection(selectionRef.current, rewritten.after)) return;
+      await updateSelection(rewritten.before, "undoing a branch delete");
+    },
+    [dropFromSelection, updateSelection],
   );
 
   // A name that is taken (or a folder of a taken one) is refused before the optimistic update:
@@ -158,14 +217,10 @@ export function useBranchActions(
         (prev) => ({ ...prev, branches: prev.branches.filter((branch) => branch.name !== name) }),
         async () => {
           await client.deleteBranch(repoPath, name, force);
-          // A persisted selection naming the deleted branch would otherwise linger (#97).
-          const remaining = branchNamesRef.current.filter((candidate) => candidate !== name);
-          const next = withoutBranch(selectionRef.current, name, remaining);
-          // Every branch left shown is the default graph: forget the list (#402).
-          if (next !== null) await updateSelection(coversEveryBranch(next, remaining) ? "clear" : next, "delete");
+          await dropFromSelection(name);
         },
       ),
-    [client, runOptimisticMutation, repoPath, updateSelection],
+    [client, runOptimisticMutation, repoPath, dropFromSelection],
   );
   const renameBranch = useCallback(
     async (oldName: string, newName: string) => {
@@ -184,7 +239,7 @@ export function useBranchActions(
         async () => {
           await client.renameBranch(repoPath, oldName, newName);
           const next = withRenamedBranch(selectionRef.current, oldName, newName);
-          if (next !== null) await updateSelection(next, "rename");
+          if (next !== null) await updateSelection(next, "a branch rename");
         },
       );
     },
@@ -256,5 +311,6 @@ export function useBranchActions(
     clearGraphBranchSelection,
     showAllGraphBranches,
     isolateGraphBranch,
+    afterUndoStep,
   };
 }
