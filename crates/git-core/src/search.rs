@@ -912,6 +912,8 @@ fn first_parent_diff<'r>(
     commit: &git2::Commit,
     paths: &[&str],
 ) -> Result<git2::Diff<'r>, git2::Error> {
+    #[cfg(test)]
+    tests::DIFFS_BUILT.with(|count| count.set(count.get() + 1));
     let tree = commit.tree()?;
     let parent_tree = match commit.parent(0) {
         Ok(parent) => Some(parent.tree()?),
@@ -1051,6 +1053,93 @@ fn diff_lines_contain(diff: &git2::Diff, needle: &str) -> Result<bool, git2::Err
 mod tests {
     use super::*;
     use SearchTerm::*;
+
+    thread_local! {
+        /// How many first-parent diffs this test's thread built (#848).
+        pub(super) static DIFFS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    /// A commit of `files` (path, contents) on `parent`, written without moving any ref.
+    fn commit_files(repo: &Repository, files: &[(&str, &str)], parent: Option<Oid>) -> Oid {
+        let mut index = git2::Index::new().unwrap();
+        for (path, contents) in files {
+            let id = repo.blob(contents.as_bytes()).unwrap();
+            index
+                .add(&git2::IndexEntry {
+                    ctime: git2::IndexTime::new(0, 0),
+                    mtime: git2::IndexTime::new(0, 0),
+                    dev: 0,
+                    ino: 0,
+                    mode: 0o100644,
+                    uid: 0,
+                    gid: 0,
+                    file_size: contents.len() as u32,
+                    id,
+                    flags: 0,
+                    flags_extended: 0,
+                    path: path.as_bytes().to_vec(),
+                })
+                .unwrap();
+        }
+        let tree = repo.find_tree(index.write_tree_to(repo).unwrap()).unwrap();
+        let signature =
+            git2::Signature::new("Test User", "test@example.com", &git2::Time::new(1_000, 0))
+                .unwrap();
+        let parents: Vec<git2::Commit> = parent
+            .iter()
+            .map(|id| repo.find_commit(*id).unwrap())
+            .collect();
+        let parents: Vec<&git2::Commit> = parents.iter().collect();
+        repo.commit(None, &signature, &signature, "c", &tree, &parents)
+            .unwrap()
+    }
+
+    /// #848: a `path:` term naming a file, or a folder the commit leaves alone, is answered by
+    /// comparing tree entries, without a diff per scanned commit.
+    #[test]
+    fn literal_path_terms_build_no_diff_for_commits_that_leave_the_path_alone() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        let mut tip = commit_files(&repo, &[("src/lib.rs", "l"), ("docs/a.md", "0")], None);
+        for n in 1..20 {
+            let docs = n.to_string();
+            tip = commit_files(
+                &repo,
+                &[("src/lib.rs", "l"), ("docs/a.md", &docs)],
+                Some(tip),
+            );
+        }
+        tip = commit_files(
+            &repo,
+            &[("src/lib.rs", "l2"), ("docs/a.md", "19")],
+            Some(tip),
+        );
+        repo.reference("refs/heads/main", tip, true, "test")
+            .unwrap();
+        let search = |query: &str| {
+            DIFFS_BUILT.with(|count| count.set(0));
+            let page = search_commits(
+                &repo,
+                &parse_query(query).unwrap(),
+                &GraphSelection::default(),
+                None,
+                PageLimits {
+                    time: Duration::MAX,
+                    ..PageLimits::DEFAULT
+                },
+                &|| false,
+            )
+            .unwrap();
+            (page.commits.len(), DIFFS_BUILT.with(std::cell::Cell::get))
+        };
+
+        // The root and the last commit change src/lib.rs.
+        assert_eq!(search("path:src/lib.rs"), (2, 0), "(matches, diffs built)");
+        // Only the two commits that change something under src/ need a closer look.
+        assert_eq!(search("path:src"), (2, 2), "(matches, diffs built)");
+        // A glob still needs a diff per commit.
+        assert_eq!(search("path:src/*.rs"), (2, 21), "(matches, diffs built)");
+    }
 
     /// The query's terms when it is a plain AND of terms.
     fn terms(input: &str) -> Vec<SearchTerm> {
