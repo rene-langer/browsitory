@@ -17,7 +17,8 @@ import { stashActions as stashActionRules, stashDetails, stashTitle } from "../l
  * A selected stash: its name, `stash@{n}` with "On main · 2 days ago · 3 files", Apply / Pop /
  * Drop… (and "Apply as unstaged" / "Pop as unstaged" for a stash that recorded staged changes,
  * #657), then its tracked changes (diffed against the HEAD it was made on) and its untracked files
- * (diffed as whole-file adds through the parentless untracked-files commit).
+ * (diffed as whole-file adds through the parentless untracked-files commit). Each file's menu
+ * opens it in the editor or file manager, or in the diff tool against the same commit (#129).
  */
 export function StashDiffPane({
   repoPath,
@@ -30,7 +31,7 @@ export function StashDiffPane({
   stash: StashEntry;
   actions: StashActions;
 }) {
-  const { onSelectRow } = useWorkspaceActions();
+  const { onSelectRow, externalTools } = useWorkspaceActions();
   const [files, setFiles] = useState<StashFiles | null>(null);
   const [error, setError] = useState<DescribedError | null>(null);
   const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(new Set());
@@ -137,6 +138,8 @@ export function StashDiffPane({
                     diffKey={`commit:${stash.commitId}`}
                     fetchDiff={(opts) => client.getCommitDiff(repoPath, stash.commitId, path, opts)}
                     previewSource={{ kind: "Commit", commitId: stash.commitId, oldPath: null }}
+                    externalTools={externalTools}
+                    toolSource={{ kind: "Commit", commitId: stash.commitId, oldPath: null }}
                     blameAt={stash.commitId}
                     collapsed={collapsedPaths.has(`t:${path}`)}
                     onToggleCollapse={() => toggleCollapse(`t:${path}`)}
@@ -161,6 +164,8 @@ export function StashDiffPane({
                     diffKey={`commit:${untrackedCommitId}`}
                     fetchDiff={(opts) => client.getCommitDiff(repoPath, untrackedCommitId, path, opts)}
                     previewSource={{ kind: "Commit", commitId: untrackedCommitId, oldPath: null }}
+                    externalTools={externalTools}
+                    toolSource={{ kind: "Commit", commitId: untrackedCommitId, oldPath: null }}
                     blameAt={untrackedCommitId}
                     collapsed={collapsedPaths.has(`u:${path}`)}
                     onToggleCollapse={() => toggleCollapse(`u:${path}`)}

@@ -841,8 +841,36 @@ pub fn tool_temp_root() -> PathBuf {
     std::env::temp_dir()
 }
 
+/// The file in a tool directory naming the process of the tool that uses it (#129).
+const OWNER_FILE: &str = ".browsitory-tool.pid";
+
+/// Records the tool process using `temp_dir`, so a sweep keeps its side files while it runs,
+/// even after Browsitory itself has quit. Best effort: without the file the directory is swept
+/// by age as before.
+fn record_owner(temp_dir: &Path, pid: u32) {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    if let Ok(mut file) = options.open(temp_dir.join(OWNER_FILE)) {
+        let _ = writeln!(file, "{pid}");
+    }
+}
+
+/// Whether the tool recorded in `dir` (see `record_owner`) is still running.
+fn owner_running(dir: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(dir.join(OWNER_FILE)) else {
+        return false;
+    };
+    text.trim().parse::<u32>().is_ok_and(process::process_alive)
+}
+
 /// Removes `browsitory-tool-*` directories in `root` older than `max_age`: what a crash or a
-/// handed-off launcher left behind. Symlinks are never followed.
+/// handed-off launcher left behind. A directory whose tool is still running (its recorded
+/// process is alive) is kept however old it is (#129). Symlinks are never followed.
 pub fn sweep_stale_tool_dirs(root: &Path, max_age: Duration) {
     let Ok(entries) = std::fs::read_dir(root) else {
         return;
@@ -865,7 +893,7 @@ pub fn sweep_stale_tool_dirs(root: &Path, max_age: Duration) {
             .modified()
             .map(|modified| now.duration_since(modified).unwrap_or_default() >= max_age)
             .unwrap_or(false);
-        if old {
+        if old && !owner_running(&entry.path()) {
             let _ = std::fs::remove_dir_all(entry.path());
         }
     }
@@ -1194,6 +1222,7 @@ pub fn launch_diff_tool(prepared: PreparedDiffTool, grace: Duration) -> Result<(
             return Err(error);
         }
     };
+    record_owner(&prepared.temp_dir, child.id());
     let stderr = child.stderr.take().expect("stderr is piped");
     let (tail, reader) = drain_tail(stderr, STDERR_TAIL_BYTES);
     let deadline = Instant::now() + grace;
@@ -1250,6 +1279,7 @@ pub enum MergeToolOutcome {
 pub fn run_merge_tool(prepared: PreparedMergeTool) -> Result<MergeToolOutcome, ToolError> {
     let result = (|| {
         let mut child = spawn_tool(&prepared.invocation)?;
+        record_owner(&prepared.temp_dir, child.id());
         let stderr = child.stderr.take().expect("stderr is piped");
         let (tail, reader) = drain_tail(stderr, STDERR_TAIL_BYTES);
         let status = child.wait()?;
