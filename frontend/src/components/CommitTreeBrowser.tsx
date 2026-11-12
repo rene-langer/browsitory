@@ -1,8 +1,9 @@
 import { ChevronDown, ChevronRight, File, FileCode, Folder, FolderOpen, History, Link, Package } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { startTransition, useEffect, useRef, useState, type ReactNode } from "react";
 import type { FileContent, RepoClient, TreeEntry, TreeListing } from "../ipc/RepoClient";
 import { describeError, type DescribedError } from "../lib/errorMessages";
 import { HIGHLIGHT_LINE_LIMIT, highlightLines, type Token } from "../lib/highlight";
+import { isAbortError } from "../lib/highlightWorkerProtocol";
 import { formatSize } from "../lib/fileSize";
 import { languageForPath } from "../lib/languageForPath";
 import { logFailure } from "../lib/logger";
@@ -513,16 +514,18 @@ function FileText({ path, text }: { path: string; text: string }) {
   useEffect(() => {
     if (!highlight || lang === null) return;
     let cancelled = false;
-    highlightLines(lang, text.replace(/\r\n/g, "\n")).then(
+    const controller = new AbortController();
+    highlightLines(lang, text.replace(/\r\n/g, "\n"), controller.signal).then(
       (next) => {
-        if (!cancelled) setTokens({ text, lines: next });
+        if (!cancelled) startTransition(() => setTokens({ text, lines: next }));
       },
       (err: unknown) => {
-        if (!cancelled) logHighlightError(err);
+        if (!cancelled && !isAbortError(err)) logHighlightError(err);
       },
     );
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [highlight, lang, text]);
 

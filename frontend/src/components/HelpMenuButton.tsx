@@ -6,19 +6,23 @@ import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 
 /**
  * The header's Help menu (#647): the user guide, the keyboard shortcut sheet (while a repository
- * is open: the active workspace owns it) and what's new.
+ * is open: the active workspace owns it), what's new and, in the desktop app, Check for updates
+ * (#852).
  */
 export function HelpMenuButton({
   className,
   shortcuts,
   onOpenUserGuide,
   onShowReleaseNotes,
+  onCheckForUpdates,
 }: {
   className: string;
   /** Whether a repository workspace is open to show the shortcut sheet. */
   shortcuts: boolean;
   onOpenUserGuide: () => void;
   onShowReleaseNotes: () => void;
+  /** The palette's update check; absent where there is no updater (VSCode). */
+  onCheckForUpdates?: () => void;
 }) {
   const [menu, setMenu] = useState<{ x: number; y: number; returnFocusTo: HTMLElement | undefined } | null>(null);
   const items: ContextMenuItem[] = [
@@ -27,6 +31,7 @@ export function HelpMenuButton({
       ? [{ label: "Keyboard shortcuts", onSelect: () => requestWorkspace("shortcuts"), shortcut: "?", ariaKeyShortcuts: "?" }]
       : []),
     { label: "What’s new", onSelect: onShowReleaseNotes },
+    ...(onCheckForUpdates !== undefined ? [{ label: "Check for updates", onSelect: onCheckForUpdates }] : []),
   ];
   return (
     <>

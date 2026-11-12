@@ -14,6 +14,17 @@ pub enum RepoError {
     Io(#[from] std::io::Error),
 }
 
+/// Process-wide libgit2 settings for every binary that opens repositories (#840). Call once at
+/// startup, before the first repository is opened.
+///
+/// Turns off libgit2's strict hash verification: by default it hashes every object it reads
+/// again and compares it with its id, up to two thirds of a history walk's time. git checks
+/// hashes in `git fsck` and when it receives objects, not on ordinary reads. Objects the app
+/// writes are still hashed to make their ids. See `docs/ARCHITECTURE.md`.
+pub fn configure_libgit2() {
+    git2::opts::strict_hash_verification(false);
+}
+
 pub fn open(path: &Path) -> Result<git2::Repository, RepoError> {
     Ok(git2::Repository::discover(path)?)
 }

@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { renderHook } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConflictSegment } from "../ipc/RepoClient";
-import { conflictTokens, conflictVersions, segmentLines } from "./conflictHighlight";
+import { conflictTokens, conflictVersions, segmentLines, useConflictTokens } from "./conflictHighlight";
+import { setHighlightTransport, type Token } from "./highlight";
+import type { HighlightTransport } from "./highlightWorkerProtocol";
 
 describe("segmentLines", () => {
   it("splits a segment into lines without their line ends", () => {
@@ -31,6 +34,22 @@ describe("conflictVersions", () => {
     ];
     expect(conflictVersions(segments).ours).toEqual({ text: "a\nc", starts: [0, 1] });
   });
+
+  // #847: a segment's lines were spread into push(), one argument per line, which throws past
+  // the engine's argument limit (V8: about 120,000).
+  it("builds a version from a segment of 200,000 lines", () => {
+    const count = 200_000;
+    const content = "x\n".repeat(count);
+    const segments: ConflictSegment[] = [
+      { kind: "Clean", content },
+      { kind: "Conflict", ours: "o\n", base: "", theirs: content },
+    ];
+    const versions = conflictVersions(segments);
+    expect(versions.ours.starts).toEqual([0, count]);
+    expect(versions.ours.text.split("\n")).toHaveLength(count + 1);
+    expect(versions.theirs.text.split("\n")).toHaveLength(2 * count);
+    expect(versions.base.starts).toEqual([0, count]);
+  });
 });
 
 describe("conflictTokens", () => {
@@ -54,4 +73,34 @@ describe("conflictTokens", () => {
     expect(tokens.theirs[1]![0][0].color).toBe("var(--shiki-token-comment)");
     expect(tokens.ours[1]![0].some((t) => t.color === "var(--shiki-token-keyword)")).toBe(true);
   }, 20000);
+});
+
+// #843: the merge editor's requests are cancelled when it closes or its file changes.
+describe("useConflictTokens", () => {
+  let restore: HighlightTransport | undefined;
+  afterEach(() => {
+    if (restore !== undefined) setHighlightTransport(restore);
+    restore = undefined;
+  });
+
+  it("cancels its requests when the editor goes away", async () => {
+    const signals: (AbortSignal | undefined)[] = [];
+    restore = setHighlightTransport({
+      tokenize: vi.fn((_lang: string, _code: string, signal?: AbortSignal) => {
+        signals.push(signal);
+        return new Promise<Token[][]>(() => {});
+      }),
+      loadedLanguages: vi.fn(),
+    });
+    const segments: ConflictSegment[] = [
+      { kind: "Clean", content: "const unmountedEditor = 0;\n" },
+      { kind: "Conflict", ours: "const o = 1;\n", base: "const b = 1;\n", theirs: "const t = 1;\n" },
+    ];
+
+    const { unmount } = renderHook(() => useConflictTokens(segments, "typescript", true));
+    await vi.waitFor(() => expect(signals).toHaveLength(3));
+    unmount();
+
+    expect(signals.map((s) => s?.aborted)).toEqual([true, true, true]);
+  });
 });

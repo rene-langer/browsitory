@@ -116,6 +116,21 @@ characterize libgit2 behaviour, Renovate holds
 `git2`/`libgit2-sys` updates for Dependency Dashboard approval (`renovate.json`; see
 `AGENTS.md`'s Dependency updates section) — re-check those notes when approving one.
 
+### Process-wide libgit2 settings
+
+`git_core::repo::configure_libgit2()` runs first thing in `main` of both hosts (`tauri-app`,
+`vscode-sidecar`), before any repository is opened. It turns off libgit2's strict object hash
+verification (`git2::opts::strict_hash_verification(false)`, #840): by default libgit2 hashes
+every object it inflates again and compares it with its id, which cost up to two thirds of a
+history walk's time on a 130k-commit repository (file history 22 s to 8 s, blame 68 s to
+33 s). git checks object hashes in `git fsck` and when it receives objects, not on ordinary
+reads; with the check off a corrupted object reads as whatever it inflates to, as in git.
+libgit2 still checks the zlib stream and the pack index checksums, and objects the app
+writes are still hashed to get their ids. The setting is process-wide (it can't be limited
+to one repository or lane). Tests run with libgit2's default unless they call the function
+(`crates/git-core/tests/hash_verification.rs`, and the sidecar's
+`the_sidecar_reads_objects_without_rehashing_them`, which pins that the binary calls it).
+
 ## The `RepoClient` IPC boundary
 
 `frontend/src/ipc/RepoClient.ts` defines the interface every UI component depends on — see that
@@ -2092,6 +2107,42 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   and the worker records no undo entry. `ignore_paths` checks every pattern before reading
   `.gitignore`, then writes it once. Each is one worker command and so one undo step ("Stage 3
   files", "Ignore 2 patterns"; one path keeps the single-path label).
+
+## Syntax highlighting
+
+Shiki tokenizes in a Web Worker, not on the page (#843): a 2,000-line TypeScript file took 1 to
+2 s in V8 and about 5 s in WebKitGTK, all of it a frozen UI. `highlight.ts` keeps the page's API
+(`highlightLines`, `useHunkTokens`; the merge editor's `conflictHighlight.ts`) and hands the
+work to a `HighlightTransport` (`highlightWorkerProtocol.ts`):
+
+- The tokenizer (`highlightTokenizer.ts`: grammars, Shiki, its Oniguruma WebAssembly engine) works
+  in chunks of 200 lines, carrying Shiki's grammar state from chunk to chunk, and gives the
+  event loop a turn between chunks. A caller that moves on (another file, an unmounted view)
+  aborts its `AbortSignal`; `highlightLines` shares one request between callers asking for the
+  same text and cancels it once none wants it, and the worker drops it after its current chunk.
+- The entry points pick the transport. The desktop app (`main.tsx`) starts a module worker with
+  `new Worker(new URL("./lib/highlight.worker.ts", import.meta.url), { type: "module" })`; its
+  grammars stay separate chunks that load on first use (`vite.config.ts`'s `worker` options,
+  with the excluded-grammar check). Tauri's CSP needs nothing more: workers fall back to
+  `default-src 'self'`.
+- A VSCode webview can start a worker only from a `blob:` (or `data:`) URL and the worker can't
+  import further code, and the bundle is a classic script without `import.meta`. So
+  `vite.vscodeWorker.ts` builds the worker as one self-contained script with every grammar,
+  `dist-vscode/assets/highlight-worker.js`, and `vscode-main.tsx` fetches it next to its own
+  script, wraps it in a blob and starts it (`highlightBlobWorker.ts`). The webview CSP allows
+  `worker-src blob:` for this and nothing else (`extension/src/webviewHtml.ts`).
+- The engine is Oniguruma compiled to WebAssembly (`shiki/engine/oniguruma`, binary inlined in
+  `shiki/wasm`), about 4 times faster than Shiki's JavaScript regex engine on TypeScript in
+  WebKitGTK and 2 times in VSCode's Chromium. Compiling it needs `'wasm-unsafe-eval'` in
+  `script-src`: in `tauri.conf.json`'s CSP (for the page fallback, and for the module worker
+  wherever the webview applies the page's CSP to it) and in the VSCode webview's (the blob
+  worker inherits it; without it the worker answers every request with a CSP error). It allows WebAssembly
+  compilation only, not `eval`. `polyfillResponseBytes` adds `Response.prototype.bytes`, which
+  the inlined loader uses and WebKit before Safari 18 lacks.
+- If the worker can't be created or fails to load, pending and later requests fall back to
+  the page (`highlightInProcess.ts`): the same chunked tokenizer, so the page blocks for one
+  chunk at a time instead of the whole file. Vitest uses that fallback too (jsdom has no
+  `Worker`); the protocol has its own tests with a fake worker.
 
 ## Image preview
 

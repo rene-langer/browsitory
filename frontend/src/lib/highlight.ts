@@ -1,14 +1,10 @@
-import { useEffect, useState } from "react";
-import {
-  createHighlighterCore,
-  createCssVariablesTheme,
-  type HighlighterCore,
-  type LanguageRegistration,
-} from "shiki/core";
-import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
+import { startTransition, useEffect, useState } from "react";
 import type { DiffHunk, DiffLine } from "../ipc/RepoClient";
-import { EXCLUDED_GRAMMAR_NAMES } from "./excludedGrammars";
+import { inProcessTransport } from "./highlightInProcess";
+import { abortError, isAbortError, type HighlightTransport } from "./highlightWorkerProtocol";
 import type { HighlightLanguage } from "./languageForPath";
+
+export { withoutExcludedGrammars } from "./excludedGrammars";
 
 export interface Token {
   content: string;
@@ -16,89 +12,97 @@ export interface Token {
 }
 
 export const HIGHLIGHT_LINE_LIMIT = 2000;
-const THEME = createCssVariablesTheme({ name: "browsitory", variablePrefix: "--shiki-", fontStyle: false });
 
-// Each loader is a static string so Vite can split it into its own chunk.
-const LOADERS: Record<HighlightLanguage, () => Promise<unknown>> = {
-  typescript: () => import("shiki/langs/typescript.mjs"),
-  tsx: () => import("shiki/langs/tsx.mjs"),
-  javascript: () => import("shiki/langs/javascript.mjs"),
-  jsx: () => import("shiki/langs/jsx.mjs"),
-  json: () => import("shiki/langs/json.mjs"),
-  rust: () => import("shiki/langs/rust.mjs"),
-  python: () => import("shiki/langs/python.mjs"),
-  go: () => import("shiki/langs/go.mjs"),
-  java: () => import("shiki/langs/java.mjs"),
-  c: () => import("shiki/langs/c.mjs"),
-  csharp: () => import("shiki/langs/csharp.mjs"),
-  css: () => import("shiki/langs/css.mjs"),
-  scss: () => import("shiki/langs/scss.mjs"),
-  html: () => import("shiki/langs/html.mjs"),
-  markdown: () => import("shiki/langs/markdown.mjs"),
-  yaml: () => import("shiki/langs/yaml.mjs"),
-  toml: () => import("shiki/langs/toml.mjs"),
-  shellscript: () => import("shiki/langs/shellscript.mjs"),
-  sql: () => import("shiki/langs/sql.mjs"),
-  ruby: () => import("shiki/langs/ruby.mjs"),
-  php: () => import("shiki/langs/php.mjs"),
-  kotlin: () => import("shiki/langs/kotlin.mjs"),
-  swift: () => import("shiki/langs/swift.mjs"),
-};
+/**
+ * Where tokenizing runs (#843): the app's entry points hand in a Web Worker
+ * (`setHighlightTransport(workerTransport(...))`); until then, and in tests, it runs on the page
+ * in chunks (`highlightInProcess.ts`).
+ */
+let transport: HighlightTransport = inProcessTransport();
 
-let highlighter: Promise<HighlighterCore> | null = null;
-const loaded = new Map<HighlightLanguage, Promise<void>>();
-const cache = new Map<string, Promise<Token[][]>>();
-const CACHE_LIMIT = 500;
-
-function getHighlighter(): Promise<HighlighterCore> {
-  highlighter ??= createHighlighterCore({ themes: [THEME], langs: [], engine: createJavaScriptRegexEngine() });
-  return highlighter;
+/** Sets where tokenizing runs; returns the previous transport (tests restore it). */
+export function setHighlightTransport(next: HighlightTransport): HighlightTransport {
+  const previous = transport;
+  transport = next;
+  return previous;
 }
 
 /** The grammars registered so far (tests check that excluded ones never are). */
-export async function loadedLanguages(): Promise<string[]> {
-  return (await getHighlighter()).getLoadedLanguages();
+export function loadedLanguages(): Promise<string[]> {
+  return transport.loadedLanguages();
 }
+
+const cache = new Map<string, Token[][]>();
+const CACHE_LIMIT = 500;
+
+/** A request in flight, shared by every caller asking for the same text until all of them abort. */
+interface Job {
+  promise: Promise<Token[][]>;
+  controller: AbortController;
+  waiters: number;
+}
+const inflight = new Map<string, Job>();
 
 /**
- * Drops the grammars Browsitory doesn't ship (`excludedGrammars.ts`) from a language module's
- * grammar list, and from the embedded languages the rest name, so Shiki doesn't ask for them.
- * Code embedded in such a language (C++ in a Ruby heredoc) then stays plain.
+ * The tokens of `code`, line by line. `signal` cancels this caller's interest: the promise
+ * rejects with an AbortError, and the work itself stops once no caller wants it any more.
  */
-export function withoutExcludedGrammars(langs: readonly LanguageRegistration[]): LanguageRegistration[] {
-  const excluded = (name: string) => EXCLUDED_GRAMMAR_NAMES.includes(name);
-  return langs
-    .filter((lang) => !excluded(lang.name))
-    .map((lang) =>
-      lang.embeddedLangs?.some(excluded) ? { ...lang, embeddedLangs: lang.embeddedLangs.filter((n) => !excluded(n)) } : lang,
-    );
-}
-
-async function ensureLanguage(h: HighlighterCore, lang: HighlightLanguage): Promise<void> {
-  let p = loaded.get(lang);
-  if (p === undefined) {
-    p = LOADERS[lang]().then((mod) =>
-      h.loadLanguage(withoutExcludedGrammars((mod as { default: LanguageRegistration[] }).default)),
-    );
-    loaded.set(lang, p);
-  }
-  return p;
-}
-
-export function highlightLines(lang: HighlightLanguage, code: string): Promise<Token[][]> {
+export function highlightLines(lang: HighlightLanguage, code: string, signal?: AbortSignal): Promise<Token[][]> {
   const key = `${lang}\u0000${code}`;
   const hit = cache.get(key);
-  if (hit !== undefined) return hit;
-  const result = (async () => {
-    const h = await getHighlighter();
-    await ensureLanguage(h, lang);
-    const { tokens } = h.codeToTokens(code, { lang, theme: "browsitory" });
-    return tokens.map((line) => line.map((t) => ({ content: t.content, color: t.color })));
-  })();
-  result.catch(() => cache.delete(key));
-  cache.set(key, result);
-  if (cache.size > CACHE_LIMIT) cache.delete(cache.keys().next().value!);
-  return result;
+  if (hit !== undefined) return Promise.resolve(hit);
+  if (signal?.aborted) return Promise.reject(abortError());
+  let job = inflight.get(key);
+  if (job === undefined) {
+    const controller = new AbortController();
+    const created: Job = {
+      controller,
+      waiters: 0,
+      promise: transport.tokenize(lang, code, controller.signal).then((tokens) => {
+        cache.set(key, tokens);
+        if (cache.size > CACHE_LIMIT) cache.delete(cache.keys().next().value!);
+        return tokens;
+      }),
+    };
+    const forget = () => {
+      if (inflight.get(key) === created) inflight.delete(key);
+    };
+    created.promise.then(forget, forget);
+    inflight.set(key, created);
+    job = created;
+  }
+  const shared = job;
+  shared.waiters += 1;
+  return new Promise<Token[][]>((resolve, reject) => {
+    let settled = false;
+    const leave = () => {
+      settled = true;
+      shared.waiters -= 1;
+      signal?.removeEventListener("abort", onAbort);
+    };
+    const onAbort = () => {
+      if (settled) return;
+      leave();
+      reject(abortError());
+      if (shared.waiters === 0) {
+        shared.controller.abort();
+        if (inflight.get(key) === shared) inflight.delete(key);
+      }
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    shared.promise.then(
+      (tokens) => {
+        if (settled) return;
+        leave();
+        resolve(tokens);
+      },
+      (error: unknown) => {
+        if (settled) return;
+        leave();
+        reject(error);
+      },
+    );
+  });
 }
 
 const stripEol = (s: string) => s.replace(/\r?\n$/, "");
@@ -124,24 +128,27 @@ export function useHunkTokens(
     const total = hunks.reduce((n, h) => n + h.lines.length, 0);
     if (total > HIGHLIGHT_LINE_LIMIT) return;
     let cancelled = false;
+    const controller = new AbortController();
     (async () => {
       const map = new Map<DiffLine, Token[]>();
       for (const hunk of hunks) {
         const oldSide = hunk.lines.filter((l) => !isEofMarker(l) && l.origin !== "Add");
         const newSide = hunk.lines.filter((l) => !isEofMarker(l) && l.origin !== "Remove");
         const [oldTokens, newTokens] = await Promise.all([
-          highlightLines(lang, oldSide.map((l) => stripEol(l.content)).join("\n")),
-          highlightLines(lang, newSide.map((l) => stripEol(l.content)).join("\n")),
+          highlightLines(lang, oldSide.map((l) => stripEol(l.content)).join("\n"), controller.signal),
+          highlightLines(lang, newSide.map((l) => stripEol(l.content)).join("\n"), controller.signal),
         ]);
         oldSide.forEach((l, i) => l.origin === "Remove" && map.set(l, oldTokens[i] ?? []));
         newSide.forEach((l, i) => map.set(l, newTokens[i] ?? []));
       }
-      if (!cancelled) setTokens(map);
+      // A transition: rendering a long file's tokens yields to input instead of blocking it.
+      if (!cancelled) startTransition(() => setTokens(map));
     })().catch((e: unknown) => {
-      if (!cancelled) onError?.(e);
+      if (!cancelled && !isAbortError(e)) onError?.(e);
     });
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [hunks, lang, enabled, onError]);
   return tokens;

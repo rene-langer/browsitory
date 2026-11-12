@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { startTransition, useEffect, useState } from "react";
 import type { ConflictSegment } from "../ipc/RepoClient";
 import { HIGHLIGHT_LINE_LIMIT, highlightLines, type Token } from "./highlight";
+import { isAbortError } from "./highlightWorkerProtocol";
 import type { HighlightLanguage } from "./languageForPath";
 
 /**
@@ -40,7 +41,9 @@ export function conflictVersions(segments: readonly ConflictSegment[]): Record<C
     const starts: number[] = [];
     for (const segment of segments) {
       starts.push(lines.length);
-      lines.push(...segmentLines(sideContent(segment, side)));
+      // A loop, not a spread: a spread passes one argument per line and throws past the
+      // engine's argument limit on a very long segment (#847).
+      for (const line of segmentLines(sideContent(segment, side))) lines.push(line);
     }
     return { text: lines.join("\n"), starts };
   };
@@ -56,9 +59,12 @@ export type ConflictTokens = Record<ConflictSide, (Token[][] | undefined)[]>;
 export async function conflictTokens(
   segments: readonly ConflictSegment[],
   lang: HighlightLanguage,
+  signal?: AbortSignal,
 ): Promise<ConflictTokens> {
   const versions = conflictVersions(segments);
-  const [ours, theirs, base] = await Promise.all(SIDES.map((side) => highlightLines(lang, versions[side].text)));
+  const [ours, theirs, base] = await Promise.all(
+    SIDES.map((side) => highlightLines(lang, versions[side].text, signal)),
+  );
   const tokensBySide: Record<ConflictSide, Token[][]> = { ours, theirs, base };
   const result: ConflictTokens = { ours: [], theirs: [], base: [] };
   for (const side of SIDES) {
@@ -88,16 +94,18 @@ export function useConflictTokens(
   useEffect(() => {
     if (!active || lang === null) return;
     let cancelled = false;
-    conflictTokens(segments, lang).then(
+    const controller = new AbortController();
+    conflictTokens(segments, lang, controller.signal).then(
       (tokens) => {
-        if (!cancelled) setState({ segments, tokens });
+        if (!cancelled) startTransition(() => setState({ segments, tokens }));
       },
       (error: unknown) => {
-        if (!cancelled) onError?.(error);
+        if (!cancelled && !isAbortError(error)) onError?.(error);
       },
     );
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [active, lang, segments, onError]);
   return active && state !== null && state.segments === segments ? state.tokens : null;

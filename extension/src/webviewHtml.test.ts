@@ -42,9 +42,18 @@ describe("renderWebviewHtml", () => {
     expect(html).not.toMatch(/img-src[^;]*(?:https:|http:|\*|blob:)/);
     expect(html).not.toMatch(/connect-src[^;]*(?:https:|http:|\*|blob:|ws:)/);
     expect(html).not.toMatch(/(?:script-src|style-src) [^;]*'unsafe-inline'/);
-    expect(html).toMatch(/script-src 'nonce-[a-f0-9]{32}';/);
+    expect(html).toMatch(/script-src 'nonce-[a-f0-9]{32}' 'wasm-unsafe-eval';/);
     expect(html).not.toContain("'unsafe-eval'");
     expect(html).not.toMatch(/<script[^>]*>\s*[^<\s]/);
+  });
+
+  // #843: syntax highlighting runs in a Web Worker. A webview can only start one from a blob:
+  // (or data:) URL; the frontend bundle carries the worker's code and makes the blob itself.
+  it("allows workers from blob: URLs and nothing else", () => {
+    const html = renderWebviewHtml(fakeWebview(), { script: fakeUri("script.js"), style: fakeUri("style.css") });
+
+    expect(html).toMatch(/worker-src blob:;/);
+    expect(html.match(/worker-src[^;]*/g)).toEqual(["worker-src blob:"]);
   });
 
   it("generates a fresh nonce for each document", () => {
