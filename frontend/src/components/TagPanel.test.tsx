@@ -63,6 +63,33 @@ const tagRow = (name: string) =>
 
 const openMenu = (name: string) => fireEvent.click(screen.getByRole("button", { name: `Actions for ${name}` }));
 
+describe("TagPanel user commands (#895)", () => {
+  it("lists the user commands set for tags and runs one on the tag", () => {
+    const onRunUserCommand = vi.fn();
+    const release = {
+      id: "release",
+      name: "Release notes",
+      commandLine: "notes ${ref}",
+      workingDirectory: null,
+      targets: ["Tag" as const],
+      confirm: false,
+      showOutput: true,
+      refresh: false,
+      variables: ["ref" as const],
+      problem: null,
+    };
+    renderPanel({ userCommands: [release], onRunUserCommand });
+    openMenu("v1.0.0");
+    fireEvent.click(screen.getByRole("menuitem", { name: /Release notes/ }));
+    expect(onRunUserCommand).toHaveBeenCalledWith(release, {
+      commitId: "abc123",
+      branch: null,
+      refName: "refs/tags/v1.0.0",
+      paths: [],
+    });
+  });
+});
+
 describe("TagPanel", () => {
   // #438: tags are created from the graph and the palette; the panel is the tag list.
   it("has no create form and points to where tags are created when there are none", () => {

@@ -7,6 +7,7 @@ import { ReadOnlyFileSection } from "./ReadOnlyFileSection";
 import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
 import { DiffViewOptionsProvider } from "../state/DiffViewOptionsProvider";
 import { fakeRepoClient } from "../test/fakeRepoClient";
+import { UserCommandsContext } from "../state/userCommandsContext";
 
 function renderSection(overrides: Partial<Parameters<typeof ReadOnlyFileSection>[0]> = {}) {
   const props: Parameters<typeof ReadOnlyFileSection>[0] = {
@@ -94,6 +95,41 @@ describe("ReadOnlyFileSection", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Apply this file and stage" }));
     expect(patch.onApplyFile).toHaveBeenCalledWith(true);
     expect(screen.queryByRole("menuitem", { name: "Open in editor" })).toBeNull();
+  });
+
+  it("lists the user commands set for files and runs one on the file at the commit (#895)", () => {
+    const run = vi.fn();
+    const lint = {
+      id: "lint",
+      name: "Lint file",
+      commandLine: "lint ${path}",
+      workingDirectory: null,
+      targets: ["File" as const],
+      confirm: false,
+      showOutput: true,
+      refresh: false,
+      variables: ["path" as const],
+      problem: null,
+    };
+    render(
+      <UserCommandsContext.Provider value={{ commands: [lint], run }}>
+        <ReadOnlyFileSection
+          repoPath="/repo"
+          client={fakeRepoClient({ getBlame: vi.fn(async () => []) })}
+          path="a.txt"
+          diffKey="k1"
+          fetchDiff={vi.fn(async () => [])}
+          blameAt="abc"
+          toolSource={{ kind: "Commit", commitId: "abc", oldPath: null }}
+          collapsed={false}
+          onToggleCollapse={vi.fn()}
+          onSelectRow={vi.fn()}
+        />
+      </UserCommandsContext.Provider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Actions for a.txt" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Lint file/ }));
+    expect(run).toHaveBeenCalledWith(lint, { commitId: "abc", branch: null, refName: null, paths: ["a.txt"] });
   });
 
   it("a commit's hunk action carries the algorithm the diff was fetched with (#469)", async () => {

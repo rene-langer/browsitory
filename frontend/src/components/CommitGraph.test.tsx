@@ -245,6 +245,50 @@ describe("CommitGraph", () => {
     expect(screen.getByText("Branch from here")).toBeInTheDocument();
   });
 
+  it("lists the user commands set for commits last, and runs one on the commit (#895)", () => {
+    const onRunUserCommand = vi.fn();
+    const show = {
+      id: "id-show",
+      name: "Show in tool",
+      commandLine: "tool ${commit}",
+      workingDirectory: null,
+      targets: ["Commit" as const],
+      confirm: false,
+      showOutput: true,
+      refresh: false,
+      variables: ["commit" as const],
+      problem: null,
+    };
+    const branchOnly = { ...show, id: "id-branch", name: "Branch tool", targets: ["Branch" as const] };
+    render(
+      <CommitGraph
+        {...historyProps}
+        status={status}
+        commits={commits}
+        selectedRow="uncommitted"
+        operationsBlocked={false}
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
+        userCommands={[show, branchOnly]}
+        onRunUserCommand={onRunUserCommand}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByText(/second commit/).closest("li")!);
+
+    const items = screen.getAllByRole("menuitem");
+    expect(items[items.length - 1]).toHaveTextContent("Show in tool");
+    expect(screen.queryByRole("menuitem", { name: /Branch tool/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: /Show in tool/ }));
+    expect(onRunUserCommand).toHaveBeenCalledWith(show, {
+      commitId: "aaa111...",
+      branch: null,
+      refName: null,
+      paths: [],
+    });
+  });
+
   it("renders the menu next to the commit list, not inside its listbox (#669)", () => {
     render(
       <CommitGraph
