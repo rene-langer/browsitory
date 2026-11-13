@@ -79,6 +79,11 @@ describe("Browsitory user commands", () => {
       const seen = await browser.execute(
         (id: string) => ({
           row: document.querySelector(`li[data-commit-id="${id}"]`) !== null,
+          rows: Array.from(document.querySelectorAll("li[data-commit-id]"))
+            .slice(0, 3)
+            .map((row) => row.getAttribute("data-commit-id")),
+          tab: document.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute("title") ?? null,
+          active: document.querySelector('[data-active-repo="true"]')?.textContent?.slice(0, 200) ?? null,
           menu: Array.from(document.querySelectorAll('[role="menu"] button')).map((b) => b.textContent),
         }),
         head,
