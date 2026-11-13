@@ -9,7 +9,13 @@
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::process::{split_command_line, CommandStyle, SplitError};
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use crate::process::{
+    run_captured, split_command_line, CommandStyle, RunError as ProcessRunError, SplitError,
+    REPO_PINNING_ENV,
+};
 
 /// A variable a user command can use, written `${name}`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -289,4 +295,96 @@ impl CommandTemplate {
             .transpose()?;
         Ok(Expanded { args, directory })
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Running a user command (#894).
+// ---------------------------------------------------------------------------------------------
+
+/// How long a user command may run before it is stopped.
+pub const RUN_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+/// How much of a user command's output (stdout and stderr together, the end) is kept.
+pub const OUTPUT_LIMIT: usize = 256 * 1024;
+
+/// Where a command runs from: what the user selected. Empty fields have nothing to fill in.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Context {
+    /// A commit id (full or abbreviated).
+    pub commit: Option<String>,
+    /// A local (`main`) or remote-tracking (`origin/main`) branch's short name.
+    pub branch: Option<String>,
+    /// A full ref name (`refs/tags/v1`).
+    pub git_ref: Option<String>,
+    /// Work tree paths, relative to the root.
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum ContextError {
+    #[error("The commit {0} isn't in this repository.")]
+    UnknownCommit(String),
+    #[error("The branch {0} isn't in this repository.")]
+    UnknownBranch(String),
+    #[error("The ref {0} isn't in this repository.")]
+    UnknownRef(String),
+    #[error("The path {0} isn't a path in the work tree.")]
+    InvalidPath(String),
+}
+
+/// The variables' values for `context` in `repo`, whose work tree root (or git folder, when bare)
+/// is `root`. A branch or ref also fills in `${commit}` (its tip) when no commit is given, and a
+/// branch its `${ref}`; a local branch ref its `${branch}`. `${path}` is filled for exactly one
+/// path, `${paths}` for one or more. Every name is checked against the repository, and every path
+/// must stay inside the work tree (`launch::resolve_in_workdir`).
+pub fn values(
+    repo: &git2::Repository,
+    root: &Path,
+    context: &Context,
+) -> Result<Values, ContextError> {
+    let _ = (repo, root, context);
+    todo!()
+}
+
+/// How a user command ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunOutcome {
+    /// `None` when it was killed (time limit, or a signal).
+    pub exit_code: Option<i32>,
+    pub success: bool,
+    pub timed_out: bool,
+    /// The end of stdout and stderr together, at most `limit` bytes, escape sequences removed.
+    pub output: String,
+}
+
+#[derive(Debug, Error)]
+pub enum RunError {
+    #[error("The command has no program.")]
+    NoProgram,
+    #[error("Couldn't find the program '{0}'. Use a program on PATH or its absolute path.")]
+    NotFound(String),
+    #[error("The working directory {0} doesn't exist.")]
+    NoDirectory(String),
+    #[error("Couldn't start '{program}': {message}")]
+    Start { program: String, message: String },
+    #[error("Couldn't wait for the command: {0}")]
+    Wait(String),
+    #[error("The command was stopped.")]
+    Cancelled,
+}
+
+/// Runs an expanded command: its program resolved with `find` (absolute `PATH` entries only, see
+/// `process::find_program`; a relative path such as `./x` is never run), in its working directory
+/// (relative to `root`; `root` itself when none), stdin closed, stdout and stderr captured
+/// together, no shell. Killed with everything it started after `timeout` or when `cancel` says
+/// so. On Windows it gets no console window and runs in a job object, like a hook.
+pub fn run(
+    expanded: &Expanded,
+    root: &Path,
+    find: impl Fn(&str) -> Option<PathBuf>,
+    cancel: &dyn Fn() -> bool,
+    timeout: Duration,
+    limit: usize,
+) -> Result<RunOutcome, RunError> {
+    let _ = (expanded, root, find, cancel, timeout, limit);
+    todo!()
 }

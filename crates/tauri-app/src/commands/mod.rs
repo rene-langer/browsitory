@@ -97,7 +97,10 @@ pub use tools::{
 };
 pub use tree::{get_commit_tree, get_file_at_commit, restore_file_version, save_file_version};
 pub use undo::{get_undo_state, redo_last, undo_last};
-pub use user_commands::{check_user_command, list_user_commands, set_user_commands};
+pub use user_commands::{
+    cancel_user_command, check_user_command, list_user_commands, run_user_command,
+    set_user_commands,
+};
 pub use watch::{unwatch_repo, watch_repo, WatchState};
 pub use worktree::{create_worktree, list_worktrees, prune_worktrees, remove_worktree};
 

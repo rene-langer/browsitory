@@ -229,6 +229,7 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         | Command::GetFileSides { .. }
         | Command::ListRecentAuthors { .. }
         | Command::CheckMergeTarget { .. }
+        | Command::UserCommandValues { .. }
         | Command::ReadFileVersion { .. }
         | Command::GetCommitTree { .. }
         | Command::GetFileAtCommit { .. }
@@ -626,6 +627,7 @@ pub(super) fn reply_of(command: &mut Command) -> Option<&mut dyn Reply> {
         GetFileSides,
         ListRecentAuthors,
         CheckMergeTarget,
+        UserCommandValues,
         ReadFileVersion,
         GetCommitTree,
         GetFileAtCommit,

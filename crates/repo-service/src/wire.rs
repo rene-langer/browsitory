@@ -2351,6 +2351,68 @@ impl From<config::UserCommands> for UserCommandsDto {
     }
 }
 
+/// What a user command runs on (#894): the selection it was started from. Paths are relative to
+/// the work tree root.
+#[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "UserCommandContext"))]
+#[serde(rename_all = "camelCase")]
+pub struct UserCommandContextDto {
+    pub commit_id: Option<String>,
+    pub branch: Option<String>,
+    pub ref_name: Option<String>,
+    pub paths: Vec<String>,
+}
+
+impl From<UserCommandContextDto> for git_core::user_command::Context {
+    fn from(dto: UserCommandContextDto) -> Self {
+        Self {
+            commit: dto.commit_id,
+            branch: dto.branch,
+            git_ref: dto.ref_name,
+            paths: dto.paths,
+        }
+    }
+}
+
+/// How a user command ended (#894). `cancelled`: stopped by `cancel_user_command`, with no output.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "UserCommandRun"))]
+#[serde(rename_all = "camelCase")]
+pub struct UserCommandRunDto {
+    pub exit_code: Option<i32>,
+    pub success: bool,
+    pub timed_out: bool,
+    pub cancelled: bool,
+    pub output: String,
+}
+
+impl From<git_core::user_command::RunOutcome> for UserCommandRunDto {
+    fn from(outcome: git_core::user_command::RunOutcome) -> Self {
+        Self {
+            exit_code: outcome.exit_code,
+            success: outcome.success,
+            timed_out: outcome.timed_out,
+            cancelled: false,
+            output: outcome.output,
+        }
+    }
+}
+
+impl UserCommandRunDto {
+    /// A run stopped by `cancel_user_command`.
+    pub fn cancelled() -> Self {
+        Self {
+            exit_code: None,
+            success: false,
+            timed_out: false,
+            cancelled: true,
+            output: String::new(),
+        }
+    }
+}
+
 /// How a user command line splits, for "Test" in Preferences (#893): each argument with its
 /// variables unexpanded, and where the program was found.
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -3961,6 +4023,8 @@ mod ts_bindings {
             UserCommandInput,
             UserCommandsDto,
             UserCommandCheckDto,
+            UserCommandContextDto,
+            UserCommandRunDto,
             GitConfigSourceDto,
             GitToolDto,
             GitToolsDto,

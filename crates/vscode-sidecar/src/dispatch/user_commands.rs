@@ -3,10 +3,12 @@
 
 use std::path::Path;
 
-use repo_service::wire::UserCommandsDto;
 use repo_service::wire::{ErrorDto, UserCommandCheckDto, UserCommandDto, UserCommandInput};
+use repo_service::wire::{UserCommandContextDto, UserCommandsDto};
 use serde::Deserialize;
 use serde_json::Value;
+
+use super::{worker_handle, Repos};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,4 +48,41 @@ pub(super) fn check_user_command(params: CheckUserCommandParams) -> Result<Value
     let check =
         UserCommandCheckDto::check(&params.command_line, params.working_directory.as_deref())?;
     serde_json::to_value(check).map_err(ErrorDto::from_error)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct RunUserCommandParams {
+    repo_path: String,
+    command_id: String,
+    run_id: String,
+    context: UserCommandContextDto,
+}
+
+/// Runs a stored command (#894) on this request's own thread (`main.rs` gives each request
+/// one), so the repository and every other request go on while it runs.
+pub(super) fn run_user_command(
+    params: RunUserCommandParams,
+    repos: &Repos,
+) -> Result<Value, ErrorDto> {
+    let reads = worker_handle(repos, &params.repo_path)?.reads();
+    let prepared = repo_service::user_commands::prepare(
+        &reads,
+        Path::new(&params.repo_path),
+        &params.command_id,
+        params.context.into(),
+    )?;
+    let outcome = repo_service::user_commands::execute(&prepared, &params.run_id)?;
+    serde_json::to_value(outcome).map_err(ErrorDto::from_error)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct CancelUserCommandParams {
+    run_id: String,
+}
+
+pub(super) fn cancel_user_command(params: CancelUserCommandParams) -> Result<Value, ErrorDto> {
+    repo_service::user_commands::cancel(&params.run_id);
+    Ok(Value::Null)
 }

@@ -636,6 +636,11 @@ pub(crate) enum Command {
         path: String,
         reply: Sender<Result<(), ErrorDto>>,
     },
+    /// The variables' values for a user command run on `context` (#894).
+    UserCommandValues {
+        context: git_core::user_command::Context,
+        reply: Sender<Result<git_core::user_command::Values, ErrorDto>>,
+    },
     ReadFileVersion {
         path: String,
         version: git_core::tools::FileVersion,

@@ -82,6 +82,7 @@ where
             | Command::GetFileSides { .. }
             | Command::ListRecentAuthors { .. }
             | Command::CheckMergeTarget { .. }
+            | Command::UserCommandValues { .. }
             | Command::ReadFileVersion { .. }
             | Command::GetCommitTree { .. }
             | Command::GetFileAtCommit { .. }

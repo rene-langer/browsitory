@@ -27,8 +27,10 @@ import type {
   ExternalToolSettings,
   UserCommand,
   UserCommandCheck,
+  UserCommandContext,
   UserCommandInput,
   UserCommands,
+  UserCommandRun,
   GitTools,
   MarkResolvedOutcome,
   MergeToolOutcome,
@@ -505,5 +507,8 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
     setUserCommands: (repoPath: string | null, commands: UserCommandInput[]) =>
       call<UserCommand[]>("set_user_commands", { repoPath, commands }),
     checkUserCommand: (commandLine: string, workingDirectory: string | null) =>
-      call<UserCommandCheck>("check_user_command", { commandLine, workingDirectory }),  };
+      call<UserCommandCheck>("check_user_command", { commandLine, workingDirectory }),
+    runUserCommand: (repoPath: string, commandId: string, runId: string, context: UserCommandContext) =>
+      call<UserCommandRun>("run_user_command", { repoPath, commandId, runId, context }),
+    cancelUserCommand: (runId: string) => call<void>("cancel_user_command", { runId }),  };
 }

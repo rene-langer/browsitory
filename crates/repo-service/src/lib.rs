@@ -9,6 +9,7 @@ pub mod credentials;
 pub mod fonts;
 pub mod oplog;
 pub mod pull_requests;
+pub mod user_commands;
 pub mod watch;
 pub mod wire;
 pub mod worker;

@@ -52,7 +52,10 @@ use commands::{
 // Several paths as one undo step (#528).
 use commands::{ignore_paths, stage_paths, unstage_paths};
 // User-defined commands (#893).
-use commands::{check_user_command, list_user_commands, set_user_commands};
+use commands::{
+    cancel_user_command, check_user_command, list_user_commands, run_user_command,
+    set_user_commands,
+};
 // The repository tab names (#625).
 use commands::{list_repo_aliases, set_repo_alias};
 // The operation log (#888).
@@ -269,6 +272,8 @@ commands![
     list_user_commands,
     set_user_commands,
     check_user_command,
+    run_user_command,
+    cancel_user_command,
     get_git_tools,
     get_file_sides,
     get_commit_tree,

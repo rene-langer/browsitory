@@ -895,6 +895,11 @@ describe("tauriRepoClient external tools", () => {
     expect(invoke).toHaveBeenLastCalledWith("set_user_commands", { repoPath: null, commands: [] });
     await tauriRepoClient.checkUserCommand("make ${paths}", null);
     expect(invoke).toHaveBeenLastCalledWith("check_user_command", { commandLine: "make ${paths}", workingDirectory: null });
+    const context = { commitId: "c", branch: null, refName: null, paths: ["a.txt"] };
+    await tauriRepoClient.runUserCommand("/repo", "id-1", "run-1", context);
+    expect(invoke).toHaveBeenLastCalledWith("run_user_command", { repoPath: "/repo", commandId: "id-1", runId: "run-1", context });
+    await tauriRepoClient.cancelUserCommand("run-1");
+    expect(invoke).toHaveBeenLastCalledWith("cancel_user_command", { runId: "run-1" });
   });
 });
 

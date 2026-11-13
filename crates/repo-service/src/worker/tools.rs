@@ -86,6 +86,18 @@ pub(super) fn create_root_file(
     let _ = reply.send(result.map_err(ErrorDto::from_error));
 }
 
+/// The variables' values for a user command (#894): the work tree root (the git folder of a bare
+/// repository) and what `context` names, checked against the repository.
+pub(super) fn user_command_values(
+    repo: &git2::Repository,
+    context: &git_core::user_command::Context,
+    reply: Sender<Result<git_core::user_command::Values, ErrorDto>>,
+) {
+    let root = repo.workdir().unwrap_or_else(|| repo.path());
+    let _ = reply
+        .send(git_core::user_command::values(repo, root, context).map_err(ErrorDto::from_error));
+}
+
 const NO_WORKDIR: &str = "repository has no working directory (bare repository)";
 
 impl WorkerHandle {
@@ -145,6 +157,14 @@ impl ReadHandle {
             source,
             reply: tx,
         })
+    }
+
+    /// The variables' values for a user command run on `context` (#894).
+    pub fn user_command_values(
+        &self,
+        context: git_core::user_command::Context,
+    ) -> Result<git_core::user_command::Values, ErrorDto> {
+        self.read(|tx| Command::UserCommandValues { context, reply: tx })
     }
 
     /// The diff and merge tools from the user's git config, for the Preferences dialog.
