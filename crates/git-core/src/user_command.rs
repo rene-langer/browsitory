@@ -341,8 +341,68 @@ pub fn values(
     root: &Path,
     context: &Context,
 ) -> Result<Values, ContextError> {
-    let _ = (repo, root, context);
-    todo!()
+    let mut values = Values {
+        repo: root.to_string_lossy().into_owned(),
+        ..Values::default()
+    };
+    let mut tip = None;
+    if let Some(branch) = &context.branch {
+        let reference = ["refs/heads/", "refs/remotes/"]
+            .iter()
+            .filter_map(|prefix| repo.find_reference(&format!("{prefix}{branch}")).ok())
+            .next()
+            .ok_or_else(|| ContextError::UnknownBranch(branch.clone()))?;
+        values.branch = Some(branch.clone());
+        values.git_ref = reference.name().ok().map(str::to_string);
+        tip = reference.peel_to_commit().ok();
+    }
+    if let Some(name) = &context.git_ref {
+        let reference = repo
+            .find_reference(name)
+            .map_err(|_| ContextError::UnknownRef(name.clone()))?;
+        if values.branch.is_none() {
+            values.branch = name
+                .strip_prefix("refs/heads/")
+                .or_else(|| name.strip_prefix("refs/remotes/"))
+                .map(str::to_string);
+        }
+        values.git_ref = Some(name.clone());
+        tip = tip.or_else(|| reference.peel_to_commit().ok());
+    }
+    let commit = match &context.commit {
+        Some(id) => Some(
+            repo.revparse_single(id)
+                .ok()
+                .filter(|_| !id.is_empty() && id.chars().all(|c| c.is_ascii_hexdigit()))
+                .and_then(|object| object.peel_to_commit().ok())
+                .ok_or_else(|| ContextError::UnknownCommit(id.clone()))?,
+        ),
+        None => tip,
+    };
+    if let Some(commit) = commit {
+        values.commit = Some(commit.id().to_string());
+        values.short_commit = commit
+            .as_object()
+            .short_id()
+            .ok()
+            .and_then(|buf| buf.as_str().ok().map(str::to_string));
+    }
+    if !context.paths.is_empty() {
+        let paths = context
+            .paths
+            .iter()
+            .map(|rel| {
+                crate::launch::resolve_in_workdir(root, rel)
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .map_err(|_| ContextError::InvalidPath(rel.clone()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if let [only] = paths.as_slice() {
+            values.path = Some(only.clone());
+        }
+        values.paths = Some(paths);
+    }
+    Ok(values)
 }
 
 /// How a user command ended.
@@ -385,6 +445,35 @@ pub fn run(
     timeout: Duration,
     limit: usize,
 ) -> Result<RunOutcome, RunError> {
-    let _ = (expanded, root, find, cancel, timeout, limit);
-    todo!()
+    let (name, args) = expanded.args.split_first().ok_or(RunError::NoProgram)?;
+    if name.is_empty() {
+        return Err(RunError::NoProgram);
+    }
+    let program = find(name).ok_or_else(|| RunError::NotFound(name.clone()))?;
+    let directory = match &expanded.directory {
+        Some(dir) => root.join(dir),
+        None => root.to_path_buf(),
+    };
+    if !directory.is_dir() {
+        return Err(RunError::NoDirectory(directory.display().to_string()));
+    }
+    let mut command = std::process::Command::new(&program);
+    command.args(args).current_dir(&directory);
+    for key in REPO_PINNING_ENV {
+        command.env_remove(key);
+    }
+    match run_captured(command, None, cancel, timeout, limit) {
+        Ok(captured) => Ok(RunOutcome {
+            exit_code: captured.code,
+            success: captured.success,
+            timed_out: captured.timed_out,
+            output: captured.output,
+        }),
+        Err(ProcessRunError::Cancelled) => Err(RunError::Cancelled),
+        Err(ProcessRunError::Spawn(error)) => Err(RunError::Start {
+            program: program.display().to_string(),
+            message: error.to_string(),
+        }),
+        Err(ProcessRunError::Wait(error)) => Err(RunError::Wait(error.to_string())),
+    }
 }

@@ -197,6 +197,10 @@ UserCommand/problem key-order
 UserCommandCheck/found key-order
 UserCommandCheck/not-found key-order
 UserCommandCheck/program-variable key-order
+UserCommandRun/cancelled key-order
+UserCommandRun/failed key-order
+UserCommandRun/succeeded key-order
+UserCommandRun/timed-out key-order
 UserCommands/both key-order
 Workspace/empty key-order
 Workspace/members key-order

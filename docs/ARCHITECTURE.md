@@ -2446,6 +2446,25 @@ User-defined commands (epic #897) are programs the user adds to menus and the pa
   frontend can tell where it can run, and `problem` for a hand-written one that doesn't parse.
   `check_user_command` ("Test" in Preferences) returns the words as split and the program's
   `find_program` result without running anything.
+- Running (#894): `run_user_command` names a stored command by id, never a command line, so a
+  caller (the VSCode webview included) can only run what the user defined. The repository's own
+  commands are searched first, then the app-wide ones. `repo_service::user_commands::prepare`
+  fills the variables on the worker's read lane (`UserCommandValues`, `user_command::values`):
+  a commit id must be hex and in the repository (`${shortCommit}` is libgit2's `short_id`, so
+  `core.abbrev` applies), a branch must exist as `refs/heads/…` or `refs/remotes/…` and also
+  fills `${ref}`, a ref must exist, a branch or ref fills `${commit}` with its tip when no commit
+  is given, and every path goes through `launch::resolve_in_workdir`. `${path}` needs exactly one
+  path. `execute` then runs it off the worker (the Tauri blocking pool with no gate held; the
+  sidecar's per-request thread), so a long command never holds up the repository.
+- `user_command::run` resolves the program with `find_program` (absolute `PATH` entries,
+  `PATHEXT` on Windows; a relative path such as `./x` is never run, `${repo}/x` is absolute) and
+  runs it through `process::run_captured`, as hooks run: stdin closed, stdout and stderr
+  through one pipe with the last `OUTPUT_LIMIT` (256 KiB) kept, its own session and process
+  group on Unix and a job object with no console window on Windows, killed with everything it
+  started on cancel or after `RUN_TIMEOUT` (30 minutes). The repository-pinning `GIT_*`
+  variables are removed. A non-zero exit is an answer, not an error. `cancel_user_command`
+  marks the caller's run id in a process-wide registry the run polls; an id that isn't running
+  is ignored.
 
 ## Fetch all
 

@@ -961,7 +961,7 @@ fn cancel_user_command_stops_a_running_command() {
         "cancel_user_command",
         serde_json::json!({"runId": "slow-run"}),
     );
-    let mut answers = vec![sidecar.read_response(), sidecar.read_response()];
+    let mut answers = [sidecar.read_response(), sidecar.read_response()];
     answers.sort_by_key(|answer| answer["id"].as_u64());
     assert_eq!(answers[0]["id"], 2);
     assert_eq!(

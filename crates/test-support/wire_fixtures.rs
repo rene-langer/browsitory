@@ -864,6 +864,41 @@ pub fn user_command_checks() -> Cases<(String, bool)> {
     ]
 }
 
+/// How a user command ended; `None` is a cancelled run.
+pub fn user_command_runs() -> Cases<Option<git_core::user_command::RunOutcome>> {
+    use git_core::user_command::RunOutcome;
+    vec![
+        case(
+            "succeeded",
+            Some(RunOutcome {
+                exit_code: Some(0),
+                success: true,
+                timed_out: false,
+                output: "done\n".to_string(),
+            }),
+        ),
+        case(
+            "failed",
+            Some(RunOutcome {
+                exit_code: Some(3),
+                success: false,
+                timed_out: false,
+                output: "nope\n".to_string(),
+            }),
+        ),
+        case(
+            "timed-out",
+            Some(RunOutcome {
+                exit_code: None,
+                success: false,
+                timed_out: true,
+                output: String::new(),
+            }),
+        ),
+        case("cancelled", None),
+    ]
+}
+
 pub fn commit_message_settings() -> Cases<config::CommitMessageSettings> {
     vec![case(
         "plain",
