@@ -49,6 +49,7 @@ function createBridge(overrides: {
   mergeEditorOpened?: boolean;
   savePath?: string | undefined;
   fileBytes?: Uint8Array;
+  trusted?: boolean;
 } = {}) {
   const child = new FakeSidecar();
   const spawnResults = overrides.spawnResults ?? [child];
@@ -92,6 +93,7 @@ function createBridge(overrides: {
     openDiff,
     openMergeEditor,
     executeCommand,
+    isWorkspaceTrusted: () => overrides.trusted ?? true,
   });
   return {
     bridge,
@@ -465,6 +467,47 @@ describe("SidecarBridge", () => {
       expect.objectContaining({ id: 4, error: expect.objectContaining({ code: -32602 }) }),
     );
     expect(child.stdin.write).not.toHaveBeenCalled();
+  });
+
+  it("says whether user commands may run: only in a trusted workspace (#896)", async () => {
+    const trusted = createBridge({ trusted: true });
+    await trusted.bridge.handleWebviewMessage({ jsonrpc: "2.0", id: 1, method: "user_commands_blocked", params: {} });
+    expect(trusted.postToWebview).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 1, result: null });
+
+    const untrusted = createBridge({ trusted: false });
+    await untrusted.bridge.handleWebviewMessage({ jsonrpc: "2.0", id: 1, method: "user_commands_blocked", params: {} });
+    expect(untrusted.postToWebview).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      result: "Your commands don't run in an untrusted workspace. Trust this workspace to run them.",
+    });
+    expect(untrusted.child.stdin.write).not.toHaveBeenCalled();
+  });
+
+  it("never lets a user command reach the sidecar in an untrusted workspace (#896)", async () => {
+    const { bridge, child, postToWebview } = createBridge({ trusted: false });
+    await bridge.handleWebviewMessage({
+      jsonrpc: "2.0",
+      id: 7,
+      method: "run_user_command",
+      params: { repoPath: "/r", commandId: "c", runId: "r1", context: { commitId: null, branch: null, refName: null, paths: [] } },
+    });
+    expect(postToWebview).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 7,
+      error: {
+        code: -32000,
+        message: "Your commands don't run in an untrusted workspace. Trust this workspace to run them.",
+      },
+    });
+    expect(child.stdin.write).not.toHaveBeenCalled();
+  });
+
+  it("passes a user command to the sidecar in a trusted workspace (#896)", async () => {
+    const { bridge, child } = createBridge({ trusted: true });
+    const request = { jsonrpc: "2.0", id: 7, method: "run_user_command", params: { repoPath: "/r", commandId: "c", runId: "r1", context: {} } };
+    void bridge.handleWebviewMessage(request);
+    await vi.waitFor(() => expect(child.stdin.write).toHaveBeenCalledWith(`${JSON.stringify(request)}\n`));
   });
 
   it("opens VSCode's Keyboard Shortcuts on Browsitory's shortcut commands (#900)", async () => {

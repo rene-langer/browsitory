@@ -320,6 +320,31 @@ describe("buildPaletteCommands (#644)", () => {
     expect(all.find((command) => command.label === "Run: Lint")?.disabledReason).toBe("Needs a file");
   });
 
+  it("in an untrusted VSCode workspace lists every user command as unavailable, saying why (#896)", () => {
+    const run = vi.fn();
+    const show = {
+      id: "show",
+      name: "Show",
+      commandLine: "x",
+      workingDirectory: null,
+      targets: [],
+      confirm: false,
+      showOutput: true,
+      refresh: false,
+      problem: null,
+      variables: [],
+    };
+    const reason = "Your commands don't run in an untrusted workspace. Trust this workspace to run them.";
+    const all = buildPaletteCommands({
+      appState: makeAppState(),
+      sidebar: sidebar(),
+      tabs: tabs(),
+      userCommands: { commands: [show], run, blockedReason: reason },
+    });
+    expect(all.find((command) => command.label === "Run: Show")?.disabledReason).toBe(reason);
+    expect(commandsFor(makeAppState(), { userCommands: { commands: [show], run, blockedReason: reason } }).some((command) => command.label === "Run: Show")).toBe(false);
+  });
+
   it("runs a user command on the changed files selected, or the current one (#895)", () => {
     const run = vi.fn();
     const lint = {
