@@ -57,6 +57,11 @@ mod walk_types {
         Opened(&'a OsStr),
         Created(&'a OsStr),
         Cleared(&'a OsStr),
+        /// Windows: the leaf was opened as itself and found to be a file; it is opened a second
+        /// time next (by its file ID, `reopen_same`) to read or write it (#228).
+        #[cfg(windows)]
+        #[cfg_attr(not(test), allow(dead_code))]
+        Classified(&'a OsStr),
     }
 
     /// The walk's test seam; production passes [`no_step`].

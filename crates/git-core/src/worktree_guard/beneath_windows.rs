@@ -3739,4 +3739,248 @@ mod tests {
         let again = create_dir_in(&held, OsStr::new("NEW")).unwrap_err();
         assert_eq!(again.raw_os_error(), Some(ERROR_ALREADY_EXISTS));
     }
+
+    /// A step that runs `change` once, the first time the leaf `name` is classified as a file
+    /// (between `open_leaf` and `reopen_same`, #228).
+    fn once_classified<'a>(
+        name: &'a str,
+        mut change: impl FnMut() + 'a,
+    ) -> impl FnMut(Step<'_>) + 'a {
+        let mut done = false;
+        move |step| {
+            if step == Step::Classified(OsStr::new(name)) && !done {
+                done = true;
+                change();
+            }
+        }
+    }
+
+    /// `d/f` ("inside") in a new work tree, and a file `secret` ("outside") in another folder.
+    fn tree_and_outside() -> (TempDir, TempDir, PathBuf) {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        std::fs::write(dir.path().join("d").join("f"), "inside").unwrap();
+        let outside = TempDir::new().unwrap();
+        let secret = outside.path().join("secret");
+        std::fs::write(&secret, "outside").unwrap();
+        (dir, outside, secret)
+    }
+
+    /// #228: a symbolic link swapped in under the leaf's name after it was classified is never
+    /// read through: the reopen by file ID finds the classified file, now named `g`, no longer
+    /// the leaf, so the read finds nothing.
+    #[test]
+    fn read_never_follows_a_link_swapped_in_after_classifying() {
+        let (dir, _outside, secret) = tree_and_outside();
+        if !symlink_privilege(dir.path()) {
+            assert!(
+                std::env::var_os("CI").is_none(),
+                "no symlink privilege on CI"
+            );
+            eprintln!("SKIP: no privilege to create symbolic links");
+            return;
+        }
+        let d = dir.path().join("d");
+        let mut step = once_classified("f", || {
+            std::fs::rename(d.join("f"), d.join("g")).unwrap();
+            std::os::windows::fs::symlink_file(&secret, d.join("f")).unwrap();
+        });
+        let read = read(dir.path(), Path::new("d/f"), &mut step).unwrap();
+        assert!(read.is_none(), "{read:?}");
+        assert_eq!(std::fs::read_to_string(d.join("g")).unwrap(), "inside");
+        assert_eq!(std::fs::read_to_string(&secret).unwrap(), "outside");
+    }
+
+    /// #228: a file renamed out of the held folder after it was classified isn't read under the
+    /// leaf's name.
+    #[test]
+    fn read_finds_nothing_when_the_file_is_renamed_out_after_classifying() {
+        let (dir, _outside, _secret) = tree_and_outside();
+        let root = dir.path().to_path_buf();
+        let mut step = once_classified("f", || {
+            std::fs::rename(root.join("d").join("f"), root.join("moved")).unwrap();
+        });
+        let read = read(dir.path(), Path::new("d/f"), &mut step).unwrap();
+        assert!(read.is_none(), "{read:?}");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("moved")).unwrap(),
+            "inside"
+        );
+    }
+
+    /// #228: a write whose leaf becomes a symbolic link after it was classified replaces the
+    /// link itself (classified again, the link is deleted) and never writes through it.
+    #[test]
+    fn write_replaces_a_link_swapped_in_after_classifying_without_following_it() {
+        let (dir, _outside, secret) = tree_and_outside();
+        if !symlink_privilege(dir.path()) {
+            assert!(
+                std::env::var_os("CI").is_none(),
+                "no symlink privilege on CI"
+            );
+            eprintln!("SKIP: no privilege to create symbolic links");
+            return;
+        }
+        let d = dir.path().join("d");
+        let mut step = once_classified("f", || {
+            std::fs::rename(d.join("f"), d.join("g")).unwrap();
+            std::os::windows::fs::symlink_file(&secret, d.join("f")).unwrap();
+        });
+        assert!(write(dir.path(), Path::new("d/f"), b"new", &mut step).unwrap());
+        assert!(!std::fs::symlink_metadata(d.join("f"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(std::fs::read_to_string(d.join("f")).unwrap(), "new");
+        assert_eq!(std::fs::read_to_string(d.join("g")).unwrap(), "inside");
+        assert_eq!(std::fs::read_to_string(&secret).unwrap(), "outside");
+    }
+
+    /// #228: a write whose file is renamed out of the held folder after it was classified
+    /// writes a new file under the leaf's name and leaves the moved file alone.
+    #[test]
+    fn write_creates_the_leaf_when_the_file_is_renamed_out_after_classifying() {
+        let (dir, _outside, _secret) = tree_and_outside();
+        let root = dir.path().to_path_buf();
+        let mut step = once_classified("f", || {
+            std::fs::rename(root.join("d").join("f"), root.join("moved")).unwrap();
+        });
+        assert!(write(dir.path(), Path::new("d/f"), b"new", &mut step).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("d").join("f")).unwrap(),
+            "new"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("moved")).unwrap(),
+            "inside"
+        );
+    }
+
+    /// A new folder on the test volume CI mounts and names in `variable` (a FAT32, exFAT or ReFS
+    /// VHD, see `scripts/ci-windows-test-volumes.ps1`, #228). `None` (the test skips) when
+    /// it isn't set, which CI never allows.
+    fn test_volume(variable: &str) -> Option<TempDir> {
+        let Some(root) = std::env::var_os(variable) else {
+            assert!(
+                std::env::var_os("CI").is_none(),
+                "{variable} is not set on CI: the windows-latest job mounts the test volumes"
+            );
+            eprintln!("SKIP: {variable} is not set");
+            return None;
+        };
+        Some(TempDir::new_in(root).unwrap())
+    }
+
+    /// FAT32 and exFAT have no opens by file ID, no POSIX deletes or renames and no hard links:
+    /// a write (new, then over the existing file), a read and a remove still work through the
+    /// by-name and classic fallbacks (#228, #195).
+    fn the_fallbacks_work_on(variable: &str) {
+        let Some(dir) = test_volume(variable) else {
+            return;
+        };
+        assert!(write(dir.path(), Path::new("d/f"), b"one", &mut no_step).unwrap());
+        assert!(write(dir.path(), Path::new("d/f"), b"two", &mut no_step).unwrap());
+        let read = read(dir.path(), Path::new("d/f"), &mut no_step).unwrap();
+        assert!(
+            matches!(&read, Some(Leaf::File { bytes, .. }) if bytes == b"two"),
+            "{read:?}"
+        );
+        assert_eq!(
+            std::fs::read(dir.path().join("d").join("f")).unwrap(),
+            b"two"
+        );
+        // A read-only file is deleted too (the classic disposition clears the attribute).
+        make_read_only(&dir.path().join("d").join("f"));
+        assert!(remove(dir.path(), Path::new("d/f"), &mut no_step).unwrap());
+        assert!(std::fs::symlink_metadata(dir.path().join("d").join("f")).is_err());
+        // No temporary file left behind.
+        let left: Vec<_> = std::fs::read_dir(dir.path().join("d"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert!(left.is_empty(), "{left:?}");
+    }
+
+    #[test]
+    fn the_fallbacks_work_on_fat32() {
+        the_fallbacks_work_on("BROWSITORY_TEST_FAT32_DIR");
+    }
+
+    #[test]
+    fn the_fallbacks_work_on_exfat() {
+        the_fallbacks_work_on("BROWSITORY_TEST_EXFAT_DIR");
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn SetFileAttributesW(name: *const u16, attributes: u32) -> i32;
+    }
+
+    /// `FILE_ATTRIBUTE_INTEGRITY_STREAM` and `FILE_ATTRIBUTE_NO_SCRUB_DATA` (ReFS, Dev Drive).
+    const INTEGRITY_STREAM: u32 = 0x8000;
+    const NO_SCRUB_DATA: u32 = 0x2_0000;
+
+    fn wide(path: &Path) -> Vec<u16> {
+        use std::os::windows::ffi::OsStrExt;
+        path.as_os_str().encode_wide().chain([0]).collect()
+    }
+
+    /// A file `f` on the ReFS test volume, which CI formats with integrity streams on, so the
+    /// file has `INTEGRITY_STREAM`, and with `NO_SCRUB_DATA` set on it.
+    fn refs_file_with_integrity_and_no_scrub() -> Option<(TempDir, PathBuf)> {
+        let dir = test_volume("BROWSITORY_TEST_REFS_DIR")?;
+        let path = dir.path().join("f");
+        std::fs::write(&path, "old").unwrap();
+        let attributes = attributes_of(&path);
+        // SAFETY: a NUL-terminated wide string that outlives the call.
+        let ok = unsafe { SetFileAttributesW(wide(&path).as_ptr(), attributes | NO_SCRUB_DATA) };
+        assert_ne!(ok, 0, "{}", io::Error::last_os_error());
+        let attributes = attributes_of(&path);
+        assert_eq!(
+            attributes & (INTEGRITY_STREAM | NO_SCRUB_DATA),
+            INTEGRITY_STREAM | NO_SCRUB_DATA,
+            "setup: {attributes:#x}"
+        );
+        Some((dir, path))
+    }
+
+    /// #228: setting the settable attributes through a handle (as the classic delete does to
+    /// clear read-only) keeps ReFS's integrity and no-scrub bits.
+    #[test]
+    fn set_attributes_keeps_integrity_and_no_scrub_on_refs() {
+        let Some((_dir, path)) = refs_file_with_integrity_and_no_scrub() else {
+            return;
+        };
+        let file = OpenOptions::new()
+            .access_mode(FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE)
+            .open(&path)
+            .unwrap();
+        let attributes = attribute_tag(&file).unwrap().file_attributes;
+        set_attributes(&file, attributes | FILE_ATTRIBUTE_READONLY).unwrap();
+        set_attributes(&file, attributes & !FILE_ATTRIBUTE_READONLY).unwrap();
+        drop(file);
+        let after = attributes_of(&path);
+        assert_eq!(
+            after & (INTEGRITY_STREAM | NO_SCRUB_DATA | FILE_ATTRIBUTE_READONLY),
+            INTEGRITY_STREAM | NO_SCRUB_DATA,
+            "{after:#x}"
+        );
+    }
+
+    /// #228: a write replaces the file with a new one; that keeps ReFS's integrity and no-scrub
+    /// bits as it keeps the other settable attributes.
+    #[test]
+    fn write_keeps_integrity_and_no_scrub_on_refs() {
+        let Some((dir, path)) = refs_file_with_integrity_and_no_scrub() else {
+            return;
+        };
+        assert!(write(dir.path(), Path::new("f"), b"new", &mut no_step).unwrap());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+        let after = attributes_of(&path);
+        assert_eq!(
+            after & (INTEGRITY_STREAM | NO_SCRUB_DATA),
+            INTEGRITY_STREAM | NO_SCRUB_DATA,
+            "{after:#x}"
+        );
+    }
 }
