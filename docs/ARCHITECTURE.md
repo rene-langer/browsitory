@@ -95,6 +95,16 @@ keys alone in VSCode (`data-host="vscode"`) and runs the shortcut when the reque
 its test keeps `extension/package.json` equal to them. A `WebviewPanelSerializer` brings the
 panel back after a reload.
 
+**The user's keys (#898).** `frontend/src/lib/keymap.ts` keeps the user's keys on top of the
+built-in keymap (the global shortcuts and the merge editor's keys, one namespace for conflicts):
+a shortcut gets other keys, a second key, or none. It is a per-machine `localStorage` preference
+(`keybindings`), loaded once by `main.tsx`, so only the desktop app applies it; the generated
+VSCode keybindings stay the built-in ones. `keybindings.ts` reads the effective keys wherever it
+reads a shortcut's (`chordsFor`, the labels, `matchShortcut`), and components that show keys
+re-render through `useKeymap`. Reserved keys (copy, paste, Esc, Tab, Enter, Space, plain arrows,
+F6, the OS quit/close keys) can't be taken; a shortcut keeps its own reserved built-in keys, and
+Ctrl/Cmd+1 … 9 stays fixed. A key that types a character never runs a shortcut from a text field.
+
 ## Why Tauri + a web frontend, not egui again
 
 A prior pass (see git history on this branch before 2026-08-11) used `egui` for a

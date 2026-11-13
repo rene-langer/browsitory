@@ -2,6 +2,7 @@ import { Pin, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { RepoClient, Workspace } from "../ipc/RepoClient";
 import { shortcutLabel } from "../lib/keybindings";
+import { useKeymap } from "../lib/keymap";
 import { repoNameOf } from "../lib/repoName";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { InlineError } from "./primitives/InlineError";
@@ -44,6 +45,7 @@ export function RepoPicker({
   /** Shows the welcome on top (#688): the first launch, until dismissed or a repository opens. */
   welcome?: { onDismiss: () => void; onOpenUserGuide: () => void };
 }) {
+  useKeymap();
   const [recentRepos, setRecentRepos] = useState<string[]>([]);
   // Recent repositories whose folder is gone (#690): marked, still listed, and removable.
   const [missingRepos, setMissingRepos] = useState<ReadonlySet<string>>(new Set());
@@ -148,7 +150,9 @@ export function RepoPicker({
       {onNewRepository !== undefined && <button onClick={onNewRepository}>New repository…</button>}
     </>
   );
-  const paletteKey = <kbd>{shortcutLabel("palette")}</kbd>;
+  const paletteLabel = shortcutLabel("palette");
+  // Without a key for it (#898) the header's Commands button opens the palette.
+  const paletteKey = paletteLabel === "" ? "Commands" : <kbd>{paletteLabel}</kbd>;
 
   return (
     <div className={styles.picker}>

@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { requestWorkspace } from "../lib/workspaceRequests";
+import { resetAllShortcuts, setShortcutChords } from "../lib/keymap";
 import { useWorkspaceShortcuts } from "./useWorkspaceShortcuts";
 
 function setup() {
@@ -68,5 +69,46 @@ describe("useWorkspaceShortcuts and VSCode's keybindings (#679)", () => {
     const props = setup();
     press({ key: "w", code: "KeyW", ctrlKey: true });
     expect(props.onCloseRepoTab).toHaveBeenCalledWith("/repos/a");
+  });
+});
+
+describe("useWorkspaceShortcuts and the user's keys (#898)", () => {
+  afterEach(() => {
+    resetAllShortcuts();
+    localStorage.clear();
+    document.body.innerHTML = "";
+  });
+
+  it("runs a rebound shortcut with its new key, not the built-in one", () => {
+    setShortcutChords("refresh", [{ key: "F4" }]);
+    const props = setup();
+    press({ key: "F5", code: "F5" });
+    expect(props.runCommand).not.toHaveBeenCalled();
+    press({ key: "F4", code: "F4" });
+    expect(props.runCommand).toHaveBeenCalledWith("refresh");
+  });
+
+  it("goes back and forward with rebound keys", () => {
+    setShortcutChords("go-back", [{ mod: true, alt: true, key: "ArrowLeft" }]);
+    setShortcutChords("go-forward", [{ key: "F9" }]);
+    const props = setup();
+    press({ key: "ArrowLeft", code: "ArrowLeft", ctrlKey: true, altKey: true });
+    expect(props.onNavigateBack).toHaveBeenCalledOnce();
+    press({ key: "F9", code: "F9" });
+    expect(props.onNavigateForward).toHaveBeenCalledOnce();
+  });
+
+  it("never takes a key that types a character in a text field", () => {
+    // Refresh works from text fields, but a plain letter must still type there.
+    setShortcutChords("refresh", [{ key: "r" }]);
+    const props = setup();
+    const field = document.createElement("textarea");
+    document.body.append(field);
+    field.focus();
+    act(() => void field.dispatchEvent(new KeyboardEvent("keydown", { key: "r", code: "KeyR", bubbles: true })));
+    expect(props.runCommand).not.toHaveBeenCalled();
+    field.blur();
+    press({ key: "r", code: "KeyR" });
+    expect(props.runCommand).toHaveBeenCalledWith("refresh");
   });
 });

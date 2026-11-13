@@ -33,8 +33,10 @@ import {
   matchShortcut,
   mergeEditorAriaKeyShortcuts,
   mergeEditorShortcutLabel,
+  withShortcutLabel,
   type MergeEditorShortcutId,
 } from "../lib/keybindings";
+import { useKeymap } from "../lib/keymap";
 import { languageForPath } from "../lib/languageForPath";
 import { logFailure } from "../lib/logger";
 import { historyOf, record, redo, undo, type History } from "../lib/mergeHistory";
@@ -170,6 +172,8 @@ export function ConflictResolutionPane({
   /** Stages the file as it is on disk (the caller asks first if conflict markers remain). */
   onMarkResolved?: () => void;
 }) {
+  // Its keys and their tooltips follow the user's keymap (#898).
+  useKeymap();
   const [segments, setSegments] = useState<ConflictSegment[]>([]);
   // Every block starts unchosen, so Save never takes a side the user didn't pick (#654). An
   // unchanged run typed over (#878) is `edited` too. Every change is a step in the undo history.
@@ -544,8 +548,8 @@ export function ConflictResolutionPane({
           <button
             key={option.choice}
             aria-pressed={choice === option.choice}
-            aria-keyshortcuts={mergeEditorAriaKeyShortcuts(option.shortcut)}
-            title={`${option.title} (${mergeEditorShortcutLabel(option.shortcut)})`}
+            aria-keyshortcuts={mergeEditorAriaKeyShortcuts(option.shortcut) || undefined}
+            title={withShortcutLabel(option.title, mergeEditorShortcutLabel(option.shortcut))}
             onClick={() => setStateAt(index, { kind: "chosen", choice: option.choice })}
           >
             {option.label}
@@ -648,16 +652,16 @@ export function ConflictResolutionPane({
             </span>
             <button
               disabled={!canGoPrevious}
-              aria-keyshortcuts={mergeEditorAriaKeyShortcuts("previous-conflict")}
-              title={`Previous conflict (${mergeEditorShortcutLabel("previous-conflict")})`}
+              aria-keyshortcuts={mergeEditorAriaKeyShortcuts("previous-conflict") || undefined}
+              title={withShortcutLabel("Previous conflict", mergeEditorShortcutLabel("previous-conflict"))}
               onClick={goToPrevious}
             >
               Previous conflict
             </button>
             <button
               disabled={!canGoNext}
-              aria-keyshortcuts={mergeEditorAriaKeyShortcuts("next-conflict")}
-              title={`Next conflict (${mergeEditorShortcutLabel("next-conflict")})`}
+              aria-keyshortcuts={mergeEditorAriaKeyShortcuts("next-conflict") || undefined}
+              title={withShortcutLabel("Next conflict", mergeEditorShortcutLabel("next-conflict"))}
               onClick={goToNext}
             >
               Next conflict
@@ -667,16 +671,16 @@ export function ConflictResolutionPane({
             </button>
             <button
               disabled={history.past.length === 0}
-              aria-keyshortcuts={ariaKeyShortcuts("undo")}
-              title={`Undo the last change in the merge editor (${formatChords(chordsFor("undo"))})`}
+              aria-keyshortcuts={ariaKeyShortcuts("undo") || undefined}
+              title={withShortcutLabel("Undo the last change in the merge editor", formatChords(chordsFor("undo")))}
               onClick={undoEdit}
             >
               Undo
             </button>
             <button
               disabled={history.future.length === 0}
-              aria-keyshortcuts={ariaKeyShortcuts("redo")}
-              title={`Redo the change undone in the merge editor (${formatChords(chordsFor("redo"))})`}
+              aria-keyshortcuts={ariaKeyShortcuts("redo") || undefined}
+              title={withShortcutLabel("Redo the change undone in the merge editor", formatChords(chordsFor("redo")))}
               onClick={redoEdit}
             >
               Redo
