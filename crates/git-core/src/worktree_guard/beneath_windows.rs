@@ -368,20 +368,32 @@ fn hard_links(file: &File) -> io::Result<Vec<(u64, Vec<u16>)>> {
 /// `ERROR_ACCESS_DENIED`. On access denied, as where there are no POSIX deletes, the classic
 /// disposition follows, which clears the attribute and tries again (see `delete_classic`).
 fn delete_by_handle(file: &File) -> io::Result<()> {
-    let posix = FILE_DISPOSITION_FLAG_DELETE | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS;
-    let mut ignoring_read_only = DispositionInfoEx {
-        flags: posix | FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
-    };
-    let result = match set_information(
+    delete_by_handle_with(
         file,
-        FILE_DISPOSITION_INFO_EX_CLASS,
-        &mut ignoring_read_only,
+        &|file, flags| {
+            set_information(
+                file,
+                FILE_DISPOSITION_INFO_EX_CLASS,
+                &mut DispositionInfoEx { flags },
+            )
+        },
+        &delete_classic,
+    )
+}
+
+/// `delete_by_handle` with `posix` as the `FileDispositionInfoEx` call (given its flags) and
+/// `classic` as the fallback (test seams, #195: CI's NTFS never refuses POSIX deletes).
+fn delete_by_handle_with(
+    file: &File,
+    posix: &dyn Fn(&File, u32) -> io::Result<()>,
+    classic: &dyn Fn(&File) -> io::Result<()>,
+) -> io::Result<()> {
+    let flags = FILE_DISPOSITION_FLAG_DELETE | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS;
+    let result = match posix(
+        file,
+        flags | FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
     ) {
-        Err(error) if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER) => set_information(
-            file,
-            FILE_DISPOSITION_INFO_EX_CLASS,
-            &mut DispositionInfoEx { flags: posix },
-        ),
+        Err(error) if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER) => posix(file, flags),
         other => other,
     };
     match result {
@@ -397,7 +409,7 @@ fn delete_by_handle(file: &File) -> io::Result<()> {
                 )
             ) =>
         {
-            delete_classic(file)
+            classic(file)
         }
         other => other,
     }
@@ -3288,6 +3300,113 @@ mod tests {
         delete_classic(&file).unwrap();
         drop(file);
         assert!(std::fs::symlink_metadata(&path).is_err());
+    }
+
+    /// A file opened as `delete_by_handle`'s callers open one: `DELETE` and attribute access.
+    fn open_for_delete(path: &Path) -> File {
+        OpenOptions::new()
+            .access_mode(DELETE | FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)
+            .unwrap()
+    }
+
+    /// #195: where the file system refuses POSIX deletes (FAT/exFAT, older Windows, some shares),
+    /// or (1607–1803) a read-only file, the classic disposition deletes the file. CI's NTFS
+    /// never refuses, so the refusal is injected; the classic disposition is the real one.
+    #[test]
+    fn delete_falls_back_to_the_classic_disposition_where_posix_deletes_are_refused() {
+        for refusal in [
+            ERROR_INVALID_FUNCTION,
+            ERROR_NOT_SUPPORTED,
+            ERROR_ACCESS_DENIED,
+        ] {
+            let dir = TempDir::new().unwrap();
+            let path = dir.path().join("f");
+            std::fs::write(&path, "old").unwrap();
+            let file = open_for_delete(&path);
+            let posix_calls = std::cell::RefCell::new(Vec::new());
+            let classic_calls = std::cell::Cell::new(0);
+            delete_by_handle_with(
+                &file,
+                &|_, flags| {
+                    posix_calls.borrow_mut().push(flags);
+                    Err(io::Error::from_raw_os_error(refusal))
+                },
+                &|file| {
+                    classic_calls.set(classic_calls.get() + 1);
+                    delete_classic(file)
+                },
+            )
+            .unwrap();
+            drop(file);
+            assert_eq!(
+                (posix_calls.into_inner(), classic_calls.get()),
+                (vec![0x13], 1),
+                "refusal {refusal}"
+            );
+            assert!(
+                std::fs::symlink_metadata(&path).is_err(),
+                "refusal {refusal}"
+            );
+        }
+    }
+
+    /// #195: Windows 10 1607–1803 refuse `IGNORE_READONLY_ATTRIBUTE` (invalid parameter): the
+    /// POSIX delete is tried again without it, which refuses a read-only file (access denied),
+    /// and the classic disposition then clears the attribute and deletes it.
+    #[test]
+    fn delete_of_a_read_only_file_without_ignore_read_only_ends_in_the_classic_disposition() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("f");
+        std::fs::write(&path, "old").unwrap();
+        make_read_only(&path);
+        let file = open_for_delete(&path);
+        let posix_calls = std::cell::RefCell::new(Vec::new());
+        delete_by_handle_with(
+            &file,
+            &|_, flags| {
+                posix_calls.borrow_mut().push(flags);
+                let error = if flags & FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE != 0 {
+                    ERROR_INVALID_PARAMETER
+                } else {
+                    ERROR_ACCESS_DENIED
+                };
+                Err(io::Error::from_raw_os_error(error))
+            },
+            &delete_classic,
+        )
+        .unwrap();
+        drop(file);
+        assert_eq!(posix_calls.into_inner(), [0x13, 0x3]);
+        assert!(std::fs::symlink_metadata(&path).is_err());
+    }
+
+    /// #195: any other failure of the POSIX delete (a sharing violation here) is the answer; the
+    /// classic disposition isn't tried and the file stays.
+    #[test]
+    fn delete_reports_other_failures_without_the_classic_disposition() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("f");
+        std::fs::write(&path, "old").unwrap();
+        let file = open_for_delete(&path);
+        let classic_calls = std::cell::Cell::new(0);
+        let error = delete_by_handle_with(
+            &file,
+            &|_, _| Err(io::Error::from_raw_os_error(ERROR_SHARING_VIOLATION)),
+            &|_| {
+                classic_calls.set(classic_calls.get() + 1);
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        drop(file);
+        assert_eq!(
+            (error.raw_os_error(), classic_calls.get()),
+            (Some(ERROR_SHARING_VIOLATION), 0)
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "old");
     }
 
     /// When the delete still fails after the read-only attribute was cleared, the attribute is

@@ -1,2 +1,8 @@
+# The one Rust version for local builds and every CI and release job (#220): rustup installs it
+# on the first cargo call, and CI's `rustup toolchain install` steps read it from here. Renovate
+# proposes each new release (the "Rust toolchain" group, a week after it ships); new lints are
+# fixed in that pull request.
 [toolchain]
-channel = "stable"
+channel = "1.100.0"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

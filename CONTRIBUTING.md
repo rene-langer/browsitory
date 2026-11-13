@@ -13,7 +13,8 @@ by two hosts: a Tauri desktop app (`crates/tauri-app`) and a VSCode extension (`
 
 ## Run the desktop app from source
 
-You need Rust, Node.js 22 or newer (CI uses 24; packaging the extension with `vsce` needs 22),
+You need Rust through [rustup](https://rustup.rs) (it installs the version `rust-toolchain.toml`
+pins, the one CI uses, on the first build), Node.js 22 or newer (CI uses 24; packaging the extension with `vsce` needs 22),
 [pnpm](https://pnpm.io) 11 or newer (it switches to the version each `package.json` pins) and
 the [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your system. The Tauri CLI
 comes with the frontend's dependencies (`@tauri-apps/cli`, locked in `frontend/pnpm-lock.yaml`),
@@ -46,6 +47,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 cd frontend && pnpm test -- --run && pnpm lint
 ```
+
+Code under `#[cfg(windows)]` (in `crates/git-core`) only compiles for a Windows target. On Linux
+or macOS, `scripts/check-windows.sh` runs clippy on it for `x86_64-pc-windows-gnu`; it needs
+`rustup target add x86_64-pc-windows-gnu` and nothing else (no MinGW: a stub stands in for the C
+compiler, as nothing is linked). Its tests run only on CI's `windows-latest` job.
 
 ## Pull requests
 
