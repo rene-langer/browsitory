@@ -306,7 +306,6 @@ not a lookalike such as `lightningcss-plugin`. Owner decision 2026-11-03 (#273).
 |---|---|---|---|
 | lightningcss, lightningcss-*-* | 1 | MPL-2.0 | Vite's CSS minifier and its per-platform native binaries (`frontend/`, `extension/`'s vitest). A build tool; its output isn't covered. |
 | caniuse-lite | 1 | CC-BY-4.0 | Browser support data for browserslist (`eslint-plugin-react-hooks` > `@babel/core`). |
-| mdn-data | 2 | CC0-1.0 | CSS data for `css-tree` (`jsdom`, tests only). |
 | spdx-license-ids | 3 | CC0-1.0 | SPDX id list for package metadata tools (`@wdio/cli`, `e2e/` only). |
 | spdx-exceptions | 2 | CC-BY-3.0 | SPDX exception list, same tools. |
 | stream-buffers | 3 | Unlicense | `@wdio/local-runner` (`e2e/` only). |
