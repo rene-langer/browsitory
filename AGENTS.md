@@ -18,6 +18,9 @@ build guide.
 cargo build --workspace                          # build all Rust crates
 cargo test --workspace                            # run all Rust tests
 cargo clippy --workspace --all-targets -- -D warnings
+scripts/check-windows.sh                          # clippy git-core's cfg(windows) code from
+                                                   # Linux/macOS (needs only `rustup target add
+                                                   # x86_64-pc-windows-gnu`; no MinGW, #196)
 cargo fmt --all -- --check                        # format check (CI)
 node ../../frontend/node_modules/@tauri-apps/cli/tauri.js dev  # run the desktop app (from
                                                    # crates/tauri-app, after `pnpm install` in
