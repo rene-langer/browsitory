@@ -167,6 +167,8 @@ In the desktop app, open **Preferences** (the gear in the header) and choose **K
 click **Change shortcuts…** in the shortcut sheet. It lists the global shortcuts and the merge
 editor's keys with their keys; type in **Search shortcuts** to find one by name or key.
 
+![Preferences, open on the Keyboard group](assets/preferences-keyboard.png)
+
 - To add a key, click **Add key** next to the command and press the keys you want, for example
   **Ctrl+Alt+R**. Esc cancels; Tab moves on without recording. A command can have several keys.
 - To remove a key, click **×** next to it. A command without keys runs only from the palette or

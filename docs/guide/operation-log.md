@@ -28,6 +28,8 @@ skipped), the error, for a fetch, pull or push what the transfer reported, for a
 remotes it couldn't fetch, and every hook and signing program it ran, with its command line and
 the end of its output. **Copy** copies a program's output, for example for a bug report.
 
+![The operation log on a push that its pre-push hook refused, with the hook's output](assets/operation-log.png)
+
 **Failed only** lists only the failed operations. **Hide automatic fetches** leaves out the
 fetches **Fetch automatically** runs in the background (see
 [Branches and remotes](branches-and-remotes.md)). The log follows along while it is open: a long

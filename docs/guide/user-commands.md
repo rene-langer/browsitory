@@ -26,6 +26,8 @@ without running anything. **Save** checks the command first and says what is wro
 can't run, such as an unknown variable. Use the arrows to change the order the menus and the
 palette list your commands in, and **Delete** to remove one.
 
+![Preferences, open on the Commands group: two commands for all repositories, one for this repository only](assets/preferences-commands.png)
+
 ## Variables
 
 | Variable | Stands for |
