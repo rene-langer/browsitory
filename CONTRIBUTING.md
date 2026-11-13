@@ -48,6 +48,11 @@ cargo fmt --all -- --check
 cd frontend && pnpm test -- --run && pnpm lint
 ```
 
+Code under `#[cfg(windows)]` (in `crates/git-core`) only compiles for a Windows target. On Linux
+or macOS, `scripts/check-windows.sh` runs clippy on it for `x86_64-pc-windows-gnu`; it needs
+`rustup target add x86_64-pc-windows-gnu` and nothing else (no MinGW: a stub stands in for the C
+compiler, as nothing is linked). Its tests run only on CI's `windows-latest` job.
+
 ## Pull requests
 
 - Every pull request that changes the app adds a changelog fragment in `changelog.d/` instead
