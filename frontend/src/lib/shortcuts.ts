@@ -3,6 +3,7 @@ import {
   MERGE_EDITOR_SHORTCUTS,
   chordsFor,
   formatChords,
+  mergeEditorChordsFor,
   shortcutLabel,
   type GlobalShortcut,
   type KeyChord,
@@ -29,7 +30,9 @@ const SHIFT_UP = k("ArrowUp", { shift: true });
 const SHIFT_DOWN = k("ArrowDown", { shift: true });
 const MENU_KEYS = [k("ContextMenu"), k("F10", { shift: true })];
 
-function globalEntry(shortcut: GlobalShortcut, apple: boolean, vscode: boolean): ShortcutEntry {
+function globalEntry(shortcut: GlobalShortcut, apple: boolean, vscode: boolean): ShortcutEntry | null {
+  // A shortcut the user took every key from (#898) has no row.
+  if (chordsFor(shortcut.id, apple).length === 0) return null;
   // In VSCode the extension contributes these keys for the Browsitory panel (#679), so they work.
   const claimed = shortcut.hostMayClaim === true && !(vscode && shortcut.vscodeKeybinding === true);
   const description = claimed ? `${shortcut.description} (where the host doesn't claim it)` : shortcut.description;
@@ -50,7 +53,7 @@ export function shortcutGroups(apple: boolean = isApplePlatform(), vscode: boole
     {
       title: "Global",
       shortcuts: [
-        ...GLOBAL_SHORTCUTS.map((shortcut) => globalEntry(shortcut, apple, vscode)),
+        ...GLOBAL_SHORTCUTS.flatMap((shortcut) => globalEntry(shortcut, apple, vscode) ?? []),
         row("Mouse back / forward buttons", "Back / forward through the selected commits"),
       ],
     },
@@ -129,14 +132,15 @@ export function shortcutGroups(apple: boolean = isApplePlatform(), vscode: boole
       // #764: the pane binds these itself (`MERGE_EDITOR_SHORTCUTS`).
       title: "Merge editor",
       shortcuts: [
-        ...MERGE_EDITOR_SHORTCUTS.map((shortcut) =>
-          row(
-            shortcut.chords,
-            shortcut.chords.some((chord) => chord.key === "F7")
-              ? shortcut.description
-              : `${shortcut.description} (in a conflict block, outside its result)`,
-          ),
-        ),
+        ...MERGE_EDITOR_SHORTCUTS.flatMap((shortcut) => {
+          // The user's keys (#898); none, no row.
+          const chords = mergeEditorChordsFor(shortcut.id, apple);
+          if (chords.length === 0) return [];
+          const anywhere = shortcut.id === "next-conflict" || shortcut.id === "previous-conflict";
+          return [
+            row(chords, anywhere ? shortcut.description : `${shortcut.description} (in a conflict block, outside its result)`),
+          ];
+        }),
         row([k("Escape")], "Leave a conflict's result field, back to its block"),
         // #878: inside the merge editor these keys undo its own changes, not a Git operation.
         row(

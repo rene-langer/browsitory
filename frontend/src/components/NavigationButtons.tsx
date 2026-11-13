@@ -1,3 +1,5 @@
+import { withShortcutLabel } from "../lib/keybindings";
+import { useKeymap } from "../lib/keymap";
 import { navigationKeyLabels } from "../lib/navigationKeys";
 import { Toolbar } from "./primitives/Toolbar";
 
@@ -13,13 +15,14 @@ export function NavigationButtons({
   onGoBack: () => void;
   onGoForward: () => void;
 }) {
+  useKeymap();
   const keys = navigationKeyLabels();
   return (
     <Toolbar aria-label="Navigation">
       <button
         type="button"
         aria-label="Back"
-        title={`Back to the previously selected commit (${keys.back})`}
+        title={withShortcutLabel("Back to the previously selected commit", keys.back)}
         disabled={!canGoBack}
         onClick={onGoBack}
       >
@@ -28,7 +31,7 @@ export function NavigationButtons({
       <button
         type="button"
         aria-label="Forward"
-        title={`Forward again (${keys.forward})`}
+        title={withShortcutLabel("Forward again", keys.forward)}
         disabled={!canGoForward}
         onClick={onGoForward}
       >

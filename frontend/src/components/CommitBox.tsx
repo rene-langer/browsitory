@@ -16,7 +16,8 @@ import { Field } from "./primitives/Field";
 import { SplitButton } from "./primitives/SplitButton";
 import { Toolbar } from "./primitives/Toolbar";
 import { HookStatus } from "./HookStatus";
-import { shortcutLabel } from "../lib/keybindings";
+import { shortcutLabel, withShortcutLabel } from "../lib/keybindings";
+import { useKeymap } from "../lib/keymap";
 import styles from "./CommitBox.module.css";
 
 /**
@@ -155,6 +156,7 @@ export function CommitBox({
     headAuthor?: SignatureInput | null;
   };
 }) {
+  useKeymap();
   const [message, setMessage] = useState(initialDraft?.message ?? "");
   // Tracks the last `initialMessage` value that was auto-seeded into `message`, so we can tell
   // "user hasn't touched the field since it was seeded" (message === lastSeeded) apart from "user
@@ -426,7 +428,7 @@ export function CommitBox({
           Summary {summaryLength}/{summaryLimit}
         </span>
         {canRestore && (
-          <button type="button" className={styles.historyButton} onClick={restoreReplaced} title={`Undo the pick (${shortcutLabel("undo")})`}>
+          <button type="button" className={styles.historyButton} onClick={restoreReplaced} title={withShortcutLabel("Undo the pick", shortcutLabel("undo"))}>
             Restore message
           </button>
         )}

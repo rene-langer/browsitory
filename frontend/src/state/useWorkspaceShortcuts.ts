@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { GLOBAL_SHORTCUTS, matchShortcut, type GlobalShortcut, type ShortcutId } from "../lib/keybindings";
-import { navigationKeyDirection } from "../lib/navigationKeys";
 import { focusAdjacentPane, paneOf } from "../lib/paneFocus";
-import { isVscodeHost } from "../lib/platform";
+import { isApplePlatform, isVscodeHost } from "../lib/platform";
 import { onWorkspaceRequest } from "../lib/workspaceRequests";
 import type { AppState } from "./useAppState";
 
@@ -32,16 +31,26 @@ interface ShortcutPress {
   digit: number | null;
   /** Back (-1) or Forward (1) for the Back/Forward keys. */
   direction: -1 | 1 | null;
+  /** The key types a character in a text field (#898: a user's key may be a plain letter). */
+  typesText: boolean;
 }
 
-function keyPress(event: KeyboardEvent): ShortcutPress {
+function direction(id: ShortcutId): -1 | 1 | null {
+  return id === "go-back" ? -1 : id === "go-forward" ? 1 : null;
+}
+
+function keyPress(event: KeyboardEvent, id: ShortcutId): ShortcutPress {
+  // Option types characters on macOS (Option+C is "ç").
+  const typesText =
+    event.key.length === 1 && !event.ctrlKey && !event.metaKey && (!event.altKey || isApplePlatform());
   return {
     target: event.target,
     preventDefault: () => event.preventDefault(),
     repeat: event.repeat,
     defaultPrevented: event.defaultPrevented,
     digit: Number(event.code.startsWith("Digit") ? event.code.slice(5) : event.key),
-    direction: navigationKeyDirection(event),
+    direction: direction(id),
+    typesText,
   };
 }
 
@@ -52,7 +61,8 @@ function hostPress(id: ShortcutId, index: number | undefined): ShortcutPress {
     repeat: false,
     defaultPrevented: false,
     digit: index ?? null,
-    direction: id === "go-back" ? -1 : id === "go-forward" ? 1 : null,
+    direction: direction(id),
+    typesText: false,
   };
 }
 
@@ -175,13 +185,14 @@ export function useWorkspaceShortcuts({
         event.preventDefault();
         return;
       }
-      runShortcut(shortcut, keyPress(event));
+      runShortcut(shortcut, keyPress(event, shortcut.id));
     }
 
     function runShortcut(shortcut: GlobalShortcut, event: ShortcutPress) {
       const target = event.target;
-      // Text fields keep their own keys (native undo in the commit message, "?" typed, …).
-      if (!shortcut.inTextFields && isTextField(target)) return;
+      // Text fields keep their own keys (native undo in the commit message, "?" typed, …), and
+      // every key that types there, whatever the user bound to it (#898).
+      if ((!shortcut.inTextFields || event.typesText) && isTextField(target)) return;
       switch (shortcut.id) {
         case "palette":
           event.preventDefault();

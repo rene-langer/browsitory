@@ -358,8 +358,8 @@ function AppContent({
           disabled: !canReopenClosedRepo,
           title: canReopenClosedRepo ? undefined : "No closed tab to reopen",
           group: "reopen",
-          shortcut: shortcutLabel("reopen-closed-tab"),
-          ariaKeyShortcuts: ariaKeyShortcuts("reopen-closed-tab"),
+          shortcut: shortcutLabel("reopen-closed-tab") || undefined,
+          ariaKeyShortcuts: ariaKeyShortcuts("reopen-closed-tab") || undefined,
         },
       ];
     },

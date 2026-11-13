@@ -3,7 +3,8 @@ import type { ComponentProps } from "react";
 import { FileDiff, GitBranch, PanelLeft, RefreshCw } from "lucide-react";
 import type { UpstreamInfo } from "../ipc/RepoClient";
 import type { SplitViewLeftState } from "./primitives/SplitView";
-import { ariaKeyShortcuts, shortcutLabel } from "../lib/keybindings";
+import { ariaKeyShortcuts, shortcutLabel, withShortcutLabel } from "../lib/keybindings";
+import { useKeymap } from "../lib/keymap";
 import { NavigationButtons } from "./NavigationButtons";
 import { SyncBar } from "./SyncBar";
 import { UndoRedoButtons } from "./UndoRedoButtons";
@@ -41,6 +42,7 @@ export function RepoToolbar({
   applyPatch: { disabledReason: string | null; onApplyPatch: () => void };
   onRefresh: () => void;
 }) {
+  useKeymap();
   const sidebarShown = sidebar.state !== "collapsed";
   return (
     <SyncBar
@@ -55,8 +57,8 @@ export function RepoToolbar({
             aria-label="Sidebar"
             aria-expanded={sidebarShown}
             aria-controls={sidebar.controls}
-            title={`${sidebarShown ? "Hide" : "Show"} the sidebar (${shortcutLabel("toggle-sidebar")})`}
-            aria-keyshortcuts={ariaKeyShortcuts("toggle-sidebar")}
+            title={withShortcutLabel(`${sidebarShown ? "Hide" : "Show"} the sidebar`, shortcutLabel("toggle-sidebar"))}
+            aria-keyshortcuts={ariaKeyShortcuts("toggle-sidebar") || undefined}
             onClick={(event) => sidebar.onToggle(event.currentTarget)}
           >
             <PanelLeft size={16} aria-hidden="true" />
@@ -81,8 +83,8 @@ export function RepoToolbar({
             type="button"
             className={styles.iconButton}
             aria-label="Refresh"
-            title={`Refresh (${shortcutLabel("refresh")})`}
-            aria-keyshortcuts={ariaKeyShortcuts("refresh")}
+            title={withShortcutLabel("Refresh", shortcutLabel("refresh"))}
+            aria-keyshortcuts={ariaKeyShortcuts("refresh") || undefined}
             onClick={onRefresh}
           >
             <RefreshCw size={14} aria-hidden="true" />
