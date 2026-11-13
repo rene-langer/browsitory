@@ -326,3 +326,13 @@ export function chordFromEvent(event: KeyEventLike, apple: boolean = isApplePlat
 export function useKeymap(): number {
   return useSyncExternalStore(subscribeKeymap, getKeymapVersion);
 }
+
+// Stubs for the test-first commits (#898, config.toml); the implementation commit replaces them.
+export async function connectKeymap(
+  _storage: { getKeybindingSettings(): Promise<unknown>; setKeybindingSettings(settings: never): Promise<void> },
+  _apple?: boolean,
+): Promise<void> {}
+export function __resetKeymapForTests(): void {
+  resetAllShortcuts();
+  localStorage.clear();
+}

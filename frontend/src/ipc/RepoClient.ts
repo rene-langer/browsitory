@@ -93,6 +93,11 @@ export interface CommitMessageSettings {
   showRuler: boolean;
 }
 
+/** Stub for the test-first commits (#898); the implementation commit documents it. */
+export interface KeybindingSettings {
+  overrides: Partial<Record<string, string[]>>;
+}
+
 /** Fetch settings (`[fetch]`): the app-wide "Fetch automatically" interval, 0 for off. */
 export interface FetchSettings {
   autoFetchMinutes: number;
