@@ -67,7 +67,7 @@ fn round_trips_as_a_table_next_to_the_other_settings() {
     let text = std::fs::read_to_string(&file).unwrap();
     assert!(
         text.contains(
-            "[keybindings]\nnext-pane = [\"F6\", \"mod+alt+p\"]\npush = []\nrefresh = [\"F4\"]\n"
+            "[keybindings]\nnext-pane = [\n    \"F6\",\n    \"mod+alt+p\",\n]\npush = []\nrefresh = [\"F4\"]\n"
         ),
         "{text}"
     );
