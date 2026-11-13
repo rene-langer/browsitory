@@ -487,8 +487,8 @@ pub(super) trait Reply {
     fn hold(&mut self, held: &mut HeldReplies);
     /// Replies with an error.
     fn refuse(&self, error: ErrorDto);
-    /// Swaps the reply for a proxy and returns what reads the answer, passes it on, and says
-    /// what it means for the operation log (`None`: nothing was answered).
+    /// Swaps the reply for a proxy and returns what reads the answer: what it means for the
+    /// operation log, and what passes it on (`None`: nothing was answered).
     fn observe(&mut self) -> super::journal::Observed;
 }
 
@@ -507,8 +507,10 @@ impl<T: 'static> Reply for Sender<Result<T, ErrorDto>> {
         Box::new(move || {
             let value = rx.try_recv().ok()?;
             let seen = super::journal::seen(&value);
-            let _ = original.send(value);
-            Some(seen)
+            let forward: Box<dyn FnOnce()> = Box::new(move || {
+                let _ = original.send(value);
+            });
+            Some((seen, forward))
         })
     }
 }

@@ -624,9 +624,9 @@ fn take_transfer_note() -> Option<TransferNote> {
     TRANSFER.with(|slot| slot.borrow_mut().take())
 }
 
-/// Reads a proxied reply's answer, passes it on, and says what it means (see
+/// Reads a proxied reply's answer: what it means, and what passes it on (see
 /// `policy::Reply::observe`); `None` when nothing was answered.
-pub(super) type Observed = Box<dyn FnOnce() -> Option<Seen>>;
+pub(super) type Observed = Box<dyn FnOnce() -> Option<(Seen, Box<dyn FnOnce()>)>>;
 
 /// What a command answered, as far as the log cares.
 pub(super) struct Seen {
@@ -793,10 +793,15 @@ impl Tracker {
         &self.runs
     }
 
-    /// Ends the entry with what the command answered (or noted), and passes the reply on.
+    /// Ends the entry with what the command answered (or noted), then passes the reply on:
+    /// a client that lists the log once it has its answer sees the outcome, not `Running`
+    /// (#958).
     pub(super) fn end(mut self) {
         self.ended = true;
-        let seen = self.seen.take().and_then(|seen| seen());
+        let (seen, forward) = match self.seen.take().and_then(|seen| seen()) {
+            Some((seen, forward)) => (Some(seen), Some(forward)),
+            None => (None, None),
+        };
         let note = take_transfer_note();
         let runs = self.runs.take();
         let mut finish = match (self.outcome, seen) {
@@ -827,6 +832,9 @@ impl Tracker {
         }
         finish.runs = runs;
         self.journal.finish(self.id, finish);
+        if let Some(forward) = forward {
+            forward();
+        }
     }
 }
 
