@@ -1,12 +1,11 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { chordsFor, mergeEditorChordsFor } from "../lib/keybindings";
-import { KEYMAP_STORAGE_KEY, resetAllShortcuts, setShortcutChords } from "../lib/keymap";
+import { resetAllShortcuts, setShortcutChords } from "../lib/keymap";
 import { KeyboardShortcutsSection } from "./KeyboardShortcutsSection";
 
 afterEach(() => {
   resetAllShortcuts();
-  localStorage.removeItem(KEYMAP_STORAGE_KEY);
 });
 
 const row = (description: string) => screen.getByRole("listitem", { name: description });
