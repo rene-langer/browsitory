@@ -15,7 +15,8 @@ use super::rebase_store::RebaseStore;
 use super::sequence_store::SequenceStore;
 use super::state_lock::{self, StateGuard};
 use super::{
-    background_fetch, gate, merge, rebase, undo, Command, PauseHook, PausePoint, SearchGeneration,
+    background_fetch, gate, journal, merge, rebase, undo, Command, PauseHook, PausePoint,
+    SearchGeneration,
 };
 
 mod dispatch;
@@ -58,6 +59,8 @@ pub(super) struct WorkerLoop<S: CredentialStore, A: ForgeApi> {
     // brief hold is still waited out (#175, #197).
     contention: state_lock::Contention,
     pause: Option<PauseHook>,
+    // The repository's operation log (#887).
+    journal: Arc<crate::oplog::Journal>,
 }
 
 /// The paused operations a command may run under.
@@ -126,6 +129,7 @@ where
         credential_store: S,
         forge_api: A,
         pause: Option<PauseHook>,
+        journal: Arc<crate::oplog::Journal>,
     ) -> Self {
         let credential_service = Arc::new(CredentialService::new(credential_store));
         let background_memory = background_fetch::Memory::default();
@@ -158,6 +162,7 @@ where
             logged_unavailable: false,
             contention: state_lock::Contention::default(),
             pause,
+            journal,
         }
     }
 
@@ -202,9 +207,21 @@ where
         (host, &self.credential_service, &self.background_memory)
     }
 
+    /// Runs one command, noted in the operation log unless it is a read (#887): from before the
+    /// state lock is taken (so refusals are noted too) to after its undo entry.
+    pub(super) fn step(&mut self, mut command: Command) {
+        match journal::Tracker::start(&self.journal, &mut command) {
+            Some(tracker) => {
+                git_core::process::record_runs(tracker.runs(), || self.run_step(command));
+                tracker.end();
+            }
+            None => self.run_step(command),
+        }
+    }
+
     /// Runs one command: lock, undo bookkeeping and gate, the command itself, then the undo
     /// entry and the lock's release.
-    pub(super) fn step(&mut self, mut command: Command) {
+    fn run_step(&mut self, mut command: Command) {
         let policy = policy::of(&command);
         // A command that can record an entry or end a paused operation holds the lock
         // from before `settle` until its `finish`, so no other holder ever sees "the

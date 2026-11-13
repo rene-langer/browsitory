@@ -352,6 +352,27 @@ fn wait_bounded(
 }
 
 pub(crate) fn run_captured(
+    command: Command,
+    stdin: Option<&[u8]>,
+    cancel: &dyn Fn() -> bool,
+    timeout: Duration,
+    limit: usize,
+) -> Result<Captured, RunError> {
+    let noting = runs::describe(&command);
+    let result = run_captured_unnoted(command, stdin, cancel, timeout, limit);
+    if let Some(noting) = noting {
+        match &result {
+            Ok(captured) => noting.note(
+                captured.output.clone(),
+                runs::exit_status(captured.success, captured.timed_out),
+            ),
+            Err(error) => noting.note_error(error),
+        }
+    }
+    result
+}
+
+fn run_captured_unnoted(
     mut command: Command,
     stdin: Option<&[u8]>,
     cancel: &dyn Fn() -> bool,
@@ -434,6 +455,36 @@ pub(crate) struct SplitCaptured {
 /// (a signature) and whose stderr is diagnostics. Stdout keeps its *head* and reports overflow,
 /// so a caller never mistakes a truncated result for a complete one; stderr keeps its tail.
 pub(crate) fn run_captured_split(
+    command: Command,
+    stdin: Option<&[u8]>,
+    cancel: &dyn Fn() -> bool,
+    timeout: Duration,
+    stdout_limit: usize,
+    stderr_limit: usize,
+) -> Result<SplitCaptured, RunError> {
+    let noting = runs::describe(&command);
+    let result = run_captured_split_unnoted(
+        command,
+        stdin,
+        cancel,
+        timeout,
+        stdout_limit,
+        stderr_limit,
+    );
+    if let Some(noting) = noting {
+        match &result {
+            // Stdout is data (a signature); stderr says what the program did.
+            Ok(captured) => noting.note(
+                captured.stderr.clone(),
+                runs::exit_status(captured.success, captured.timed_out),
+            ),
+            Err(error) => noting.note_error(error),
+        }
+    }
+    result
+}
+
+fn run_captured_split_unnoted(
     mut command: Command,
     stdin: Option<&[u8]>,
     cancel: &dyn Fn() -> bool,

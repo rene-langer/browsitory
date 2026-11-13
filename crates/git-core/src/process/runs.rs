@@ -66,19 +66,73 @@ thread_local! {
 /// Runs `f` with `log` installed on this thread, then puts back whatever was installed before
 /// (also when `f` panics).
 pub fn record_runs<R>(log: &RunLog, f: impl FnOnce() -> R) -> R {
-    let _ = log;
+    struct Restore(Option<RunLog>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let previous = self.0.take();
+            CURRENT.with(|current| *current.borrow_mut() = previous);
+        }
+    }
+    let previous = CURRENT.with(|current| current.borrow_mut().replace(log.clone()));
+    let _restore = Restore(previous);
     f()
 }
 
 /// The log installed on this thread, if any.
 pub fn current_run_log() -> Option<RunLog> {
-    None
+    CURRENT.with(|current| current.borrow().clone())
+}
+
+/// A run about to start, to be noted in the log that was installed when it started.
+pub(crate) struct Noting {
+    log: RunLog,
+    program: String,
+    args: Vec<String>,
 }
 
 /// The program and arguments of `command`, when a log is installed to note its run.
-pub(crate) fn describe(command: &std::process::Command) -> Option<(RunLog, String, Vec<String>)> {
-    let _ = command;
-    None
+pub(crate) fn describe(command: &std::process::Command) -> Option<Noting> {
+    let log = current_run_log()?;
+    Some(Noting {
+        log,
+        program: command.get_program().to_string_lossy().into_owned(),
+        args: command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect(),
+    })
+}
+
+impl Noting {
+    pub(crate) fn note(self, output: String, status: ProgramRunStatus) {
+        self.log.push(ProgramRun {
+            program: self.program,
+            args: self.args,
+            output,
+            status,
+        });
+    }
+
+    /// Notes a run that ended in `error`.
+    pub(crate) fn note_error(self, error: &super::RunError) {
+        match error {
+            super::RunError::Cancelled => self.note(String::new(), ProgramRunStatus::Cancelled),
+            super::RunError::Spawn(error) | super::RunError::Wait(error) => {
+                self.note(error.to_string(), ProgramRunStatus::NotStarted)
+            }
+        }
+    }
+}
+
+/// How a run that exited ended.
+pub(crate) fn exit_status(success: bool, timed_out: bool) -> ProgramRunStatus {
+    if timed_out {
+        ProgramRunStatus::TimedOut
+    } else if success {
+        ProgramRunStatus::Succeeded
+    } else {
+        ProgramRunStatus::Failed
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -151,13 +205,7 @@ mod tests {
                 Duration::from_millis(100),
                 1024,
             );
-            let _ = run_captured(
-                sh("sleep 30"),
-                None,
-                &|| true,
-                Duration::from_secs(30),
-                1024,
-            );
+            let _ = run_captured(sh("sleep 30"), None, &|| true, Duration::from_secs(30), 1024);
             let _ = run_captured(
                 Command::new("browsitory-no-such-program"),
                 None,
@@ -185,23 +233,10 @@ mod tests {
         record_runs(&outer, || {
             assert!(current_run_log().is_some());
             record_runs(&inner, || {
-                run_captured(
-                    sh("echo inner"),
-                    None,
-                    &|| false,
-                    Duration::from_secs(30),
-                    64,
-                )
-                .unwrap();
+                run_captured(sh("echo inner"), None, &|| false, Duration::from_secs(30), 64)
+                    .unwrap();
             });
-            run_captured(
-                sh("echo outer"),
-                None,
-                &|| false,
-                Duration::from_secs(30),
-                64,
-            )
-            .unwrap();
+            run_captured(sh("echo outer"), None, &|| false, Duration::from_secs(30), 64).unwrap();
         });
         assert!(current_run_log().is_none());
         assert_eq!(inner.take()[0].output, "inner\n");
@@ -217,14 +252,8 @@ mod tests {
             let handed = current_run_log().expect("installed");
             std::thread::spawn(move || {
                 record_runs(&handed, || {
-                    run_captured(
-                        sh("echo helper"),
-                        None,
-                        &|| false,
-                        Duration::from_secs(30),
-                        64,
-                    )
-                    .unwrap();
+                    run_captured(sh("echo helper"), None, &|| false, Duration::from_secs(30), 64)
+                        .unwrap();
                 })
             })
             .join()

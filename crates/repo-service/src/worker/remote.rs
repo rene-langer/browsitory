@@ -266,6 +266,14 @@ fn complete(
         )) => Some(git_core::hooks::spawn_failure_output(error)),
         _ => None,
     };
+    super::journal::note_transfer(super::journal::TransferNote {
+        error: result
+            .as_ref()
+            .err()
+            .map(|error| error.transfer_error_kind()),
+        message: result.as_ref().err().map(ToString::to_string),
+        ..Default::default()
+    });
     let _ = events.send(TransferEvent::Completed {
         operation_id: op.finish(),
         operation,
@@ -396,6 +404,11 @@ pub(super) fn pull<S: CredentialStore + Send + Sync + 'static>(
         .as_ref()
         .err()
         .map(|error| error.transfer_error_kind());
+    super::journal::note_transfer(super::journal::TransferNote {
+        error,
+        message: result.as_ref().err().map(ToString::to_string),
+        ..Default::default()
+    });
     let _ = reply.send(result.map_err(pull_error));
     let _ = events.send(TransferEvent::Completed {
         operation_id: op.finish(),
@@ -462,7 +475,9 @@ pub(super) fn push_current<S: CredentialStore + Send + Sync + 'static>(
 ) {
     if let Some(message) = unresolved_push_target(host.repo(), &remote_name) {
         op.clear();
-        let _ = reply.send(Err(message.into()));
+        let error = ErrorDto::from(message);
+        super::journal::note_refused(&error);
+        let _ = reply.send(Err(error));
         return;
     }
     let _ = events.send(TransferEvent::Started {
@@ -497,7 +512,9 @@ pub(super) fn force_push_branch<S: CredentialStore + Send + Sync + 'static>(
 ) {
     if let Some(message) = unresolved_push_target(host.repo(), &remote_name) {
         op.clear();
-        let _ = reply.send(Err(message.into()));
+        let error = ErrorDto::from(message);
+        super::journal::note_refused(&error);
+        let _ = reply.send(Err(error));
         return;
     }
     let _ = events.send(TransferEvent::Started {

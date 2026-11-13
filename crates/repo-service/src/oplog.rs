@@ -188,37 +188,146 @@ impl Journal {
         &self.key
     }
 
-    fn lock(&self) -> MutexGuard<'_, VecDeque<OperationEntry>> {
-        self.entries
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-    }
-
     /// Adds a `Running` entry for an operation starting now and returns its id.
     pub fn begin(&self, start: Start) -> u64 {
-        let _ = start;
-        0
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        let entry = OperationEntry {
+            id,
+            name: start.name,
+            target: start.target.as_deref().map(redact),
+            params: start
+                .params
+                .into_iter()
+                .map(|param| OperationParam {
+                    name: param.name,
+                    value: redact(&param.value),
+                })
+                .collect(),
+            started_at: now_ms(),
+            duration_ms: None,
+            outcome: OperationOutcome::Running,
+            message: None,
+            error_kind: None,
+            transfer_error: None,
+            remote_failures: Vec::new(),
+            runs: Vec::new(),
+            rerun: start.rerun,
+        };
+        {
+            let mut entries = lock(&self.entries);
+            entries.push_back(entry);
+            while entries.len() > MAX_ENTRIES {
+                entries.pop_front();
+            }
+        }
+        self.changed(id);
+        id
     }
 
     /// Ends entry `id` with `finish` (a no-op once the entry was dropped for newer ones).
     pub fn finish(&self, id: u64, finish: Finish) {
-        let _ = (id, finish);
+        {
+            let mut entries = lock(&self.entries);
+            let Some(entry) = entries.iter_mut().rev().find(|entry| entry.id == id) else {
+                return;
+            };
+            let elapsed = now_ms().saturating_sub(entry.started_at);
+            entry.duration_ms = Some(u64::try_from(elapsed).unwrap_or(0));
+            entry.outcome = finish.outcome;
+            entry.message = finish.message.as_deref().map(redact);
+            entry.error_kind = finish.error_kind;
+            entry.transfer_error = finish.transfer_error;
+            entry.remote_failures = finish
+                .remote_failures
+                .into_iter()
+                .map(|failure| RemoteFailure {
+                    message: redact(&failure.message),
+                    ..failure
+                })
+                .collect();
+            entry.runs = finish
+                .runs
+                .into_iter()
+                .take(MAX_RUNS)
+                .map(|run| OperationRun {
+                    program: redact(&run.program),
+                    args: run.args.iter().map(|arg| redact(arg)).collect(),
+                    output: tail(&redact(&run.output)),
+                    status: run.status,
+                })
+                .collect();
+        }
+        self.changed(id);
     }
 
     /// Up to `limit` entries older than `before` (all when `None`), newest first.
     pub fn page(&self, before: Option<u64>, limit: usize) -> OperationPage {
-        let _ = (before, limit, self.lock());
+        let entries = lock(&self.entries);
+        let mut older = entries
+            .iter()
+            .rev()
+            .filter(|entry| before.is_none_or(|before| entry.id < before));
+        let page: Vec<OperationEntry> = older.by_ref().take(limit).cloned().collect();
+        let has_more = older.next().is_some();
         OperationPage {
             repo: self.key.clone(),
-            entries: Vec::new(),
-            has_more: false,
+            entries: page,
+            has_more,
+        }
+    }
+
+    /// Tells every listener that entry `entry_id` was added or ended.
+    fn changed(&self, entry_id: u64) {
+        let listeners: Vec<Listener> = lock(&LISTENERS)
+            .iter()
+            .map(|(_, listener)| Arc::clone(listener))
+            .collect();
+        let change = Change {
+            repo: self.key.clone(),
+            entry_id,
+        };
+        for listener in listeners {
+            listener(&change);
         }
     }
 }
 
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|error| error.into_inner())
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
+        })
+}
+
+/// The last `MAX_RUN_OUTPUT` bytes of `output` (from a character boundary), marked when cut.
+fn tail(output: &str) -> String {
+    if output.len() <= MAX_RUN_OUTPUT {
+        return output.to_string();
+    }
+    let mut start = output.len() - MAX_RUN_OUTPUT;
+    while !output.is_char_boundary(start) {
+        start += 1;
+    }
+    format!("{OUTPUT_OMITTED}{}", &output[start..])
+}
+
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+static JOURNALS: LazyLock<Mutex<HashMap<String, Arc<Journal>>>> = LazyLock::new(Default::default);
+static LISTENERS: LazyLock<Mutex<Vec<(u64, Listener)>>> = LazyLock::new(Default::default);
+static NEXT_LISTENER: AtomicU64 = AtomicU64::new(1);
+
 /// The log of the repository with key `key`, made on first use.
 pub fn journal(key: &str) -> Arc<Journal> {
-    Arc::new(Journal::new(key.to_string()))
+    Arc::clone(
+        lock(&JOURNALS)
+            .entry(key.to_string())
+            .or_insert_with(|| Arc::new(Journal::new(key.to_string()))),
+    )
 }
 
 /// What a change listener is told: the repository key whose log changed, and the entry that
@@ -229,7 +338,7 @@ pub struct Change {
     pub entry_id: u64,
 }
 
-type Listener = Arc<dyn Fn(&Change) + Send + Sync>;
+pub type Listener = Arc<dyn Fn(&Change) + Send + Sync>;
 
 /// Keeps a listener registered with [`subscribe`] until dropped.
 pub struct Subscription {
@@ -238,32 +347,74 @@ pub struct Subscription {
 
 impl Drop for Subscription {
     fn drop(&mut self) {
-        let _ = self.id;
+        lock(&LISTENERS).retain(|(id, _)| *id != self.id);
     }
 }
 
 /// Calls `listener` (on the thread that changed the log) each time an entry is added or ends,
 /// until the returned subscription is dropped.
 pub fn subscribe(listener: Listener) -> Subscription {
-    let _ = listener;
-    Subscription { id: 0 }
+    let id = NEXT_LISTENER.fetch_add(1, Ordering::Relaxed);
+    lock(&LISTENERS).push((id, listener));
+    Subscription { id }
 }
 
 /// `text` without credentials: the user information of every URL in it (`scheme://user:pass@`
 /// → `scheme://***@`) and the value of every `Authorization` header line.
 pub fn redact(text: &str) -> String {
-    text.to_string()
+    let without_userinfo = redact_userinfo(text);
+    if !without_userinfo
+        .to_ascii_lowercase()
+        .contains(AUTHORIZATION)
+    {
+        return without_userinfo;
+    }
+    without_userinfo
+        .split_inclusive('\n')
+        .map(redact_authorization)
+        .collect()
 }
 
-#[allow(dead_code)]
-static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-#[allow(dead_code)]
-static JOURNALS: LazyLock<Mutex<HashMap<String, Arc<Journal>>>> = LazyLock::new(Default::default);
-#[allow(dead_code)]
-static LISTENERS: LazyLock<Mutex<Vec<(u64, Listener)>>> = LazyLock::new(Default::default);
-#[allow(dead_code)]
-fn unused() {
-    let _ = Ordering::SeqCst;
+const AUTHORIZATION: &str = "authorization:";
+
+/// `line` with the value after `Authorization:` replaced, its line ending kept.
+fn redact_authorization(line: &str) -> String {
+    let Some(at) = line.to_ascii_lowercase().find(AUTHORIZATION) else {
+        return line.to_string();
+    };
+    let end = at + AUTHORIZATION.len();
+    let ending = &line[line.trim_end_matches(['\r', '\n']).len()..];
+    format!("{} {REDACTED}{ending}", &line[..end])
+}
+
+/// Whether `c` ends a URL's authority (`user:pass@host:port`).
+fn ends_authority(c: char) -> bool {
+    matches!(
+        c,
+        '/' | '?' | '#' | '"' | '\'' | '<' | '>' | '(' | ')' | '[' | ']' | '`' | ','
+    ) || c.is_whitespace()
+}
+
+fn redact_userinfo(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find("://") {
+        let authority_start = at + 3;
+        out.push_str(&rest[..authority_start]);
+        let after = &rest[authority_start..];
+        let authority_len = after.find(ends_authority).unwrap_or(after.len());
+        let authority = &after[..authority_len];
+        match authority.rfind('@') {
+            Some(user_end) => {
+                out.push_str(REDACTED);
+                out.push_str(&authority[user_end..]);
+            }
+            None => out.push_str(authority),
+        }
+        rest = &after[authority_len..];
+    }
+    out.push_str(rest);
+    out
 }
 
 #[cfg(test)]
