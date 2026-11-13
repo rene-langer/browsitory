@@ -395,3 +395,49 @@ fn a_worker_error_kind_is_kept() {
     assert_eq!(entry.error_kind, Some(error.kind));
     assert_eq!(error.kind, ErrorKind::MissingIdentity);
 }
+
+/// #958: a command's entry ends before its reply is sent, so a client that lists the log right
+/// after an answer sees the outcome, never `Running`. The listener hears the entry end, waits a
+/// moment for a reply that would already be out, and notes whether it came first.
+#[test]
+fn an_entry_ends_before_the_command_replies() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let (dir, _repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a");
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let key = super::super::repo_key(dir.path()).unwrap();
+    let replied = Arc::new(AtomicBool::new(false));
+    let (ended_tx, ended_rx) = mpsc::channel();
+    let subscription = {
+        let replied = Arc::clone(&replied);
+        let ended_tx = Mutex::new(ended_tx);
+        crate::oplog::subscribe(Arc::new(move |change: &crate::oplog::Change| {
+            if change.repo != key {
+                return;
+            }
+            let entry = crate::oplog::journal(&key).page(None, 1).entries.remove(0);
+            if entry.outcome == OperationOutcome::Running {
+                return;
+            }
+            // Long enough for a reply sent before this to have been received.
+            thread::sleep(Duration::from_millis(200));
+            let _ = ended_tx
+                .lock()
+                .unwrap()
+                .send(replied.load(Ordering::SeqCst));
+        }))
+    };
+
+    handle.stage_file("a.txt".into()).unwrap();
+    replied.store(true, Ordering::SeqCst);
+    let entries = handle.operation_log(None, 1).entries;
+
+    let replied_before_the_end = ended_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    drop(subscription);
+    assert!(
+        !replied_before_the_end,
+        "the reply was sent before the entry ended"
+    );
+    assert_eq!(entries[0].outcome, OperationOutcome::Succeeded);
+}
