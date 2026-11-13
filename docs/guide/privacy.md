@@ -93,7 +93,7 @@ None of this leaves your computer, and we can't see it.
 
 | What | Where |
 |---|---|
-| Settings: recent, pinned and open repositories, workspaces, branch filters, merge choices, diff, commit message, tool, fetch and update preferences, the last version whose release notes you saw | `config.toml` in Browsitory's config folder (see below) |
+| Settings: recent, pinned and open repositories, workspaces, branch filters, merge choices, diff, commit message, tool, fetch, update and keyboard shortcut preferences, the last version whose release notes you saw | `config.toml` in Browsitory's config folder (see below) |
 | Display choices: theme, panel sizes, open and closed sections, recent commands, recent searches, recent commit messages, the per-repository **Fetch automatically** and **Prune** choices | The app's web storage (`localStorage`) |
 | HTTPS tokens for Git remotes and pull request tokens | Your system's credential store: Keychain on macOS, Credential Manager on Windows, the Secret Service (for example GNOME Keyring or KWallet) on Linux, under the names `com.browsitory.git` and `com.browsitory.forge` |
 | Undo and redo history, a paused rebase, cherry-pick or revert | Inside each repository: the folder `.git/browsitory/` (in a linked worktree, `browsitory/` in that worktree's own Git folder, `.git/worktrees/<name>/`) and Git references under `refs/browsitory/`, shared by all worktrees |

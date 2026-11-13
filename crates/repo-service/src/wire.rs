@@ -2993,6 +2993,33 @@ impl From<FetchSettingsDto> for config::FetchSettings {
     }
 }
 
+/// The `[keybindings]` preferences (#898): each shortcut the user changed, by id, with its keys
+/// as names ("mod+shift+k", "F4"); an empty list is a shortcut without keys. The frontend owns
+/// the ids and the key names and drops what it can't use.
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "KeybindingSettings"))]
+#[serde(rename_all = "camelCase")]
+pub struct KeybindingSettingsDto {
+    pub overrides: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+impl From<config::KeybindingSettings> for KeybindingSettingsDto {
+    fn from(s: config::KeybindingSettings) -> Self {
+        Self {
+            overrides: s.overrides,
+        }
+    }
+}
+
+impl From<KeybindingSettingsDto> for config::KeybindingSettings {
+    fn from(d: KeybindingSettingsDto) -> Self {
+        Self {
+            overrides: d.overrides,
+        }
+    }
+}
+
 /// The `[appearance]` preferences (#615): `codeFont` and `codeFontSize` are `null` for the
 /// built-in look; `codeFontSize` and `tabSize` are clamped to `CODE_FONT_SIZES` and `TAB_SIZES`.
 #[derive(Debug, Serialize, Deserialize)]
@@ -3527,6 +3554,7 @@ mod ts_bindings {
             WordWrapDto,
             CommitMessageSettingsDto,
             FetchSettingsDto,
+            KeybindingSettingsDto,
             AppearanceSettingsDto,
             FontFamilyDto,
             UiSizeDto,

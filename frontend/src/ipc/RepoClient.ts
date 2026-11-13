@@ -93,9 +93,13 @@ export interface CommitMessageSettings {
   showRuler: boolean;
 }
 
-/** Stub for the test-first commits (#898); the implementation commit documents it. */
+/**
+ * The user's keyboard shortcuts (`[keybindings]`, #898): each shortcut the user changed, by id,
+ * with its keys as names ("mod+shift+k", "F4"); an empty list is a shortcut without keys
+ * (`lib/keymap.ts`). VSCode's own keybindings apply in the extension (#900).
+ */
 export interface KeybindingSettings {
-  overrides: Partial<Record<string, string[]>>;
+  overrides: { [key in string]: Array<string> };
 }
 
 /** Fetch settings (`[fetch]`): the app-wide "Fetch automatically" interval, 0 for off. */
@@ -1547,6 +1551,8 @@ export interface RepoClient {
   setCommitMessageSettings(settings: CommitMessageSettings): Promise<void>;
   getFetchSettings(): Promise<FetchSettings>;
   setFetchSettings(settings: FetchSettings): Promise<void>;
+  getKeybindingSettings(): Promise<KeybindingSettings>;
+  setKeybindingSettings(settings: KeybindingSettings): Promise<void>;
   getAppearanceSettings(): Promise<AppearanceSettings>;
   setAppearanceSettings(settings: AppearanceSettings): Promise<void>;
   /**

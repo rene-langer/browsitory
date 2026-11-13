@@ -97,9 +97,15 @@ panel back after a reload.
 
 **The user's keys (#898).** `frontend/src/lib/keymap.ts` keeps the user's keys on top of the
 built-in keymap (the global shortcuts and the merge editor's keys, one namespace for conflicts):
-a shortcut gets other keys, a second key, or none. It is a per-machine `localStorage` preference
-(`keybindings`), loaded once by `main.tsx`, so only the desktop app applies it; the generated
-VSCode keybindings stay the built-in ones. `keybindings.ts` reads the effective keys wherever it
+a shortcut gets other keys, a second key, or none. They are kept in `config.toml`'s
+`[keybindings]` table with the other Preferences settings (owner decision): each changed
+shortcut's id with its keys as names (`"mod+shift+k"`, `"F4"`; `mod` is Cmd on macOS, Ctrl
+elsewhere), read and written through `get_keybinding_settings`/`set_keybinding_settings`. The
+config crate drops an entry that is no list of strings, and the frontend drops unknown ids and
+key names and reserved keys. `main.tsx` connects the desktop client once (`connectKeymap`); a
+change made before the saved keys arrive wins. Only the desktop app applies them: the sidecar
+answers the same commands, but the VSCode webview never connects, and the generated VSCode
+keybindings stay the built-in ones. `keybindings.ts` reads the effective keys wherever it
 reads a shortcut's (`chordsFor`, the labels, `matchShortcut`), and components that show keys
 re-render through `useKeymap`. Reserved keys (copy, paste, Esc, Tab, Enter, Space, plain arrows,
 F6, the OS quit/close keys) can't be taken; a shortcut keeps its own reserved built-in keys, and

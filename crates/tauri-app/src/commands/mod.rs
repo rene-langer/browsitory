@@ -9,8 +9,8 @@ use tauri_plugin_dialog::DialogExt;
 
 use repo_service::wire::{
     hook_progress_dto, transfer_progress_dto, AppearanceSettingsDto, CommitMessageSettingsDto,
-    DiffSettingsDto, ErrorDto, FetchSettingsDto, FontFamilyDto, OpenRepoEntryDto,
-    OpenRepoEntryInput, TransferProgressDto, UpdateSettingsDto, WorkspaceDto,
+    DiffSettingsDto, ErrorDto, FetchSettingsDto, FontFamilyDto, KeybindingSettingsDto,
+    OpenRepoEntryDto, OpenRepoEntryInput, TransferProgressDto, UpdateSettingsDto, WorkspaceDto,
 };
 use repo_service::worker::{HookEvent, ReadHandle, TransferEvent, WorkerHandle, WorkerRegistry};
 
@@ -432,6 +432,19 @@ pub fn get_fetch_settings() -> Result<FetchSettingsDto, ErrorDto> {
 #[tauri::command]
 pub fn set_fetch_settings(settings: FetchSettingsDto) -> Result<(), ErrorDto> {
     config::set_fetch_settings(&settings.into()).map_err(ErrorDto::from_error)
+}
+
+/// The `[keybindings]` table (#898): the user's keyboard shortcuts.
+#[tauri::command]
+pub fn get_keybinding_settings() -> Result<KeybindingSettingsDto, ErrorDto> {
+    config::get_keybinding_settings()
+        .map(KeybindingSettingsDto::from)
+        .map_err(ErrorDto::from_error)
+}
+
+#[tauri::command]
+pub fn set_keybinding_settings(settings: KeybindingSettingsDto) -> Result<(), ErrorDto> {
+    config::set_keybinding_settings(&settings.into()).map_err(ErrorDto::from_error)
 }
 
 #[tauri::command]

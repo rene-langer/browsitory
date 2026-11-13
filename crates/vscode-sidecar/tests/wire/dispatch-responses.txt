@@ -216,6 +216,9 @@ get_graph_remote_branch_selection/string {"jsonrpc":"2.0","id":7,"error":{"code"
 get_head_info/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct RepoPathParams","data":{"kind":"Other","message":"invalid type: null, expected struct RepoPathParams"}}}
 get_head_info/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 get_head_info/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct RepoPathParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct RepoPathParams"}}}
+get_keybinding_settings/absent {"jsonrpc":"2.0","id":7,"result":{"overrides":{}}}
+get_keybinding_settings/empty {"jsonrpc":"2.0","id":7,"result":{"overrides":{}}}
+get_keybinding_settings/string {"jsonrpc":"2.0","id":7,"result":{"overrides":{}}}
 get_line_history/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct GetLineHistoryParams","data":{"kind":"Other","message":"invalid type: null, expected struct GetLineHistoryParams"}}}
 get_line_history/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 get_line_history/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct GetLineHistoryParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct GetLineHistoryParams"}}}
@@ -477,6 +480,9 @@ set_graph_remote_branch_selection/string {"jsonrpc":"2.0","id":7,"error":{"code"
 set_identity/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct SetIdentityParams","data":{"kind":"Other","message":"invalid type: null, expected struct SetIdentityParams"}}}
 set_identity/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 set_identity/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct SetIdentityParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct SetIdentityParams"}}}
+set_keybinding_settings/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct SetKeybindingSettingsParams","data":{"kind":"Other","message":"invalid type: null, expected struct SetKeybindingSettingsParams"}}}
+set_keybinding_settings/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `settings`","data":{"kind":"Other","message":"missing field `settings`"}}}
+set_keybinding_settings/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct SetKeybindingSettingsParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct SetKeybindingSettingsParams"}}}
 set_merge_options/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct SetMergeOptionsParams","data":{"kind":"Other","message":"invalid type: null, expected struct SetMergeOptionsParams"}}}
 set_merge_options/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 set_merge_options/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct SetMergeOptionsParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct SetMergeOptionsParams"}}}
