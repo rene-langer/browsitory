@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { waitForAppReady } from "../support/app";
 import { gitIn } from "../support/git";
 
 // User-defined commands (#893–#896): a command defined in the app's settings, set for the commit
@@ -70,7 +71,21 @@ describe("Browsitory user commands", () => {
     const head = git("rev-parse", "HEAD").trim();
     // The workspace loads the commands when it mounts: reload so it reads the new table.
     await browser.refresh();
-    await chooseFromCommitMenu(head, NAME);
+    await waitForAppReady();
+    try {
+      await chooseFromCommitMenu(head, NAME);
+    } catch (error) {
+      // What the page showed instead: the open menu's items and whether the commit's row exists.
+      const seen = await browser.execute(
+        (id: string) => ({
+          row: document.querySelector(`li[data-commit-id="${id}"]`) !== null,
+          menu: Array.from(document.querySelectorAll('[role="menu"] button')).map((b) => b.textContent),
+        }),
+        head,
+      );
+      const config = fs.readFileSync(CONFIG_FILE, "utf8");
+      throw new Error(`${String(error)}; page: ${JSON.stringify(seen)}; config has the command: ${config.includes(NAME)}`);
+    }
     await browser.waitUntil(() => fs.existsSync(OUTPUT) && fs.readFileSync(OUTPUT, "utf8") === head, {
       timeoutMsg: `the command did not write ${head} to ${OUTPUT}`,
     });
