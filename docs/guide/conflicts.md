@@ -60,7 +60,7 @@ A conflicted file opens the **Resolve conflict** pane:
   line both sides have, a line only one side has, and a pair of lines with no word in common
   are not marked.
 
-  ![The merge editor: one conflict block with our and their lines, the choices and the result](assets/merge-editor.png)
+  ![The merge editor in three panes: ours, the result and theirs, on one conflict block](assets/merge-editor.png)
 
 - From the keyboard: with a block focused, **1** to **5** take **Accept ours**, **Accept
   theirs**, **Ours then theirs**, **Theirs then ours** and **Accept base**. **F7** and

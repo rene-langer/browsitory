@@ -28,6 +28,13 @@ the text you type stays until the group itself changes. **Start rebase** waits u
 and the messages it needs have loaded; if the commits can't be listed, the planner says why and
 offers **Retry**, and a message that can't be read is replaced by its summary, with a note.
 
+**Edit** stops the rebase at that commit as **Edit commit…** does (see [Editing older
+commits](rewriting-commits.md)): HEAD is the commit's parent, the commit's changes are staged,
+and the status strip says "Editing 1a2b3c4: change the files, then Continue". Change, stage or
+unstage files, edit the message in the commit area if you like, or commit the changes as
+several commits with **Commit part**; **Continue** commits what is staged and goes on with the
+next row. Changes left unstaged make Continue ask whether to commit or discard them.
+
 **Selecting several commits.** Ctrl/Cmd+click (mouse) toggles individual commits, which is how you
 select non-adjacent ones; Shift+click or Shift+Arrow selects a range. With two or more selected, a
 toolbar under the graph (and the right-click menu) offers **Interactive rebase…**, **Squash N commits**,
@@ -40,8 +47,8 @@ Drop and Interactive rebase… work for any selection. Selections that include a
 root commit, or commits that aren't on the current branch, can't be rebased. Esc collapses a
 selection back to one commit.
 
-**One commit, one step.** To reword, squash, fixup, move or drop a single commit, its right-click
-menu runs that edit directly, without the planner (see
+**One commit, one step.** To reword, edit, split, squash, fixup, move or drop a single commit,
+its right-click menu runs that edit directly, without the planner (see
 [Editing older commits](rewriting-commits.md)).
 
 **A paused rebase survives restarts.** Browsitory stores a paused rebase in the repository's

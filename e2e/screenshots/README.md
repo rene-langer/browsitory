@@ -56,6 +56,7 @@ Then look at every changed image before you commit it.
 | `conflict.png` | A merge stopped on a conflict, with the resolve controls |
 | `dark-theme.png` | The same conflict in the dark theme |
 | `merge-editor.png` | The merge editor on that conflict in its three panes, in a 1600×1000 window |
+| `edit-commit.png` | Edit commit… stopped at the latest commit: the strip, the staged change and **Commit part** |
 
 To add a shot, add a test to `capture.docs.ts` that ends with `shoot("<name>")`, run the
 script, and add the file to this table.

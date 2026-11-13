@@ -305,3 +305,12 @@ export function startConflict(): void {
     throw new Error("expected the demo merge to stop on a conflict");
   }
 }
+
+/**
+ * Ends the conflicted merge and stashes the working tree's changes (untracked files too), so
+ * Edit commit… can start: like a rebase, it needs a clean tracked tree.
+ */
+export function cleanForEdit(): void {
+  git(["merge", "--abort"]);
+  git(["stash", "push", "-q", "--include-untracked", "-m", "Before editing a commit"], "alex", nextDate());
+}
