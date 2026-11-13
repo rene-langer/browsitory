@@ -2387,6 +2387,65 @@ describe("App", () => {
       expect(within(dock).getByText("Write a commit message.")).toBeInTheDocument();
     });
 
+    it("an edit stop commits a part from the dock, then offers an empty box for the next (#884)", async () => {
+      let splitParts = 0;
+      const rebaseCommitPart = vi.fn(async () => {
+        splitParts += 1;
+        return "p1";
+      });
+      render(
+        <App
+          client={pickClient({
+            getHeadInfo: async () => ({ headId: "c1", detachedAt: "c1", headPushed: false, operation: "CherryPick" as const, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: { branch: "main", onto: "c1", currentStep: 1, totalSteps: 1, health: { kind: "Paused" as const }, editing: "c2", splitParts }, bisect: null, terminalSequence: null, terminalRebase: null }),
+            getMergeMessage: async () => "two\n",
+            getCommitMessage: async () => "two\n",
+            rebaseCommitPart,
+          })}
+        />,
+      );
+      const dock = await screen.findByRole("group", { name: "Commit actions" });
+      const message = await within(dock).findByRole("textbox", { name: "Commit message" });
+      await waitFor(() => expect(message).toHaveValue("two\n"));
+      fireEvent.change(message, { target: { value: "two, part 1\n" } });
+
+      fireEvent.click(within(dock).getByRole("button", { name: "Commit part" }));
+
+      await waitFor(() => expect(rebaseCommitPart).toHaveBeenCalledWith("/repos/a", "two, part 1\n"));
+      await waitFor(() => expect(message).toHaveValue(""));
+      const strip = await screen.findByRole("status", { name: "Operation status" });
+      await waitFor(() => expect(strip).toHaveTextContent("Splitting c2: commit each part, then Continue"));
+      expect(within(dock).getByText("Splitting c2")).toBeInTheDocument();
+      // An empty box commits no part.
+      expect(within(dock).getByRole("button", { name: "Commit part" })).toBeDisabled();
+    });
+
+    it("Continue with changes not staged asks to commit or discard them (#884)", async () => {
+      const rebaseContinue = vi.fn(async (_path: string, _message?: string, rest?: string) => {
+        if (rest === undefined) throw new RepoError("RestLeft", "c.txt has changes that aren't staged.");
+        return { kind: "Done" as const };
+      });
+      render(
+        <App
+          client={pickClient({
+            getHeadInfo: async () => ({ headId: "c1", detachedAt: "c1", headPushed: false, operation: "CherryPick" as const, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: { branch: "main", onto: "c1", currentStep: 1, totalSteps: 1, health: { kind: "Paused" as const }, editing: "c2", splitParts: 1 }, bisect: null, terminalSequence: null, terminalRebase: null }),
+            getMergeMessage: async () => "two\n",
+            getCommitMessage: async () => "two\n",
+            getEditRest: async () => ["c.txt"],
+            rebaseContinue,
+          })}
+        />,
+      );
+      const strip = await screen.findByRole("status", { name: "Operation status" });
+      fireEvent.click(within(strip).getByRole("button", { name: "Continue" }));
+
+      const dialog = await screen.findByRole("dialog", { name: "Changes not staged" });
+      expect(within(dialog).getByText("c.txt")).toBeInTheDocument();
+      fireEvent.click(within(dialog).getByRole("button", { name: "Discard the rest" }));
+
+      await waitFor(() => expect(rebaseContinue).toHaveBeenLastCalledWith("/repos/a", undefined, "Discard"));
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Changes not staged" })).toBeNull());
+    });
+
     it("toasts a finished multi-commit revert with its skipped count", async () => {
       const revertMany = vi.fn(async () => ({ kind: "Completed" as const, applied: 1, skipped: ["c1"] }));
       render(<App client={pickClient({ revertMany })} />);

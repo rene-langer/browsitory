@@ -72,6 +72,12 @@ describe("historyEditChecks", () => {
     });
   });
 
+  it("splits a commit, HEAD included, from its parent like Edit (#884)", () => {
+    expect(historyEditChecks(context(), "C").Split).toEqual({ ok: true, onto: "B" });
+    expect(historyEditChecks(context(), "E").Split).toEqual({ ok: true, onto: "D" });
+    expect(historyEditChecks(context(), "A").Split).toEqual(historyEditChecks(context(), "A").Edit);
+  });
+
   it("can't move HEAD up", () => {
     const checks = historyEditChecks(context(), "E");
     expect(checks.MoveUp).toEqual({ ok: false, reason: "This is already the newest commit." });
@@ -213,6 +219,14 @@ describe("buildHistoryEditPlan", () => {
       pick("E"),
     ]);
     expect(() => buildHistoryEditPlan({ kind: "Edit" }, "C", fromA)).toThrow("The history changed. Refresh and try again.");
+  });
+
+  it("stops at the commit to split and picks the rest (#884)", () => {
+    expect(buildHistoryEditPlan({ kind: "Split" }, "C", fromB)).toEqual([
+      { commitId: "C", action: { kind: "Edit" }, combinedMessage: null },
+      pick("D"),
+      pick("E"),
+    ]);
   });
 
   it("drops one commit", () => {

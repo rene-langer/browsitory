@@ -1431,6 +1431,15 @@ describe("CommitGraph — one-click history edits", () => {
     expect(item).toHaveAttribute("title", "Only commits of the current branch can be edited.");
   });
 
+  it("Split commit… stops at the commit like Edit commit… (#884)", () => {
+    const { openMenu, onEditHistory } = setup();
+    openMenu("C");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Split commit…" }));
+    expect(onEditHistory).toHaveBeenLastCalledWith("C", "B", { kind: "Split" });
+    openMenu("X");
+    expect(screen.getByRole("menuitem", { name: "Split commit…" })).toBeDisabled();
+  });
+
   it("offers Fold staged changes into this commit only with changes staged (#883)", () => {
     const staged: StatusEntry = { path: "a.txt", oldPath: null, staged: true, kind: "Modified" };
     const onFoldStaged = vi.fn();

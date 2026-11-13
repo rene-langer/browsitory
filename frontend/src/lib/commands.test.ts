@@ -1487,6 +1487,14 @@ describe("history commands", () => {
       expect(dirty.map((c) => c.id)).not.toContain("edit-selected");
     });
 
+    it("offers Split commit… for a commit, from its parent (#884)", () => {
+      const appState = makeAppState(editState);
+      const split = commandsFor(appState).find((command) => command.id === "split-selected")!;
+      expect(split.label).toBe("Split c2…");
+      split.run();
+      expect(appState.editHistory).toHaveBeenLastCalledWith("c2", "c3", { kind: "Split" });
+    });
+
     it("offers folding staged changes into the selected commit (#883)", () => {
       const staged = { path: "a", oldPath: null, staged: true, kind: "Modified" as const };
       const appState = makeAppState({ ...editState, status: [staged] });
