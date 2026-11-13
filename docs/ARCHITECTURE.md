@@ -766,6 +766,16 @@ configuration. A pull's merge and `post-merge` hook, commit hooks and signing ru
 so reads still wait for them. A long read delays the wait's next poll (progress, and a Cancel
 while still connecting) by its own run time.
 
+**Stopping at exit (#965).** When the desktop app's last window closes or it quits (also before
+an update's restart), the process would end every worker thread wherever it is; one cut off in a
+libgit2 write leaves `.git/index.lock` (or a ref lock) behind, and every later git command in the
+repository fails on it. So `main.rs` handles `RunEvent::Exit` with `WorkerRegistry::stop_all`
+and `EXIT_GRACE` (5 s, like the extension's `SIDECAR_EXIT_GRACE_MS`, #961): each worker finishes
+the command it is running (a transfer included, with the reads its wait serves) and starts no
+other (`worker/lifecycle.rs`; the commands still queued are answered `WorkerStopped`), the
+registry opens no repository any more, and the exit waits until the workers are idle or the
+grace period is over. An idle exit doesn't wait at all.
+
 **Every Tauri command that blocks must be an `async fn`.** A plain `#[tauri::command] fn` is
 dispatched by `tauri-macros`' `ExecutionContext::Blocking` path, which runs the function body
 *inline on the main/UI thread*; an `async fn` command takes the `ExecutionContext::Async` path

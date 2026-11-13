@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use super::{Worker, WorkerHandle};
 
@@ -79,12 +79,17 @@ fn trim_trailing_separators(path: &Path) -> PathBuf {
     path.components().collect()
 }
 
+/// `open` after `stop_all`.
+const STOPPED: &str = "the app is closing";
+
 #[derive(Default)]
 struct Inner {
     /// Workers by repository key.
     workers: HashMap<String, Worker>,
     /// Each opened spelling and the key of the repository it names.
     aliases: HashMap<String, String>,
+    /// Set by `stop_all`: no repository is opened any more.
+    stopped: bool,
 }
 
 impl Inner {
@@ -145,6 +150,9 @@ impl WorkerRegistry {
         let key = found.key.clone();
         {
             let mut inner = self.lock();
+            if inner.stopped {
+                return Err(STOPPED.to_string());
+            }
             if let Some(worker) = inner.workers.get(&key) {
                 let handle = worker.handle();
                 if handle.is_alive() {
@@ -166,6 +174,11 @@ impl WorkerRegistry {
             }
         };
         let mut inner = self.lock();
+        if inner.stopped {
+            // `stop_all` ran while this worker was spawning: it never runs a command.
+            worker.stop(std::time::Duration::ZERO);
+            return Err(STOPPED.to_string());
+        }
         // Another caller may have opened the same repository (through any spelling) while this
         // one was spawning, unlocked. Prefer the worker already in the map: this one is dropped
         // and its idle thread exits.
@@ -218,6 +231,29 @@ impl WorkerRegistry {
         } else {
             None
         }
+    }
+
+    /// Stops every worker when the app exits (#965): each finishes the command it is running and
+    /// starts no other (see `Worker::stop`), and no repository is opened any more. Waits up to
+    /// `grace` in all and returns whether every running command finished.
+    pub fn stop_all(&self, grace: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + grace;
+        let lifecycles: Vec<_> = {
+            let mut inner = self.lock();
+            inner.stopped = true;
+            inner
+                .workers
+                .values()
+                .map(|worker| Arc::clone(&worker.lifecycle))
+                .collect()
+        };
+        for lifecycle in &lifecycles {
+            lifecycle.request_stop();
+        }
+        // One deadline for all: once it has passed, the rest would only give up at once too.
+        lifecycles
+            .iter()
+            .all(|lifecycle| lifecycle.wait_idle(deadline))
     }
 
     /// The number of workers (open repositories).

@@ -34,6 +34,7 @@ mod remote;
 mod restart;
 mod search;
 mod sequence;
+mod shutdown;
 mod staging;
 mod stash;
 mod tree;
