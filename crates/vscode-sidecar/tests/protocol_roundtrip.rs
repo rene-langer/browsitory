@@ -719,7 +719,7 @@ fn check_user_command_shows_the_split_arguments_and_the_program() {
         1,
         "check_user_command",
         serde_json::json!({
-            "commandLine": "browsitory-surely-missing-program '${branch} notes' ${commit}",
+            "commandLine": "browsitory-surely-missing-program \"${branch} notes\" ${commit}",
             "workingDirectory": null,
         }),
     );

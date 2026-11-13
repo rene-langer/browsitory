@@ -186,7 +186,7 @@ fn refuses_a_blank_name_a_blank_command_and_an_unclosed_quote() {
     assert_eq!(blank_name.to_string(), "A command: The name is empty.");
     let blank_line = set_user_commands_at(&file, None, &[command("Empty", "  ")]).unwrap_err();
     assert_eq!(blank_line.to_string(), "Empty: The command is empty.");
-    let quote = set_user_commands_at(&file, None, &[command("Quote", "echo 'x")]).unwrap_err();
+    let quote = set_user_commands_at(&file, None, &[command("Quote", "echo \"x")]).unwrap_err();
     assert_eq!(
         quote.to_string(),
         "Quote: The command has an unclosed quote."
