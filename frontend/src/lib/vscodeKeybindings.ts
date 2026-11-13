@@ -80,3 +80,8 @@ export function vscodeShortcutKeybindings(): VscodeKeybinding[] {
     });
   });
 }
+
+// Stub for the test-first commit (#900); the implementation commit replaces it.
+export function chordFromVscodeKey(_key: string, _apple: boolean): KeyChord | null {
+  return null;
+}

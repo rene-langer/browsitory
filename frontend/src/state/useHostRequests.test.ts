@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HostRequest } from "../ipc/RepoClient";
 import { onWorkspaceRequest, takeCommitRequest, takeHistoryRequest, type WorkspaceRequest } from "../lib/workspaceRequests";
 import { fakeRepoClient } from "../test/fakeRepoClient";
+import { chordsFor } from "../lib/keybindings";
+import { resetAllShortcuts } from "../lib/keymap";
 import { useHostRequests } from "./useHostRequests";
 
 describe("useHostRequests (#677, #678, #679)", () => {
@@ -69,5 +71,17 @@ describe("useHostRequests (#677, #678, #679)", () => {
     const { emit } = setup(true);
     act(() => emit({ kind: "shortcut", id: "tab-by-number", index: 2 }));
     await waitFor(() => expect(received).toEqual([{ kind: "shortcut", id: "tab-by-number", index: 2 }]));
+  });
+
+  it("takes the keys VSCode runs the shortcuts with (#900)", async () => {
+    document.documentElement.dataset.host = "vscode";
+    try {
+      const { emit } = setup(true);
+      act(() => emit({ kind: "keybindings", keys: { refresh: ["f4"] } }));
+      await waitFor(() => expect(chordsFor("refresh", false)).toEqual([{ key: "F4" }]));
+    } finally {
+      delete document.documentElement.dataset.host;
+      resetAllShortcuts();
+    }
   });
 });

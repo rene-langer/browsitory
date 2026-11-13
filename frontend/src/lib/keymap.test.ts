@@ -12,6 +12,7 @@ import {
 } from "./keybindings";
 import {
   addShortcutChord,
+  applyHostKeybindings,
   chordConflict,
   chordFromEvent,
   effectiveChords,
@@ -370,6 +371,40 @@ describe("persistence in config.toml (#898)", () => {
     const { storage } = fakeStorage({ refresh: ["F4"] });
     await connectKeymap(storage, false);
     expect(storage.getKeybindingSettings).not.toHaveBeenCalled();
+    expect(chordsFor("refresh", false)).toEqual([{ key: "F5" }]);
+  });
+});
+
+describe("VSCode's keys (#900)", () => {
+  it("shows and matches the keys VSCode runs the shortcuts with", () => {
+    document.documentElement.dataset.host = "vscode";
+    applyHostKeybindings(
+      { refresh: ["f4"], "toggle-sidebar": ["ctrl+alt+b", "ctrl+shift+e"], "go-back": [], "close-tab": ["ctrl+k ctrl+w"] },
+      false,
+    );
+    expect(chordsFor("refresh", false)).toEqual([{ key: "F4" }]);
+    expect(shortcutLabel("toggle-sidebar", false)).toBe("Ctrl+Alt+B / Ctrl+Shift+E");
+    expect(chordsFor("go-back", false)).toEqual([]);
+    expect(matchShortcut(press("F4"), false)?.id).toBe("refresh");
+    // A two-step key can't be shown or matched here; VSCode still runs it.
+    expect(chordsFor("close-tab", false)).toEqual([]);
+    // They are VSCode's keys, not the user's overrides here.
+    expect(isCustomized("refresh")).toBe(false);
+    expect(localStorage.getItem(KEYMAP_STORAGE_KEY)).toBeNull();
+  });
+
+  it("leaves the shortcuts the webview binds itself, and the range, to their built-in keys", () => {
+    document.documentElement.dataset.host = "vscode";
+    applyHostKeybindings({ pull: ["f9"], "tab-by-number": ["ctrl+2"], "conflict-ours": ["q"], bogus: ["f8"] }, false);
+    expect(chordsFor("pull", false)).toEqual([{ mod: true, shift: true, key: "l" }]);
+    expect(chordsFor("tab-by-number", false)).toHaveLength(9);
+    expect(shortcutLabel("palette", false)).toBe("Ctrl+K");
+  });
+
+  it("goes back to the built-in keys for a shortcut VSCode no longer lists", () => {
+    document.documentElement.dataset.host = "vscode";
+    applyHostKeybindings({ refresh: ["f4"] }, false);
+    applyHostKeybindings({}, false);
     expect(chordsFor("refresh", false)).toEqual([{ key: "F5" }]);
   });
 });

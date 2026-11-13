@@ -374,3 +374,6 @@ export function chordFromEvent(event: KeyEventLike, apple: boolean = isApplePlat
 export function useKeymap(): number {
   return useSyncExternalStore(subscribeKeymap, getKeymapVersion);
 }
+
+// Stub for the test-first commit (#900); the implementation commit replaces it.
+export function applyHostKeybindings(_keys: Record<string, string[]>, _apple: boolean = isApplePlatform()): void {}

@@ -153,4 +153,15 @@ describe("KeyboardShortcutsSection (#899)", () => {
     expect(mergeEditorChordsFor("conflict-ours", false)).toEqual([{ key: "1" }]);
     expect(resetAll).toBeDisabled();
   });
+
+  it("in VSCode, sends the user to VSCode's Keyboard Shortcuts instead (#900)", () => {
+    const onOpenHostKeybindings = vi.fn();
+    render(<KeyboardShortcutsSection apple={false} vscode onOpenHostKeybindings={onOpenHostKeybindings} />);
+    expect(screen.getByRole("group", { name: "Keyboard shortcuts" })).toHaveTextContent(
+      "In VSCode, change Browsitory's keys in VSCode's Keyboard Shortcuts.",
+    );
+    expect(screen.queryByRole("button", { name: /^Add a key/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Open Keyboard Shortcuts" }));
+    expect(onOpenHostKeybindings).toHaveBeenCalledOnce();
+  });
 });
