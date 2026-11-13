@@ -97,3 +97,37 @@ export function onCommitRequest(listener: () => void): () => void {
     commitListeners.delete(listener);
   };
 }
+
+/**
+ * A user command picked from a repository tab's menu (#895), for the workspace of `repoPath`:
+ * the tab menu lives in `App`, outside any workspace. Kept until that workspace takes it, as a
+ * history request is (the menu may have switched to its tab).
+ */
+export interface UserCommandRequest {
+  repoPath: string;
+  commandId: string;
+}
+
+let pendingUserCommand: UserCommandRequest | null = null;
+const userCommandListeners = new Set<() => void>();
+
+export function requestUserCommand(request: UserCommandRequest): void {
+  pendingUserCommand = request;
+  for (const listener of [...userCommandListeners]) listener();
+}
+
+/** The pending user command request for `repoPath`, removed; `null` when there is none. */
+export function takeUserCommandRequest(repoPath: string): UserCommandRequest | null {
+  if (pendingUserCommand === null || pendingUserCommand.repoPath !== repoPath) return null;
+  const request = pendingUserCommand;
+  pendingUserCommand = null;
+  return request;
+}
+
+/** Calls `listener` whenever a user command is requested, until the returned function is called. */
+export function onUserCommandRequest(listener: () => void): () => void {
+  userCommandListeners.add(listener);
+  return () => {
+    userCommandListeners.delete(listener);
+  };
+}

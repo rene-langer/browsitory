@@ -10,6 +10,9 @@ import { ListRow } from "./primitives/ListRow";
 import { ReasonButton } from "./primitives/ReasonButton";
 import { tagMenuItems } from "./tagMenuItems";
 import styles from "./TagPanel.module.css";
+import type { UserCommand } from "../ipc/RepoClient";
+import { NO_SELECTION, userCommandMenuItems, type RunUserCommand } from "../lib/userCommands";
+import { useUserCommandsContext } from "../state/userCommandsContext";
 
 // `returnFocusTo`: the row's "…" for a pointer (WebKit focuses neither the row nor the button);
 // `undefined` for a key, so `ContextMenu` returns focus to what had it (as StashPanel).
@@ -42,7 +45,12 @@ export function TagPanel({
   operationDisabledReason,
   revealRequest,
   onCreateTagAtHead,
+  userCommands: userCommandsProp,
+  onRunUserCommand: onRunUserCommandProp,
 }: {
+  /** The user commands (#895); those set for tags close the tag menu. */
+  userCommands?: UserCommand[];
+  onRunUserCommand?: RunUserCommand;
   tags: TagInfo[];
   remotes: RemoteInfo[];
   onDelete: (name: string) => Promise<void>;
@@ -69,6 +77,9 @@ export function TagPanel({
   /** Opens "Create tag" at HEAD (#649); omitted (no HEAD commit yet), no "+" button. */
   onCreateTagAtHead?: () => void;
 }) {
+  const userCommandsApi = useUserCommandsContext();
+  const userCommands = userCommandsProp ?? userCommandsApi?.commands ?? [];
+  const onRunUserCommand = onRunUserCommandProp ?? userCommandsApi?.run;
   const [remoteName, setRemoteName] = useState(remotes[0]?.name ?? "");
   const [selected, setSelected] = useState<string[]>([]);
   const [filter, setFilter] = useState("");
@@ -284,7 +295,16 @@ export function TagPanel({
             onDeleteFromRemote,
             onCopy: copyToClipboard,
             onDelete: setDeleteConfirmation,
-          })}
+          }).concat(
+            onRunUserCommand === undefined
+              ? []
+              : userCommandMenuItems(
+                  userCommands,
+                  "Tag",
+                  { ...NO_SELECTION, commitId: menuTag.commitId, refName: `refs/tags/${menuTag.name}` },
+                  onRunUserCommand,
+                ),
+          )}
         />
       )}
 

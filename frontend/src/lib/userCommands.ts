@@ -42,23 +42,75 @@ export const NO_SELECTION: UserCommandContext = { commitId: null, branch: null, 
 /** Runs `command` on `selection` (asking first, showing output, as the command is set up). */
 export type RunUserCommand = (command: UserCommand, selection: UserCommandContext) => void;
 
-export function userCommandDisabledReason(_command: UserCommand, _selection: UserCommandContext): string | null {
-  throw new Error("not implemented");
+const isBranchRef = (refName: string | null) =>
+  refName !== null && (refName.startsWith("refs/heads/") || refName.startsWith("refs/remotes/"));
+
+/**
+ * Why `command` can't run on `selection`, `null` when it can. The backend fills a commit from a
+ * branch's or ref's tip, a ref from a branch, and a branch from a branch ref, so those count.
+ */
+export function userCommandDisabledReason(command: UserCommand, selection: UserCommandContext): string | null {
+  if (command.problem !== null) return command.problem;
+  for (const variable of command.variables) {
+    switch (variable) {
+      case "repo":
+        break;
+      case "commit":
+      case "shortCommit":
+        if (selection.commitId === null && selection.branch === null && selection.refName === null) return "Needs a commit";
+        break;
+      case "branch":
+        if (selection.branch === null && !isBranchRef(selection.refName)) return "Needs a branch";
+        break;
+      case "ref":
+        if (selection.refName === null && selection.branch === null) return "Needs a branch or tag";
+        break;
+      case "path":
+        if (selection.paths.length !== 1) return "Needs one file";
+        break;
+      case "paths":
+        if (selection.paths.length === 0) return "Needs a file";
+        break;
+    }
+  }
+  return null;
 }
 
+/** The items of the commands set for `target`'s menu, in a group of their own (#895). */
 export function userCommandMenuItems(
-  _commands: UserCommand[],
-  _target: UserCommandTarget,
-  _selection: UserCommandContext,
-  _onRun: RunUserCommand,
+  commands: UserCommand[],
+  target: UserCommandTarget,
+  selection: UserCommandContext,
+  onRun: RunUserCommand,
 ): ContextMenuItem[] {
-  throw new Error("not implemented");
+  return commands
+    .filter((command) => command.targets.includes(target))
+    .map((command) => {
+      const reason = userCommandDisabledReason(command, selection);
+      return {
+        label: command.name,
+        group: "user-commands",
+        onSelect: () => onRun(command, selection),
+        ...(reason === null ? {} : { disabled: true, title: reason }),
+      };
+    });
 }
 
+/** Every command as "Run: <name>" for the palette, an unavailable one with its reason (#895). */
 export function userCommandPaletteCommands(
-  _commands: UserCommand[],
-  _selection: UserCommandContext,
-  _onRun: RunUserCommand,
+  commands: UserCommand[],
+  selection: UserCommandContext,
+  onRun: RunUserCommand,
 ): Command[] {
-  throw new Error("not implemented");
+  return commands.map((command) => {
+    const reason = userCommandDisabledReason(command, selection);
+    return {
+      id: `user-command:${command.id}`,
+      label: `Run: ${command.name}`,
+      keywords: ["run", "command", command.name],
+      group: "General",
+      run: () => onRun(command, selection),
+      ...(reason === null ? {} : { disabledReason: reason }),
+    };
+  });
 }

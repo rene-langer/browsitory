@@ -32,6 +32,9 @@ import {
 } from "./components/PreferencesDialog";
 import { KeyboardShortcutsSection } from "./components/KeyboardShortcutsSection";
 import { UserCommandsSection } from "./components/UserCommandsSection";
+import { NO_SELECTION, userCommandMenuItems } from "./lib/userCommands";
+import { requestUserCommand } from "./lib/workspaceRequests";
+import type { UserCommand } from "./ipc/RepoClient";
 import type { PreferencesGroupId } from "./lib/preferencesGroup";
 import { OpenPreferencesContext } from "./state/openPreferences";
 import { cloneToastMessage, createNewRepository } from "./lib/newRepository";
@@ -331,6 +334,8 @@ function AppContent({
   useEffect(() => {
     if (openPathsKey !== "") openPathsKey.split("\0").forEach((path) => loadRootFiles(path));
   }, [openPathsKey, loadRootFiles]);
+  // Each tab's user commands (#895), loaded when its menu opens.
+  const [tabUserCommands, setTabUserCommands] = useState<Record<string, UserCommand[]>>({});
   const tabMenuItems = useCallback(
     (path: string) => {
       const run = (action: () => Promise<void>) => {
@@ -354,6 +359,11 @@ function AppContent({
               }
             }),
         })),
+        // The user commands set for the repository menu (#895), run in its workspace.
+        ...userCommandMenuItems(tabUserCommands[path] ?? [], "Repository", NO_SELECTION, (command) => {
+          openRepos.switchTo(path);
+          requestUserCommand({ repoPath: path, commandId: command.id });
+        }),
         {
           label: "Reopen closed tab",
           onSelect: reopenClosedTab,
@@ -365,7 +375,17 @@ function AppContent({
         },
       ];
     },
-    [client, reopenClosedTab, canReopenClosedRepo, rootFiles, loadRootFiles],
+    [client, reopenClosedTab, canReopenClosedRepo, rootFiles, loadRootFiles, tabUserCommands, openRepos],
+  );
+  const onTabMenuOpen = useCallback(
+    (path: string) => {
+      loadRootFiles(path);
+      client.listUserCommands(path).then(
+        (commands) => setTabUserCommands((current) => ({ ...current, [path]: [...commands.global, ...commands.repository] })),
+        () => {},
+      );
+    },
+    [client, loadRootFiles],
   );
 
   // VSCode (#680): an update shows a toast that opens the notes, not a dialog over the editor.
@@ -449,7 +469,7 @@ function AppContent({
             onCloseGroup={(paths) => paths.forEach((path) => openRepos.closeRepo(path))}
             onAddTab={() => setPickingRepo(true)}
             tabMenuItems={tabMenuItems}
-            onTabMenuOpen={loadRootFiles}
+            onTabMenuOpen={onTabMenuOpen}
             changedPaths={tabChangeMarkers.changedPaths}
             onRenameTab={setRenamingTab}
           />

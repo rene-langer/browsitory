@@ -72,10 +72,24 @@ import { useSequenceActions } from "./state/useSequenceActions";
 import { useUndoRedoActions } from "./state/useUndoRedoActions";
 import { useWorkspaceShortcuts } from "./state/useWorkspaceShortcuts";
 import { runShortcutCommand } from "./lib/shortcutCommands";
-import { onCommitRequest, onHistoryRequest, onWorkspaceRequest, takeCommitRequest, takeHistoryRequest } from "./lib/workspaceRequests";
+import {
+  onCommitRequest,
+  onHistoryRequest,
+  onUserCommandRequest,
+  onWorkspaceRequest,
+  takeCommitRequest,
+  takeHistoryRequest,
+  takeUserCommandRequest,
+} from "./lib/workspaceRequests";
 import { WorkspaceActionsContext, type WorkspaceActions } from "./state/useWorkspaceActions";
 import { WorkspaceDialogs, type CommitDialogRequest } from "./WorkspaceDialogs";
 import { WorkspaceMain } from "./WorkspaceMain";
+import { ConfirmDialog } from "./components/primitives/ConfirmDialog";
+import { UserCommandOutputDialog } from "./components/UserCommandOutputDialog";
+import { UserCommandsContext, type UserCommandsApi } from "./state/userCommandsContext";
+import { useUserCommandRunner } from "./state/useUserCommandRunner";
+import { useUserCommands } from "./state/useUserCommands";
+import { NO_SELECTION } from "./lib/userCommands";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
 
 // Toast copy for line-level stage/unstage/discard ("Staged 1 line", "Discarded 3 lines").
@@ -170,6 +184,30 @@ export function RepoWorkspace({
   );
   const externalTools = useExternalTools(client, repoPath, conflictedPaths, appState.refresh);
   const rootFiles = useRootFiles(client, repoPath, appState.state.refreshGeneration);
+  // The user commands (#895): the app-wide ones, then the repository's own.
+  const storedUserCommands = useUserCommands(client, repoPath).commands;
+  const userCommandRunner = useUserCommandRunner({ client, repoPath, refresh: appState.refresh, pushToast });
+  const runUserCommand = userCommandRunner.run;
+  const userCommandsApi = useMemo<UserCommandsApi | null>(
+    () =>
+      storedUserCommands === null
+        ? null
+        : { commands: [...storedUserCommands.global, ...storedUserCommands.repository], run: runUserCommand },
+    [storedUserCommands, runUserCommand],
+  );
+  // A repository tab menu's command (#895): run on the repository, with its current branch.
+  const userCommandBranch = appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null;
+  useEffect(() => {
+    if (!active || userCommandsApi === null) return;
+    const take = () => {
+      const request = takeUserCommandRequest(repoPath);
+      if (request === null) return;
+      const command = userCommandsApi.commands.find((candidate) => candidate.id === request.commandId);
+      if (command !== undefined) userCommandsApi.run(command, { ...NO_SELECTION, branch: userCommandBranch });
+    };
+    take();
+    return onUserCommandRequest(take);
+  }, [active, repoPath, userCommandsApi, userCommandBranch]);
   // A click on a row closes an open compare even when it is the row already selected (the
   // compare otherwise only closes when `selectedRow` changes), so clicking a stash or commit
   // always shows it.
@@ -545,6 +583,7 @@ export function RepoWorkspace({
         },
         toggle: { shown: sidebarState !== "collapsed", run: () => toggleSidebar() },
       },
+      userCommands: userCommandsApi ?? undefined,
       branchSwitch: {
         recentBranches: readRecentBranches(repoPath),
         onSwitchBranch: (name) => {
@@ -792,6 +831,7 @@ export function RepoWorkspace({
     <WorkspaceActionsContext.Provider value={stableWorkspaceActions}>
     <CopyToClipboardContext.Provider value={clipboard.copy}>
     <CommitDragContext.Provider value={commitDrag}>
+    <UserCommandsContext.Provider value={userCommandsApi}>
     <div
       ref={setWorkspaceElement}
       style={{ display: active ? "contents" : "none" }}
@@ -877,6 +917,29 @@ export function RepoWorkspace({
                   }),
           }}
           onClose={() => setOperationLog(null)}
+        />
+      )}
+      {userCommandRunner.confirming !== null && (
+        <ConfirmDialog
+          ariaLabel={`Run ${userCommandRunner.confirming.command.name}`}
+          message={
+            <>
+              <p>Run {userCommandRunner.confirming.command.name}?</p>
+              <p>
+                <code>{userCommandRunner.confirming.command.commandLine}</code>
+              </p>
+            </>
+          }
+          confirmLabel="Run"
+          onConfirm={userCommandRunner.confirm}
+          onCancel={userCommandRunner.cancelConfirm}
+        />
+      )}
+      {userCommandRunner.output !== null && (
+        <UserCommandOutputDialog
+          output={userCommandRunner.output}
+          onStop={userCommandRunner.stop}
+          onClose={userCommandRunner.closeOutput}
         />
       )}
       <WorkspaceDialogs
@@ -1046,6 +1109,7 @@ export function RepoWorkspace({
       />
       </div>
     </div>
+    </UserCommandsContext.Provider>
     </CommitDragContext.Provider>
     </CopyToClipboardContext.Provider>
     </WorkspaceActionsContext.Provider>
