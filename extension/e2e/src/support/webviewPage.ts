@@ -162,6 +162,8 @@ export interface WebviewSession {
   highlightWorkerColours(timeoutMs?: number): Promise<string[]>;
   /** The `name` attribute of every match of `selector` (missing attributes as ""). */
   attributes(selector: string, name: string): Promise<string[]>;
+  /** The current `value` of every text field matching `selector` (what was typed, not the attribute). */
+  values(selector: string): Promise<string[]>;
   /** Detaches from the webview target and closes the underlying CDP socket. Idempotent. */
   close(): Promise<void>;
 }
@@ -341,6 +343,14 @@ class CdpWebviewSession implements WebviewSession {
     return this.evaluate<string[]>(`
       Array.from(document.querySelectorAll(${JSON.stringify(selector)})).map(function (el) {
         return el.getAttribute(${JSON.stringify(name)}) || "";
+      })
+    `);
+  }
+
+  async values(selector: string): Promise<string[]> {
+    return this.evaluate<string[]>(`
+      Array.from(document.querySelectorAll(${JSON.stringify(selector)})).map(function (el) {
+        return el.value === undefined ? "" : String(el.value);
       })
     `);
   }

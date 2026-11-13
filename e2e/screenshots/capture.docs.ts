@@ -17,6 +17,7 @@ import { DEMO_REPO_PATH, startConflict } from "./demoRepo";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ASSETS = path.resolve(__dirname, "../../docs/guide/assets");
 const WINDOW = { width: 1280, height: 800 };
+const MERGE_EDITOR_WINDOW = { width: 1600, height: 1000 };
 
 async function click(selector: string): Promise<void> {
   const element = await $(selector);
@@ -181,10 +182,12 @@ describe("Documentation screenshots", () => {
   });
 
   it("merge-editor", async () => {
-    // A taller window, so the merge editor shows a whole conflict block under the file list.
-    await browser.setWindowSize(WINDOW.width, 1000);
+    // A taller and wider window, so the merge editor has room for its three panes (#875) next
+    // to the sidebar and the history, and shows a whole conflict block under the file list.
+    await browser.setWindowSize(MERGE_EDITOR_WINDOW.width, MERGE_EDITOR_WINDOW.height);
     const block = await $('section[aria-label="Conflict 1 of 1"]');
     await block.waitForExist();
+    await waitUntilInPage('button[aria-pressed="true"]', "Three panes");
     await browser.execute((el) => (el as HTMLElement).scrollIntoView({ block: "start" }), block);
     await shoot("merge-editor");
     await browser.setWindowSize(WINDOW.width, WINDOW.height);

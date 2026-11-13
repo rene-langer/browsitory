@@ -39,7 +39,7 @@ Then look at every changed image before you commit it.
   own settings, keys or Browsitory data.
 - `capture.docs.ts` opens the demo from the repository picker, sets a 1280×800 window and the
   light theme, and saves each screen to `docs/guide/assets/<name>.png`. The `dark-theme` shot uses
-  the dark theme, and `merge-editor` a taller window.
+  the dark theme, and `merge-editor` a wider and taller window, with room for the three panes.
 
 ## Shots
 
@@ -55,7 +55,7 @@ Then look at every changed image before you commit it.
 | `command-palette.png` | The command palette, filtered to "branch" |
 | `conflict.png` | A merge stopped on a conflict, with the resolve controls |
 | `dark-theme.png` | The same conflict in the dark theme |
-| `merge-editor.png` | The merge editor on that conflict, in a 1280×1000 window |
+| `merge-editor.png` | The merge editor on that conflict in its three panes, in a 1600×1000 window |
 
 To add a shot, add a test to `capture.docs.ts` that ends with `shoot("<name>")`, run the
 script, and add the file to this table.
