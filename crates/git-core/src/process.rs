@@ -286,23 +286,21 @@ fn spawn_suspended_in_job(command: &mut Command) -> std::io::Result<(Child, Opti
 /// left suspended until the time limit.
 #[cfg(windows)]
 fn spawn_in_job(command: &mut Command) -> Result<(Child, Option<Job>), RunError> {
-    let (mut child, job) = spawn_suspended_in_job(command).map_err(RunError::Spawn)?;
-    if let Err(error) = job_windows::resume(&child) {
-        let _ = kill_and_reap(&mut child, job.as_ref());
-        return Err(RunError::Spawn(error));
-    }
-    Ok((child, job))
+    spawn_in_job_with(command, &job_windows::resume)
 }
 
-/// `spawn_in_job` with `resume` in place of [`job_windows::resume`] (a test seam, #195). Not
-/// wired up yet: the tests come first.
-#[cfg(all(windows, test))]
+/// `spawn_in_job` with `resume` in place of [`job_windows::resume`] (a test seam, #195).
+#[cfg(windows)]
 fn spawn_in_job_with(
     command: &mut Command,
     resume: &dyn Fn(&Child) -> std::io::Result<()>,
 ) -> Result<(Child, Option<Job>), RunError> {
-    let _ = resume;
-    spawn_in_job(command)
+    let (mut child, job) = spawn_suspended_in_job(command).map_err(RunError::Spawn)?;
+    if let Err(error) = resume(&child) {
+        let _ = kill_and_reap(&mut child, job.as_ref());
+        return Err(RunError::Spawn(error));
+    }
+    Ok((child, job))
 }
 
 /// Writes `stdin` from its own thread so a program that prints a lot before reading stdin cannot

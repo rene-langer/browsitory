@@ -297,20 +297,32 @@ fn hard_links(file: &File) -> io::Result<Vec<(u64, Vec<u16>)>> {
 /// `ERROR_ACCESS_DENIED`. On access denied, as where there are no POSIX deletes, the classic
 /// disposition follows, which clears the attribute and tries again (see `delete_classic`).
 fn delete_by_handle(file: &File) -> io::Result<()> {
-    let posix = FILE_DISPOSITION_FLAG_DELETE | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS;
-    let mut ignoring_read_only = DispositionInfoEx {
-        flags: posix | FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
-    };
-    let result = match set_information(
+    delete_by_handle_with(
         file,
-        FILE_DISPOSITION_INFO_EX_CLASS,
-        &mut ignoring_read_only,
+        &|file, flags| {
+            set_information(
+                file,
+                FILE_DISPOSITION_INFO_EX_CLASS,
+                &mut DispositionInfoEx { flags },
+            )
+        },
+        &delete_classic,
+    )
+}
+
+/// `delete_by_handle` with `posix` as the `FileDispositionInfoEx` call (given its flags) and
+/// `classic` as the fallback (test seams, #195: CI's NTFS never refuses POSIX deletes).
+fn delete_by_handle_with(
+    file: &File,
+    posix: &dyn Fn(&File, u32) -> io::Result<()>,
+    classic: &dyn Fn(&File) -> io::Result<()>,
+) -> io::Result<()> {
+    let flags = FILE_DISPOSITION_FLAG_DELETE | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS;
+    let result = match posix(
+        file,
+        flags | FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
     ) {
-        Err(error) if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER) => set_information(
-            file,
-            FILE_DISPOSITION_INFO_EX_CLASS,
-            &mut DispositionInfoEx { flags: posix },
-        ),
+        Err(error) if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER) => posix(file, flags),
         other => other,
     };
     match result {
@@ -326,22 +338,10 @@ fn delete_by_handle(file: &File) -> io::Result<()> {
                 )
             ) =>
         {
-            delete_classic(file)
+            classic(file)
         }
         other => other,
     }
-}
-
-/// `delete_by_handle` with `posix` as the `FileDispositionInfoEx` call (given its flags) and
-/// `classic` as the fallback (test seams, #195). Not wired up yet: the tests come first.
-#[cfg(test)]
-fn delete_by_handle_with(
-    file: &File,
-    posix: &dyn Fn(&File, u32) -> io::Result<()>,
-    classic: &dyn Fn(&File) -> io::Result<()>,
-) -> io::Result<()> {
-    let _ = (posix, classic);
-    delete_by_handle(file)
 }
 
 /// The classic disposition (`FileDispositionInfo`). It has no way to ignore the read-only
