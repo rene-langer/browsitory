@@ -323,6 +323,7 @@ fn a_paused_edit_rebuilt_after_a_restart_continues_with_the_new_message() {
         expected_head: state.expected_head,
         stop: state.stop,
         fold_base: state.fold_base,
+        split_parts: state.split_parts,
     };
     drop(repo);
     let repo = git2::Repository::open(dir.path()).unwrap();

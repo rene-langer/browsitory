@@ -498,6 +498,7 @@ fn head_info_with_rebase(health: git_core::rebase::RebaseHealth) -> serde_json::
             total_steps: 2,
             health,
             editing: None,
+            split_parts: 0,
         }),
         bisect: None,
         terminal_sequence: None,

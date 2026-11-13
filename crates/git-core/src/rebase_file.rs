@@ -182,5 +182,6 @@ fn to_state(stored: StoredRebase, repo: &Repository) -> Result<RebaseState, Stri
             StoredStop::Error => RebaseStop::Error,
         },
         fold_base: stored.fold_base.as_deref().map(commit).transpose()?,
+        split_parts: 0,
     })
 }

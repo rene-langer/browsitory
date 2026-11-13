@@ -89,6 +89,7 @@ mod tests {
             expected_head: ids[1],
             stop: RebaseStop::Conflict,
             fold_base: None,
+            split_parts: 0,
         }
     }
 
@@ -116,6 +117,7 @@ mod tests {
             group_start_parent: None,
             stop: RebaseStop::Edit,
             fold_base: None,
+            split_parts: 0,
             ..state(&ids)
         };
         store.save(&every_action).unwrap();
@@ -258,6 +260,7 @@ mod tests {
             cursor: 2,
             stop: RebaseStop::Error,
             fold_base: None,
+            split_parts: 0,
             ..state(&ids)
         };
         store.save(&finishing).unwrap();

@@ -372,6 +372,7 @@ fn rebase_paused_after_a_pick_brought_in_a_case_pair(
         expected_head,
         stop: RebaseStop::Conflict,
         fold_base: None,
+        split_parts: 0,
     }
 }
 

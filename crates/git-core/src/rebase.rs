@@ -80,6 +80,24 @@ pub enum RebaseError {
     /// rebase would discard them on Abort, as for any rebase.
     #[error("{}", unstaged_changes_message(paths))]
     UnstagedChanges { paths: Vec<String> },
+    /// Commit part (#884) when the rebase isn't stopped at an Edit step; nothing was changed.
+    #[error("The rebase isn't stopped to edit a commit.")]
+    NotEditing,
+    /// Continue at an edit stop with changes not staged (#884), sorted by path: the caller asks
+    /// whether to commit or discard them (`EditRest`). Nothing was changed.
+    #[error("STUB")]
+    RestLeft { paths: Vec<String> },
+    #[error("STUB")]
+    NothingStagedForPart,
+}
+
+/// What Continue does with an edit stop's rest (#884): the changes not staged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditRest {
+    /// Stage it and commit it with the step (the last part).
+    Commit,
+    /// Throw it away, leaving it out of the history.
+    Discard,
 }
 
 /// The refusal copy for [`RebaseError::UnstagedChanges`].
@@ -333,6 +351,9 @@ pub struct RebaseState {
     /// (as `original_tip`, the fixup commit). Abort puts the branch back here with the changes
     /// staged again. `None` for any other rebase.
     pub fold_base: Option<Oid>,
+    /// Split a commit (#884): how many parts of the commit at an edit stop were committed with
+    /// `rebase_commit_part`; 0 at any other stop.
+    pub split_parts: usize,
 }
 
 impl RebaseState {
@@ -493,6 +514,7 @@ pub fn start_rebase_with(
         expected_head: onto_commit.id(),
         stop: RebaseStop::Error,
         fold_base: None,
+        split_parts: 0,
     };
 
     // Everything past the detach above must roll back on failure: an `Err` escaping here would
@@ -579,6 +601,32 @@ pub fn rebase_continue_with_message(
         };
     }
     result
+}
+
+/// STUB (#884).
+pub fn edit_rest(_repo: &Repository, _state: &RebaseState) -> Result<Vec<String>, RebaseError> {
+    Ok(Vec::new())
+}
+
+/// STUB (#884).
+pub fn rebase_commit_part(
+    _repo: &Repository,
+    _state: &mut RebaseState,
+    _message: &str,
+    _hooks: HookOptions<'_>,
+) -> Result<String, RebaseError> {
+    Err(RebaseError::InvalidPlan("not implemented".to_string()))
+}
+
+/// STUB (#884).
+pub fn rebase_continue_with_rest(
+    repo: &Repository,
+    state: &mut RebaseState,
+    message: Option<&str>,
+    _rest: Option<EditRest>,
+    hooks: HookOptions<'_>,
+) -> Result<RebaseStepResult, RebaseError> {
+    rebase_continue_with_message(repo, state, message, hooks)
 }
 
 /// `rebase_continue` with a cancel check and a reporter for the signing program, as in

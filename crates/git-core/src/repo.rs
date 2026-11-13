@@ -693,6 +693,8 @@ pub struct RebaseInfo {
     /// Full id of the commit the rebase stopped at to be edited (an `Edit` step, #882);
     /// `None` at a conflict or error stop.
     pub editing: Option<String>,
+    /// Split a commit (#884): parts of the edited commit committed so far; 0 when not editing.
+    pub split_parts: usize,
 }
 
 impl RebaseInfo {
@@ -716,6 +718,7 @@ impl RebaseInfo {
                         && entry.action == crate::rebase::RebaseAction::Edit
                 })
                 .map(|entry| entry.commit_id.clone()),
+            split_parts: 0,
         }
     }
 }
