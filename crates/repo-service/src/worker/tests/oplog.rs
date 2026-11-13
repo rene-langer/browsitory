@@ -117,13 +117,14 @@ fn a_remote_url_is_logged_without_its_credentials() {
     let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
     let handle = worker.handle();
 
-    handle
+    // The worker refuses such a URL; the refused command is logged with its parameters.
+    let refused = handle
         .add_remote(
             "upstream".into(),
             "https://alice:s3cret@example.test/r.git".into(),
             Some("https://token@example.test/push.git".into()),
         )
-        .unwrap();
+        .unwrap_err();
     handle
         .save_https_credential("upstream".into(), "alice".into(), "tok3n".into())
         .ok();
@@ -135,6 +136,8 @@ fn a_remote_url_is_logged_without_its_credentials() {
     assert!(!text.contains("tok3n"), "{text}");
     let add = named(&entries, "Add remote");
     assert_eq!(add.target.as_deref(), Some("upstream"));
+    assert_eq!(add.outcome, OperationOutcome::Failed);
+    assert_eq!(add.message.as_deref(), Some(refused.message.as_str()));
     let values: Vec<_> = add.params.iter().map(|p| p.value.as_str()).collect();
     assert!(
         values.contains(&"https://***@example.test/r.git"),
