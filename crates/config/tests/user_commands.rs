@@ -272,3 +272,44 @@ command_line = "make"
         }]
     );
 }
+
+#[test]
+fn a_hand_added_table_reads_back_after_saving_no_commands() {
+    let (_dir, file) = config_file();
+    set_user_commands_at(&file, None, &[]).unwrap();
+    let saved = std::fs::read_to_string(&file).unwrap();
+    std::fs::write(
+        &file,
+        format!(
+            r#"{saved}
+[[user_commands]]
+name = "X"
+command_line = "true"
+
+[[repo_user_commands]]
+repo_path = "/repos/a"
+
+[[repo_user_commands.commands]]
+name = "Y"
+command_line = "make"
+"#
+        ),
+    )
+    .unwrap();
+
+    let listed = list_user_commands_at(&file, Some(Path::new("/repos/a"))).unwrap();
+    assert_eq!(
+        listed.global,
+        [UserCommand {
+            id: "global-1".to_string(),
+            ..command("X", "true")
+        }]
+    );
+    assert_eq!(
+        listed.repository,
+        [UserCommand {
+            id: "repository-1".to_string(),
+            ..command("Y", "make")
+        }]
+    );
+}
