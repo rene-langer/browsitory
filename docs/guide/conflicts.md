@@ -52,9 +52,13 @@ A conflicted file opens the **Resolve conflict** pane:
   conflict marker). **Save resolution** is enabled once every block has a result and no
   `<<<<<<<` or `>>>>>>>` line is left anywhere in the file. The sides are labelled with what they are, for example "Ours (main)" and
   "Theirs (feature)" for a merge. **Previous conflict** and **Next conflict** move between the
-  blocks. Our lines, their lines, the base and the unchanged lines are syntax highlighted like
+  blocks; from an unchanged part of the result you were typing in, they go to the conflict
+  before or after it. Our lines, their lines, the base and the unchanged lines are syntax highlighted like
   the diff, following the diff's **Syntax highlighting** option; in the result, the lines you
-  took from a side or left unchanged are highlighted too, and typed lines stay plain.
+  took from a side or left unchanged are highlighted too, and typed lines stay plain. Inside a
+  block, the words that differ between our line and their line are marked, as in the diff. A
+  line both sides have, a line only one side has, and a pair of lines with no word in common
+  are not marked.
 
   ![The merge editor: one conflict block with our and their lines, the choices and the result](assets/merge-editor.png)
 

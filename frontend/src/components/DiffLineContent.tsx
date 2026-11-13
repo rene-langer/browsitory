@@ -1,34 +1,8 @@
 import type { ReactNode } from "react";
 import type { DiffLine } from "../ipc/RepoClient";
 import type { Token } from "../lib/highlight";
-import type { Segment } from "../lib/wordDiff";
+import { markRuns as runs, type Segment } from "../lib/wordDiff";
 import styles from "./DiffView.module.css";
-
-type Run = { text: string; color: string | undefined; changed: boolean };
-
-function runs(text: string, tokens: Token[] | undefined, segments: Segment[] | undefined): Run[] {
-  const tokenRuns = tokens ?? [{ content: text, color: undefined }];
-  const segs = segments ?? [{ text, changed: false }];
-  const out: Run[] = [];
-  let ti = 0;
-  let tOffset = 0;
-  for (const seg of segs) {
-    let remaining = seg.text.length;
-    while (remaining > 0 && ti < tokenRuns.length) {
-      const tok = tokenRuns[ti];
-      const take = Math.min(remaining, tok.content.length - tOffset);
-      out.push({ text: tok.content.slice(tOffset, tOffset + take), color: tok.color, changed: seg.changed });
-      remaining -= take;
-      tOffset += take;
-      if (tOffset >= tok.content.length) {
-        ti++;
-        tOffset = 0;
-      }
-    }
-    if (remaining > 0) out.push({ text: seg.text.slice(seg.text.length - remaining), color: undefined, changed: seg.changed });
-  }
-  return out;
-}
 
 const WHITESPACE: Record<string, { kind: string; className: string }> = {
   " ": { kind: "space", className: styles.wsSpace },

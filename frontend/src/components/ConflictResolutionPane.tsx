@@ -1,4 +1,15 @@
-import { Fragment, useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type FocusEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { errorKind, type ConflictSegment, type ConflictSide, type FileConflictChoice, type RepoClient } from "../ipc/RepoClient";
 import { conflictSideNames, type ConflictSideNames } from "../lib/conflictSides";
 import {
@@ -12,6 +23,7 @@ import {
   type ConflictBlock,
 } from "../lib/conflictMerge";
 import { useConflictTokens } from "../lib/conflictHighlight";
+import { blockWordMarks } from "../lib/conflictWordDiff";
 import type { Token } from "../lib/highlight";
 import {
   ariaKeyShortcuts,
@@ -26,10 +38,12 @@ import {
 import { languageForPath } from "../lib/languageForPath";
 import { logFailure } from "../lib/logger";
 import { historyOf, record, redo, undo, type History } from "../lib/mergeHistory";
+import type { Segment } from "../lib/wordDiff";
 import { useRegisterMergeEditor } from "../state/useCurrentMergeEditor";
 import { useMergeEditorView } from "../state/useMergeEditorView";
 import { useNarrowLayout } from "../state/useNarrowLayout";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
+import { MarkedLine } from "./MarkedLine";
 import { MergePanes } from "./MergePanes";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { Panel } from "./primitives/Panel";
@@ -99,22 +113,31 @@ function logHighlightError(error: unknown): void {
   logFailure("Syntax highlighting failed", error);
 }
 
-/** `text` as it is, its lines coloured with `tokens` when given (#763). */
-function Code({ text, tokens }: { text: string; tokens: readonly Token[][] | undefined }) {
-  if (tokens === undefined) return <>{text}</>;
+/**
+ * `text` as it is, its lines coloured with `tokens` when given (#763) and the words that differ
+ * from the other side in `<mark>` (#879).
+ */
+function Code({
+  text,
+  tokens,
+  marks,
+}: {
+  text: string;
+  tokens: readonly Token[][] | undefined;
+  marks?: readonly (Segment[] | undefined)[];
+}) {
+  if (tokens === undefined && marks === undefined) return <>{text}</>;
   return (
     <>
       {text.split(/(?<=\n)/).map((line, i) => {
-        const lineTokens = tokens[i];
-        if (lineTokens === undefined) return <Fragment key={i}>{line}</Fragment>;
+        const lineTokens = tokens?.[i];
+        const lineMarks = marks?.[i];
+        if (lineTokens === undefined && lineMarks === undefined) return <Fragment key={i}>{line}</Fragment>;
+        const ending = /\r?\n$/.exec(line)?.[0] ?? "";
         return (
           <Fragment key={i}>
-            {lineTokens.map((token, j) => (
-              <span key={j} style={token.color !== undefined ? { color: token.color } : undefined}>
-                {token.content}
-              </span>
-            ))}
-            {/\r?\n$/.exec(line)?.[0] ?? ""}
+            <MarkedLine text={line.slice(0, line.length - ending.length)} tokens={lineTokens} marks={lineMarks} />
+            {ending}
           </Fragment>
         );
       })}
@@ -160,6 +183,9 @@ export function ConflictResolutionPane({
   const [confirmLeave, setConfirmLeave] = useState(false);
   const blockRefs = useRef<(HTMLElement | null)[]>([]);
   const [currentConflict, setCurrentConflict] = useState(-1);
+  // The unchanged run (by segment index) whose result had the focus last, after the current
+  // conflict: F7 and Shift+F7 go on from there (#879). Null once a block has the focus.
+  const [runCursor, setRunCursor] = useState<number | null>(null);
   const idPrefix = useId();
   const [error, setError] = useState<string | null>(null);
   const [isAddDeleteConflict, setIsAddDeleteConflict] = useState(false);
@@ -184,6 +210,7 @@ export function ConflictResolutionPane({
           setWholeEdit(null);
           setConfirmLeave(false);
           setCurrentConflict(-1);
+          setRunCursor(null);
           setError(null);
           setLoadedPath(path);
         }
@@ -241,24 +268,36 @@ export function ConflictResolutionPane({
 
   const conflictIndices = segments.flatMap((segment, index) => (segment.kind === "Conflict" ? [index] : []));
 
+  // From an unchanged run, the conflicts after and before it; else the current one's neighbours.
+  let previousPosition = currentConflict - 1;
+  let nextPosition = currentConflict + 1;
+  if (runCursor !== null) {
+    nextPosition = conflictIndices.findIndex((index) => index > runCursor);
+    if (nextPosition < 0) nextPosition = conflictIndices.length;
+    previousPosition = nextPosition - 1;
+  }
+  const canGoPrevious = previousPosition >= 0;
+  const canGoNext = nextPosition < conflictIndices.length;
+
   const goToConflict = (position: number) => {
     setCurrentConflict(position);
+    setRunCursor(null);
     const block = blockRefs.current[conflictIndices[position]];
     block?.focus();
     block?.scrollIntoView?.({ block: "nearest" });
   };
   const goToPrevious = () => {
-    if (currentConflict > 0) goToConflict(currentConflict - 1);
+    if (canGoPrevious) goToConflict(previousPosition);
   };
   const goToNext = () => {
-    if (currentConflict < conflictIndices.length - 1) goToConflict(currentConflict + 1);
+    if (canGoNext) goToConflict(nextPosition);
   };
 
   // The palette's merge editor commands (#764) act on the current conflict.
   const blocksShown = loaded && error === null && wholeEdit === null && conflictIndices.length > 0;
   useRegisterMergeEditor(
     blocksShown
-      ? { path, canGoPrevious: currentConflict > 0, canGoNext: currentConflict < conflictIndices.length - 1 }
+      ? { path, canGoPrevious, canGoNext }
       : null,
     {
       previous: goToPrevious,
@@ -275,6 +314,11 @@ export function ConflictResolutionPane({
   // The read-only parts are highlighted like the diff viewer (#763); the results stay plain.
   const { settings } = useDiffSettingsContext();
   const tokens = useConflictTokens(segments, languageForPath(path), settings.syntaxHighlight, logHighlightError);
+  // The words that differ between each block's sides (#879), worked out once per file.
+  const wordMarks = useMemo(
+    () => segments.map((segment) => (segment.kind === "Conflict" ? blockWordMarks(segment.ours, segment.theirs) : null)),
+    [segments],
+  );
 
   // The whole file in panes (#875) unless the user chose the blocks or the pane is too narrow.
   const [view, setView] = useMergeEditorView();
@@ -461,7 +505,10 @@ export function ConflictResolutionPane({
         tabIndex={-1}
         aria-label={title}
         className={className}
-        onFocus={() => setCurrentConflict(position)}
+        onFocus={() => {
+          setCurrentConflict(position);
+          setRunCursor(null);
+        }}
         onKeyDown={(event) => {
           if (inTextField(event.target)) {
             // Esc leaves the result field for its block, where the choices' keys work (#764).
@@ -537,13 +584,13 @@ export function ConflictResolutionPane({
           <div className={`${styles.side} ${choice === "ours" || bothChosen ? styles.chosen : ""}`}>
             <div className={styles.sideLabel}>{sideLabel("Ours", names.ours)}</div>
             <pre className={styles.segment}>
-              <Code text={segment.ours} tokens={tokens?.ours[index]} />
+              <Code text={segment.ours} tokens={tokens?.ours[index]} marks={wordMarks[index]?.ours} />
             </pre>
           </div>
           <div className={`${styles.side} ${choice === "theirs" || bothChosen ? styles.chosen : ""}`}>
             <div className={styles.sideLabel}>{sideLabel("Theirs", names.theirs)}</div>
             <pre className={styles.segment}>
-              <Code text={segment.theirs} tokens={tokens?.theirs[index]} />
+              <Code text={segment.theirs} tokens={tokens?.theirs[index]} marks={wordMarks[index]?.theirs} />
             </pre>
           </div>
         </div>
@@ -584,17 +631,23 @@ export function ConflictResolutionPane({
     else goToPrevious();
   };
 
+  // An unchanged run's result taking the focus in the panes is where F7 goes on from (#879).
+  const onEditorFocus = (event: FocusEvent<HTMLDivElement>) => {
+    const run = event.target instanceof Element ? event.target.closest("[data-run]") : null;
+    if (run !== null) setRunCursor(Number(run.getAttribute("data-run")));
+  };
+
   return (
     <Panel title="Resolve conflict">
       {header}
-      <div ref={setEditorElement} onKeyDown={onEditorKeyDown}>
+      <div ref={setEditorElement} onKeyDown={onEditorKeyDown} onFocus={onEditorFocus}>
         {conflictIndices.length > 0 && (
           <Toolbar aria-label="Conflicts">
             <span role="status">
               {resolvedCount} of {conflictIndices.length} resolved
             </span>
             <button
-              disabled={currentConflict <= 0}
+              disabled={!canGoPrevious}
               aria-keyshortcuts={mergeEditorAriaKeyShortcuts("previous-conflict")}
               title={`Previous conflict (${mergeEditorShortcutLabel("previous-conflict")})`}
               onClick={goToPrevious}
@@ -602,7 +655,7 @@ export function ConflictResolutionPane({
               Previous conflict
             </button>
             <button
-              disabled={currentConflict >= conflictIndices.length - 1}
+              disabled={!canGoNext}
               aria-keyshortcuts={mergeEditorAriaKeyShortcuts("next-conflict")}
               title={`Next conflict (${mergeEditorShortcutLabel("next-conflict")})`}
               onClick={goToNext}
@@ -675,6 +728,7 @@ export function ConflictResolutionPane({
             onEdit={editAt}
             onTake={(index, side) => setStateAt(index, takeSide(stateAt(index), side))}
             blockTitle={blockTitle}
+            wordMarks={wordMarks}
           />
         ) : (
           segments.map((segment, index) =>

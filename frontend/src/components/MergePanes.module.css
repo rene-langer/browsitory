@@ -204,3 +204,14 @@
 .takeTheirs {
   left: 2px;
 }
+
+/* The words that differ between a block's ours and theirs (#879), as the diff marks them. */
+.text mark {
+  background: var(--color-warning-bg);
+  color: inherit;
+}
+
+/* Previous/Next conflict scrolls a block into view below the sticky pane names. */
+.block {
+  scroll-margin-top: calc(var(--merge-line-height) * 1em + var(--space-4));
+}
