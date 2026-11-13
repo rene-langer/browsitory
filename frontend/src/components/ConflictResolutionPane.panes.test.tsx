@@ -864,3 +864,214 @@ describe("ConflictResolutionPane editable result pane (#878)", () => {
     expect(onResolve).toHaveBeenCalledWith("shared.txt", `${text}theirs\n${run(2501)}`);
   }, 30000);
 });
+
+// #879: navigation, the counter, save and the whole-file actions in the three panes, and the
+// changed words inside a block.
+describe("ConflictResolutionPane navigation, save and word marks (#879)", () => {
+  /** The result field of the unchanged run whose text is `value`. */
+  function runField(value: string): HTMLTextAreaElement {
+    const field = screen
+      .getAllByLabelText<HTMLTextAreaElement>("Result")
+      .find((candidate) => candidate.value === value && candidate.closest('section[aria-label^="Conflict"]') === null);
+    if (field === undefined) throw new Error(`no unchanged run ${JSON.stringify(value)}`);
+    return field;
+  }
+
+  /** The words marked as changed in a block's pane, in order. */
+  function marksIn(region: HTMLElement, pane: string): string[] {
+    return [...cellOf(region, pane).querySelectorAll("mark")].map((mark) => mark.textContent ?? "");
+  }
+
+  function renderWithRegistry(segments: ConflictSegment[]) {
+    const registry: { current: MergeEditorRegistry | null } = { current: null };
+    function Harness({ children }: { children: ReactNode }) {
+      const value = useMergeEditorRegistry();
+      registry.current = value;
+      return <MergeEditorContext.Provider value={value}>{children}</MergeEditorContext.Provider>;
+    }
+    render(
+      <Harness>
+        <ConflictResolutionPane
+          repoPath={TEST_REPO_PATH}
+          client={fakeClient({ getConflictHunks: async () => segments })}
+          path="shared.txt"
+          onResolve={vi.fn()}
+          onResolveAddDelete={vi.fn()}
+        />
+      </Harness>,
+    );
+    return registry;
+  }
+
+  it("goes from an unchanged run's result to the conflict after it with F7, before it with Shift+F7", async () => {
+    renderPane(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    const second = screen.getByRole("region", { name: "Conflict 2 of 2" });
+
+    // Between the blocks, after the first was the current one: on to the second, back to the first.
+    act(() => first.focus());
+    act(() => runField("c\n").focus());
+    fireEvent.keyDown(runField("c\n"), { key: "F7" });
+    expect(second).toHaveFocus();
+    act(() => runField("c\n").focus());
+    fireEvent.keyDown(runField("c\n"), { key: "F7", shiftKey: true });
+    expect(first).toHaveFocus();
+
+    // Above the first block, after the last was the current one: F7 goes to the first.
+    act(() => second.focus());
+    act(() => runField("a\nb\n").focus());
+    expect(screen.getByRole("button", { name: "Previous conflict" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Next conflict" })).toBeEnabled();
+    fireEvent.keyDown(runField("a\nb\n"), { key: "F7" });
+    expect(first).toHaveFocus();
+
+    // Below the last block: Shift+F7 goes to it, F7 has nowhere to go.
+    act(() => runField("d\n").focus());
+    expect(screen.getByRole("button", { name: "Next conflict" })).toBeDisabled();
+    fireEvent.keyDown(runField("d\n"), { key: "F7" });
+    expect(runField("d\n")).toHaveFocus();
+    fireEvent.keyDown(runField("d\n"), { key: "F7", shiftKey: true });
+    expect(second).toHaveFocus();
+  });
+
+  it("keeps the toolbar's buttons going from the unchanged run that had the focus", async () => {
+    renderPane(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    const second = screen.getByRole("region", { name: "Conflict 2 of 2" });
+    act(() => second.focus());
+    act(() => runField("a\nb\n").focus());
+    const next = screen.getByRole("button", { name: "Next conflict" });
+    act(() => next.focus());
+    expect(next).toBeEnabled();
+    fireEvent.click(next);
+    expect(first).toHaveFocus();
+  });
+
+  it("offers the palette's previous and next from an unchanged run, and they go from there", async () => {
+    const registry = renderWithRegistry(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    const second = screen.getByRole("region", { name: "Conflict 2 of 2" });
+    act(() => second.focus());
+    await waitFor(() => expect(registry.current?.current).toMatchObject({ canGoPrevious: true, canGoNext: false }));
+    act(() => runField("c\n").focus());
+    await waitFor(() => expect(registry.current?.current).toMatchObject({ canGoPrevious: true, canGoNext: true }));
+    act(() => registry.current!.current!.next());
+    expect(second).toHaveFocus();
+    act(() => runField("a\nb\n").focus());
+    await waitFor(() => expect(registry.current?.current).toMatchObject({ canGoPrevious: false, canGoNext: true }));
+    act(() => registry.current!.current!.next());
+    expect(first).toHaveFocus();
+    // The palette's choices act on the block it went to.
+    act(() => registry.current!.current!.choose("theirs"));
+    expect(within(first).getByLabelText("Result")).toHaveValue("t1\n");
+  });
+
+  it("counts, saves and stages a file resolved with the arrows and an edit", async () => {
+    const { onResolve } = renderPane(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    const second = screen.getByRole("region", { name: "Conflict 2 of 2" });
+    const save = screen.getByRole("button", { name: "Save resolution" });
+    fireEvent.click(within(cellOf(first, "theirs")).getByRole("button", { name: "Take theirs" }));
+    expect(screen.getByRole("status")).toHaveTextContent("1 of 2 resolved");
+    expect(save).toBeDisabled();
+    fireEvent.click(within(cellOf(second, "theirs")).getByRole("button", { name: "Take theirs" }));
+    fireEvent.click(within(cellOf(second, "ours")).getByRole("button", { name: "Take ours" }));
+    expect(screen.getByRole("status")).toHaveTextContent("2 of 2 resolved");
+    fireEvent.change(within(first).getByLabelText("Result"), { target: { value: "t1 edited\n" } });
+    expect(screen.getByRole("status")).toHaveTextContent("2 of 2 resolved");
+    fireEvent.click(save);
+    expect(onResolve).toHaveBeenCalledWith("shared.txt", "a\nb\nt1 edited\nc\nt2\nt3\nd\n");
+  });
+
+  it("keeps Use ours, Use theirs (whole file) and Mark resolved in the three panes", async () => {
+    const onResolveWholeFile = vi.fn();
+    const onMarkResolved = vi.fn();
+    render(
+      <ConflictResolutionPane
+        repoPath={TEST_REPO_PATH}
+        client={fakeClient({ getConflictHunks: async () => unequal })}
+        path="shared.txt"
+        onResolve={vi.fn()}
+        onResolveAddDelete={vi.fn()}
+        onResolveWholeFile={onResolveWholeFile}
+        onMarkResolved={onMarkResolved}
+      />,
+    );
+    await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    expect(document.querySelector("[data-pane-header]")).not.toBeNull();
+    const whole = screen.getByRole("group", { name: "Whole file" });
+    fireEvent.click(within(whole).getByRole("button", { name: "Use ours (whole file)" }));
+    expect(onResolveWholeFile).toHaveBeenCalledWith("shared.txt", "Ours");
+    fireEvent.click(within(whole).getByRole("button", { name: "Use theirs (whole file)" }));
+    expect(onResolveWholeFile).toHaveBeenCalledWith("shared.txt", "Theirs");
+    fireEvent.click(within(whole).getByRole("button", { name: "Mark resolved" }));
+    expect(onMarkResolved).toHaveBeenCalledTimes(1);
+  });
+
+  const words: ConflictSegment[] = [
+    { kind: "Clean", content: "start\n" },
+    {
+      kind: "Conflict",
+      ours: "let total = 1;\nsame\n",
+      base: "let total = 0;\n",
+      theirs: "let total = 2;\nsame\nextra\n",
+    },
+    { kind: "Clean", content: "end\n" },
+    { kind: "Conflict", ours: "a = 1\nb = 2\n", base: "", theirs: "# note\na = 1\nb = 3\n" },
+    { kind: "Conflict", ours: "o1\n", base: "", theirs: "t1\n" },
+  ];
+
+  it("marks the words that differ between ours and theirs inside each block", async () => {
+    renderPane(words);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 3" });
+    const second = screen.getByRole("region", { name: "Conflict 2 of 3" });
+    const third = screen.getByRole("region", { name: "Conflict 3 of 3" });
+    expect(marksIn(first, "ours")).toEqual(["1"]);
+    expect(marksIn(first, "theirs")).toEqual(["2"]);
+    // Lines both sides share line up the pairs: "b = 2" against "b = 3", not "a = 1".
+    expect(marksIn(second, "ours")).toEqual(["2"]);
+    expect(marksIn(second, "theirs")).toEqual(["3"]);
+    // Lines with no word in common differ as a whole: no marks.
+    expect(marksIn(third, "ours")).toEqual([]);
+    expect(marksIn(third, "theirs")).toEqual([]);
+    // The line keeps its text, and the result is not marked.
+    expect(cellOf(first, "ours").querySelector('[data-line="2"]')).toHaveTextContent(/^2let total = 1;$/);
+    expect(marksIn(first, "result")).toEqual([]);
+  });
+
+  it("marks the changed words with the syntax highlighting on", async () => {
+    render(
+      <DiffSettingsContext.Provider
+        value={{
+          settings: { ...DEFAULT_DIFF_SETTINGS, syntaxHighlight: true },
+          update: () => {},
+          error: null,
+          dismissError: () => {},
+        }}
+      >
+        <ConflictResolutionPane
+          repoPath={TEST_REPO_PATH}
+          client={fakeClient({ getConflictHunks: async () => words })}
+          path="src/a.ts"
+          onResolve={vi.fn()}
+          onResolveAddDelete={vi.fn()}
+        />
+      </DiffSettingsContext.Provider>,
+    );
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 3" });
+    await waitFor(() => expect(cellOf(first, "theirs").querySelector('[style*="--shiki-token"]')).not.toBeNull(), {
+      timeout: 15000,
+    });
+    expect(marksIn(first, "ours")).toEqual(["1"]);
+    expect(marksIn(first, "theirs")).toEqual(["2"]);
+    expect(cellOf(first, "ours")).toHaveTextContent("let total = 1;");
+  }, 20000);
+
+  it("marks the changed words in the block view too", async () => {
+    localStorage.setItem("mergeEditor.view", "blocks");
+    renderPane(words);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 3" });
+    const marks = [...first.querySelectorAll("mark")].map((mark) => mark.textContent);
+    expect(marks).toEqual(["1", "2"]);
+  });
+});

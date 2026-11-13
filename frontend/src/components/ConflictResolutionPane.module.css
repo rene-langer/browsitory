@@ -92,3 +92,9 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
 }
+
+/* The words that differ between a block's ours and theirs (#879), as the diff marks them. */
+.segment mark {
+  background: var(--color-warning-bg);
+  color: inherit;
+}

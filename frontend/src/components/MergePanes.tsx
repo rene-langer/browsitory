@@ -3,7 +3,10 @@ import { Fragment, memo, type CSSProperties, type ReactNode } from "react";
 import type { ConflictSegment } from "../ipc/RepoClient";
 import { segmentLines, type ConflictTokens } from "../lib/conflictHighlight";
 import { segmentResult, sideTaken, type BlockState, type ConflictBlock } from "../lib/conflictMerge";
+import type { BlockWordMarks } from "../lib/conflictWordDiff";
 import type { Token } from "../lib/highlight";
+import type { Segment } from "../lib/wordDiff";
+import { MarkedLine } from "./MarkedLine";
 import styles from "./MergePanes.module.css";
 
 /**
@@ -78,36 +81,29 @@ function blockOrigins(
   }
 }
 
-function TokenLine({ tokens }: { tokens: readonly Token[] }) {
-  return (
-    <>
-      {tokens.map((token, j) => (
-        <span key={j} style={token.color !== undefined ? { color: token.color } : undefined}>
-          {token.content}
-        </span>
-      ))}
-    </>
-  );
-}
-
 /** One line with its number; memoised, so typing re-renders only the lines it changes (#878). */
 const Line = memo(function Line({
   line,
   tokens,
   number,
   origin,
+  marks,
 }: {
   line: string;
   tokens: readonly Token[] | undefined;
   number: number;
   origin: LineOrigin | undefined;
+  /** The words that differ from the other side's line (#879). */
+  marks: readonly Segment[] | undefined;
 }) {
   return (
     <span className={styles.line} data-line={number} data-origin={origin}>
       <span className={styles.number} aria-hidden="true">
         {number}
       </span>
-      <span className={styles.text}>{tokens === undefined ? line : <TokenLine tokens={tokens} />}</span>
+      <span className={styles.text}>
+        <MarkedLine text={line} tokens={tokens} marks={marks} />
+      </span>
     </span>
   );
 });
@@ -120,6 +116,7 @@ const Lines = memo(function Lines({
   from = 0,
   to,
   origins,
+  marks,
 }: {
   text: string;
   tokens: readonly Token[][] | undefined;
@@ -128,6 +125,8 @@ const Lines = memo(function Lines({
   to?: number;
   /** Every line's origin, or one for all of them. */
   origins?: LineOrigin | readonly LineOrigin[];
+  /** Every line's changed words (#879), by line. */
+  marks?: readonly (Segment[] | undefined)[];
 }) {
   const lines = segmentLines(text).slice(from, to);
   return (
@@ -139,6 +138,7 @@ const Lines = memo(function Lines({
           tokens={tokens?.[from + i]}
           number={start + from + i}
           origin={typeof origins === "string" ? origins : origins?.[from + i]}
+          marks={marks?.[from + i]}
         />
       ))}
     </pre>
@@ -200,6 +200,8 @@ export interface MergePanesProps {
   onTake(index: number, side: "ours" | "theirs"): void;
   /** The block's title, e.g. "Conflict 1 of 3", for its arrows. */
   blockTitle(index: number): string;
+  /** Each block's changed words between ours and theirs (#879), by segment index. */
+  wordMarks: readonly (BlockWordMarks | null)[];
 }
 
 export function MergePanes({
@@ -215,6 +217,7 @@ export function MergePanes({
   onEdit,
   onTake,
   blockTitle,
+  wordMarks,
 }: MergePanesProps) {
   const results = segments.map((segment, index) => segmentResult(segment, stateAt(index)));
   const starts = paneStarts(segments, results);
@@ -228,8 +231,13 @@ export function MergePanes({
     "--merge-gutter": `calc(${Math.max(digits, 2) + 1}ch + 4px)`,
   } as CSSProperties;
 
-  const row = (key: string, cells: Record<MergePane, ReactNode>, chosen: ReadonlySet<MergePane> = new Set()) => (
-    <div key={key} className={styles.row}>
+  const row = (
+    key: string,
+    cells: Record<MergePane, ReactNode>,
+    chosen: ReadonlySet<MergePane> = new Set(),
+    run?: number,
+  ) => (
+    <div key={key} className={styles.row} data-run={run}>
       {panes.map((pane) => (
         <div
           key={pane}
@@ -260,21 +268,27 @@ export function MergePanes({
     const cleanTokens = tokens?.ours[index];
     const start = starts[index];
     const edited = stateAt(index).kind === "edited";
-    return row(String(index), {
-      base: <Lines text={content} tokens={cleanTokens} start={start.base} />,
-      ours: <Lines text={content} tokens={cleanTokens} start={start.ours} />,
-      result: (
-        <EditableLines
-          index={index}
-          text={results[index]}
-          tokens={edited ? undefined : cleanTokens}
-          start={start.result}
-          origins={edited ? "edited" : undefined}
-          onEdit={onEdit}
-        />
-      ),
-      theirs: <Lines text={content} tokens={cleanTokens} start={start.theirs} />,
-    });
+    // `data-run` lets F7 and Shift+F7 go on from this run while its result has the focus (#879).
+    return row(
+      String(index),
+      {
+        base: <Lines text={content} tokens={cleanTokens} start={start.base} />,
+        ours: <Lines text={content} tokens={cleanTokens} start={start.ours} />,
+        result: (
+          <EditableLines
+            index={index}
+            text={results[index]}
+            tokens={edited ? undefined : cleanTokens}
+            start={start.result}
+            origins={edited ? "edited" : undefined}
+            onEdit={onEdit}
+          />
+        ),
+        theirs: <Lines text={content} tokens={cleanTokens} start={start.theirs} />,
+      },
+      undefined,
+      index,
+    );
   };
 
   const renderClean = (content: string, index: number) => {
@@ -287,7 +301,7 @@ export function MergePanes({
     return (
       <Fragment key={index}>
         {head > 0 && cleanRow(`${index}-head`, content, index, 0, head)}
-        <button className={styles.expand} onClick={() => onExpand(index)}>
+        <button className={styles.expand} data-run={index} onClick={() => onExpand(index)}>
           Show {hidden} unchanged lines
         </button>
         {tail > 0 && cleanRow(`${index}-tail`, content, index, count - tail, count)}
@@ -295,11 +309,16 @@ export function MergePanes({
     );
   };
 
-  const side = (text: string, sideTokens: readonly Token[][] | undefined, start: number) =>
+  const side = (
+    text: string,
+    sideTokens: readonly Token[][] | undefined,
+    start: number,
+    marks: readonly (Segment[] | undefined)[] | undefined,
+  ) =>
     text === "" ? (
       <p className={styles.placeholder}>Empty: no lines on this side</p>
     ) : (
-      <Lines text={text} tokens={sideTokens} start={start} />
+      <Lines text={text} tokens={sideTokens} start={start} marks={marks} />
     );
 
   /** A block's side with its arrow (#876) on the edge next to the result. */
@@ -308,7 +327,7 @@ export function MergePanes({
     const lines = which === "ours" ? "our" : "their";
     return (
       <>
-        {side(segment[which], tokens?.[which][index], starts[index][which])}
+        {side(segment[which], tokens?.[which][index], starts[index][which], wordMarks[index]?.[which])}
         <button
           className={`${styles.take} ${which === "ours" ? styles.takeOurs : styles.takeTheirs}`}
           aria-label={which === "ours" ? "Take ours" : "Take theirs"}

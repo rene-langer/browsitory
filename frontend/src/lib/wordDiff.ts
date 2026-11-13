@@ -1,3 +1,5 @@
+import type { Token } from "./highlight";
+
 export interface Segment {
   text: string;
   changed: boolean;
@@ -85,4 +87,40 @@ function pushSegment(segments: Segment[], text: string, changed: boolean) {
   } else {
     segments.push({ text, changed });
   }
+}
+
+/** A piece of a line with one colour and one changed-or-not mark. */
+export interface MarkedRun {
+  text: string;
+  color: string | undefined;
+  changed: boolean;
+}
+
+/**
+ * `text` cut where either its syntax tokens or its word-diff segments change, so each piece
+ * carries both its colour and its mark (the marks win the boundaries). Text the tokens don't
+ * cover (a line ending they stop before) comes through uncoloured.
+ */
+export function markRuns(text: string, tokens: readonly Token[] | undefined, segments: readonly Segment[] | undefined): MarkedRun[] {
+  const tokenRuns = tokens ?? [{ content: text, color: undefined }];
+  const segs = segments ?? [{ text, changed: false }];
+  const out: MarkedRun[] = [];
+  let ti = 0;
+  let tOffset = 0;
+  for (const seg of segs) {
+    let remaining = seg.text.length;
+    while (remaining > 0 && ti < tokenRuns.length) {
+      const tok = tokenRuns[ti];
+      const take = Math.min(remaining, tok.content.length - tOffset);
+      out.push({ text: tok.content.slice(tOffset, tOffset + take), color: tok.color, changed: seg.changed });
+      remaining -= take;
+      tOffset += take;
+      if (tOffset >= tok.content.length) {
+        ti++;
+        tOffset = 0;
+      }
+    }
+    if (remaining > 0) out.push({ text: seg.text.slice(seg.text.length - remaining), color: undefined, changed: seg.changed });
+  }
+  return out;
 }
