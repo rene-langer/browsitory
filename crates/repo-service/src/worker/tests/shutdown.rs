@@ -114,3 +114,44 @@ fn a_stopped_registry_opens_no_repository_and_its_workers_run_nothing() {
         .get_path(Path::new("a.txt"), 0)
         .is_none());
 }
+
+/// `stop_all` waits for a command a worker is running (here a commit whose `pre-commit` hook
+/// sleeps) instead of giving up at once.
+#[cfg(unix)]
+#[test]
+fn a_stopping_registry_waits_for_the_running_command() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a");
+    let outside = TempDir::new().unwrap();
+    let started_hook = outside.path().join("hook-started");
+    install_hook(
+        &repo,
+        "pre-commit",
+        &format!("touch '{}'\nsleep 1", started_hook.display()),
+    );
+    let path = dir.path().to_string_lossy().into_owned();
+    let registry = WorkerRegistry::new();
+    let (_, handle) = registry.open(&path).unwrap();
+    handle.stage_file("a.txt".into()).unwrap();
+
+    let committing = {
+        let handle = handle.clone();
+        thread::spawn(move || handle.commit("a".into(), false, Vec::new(), no_events()))
+    };
+    let waiting_since = Instant::now();
+    while !started_hook.exists() {
+        assert!(
+            waiting_since.elapsed() < Duration::from_secs(10),
+            "the pre-commit hook never started"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    assert!(
+        registry.stop_all(Duration::from_secs(10)),
+        "stop_all gave up while the commit was still running"
+    );
+    assert!(committing.join().unwrap().is_ok());
+    assert!(repo.head().is_ok(), "the commit did not land");
+    assert!(!repo.path().join("index.lock").exists());
+}
