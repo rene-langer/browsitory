@@ -1,8 +1,8 @@
 import { ArrowLeft, ArrowRight } from "lucide-react";
-import { Fragment, type CSSProperties, type ReactNode } from "react";
+import { Fragment, memo, type CSSProperties, type ReactNode } from "react";
 import type { ConflictSegment } from "../ipc/RepoClient";
 import { segmentLines, type ConflictTokens } from "../lib/conflictHighlight";
-import { blockResult, sideTaken, type BlockState, type ConflictBlock } from "../lib/conflictMerge";
+import { segmentResult, sideTaken, type BlockState, type ConflictBlock } from "../lib/conflictMerge";
 import type { Token } from "../lib/highlight";
 import styles from "./MergePanes.module.css";
 
@@ -10,7 +10,9 @@ import styles from "./MergePanes.module.css";
  * The three-pane merge editor (#875): the whole file as ours | result | theirs. Every row (an
  * unchanged run, or one conflict's sides and result) spans all the panes, so the panes stay
  * aligned whatever a block's lengths, and they scroll as one. Show base adds the common
- * ancestor as a fourth pane on the left (#877).
+ * ancestor as a fourth pane on the left (#877). The result is editable in every row shown in
+ * full (#878): an unresolved block holds git's conflict markers, and each line is marked with
+ * where it came from.
  */
 
 /** A pane's column. */
@@ -21,29 +23,59 @@ const MERGE_PANES: readonly MergePane[] = ["ours", "result", "theirs"];
 /** With Show base (#877): the base first, before the side each block starts from. */
 const MERGE_PANES_WITH_BASE: readonly MergePane[] = ["base", ...MERGE_PANES];
 
+/** Where a result line came from (#878): a side taken, typed, or a block still in conflict. */
+export type LineOrigin = "ours" | "theirs" | "base" | "edited" | "conflict";
+
 /** Where each segment starts in each pane, 1-based, by segment index; one more entry for the end. */
 type Starts = Record<MergePane, number>[];
 
-function paneStarts(segments: readonly ConflictSegment[], results: readonly (string | null)[]): Starts {
+function paneStarts(segments: readonly ConflictSegment[], results: readonly string[]): Starts {
   const next = { ours: 1, result: 1, theirs: 1, base: 1 };
   const starts = segments.map((segment, index) => {
     const start = { ...next };
     if (segment.kind === "Clean") {
       const count = segmentLines(segment.content).length;
       next.ours += count;
-      next.result += count;
       next.theirs += count;
       next.base += count;
     } else {
       next.ours += segmentLines(segment.ours).length;
       next.theirs += segmentLines(segment.theirs).length;
       next.base += segmentLines(segment.base).length;
-      next.result += segmentLines(results[index] ?? "").length;
     }
+    next.result += segmentLines(results[index]).length;
     return start;
   });
   starts.push(next);
   return starts;
+}
+
+/** Each line's origin in a block's result, and the highlighting of the sides it took. */
+function blockOrigins(
+  segment: ConflictBlock,
+  state: BlockState,
+  index: number,
+  tokens: ConflictTokens | null,
+): { origins: LineOrigin | LineOrigin[]; tokens: readonly Token[][] | undefined } {
+  if (state.kind === "unchosen") return { origins: "conflict", tokens: undefined };
+  if (state.kind === "edited") return { origins: "edited", tokens: undefined };
+  const lines = (side: "ours" | "theirs") => Array<LineOrigin>(segmentLines(segment[side]).length).fill(side);
+  switch (state.choice) {
+    case "ours":
+    case "theirs":
+    case "base":
+      return { origins: state.choice, tokens: tokens?.[state.choice][index] };
+    case "oursThenTheirs":
+      return {
+        origins: [...lines("ours"), ...lines("theirs")],
+        tokens: tokens === null ? undefined : [...(tokens.ours[index] ?? []), ...(tokens.theirs[index] ?? [])],
+      };
+    case "theirsThenOurs":
+      return {
+        origins: [...lines("theirs"), ...lines("ours")],
+        tokens: tokens === null ? undefined : [...(tokens.theirs[index] ?? []), ...(tokens.ours[index] ?? [])],
+      };
+  }
 }
 
 function TokenLine({ tokens }: { tokens: readonly Token[] }) {
@@ -58,37 +90,93 @@ function TokenLine({ tokens }: { tokens: readonly Token[] }) {
   );
 }
 
+/** One line with its number; memoised, so typing re-renders only the lines it changes (#878). */
+const Line = memo(function Line({
+  line,
+  tokens,
+  number,
+  origin,
+}: {
+  line: string;
+  tokens: readonly Token[] | undefined;
+  number: number;
+  origin: LineOrigin | undefined;
+}) {
+  return (
+    <span className={styles.line} data-line={number} data-origin={origin}>
+      <span className={styles.number} aria-hidden="true">
+        {number}
+      </span>
+      <span className={styles.text}>{tokens === undefined ? line : <TokenLine tokens={tokens} />}</span>
+    </span>
+  );
+});
+
 /** Lines `from` … `to` of `text`, each with its number in the pane (counted from `start`). */
-function Lines({
+const Lines = memo(function Lines({
   text,
   tokens,
   start,
   from = 0,
   to,
+  origins,
 }: {
   text: string;
   tokens: readonly Token[][] | undefined;
   start: number;
   from?: number;
   to?: number;
+  /** Every line's origin, or one for all of them. */
+  origins?: LineOrigin | readonly LineOrigin[];
 }) {
   const lines = segmentLines(text).slice(from, to);
   return (
     <pre className={styles.lines}>
-      {lines.map((line, i) => {
-        const lineTokens = tokens?.[from + i];
-        return (
-          <span key={i} className={styles.line} data-line={start + from + i}>
-            <span className={styles.number} aria-hidden="true">
-              {start + from + i}
-            </span>
-            <span className={styles.text}>
-              {lineTokens === undefined ? line : <TokenLine tokens={lineTokens} />}
-            </span>
-          </span>
-        );
-      })}
+      {lines.map((line, i) => (
+        <Line
+          key={i}
+          line={line}
+          tokens={tokens?.[from + i]}
+          number={start + from + i}
+          origin={typeof origins === "string" ? origins : origins?.[from + i]}
+        />
+      ))}
     </pre>
+  );
+});
+
+/**
+ * A run of the result, editable (#878): a text field over its numbered, highlighted lines, the
+ * field's text transparent so the lines show through and stay level with the side panes.
+ */
+function EditableLines({
+  index,
+  text,
+  tokens,
+  start,
+  origins,
+  onEdit,
+}: {
+  index: number;
+  text: string;
+  tokens: readonly Token[][] | undefined;
+  start: number;
+  origins: LineOrigin | readonly LineOrigin[] | undefined;
+  onEdit(index: number, text: string): void;
+}) {
+  return (
+    <div className={styles.editable}>
+      <div aria-hidden="true">
+        <Lines text={text} tokens={tokens} start={start} origins={origins} />
+      </div>
+      <textarea
+        aria-label="Result"
+        className={styles.input}
+        spellCheck={false}
+        value={text}
+        onChange={(event) => onEdit(index, event.target.value)}
+      />
+    </div>
   );
 }
 
@@ -106,6 +194,7 @@ export interface MergePanesProps {
   contextLines: number;
   /** The block's focusable section, with its title and choices, around `children`. */
   renderBlock(segment: ConflictBlock, index: number, className: string, children: ReactNode): ReactNode;
+  /** Text typed into the result of a segment, a block or an unchanged run (#878). */
   onEdit(index: number, text: string): void;
   /** Takes a side into the block's result: the panes' arrows (#876). */
   onTake(index: number, side: "ours" | "theirs"): void;
@@ -127,9 +216,7 @@ export function MergePanes({
   onTake,
   blockTitle,
 }: MergePanesProps) {
-  const results = segments.map((segment, index) =>
-    segment.kind === "Clean" ? null : blockResult(segment, stateAt(index)),
-  );
+  const results = segments.map((segment, index) => segmentResult(segment, stateAt(index)));
   const starts = paneStarts(segments, results);
   const end = starts[segments.length];
   const digits = String(Math.max(end.ours, end.result, end.theirs, end.base)).length;
@@ -137,7 +224,8 @@ export function MergePanes({
   const headings: Record<MergePane, string> = { base: "Base", ...labels };
   const gridStyle = {
     "--merge-panes": panes.length,
-    "--merge-gutter": `${Math.max(digits, 2) + 1}ch`,
+    // Room for the numbers, the space after them and the origin bar before them (#878).
+    "--merge-gutter": `calc(${Math.max(digits, 2) + 1}ch + 4px)`,
   } as CSSProperties;
 
   const row = (key: string, cells: Record<MergePane, ReactNode>, chosen: ReadonlySet<MergePane> = new Set()) => (
@@ -155,6 +243,7 @@ export function MergePanes({
     </div>
   );
 
+  /** Part of an unchanged run, read-only: the lines next to a collapsed middle. */
   const cleanRow = (key: string, content: string, index: number, from: number, to: number) => {
     const cleanTokens = tokens?.ours[index];
     const start = starts[index];
@@ -166,12 +255,35 @@ export function MergePanes({
     });
   };
 
+  /** A whole unchanged run, its result editable (#878). */
+  const editableCleanRow = (content: string, index: number) => {
+    const cleanTokens = tokens?.ours[index];
+    const start = starts[index];
+    const edited = stateAt(index).kind === "edited";
+    return row(String(index), {
+      base: <Lines text={content} tokens={cleanTokens} start={start.base} />,
+      ours: <Lines text={content} tokens={cleanTokens} start={start.ours} />,
+      result: (
+        <EditableLines
+          index={index}
+          text={results[index]}
+          tokens={edited ? undefined : cleanTokens}
+          start={start.result}
+          origins={edited ? "edited" : undefined}
+          onEdit={onEdit}
+        />
+      ),
+      theirs: <Lines text={content} tokens={cleanTokens} start={start.theirs} />,
+    });
+  };
+
   const renderClean = (content: string, index: number) => {
     const count = segmentLines(content).length;
     const head = index > 0 ? contextLines : 0;
     const tail = index < segments.length - 1 ? contextLines : 0;
     const hidden = count - head - tail;
-    if (expanded.has(index) || hidden <= 2) return cleanRow(String(index), content, index, 0, count);
+    // Typed over: shown in full, as it is now.
+    if (expanded.has(index) || hidden <= 2 || stateAt(index).kind === "edited") return editableCleanRow(content, index);
     return (
       <Fragment key={index}>
         {head > 0 && cleanRow(`${index}-head`, content, index, 0, head)}
@@ -216,14 +328,14 @@ export function MergePanes({
 
   const renderConflict = (segment: ConflictBlock, index: number) => {
     const state = stateAt(index);
-    const result = results[index] ?? null;
+    const result = results[index];
     const start = starts[index];
     const choice = state.kind === "chosen" ? state.choice : null;
     const chosen = new Set<MergePane>();
     if (choice === "ours" || choice === "oursThenTheirs" || choice === "theirsThenOurs") chosen.add("ours");
     if (choice === "theirs" || choice === "oursThenTheirs" || choice === "theirsThenOurs") chosen.add("theirs");
     if (choice === "base") chosen.add("base");
-    const resultLines = result === null ? 0 : segmentLines(result).length;
+    const highlight = blockOrigins(segment, state, index, tokens);
     return renderBlock(
       segment,
       index,
@@ -241,25 +353,14 @@ export function MergePanes({
             ours: sideWithArrow(segment, index, "ours"),
             result: (
               <>
-                <div className={styles.resultLines}>
-                  <div className={styles.gutter} aria-hidden="true">
-                    {Array.from({ length: resultLines }, (_, i) => (
-                      <span key={i} className={styles.number} data-line={start.result + i}>
-                        {start.result + i}
-                      </span>
-                    ))}
-                  </div>
-                  <textarea
-                    aria-label="Result"
-                    className={styles.result}
-                    spellCheck={false}
-                    wrap="off"
-                    placeholder="Not chosen yet: take a side, or type the result."
-                    rows={Math.max(1, resultLines)}
-                    value={result ?? ""}
-                    onChange={(event) => onEdit(index, event.target.value)}
-                  />
-                </div>
+                <EditableLines
+                  index={index}
+                  text={result}
+                  tokens={highlight.tokens}
+                  start={start.result}
+                  origins={highlight.origins}
+                  onEdit={onEdit}
+                />
                 {result === "" && <p className={styles.placeholder}>Empty: the block&apos;s lines are removed.</p>}
               </>
             ),

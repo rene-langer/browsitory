@@ -51,9 +51,12 @@ function placeOf(text: HTMLElement) {
   };
 }
 
-/** The panes a line's text appears in, with that pane's line number. */
+/**
+ * The panes a line's text appears in, with that pane's line number. A result field's own text
+ * (#878) is left out: its lines are shown, numbered, under it.
+ */
 function linesOf(text: string): [string | null, number | null][] {
-  return screen.getAllByText(text).map((element) => {
+  return screen.getAllByText(text, { ignore: "script, style, textarea" }).map((element) => {
     const place = placeOf(element);
     return [place.pane, place.line];
   });
@@ -126,11 +129,11 @@ describe("ConflictResolutionPane three-pane view (#875)", () => {
     expect(numbersIn(cellOf(first, "theirs"))).toEqual([3]);
     expect(cellOf(first, "ours").parentElement).toBe(cellOf(first, "theirs").parentElement);
     expect(cellOf(first, "result").parentElement).toBe(cellOf(first, "ours").parentElement);
-    // After it the panes line up again, each counting its own lines; an unchosen block has no
-    // lines in the result yet.
+    // After it the panes line up again, each counting its own lines; an unchosen block's result
+    // holds git's conflict markers (#878).
     expect(linesOf("c")).toEqual([
       ["ours", 6],
-      ["result", 3],
+      ["result", 12],
       ["theirs", 4],
     ]);
     const rows = new Set(screen.getAllByText("c").map((text) => placeOf(text).row));
@@ -138,7 +141,7 @@ describe("ConflictResolutionPane three-pane view (#875)", () => {
     expect(numbersIn(cellOf(second, "theirs"))).toEqual([5, 6]);
     expect(linesOf("d")).toEqual([
       ["ours", 7],
-      ["result", 4],
+      ["result", 20],
       ["theirs", 7],
     ]);
   });
@@ -196,20 +199,20 @@ describe("ConflictResolutionPane three-pane view (#875)", () => {
     expect(screen.getAllByRole("button", { name: /unchanged lines/ })).toHaveLength(1);
     expect(linesOf("same 3")).toEqual([
       ["ours", 4],
-      ["result", 3],
+      ["result", 9],
       ["theirs", 4],
     ]);
     expect(screen.queryByText("same 6")).not.toBeInTheDocument();
     expect(linesOf("same 10")).toEqual([
       ["ours", 11],
-      ["result", 10],
+      ["result", 16],
       ["theirs", 11],
     ]);
 
     fireEvent.click(expand);
     expect(linesOf("same 6")).toEqual([
       ["ours", 7],
-      ["result", 6],
+      ["result", 12],
       ["theirs", 7],
     ]);
     expect(screen.queryByRole("button", { name: /unchanged lines/ })).not.toBeInTheDocument();
@@ -278,7 +281,7 @@ describe("ConflictResolutionPane three-pane view (#875)", () => {
     expect(first.querySelector('[data-pane="base"]')).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Show base" }));
     expect(cellOf(first, "base")).toBeInTheDocument();
-    expect(within(first).getByText("x")).toBeInTheDocument();
+    expect(within(cellOf(first, "base")).getByText("x")).toBeInTheDocument();
     fireEvent.click(within(first).getByRole("button", { name: "Accept base" }));
     expect(within(first).getByLabelText("Result")).toHaveValue("x\n");
 
@@ -385,8 +388,10 @@ describe("ConflictResolutionPane three-pane view (#875)", () => {
     await waitFor(() => expect(highlighted(cellOf(block, "theirs"))).toBe(true), { timeout: 15000 });
     expect(highlighted(cellOf(block, "ours"))).toBe(true);
     expect(cellOf(block, "theirs")).toHaveTextContent("const theirs = 2;");
-    // The unchanged line in all three panes; only the block's result field stays plain.
-    const cells = [...document.querySelectorAll("[data-pane]")].filter((cell) => cell.querySelector("textarea") === null);
+    // The unchanged line in all three panes; only the block's result stays plain.
+    const cells = [...document.querySelectorAll("[data-pane]")].filter(
+      (cell) => cell.getAttribute("data-pane") !== "result" || cell.closest('section[aria-label^="Conflict"]') === null,
+    );
     expect(cells.map((cell) => cell.getAttribute("data-pane"))).toEqual(["ours", "result", "theirs", "ours", "theirs"]);
     for (const cell of cells) expect(highlighted(cell)).toBe(true);
     unmount();
@@ -425,7 +430,9 @@ describe("ConflictResolutionPane take-side arrows (#876)", () => {
     expect(screen.getByRole("status")).toHaveTextContent("1 of 2 resolved");
     expect(arrow(second, "theirs")).toBeDisabled();
     // The other block is untouched.
-    expect(within(screen.getByRole("region", { name: "Conflict 1 of 2" })).getByLabelText("Result")).toHaveValue("");
+    expect(within(screen.getByRole("region", { name: "Conflict 1 of 2" })).getByLabelText("Result")).toHaveValue(
+      "<<<<<<< ours\no1\no2\no3\n||||||| base\nx\n=======\nt1\n>>>>>>> theirs\n",
+    );
   });
 
   it("appends the second side taken: ours then theirs, or theirs then ours", async () => {
@@ -463,7 +470,7 @@ describe("ConflictResolutionPane take-side arrows (#876)", () => {
     expect(screen.getByRole("status")).toHaveTextContent("1 of 2 resolved");
 
     fireEvent.click(within(first).getByRole("button", { name: "Reset" }));
-    expect(within(first).getByLabelText("Result")).toHaveValue("");
+    expect(within(first).getByLabelText("Result")).toHaveValue("<<<<<<< ours\no1\no2\no3\n||||||| base\nx\n=======\nt1\n>>>>>>> theirs\n");
     expect(within(first).getByText("Not chosen")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("0 of 2 resolved");
     expect(arrow(first, "ours")).toBeEnabled();
@@ -533,7 +540,7 @@ describe("ConflictResolutionPane base pane (#877)", () => {
     expect(cellOf(first, "base")).toHaveTextContent("x");
     // No separate base strip above the block's panes any more: its base is in the row.
     expect(cellOf(first, "base").parentElement).toBe(cellOf(first, "ours").parentElement);
-    expect(screen.getAllByText("x")).toHaveLength(1);
+    expect(screen.getAllByText("x").map((text) => placeOf(text).pane)).toEqual(["base", "result"]);
 
     fireEvent.click(toggle);
     expect(headers()).toEqual(["ours", "result", "theirs"]);
@@ -556,7 +563,7 @@ describe("ConflictResolutionPane base pane (#877)", () => {
     expect(linesOf("c")).toEqual([
       ["base", 4],
       ["ours", 6],
-      ["result", 3],
+      ["result", 12],
       ["theirs", 4],
     ]);
     expect(new Set(screen.getAllByText("c").map((text) => placeOf(text).row)).size).toBe(1);
@@ -564,7 +571,7 @@ describe("ConflictResolutionPane base pane (#877)", () => {
     expect(linesOf("d")).toEqual([
       ["base", 6],
       ["ours", 7],
-      ["result", 4],
+      ["result", 20],
       ["theirs", 7],
     ]);
   });
@@ -581,7 +588,7 @@ describe("ConflictResolutionPane base pane (#877)", () => {
     expect(linesOf("same 10")).toEqual([
       ["base", 10],
       ["ours", 11],
-      ["result", 10],
+      ["result", 16],
       ["theirs", 11],
     ]);
   });
@@ -622,4 +629,238 @@ describe("ConflictResolutionPane base pane (#877)", () => {
     expect(within(first).getByText("Base")).toBeInTheDocument();
     expect(document.querySelector("[data-pane]")).toBeNull();
   });
+});
+
+// #878: the result pane is editable for the whole file: unresolved blocks show git's conflict
+// markers, resolved ones are highlighted by origin, and one undo history covers takes and typing.
+describe("ConflictResolutionPane editable result pane (#878)", () => {
+  const markers1 = "<<<<<<< ours\no1\no2\no3\n||||||| base\nx\n=======\nt1\n>>>>>>> theirs\n";
+  const markers2 = "<<<<<<< ours\n||||||| base\ny\n=======\nt2\nt3\n>>>>>>> theirs\n";
+
+  /** The result pane's text field in the row that shows `text` (an unchanged line). */
+  function resultFieldWith(text: string): HTMLTextAreaElement {
+    const line = screen.getAllByText(text).find((element) => placeOf(element).pane === "result");
+    const field = line?.closest("[data-pane]")?.querySelector("textarea");
+    if (field == null) throw new Error(`no result field next to ${text}`);
+    return field;
+  }
+
+  /** Each result line's origin in `region`'s result pane, in order. */
+  function originsIn(region: HTMLElement): (string | null)[] {
+    return [...cellOf(region, "result").querySelectorAll("[data-line]")].map((line) => line.getAttribute("data-origin"));
+  }
+
+  const undoKey = (target: Element) => fireEvent.keyDown(target, { key: "z", code: "KeyZ", ctrlKey: true });
+  const redoKey = (target: Element) =>
+    fireEvent.keyDown(target, { key: "z", code: "KeyZ", ctrlKey: true, shiftKey: true });
+
+  it("shows an unresolved block with git's conflict markers in the result and numbers them", async () => {
+    renderPane(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    const second = screen.getByRole("region", { name: "Conflict 2 of 2" });
+    expect(within(first).getByLabelText("Result")).toHaveValue(markers1);
+    expect(within(second).getByLabelText("Result")).toHaveValue(markers2);
+    expect(numbersIn(cellOf(first, "result"))).toEqual([3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    expect(originsIn(first)).toEqual(Array(9).fill("conflict"));
+    expect(linesOf("c")).toEqual([
+      ["ours", 6],
+      ["result", 12],
+      ["theirs", 4],
+    ]);
+    expect(screen.getByRole("status")).toHaveTextContent("0 of 2 resolved");
+    expect(screen.getByRole("button", { name: "Save resolution" })).toBeDisabled();
+  });
+
+  it("types into the result outside the blocks, and saves what was typed", async () => {
+    const { onResolve } = renderPane(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    const second = screen.getByRole("region", { name: "Conflict 2 of 2" });
+
+    fireEvent.change(resultFieldWith("a"), { target: { value: "a\nadded\nb\n" } });
+    expect(resultFieldWith("a")).toHaveValue("a\nadded\nb\n");
+    // The side panes keep their lines; the result's numbers after the edit move down one.
+    expect(linesOf("b")).toEqual([
+      ["ours", 2],
+      ["result", 3],
+      ["theirs", 2],
+    ]);
+    expect(linesOf("added")).toEqual([["result", 2]]);
+    expect(placeOf(screen.getByText("added")).row).toBe(placeOf(screen.getAllByText("a")[0]).row);
+    expect(screen.getByText("added").closest("[data-line]")).toHaveAttribute("data-origin", "edited");
+
+    fireEvent.click(within(first).getByRole("button", { name: "Accept ours" }));
+    fireEvent.click(within(second).getByRole("button", { name: "Accept theirs" }));
+    fireEvent.change(resultFieldWith("d"), { target: { value: "d\nlast\n" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save resolution" }));
+    expect(onResolve).toHaveBeenCalledWith("shared.txt", "a\nadded\nb\no1\no2\no3\nc\nt2\nt3\nd\nlast\n");
+  });
+
+  it("highlights a resolved block's lines by origin and marks a typed block Edited", async () => {
+    renderPane(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+
+    fireEvent.click(within(first).getByRole("button", { name: "Accept ours" }));
+    expect(originsIn(first)).toEqual(["ours", "ours", "ours"]);
+    fireEvent.click(within(first).getByRole("button", { name: "Theirs then ours" }));
+    expect(originsIn(first)).toEqual(["theirs", "ours", "ours", "ours"]);
+    fireEvent.click(within(first).getByRole("button", { name: "Accept base" }));
+    expect(originsIn(first)).toEqual(["base"]);
+
+    fireEvent.change(within(first).getByLabelText("Result"), { target: { value: "x\nmine\n" } });
+    expect(within(first).getByText("Edited")).toBeInTheDocument();
+    expect(originsIn(first)).toEqual(["edited", "edited"]);
+    expect(screen.getByRole("status")).toHaveTextContent("1 of 2 resolved");
+  });
+
+  it("resolves a block by typing over its conflict markers", async () => {
+    renderPane(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    const second = screen.getByRole("region", { name: "Conflict 2 of 2" });
+    const save = screen.getByRole("button", { name: "Save resolution" });
+    fireEvent.click(within(second).getByRole("button", { name: "Accept ours" }));
+
+    // Typed, but the start marker is left: still a conflict, and nothing can be saved.
+    fireEvent.change(within(first).getByLabelText("Result"), {
+      target: { value: "<<<<<<< ours\no1\no2\no3\nt1\n" },
+    });
+    expect(within(first).getByText("Edited")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("1 of 2 resolved");
+    expect(save).toBeDisabled();
+    expect(screen.getByText(/Remove the conflict markers/)).toBeInTheDocument();
+
+    // An end marker typed into an unchanged run blocks the save too.
+    fireEvent.change(within(first).getByLabelText("Result"), { target: { value: "o1\nt1\n" } });
+    expect(screen.getByRole("status")).toHaveTextContent("2 of 2 resolved");
+    expect(save).toBeEnabled();
+    fireEvent.change(resultFieldWith("c"), { target: { value: "c\n>>>>>>> theirs\n" } });
+    expect(save).toBeDisabled();
+    fireEvent.change(resultFieldWith("c"), { target: { value: "c\n" } });
+    expect(save).toBeEnabled();
+  });
+
+  it("undoes and redoes an arrow take with the keys and the buttons", async () => {
+    renderPane(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    const undo = screen.getByRole("button", { name: "Undo" });
+    const redo = screen.getByRole("button", { name: "Redo" });
+    expect(undo).toBeDisabled();
+    expect(redo).toBeDisabled();
+
+    fireEvent.click(within(cellOf(first, "ours")).getByRole("button", { name: "Take ours" }));
+    expect(within(first).getByLabelText("Result")).toHaveValue("o1\no2\no3\n");
+    expect(undo).toBeEnabled();
+
+    act(() => first.focus());
+    undoKey(first);
+    expect(within(first).getByLabelText("Result")).toHaveValue(markers1);
+    expect(within(first).getByText("Not chosen")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("0 of 2 resolved");
+    expect(undo).toBeDisabled();
+    expect(redo).toBeEnabled();
+
+    redoKey(first);
+    expect(within(first).getByLabelText("Result")).toHaveValue("o1\no2\no3\n");
+    fireEvent.click(undo);
+    expect(within(first).getByLabelText("Result")).toHaveValue(markers1);
+    fireEvent.click(redo);
+    expect(within(first).getByLabelText("Result")).toHaveValue("o1\no2\no3\n");
+    // Ctrl+Y redoes too.
+    fireEvent.click(undo);
+    fireEvent.keyDown(first, { key: "y", code: "KeyY", ctrlKey: true });
+    expect(within(first).getByLabelText("Result")).toHaveValue("o1\no2\no3\n");
+  });
+
+  it("undoes typing in one step per field, and a new change drops the redo", async () => {
+    renderPane(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    const field = within(first).getByLabelText("Result");
+    fireEvent.click(within(first).getByRole("button", { name: "Accept theirs" }));
+
+    // Keystrokes in one field go back together.
+    fireEvent.change(field, { target: { value: "t1\nn" } });
+    fireEvent.change(field, { target: { value: "t1\nne" } });
+    fireEvent.change(field, { target: { value: "t1\nnew\n" } });
+    fireEvent.change(resultFieldWith("c"), { target: { value: "c2\n" } });
+
+    undoKey(resultFieldWith("c2"));
+    expect(screen.queryByText("c2")).not.toBeInTheDocument();
+    expect(resultFieldWith("c")).toHaveValue("c\n");
+    undoKey(field);
+    expect(field).toHaveValue("t1\n");
+    expect(within(first).getByRole("button", { name: "Accept theirs" })).toHaveAttribute("aria-pressed", "true");
+    undoKey(field);
+    expect(field).toHaveValue(markers1);
+
+    redoKey(field);
+    expect(field).toHaveValue("t1\n");
+    fireEvent.click(within(first).getByRole("button", { name: "Reset" }));
+    expect(screen.getByRole("button", { name: "Redo" })).toBeDisabled();
+    undoKey(first);
+    expect(field).toHaveValue("t1\n");
+  });
+
+  it("keeps Ctrl+Z inside the merge editor away from the app's Git undo", async () => {
+    renderPane(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    const reached = vi.fn();
+    window.addEventListener("keydown", reached);
+    try {
+      fireEvent.click(within(first).getByRole("button", { name: "Accept ours" }));
+      undoKey(within(first).getByLabelText("Result"));
+      redoKey(first);
+      expect(reached).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("keydown", reached);
+    }
+  });
+
+  it("undoes in the block view too, the history shared with the panes", async () => {
+    renderPane(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    fireEvent.click(within(first).getByRole("button", { name: "Accept ours" }));
+    fireEvent.click(screen.getByRole("button", { name: "Blocks" }));
+    const block = screen.getByRole("region", { name: "Conflict 1 of 2" });
+    fireEvent.click(within(block).getByRole("button", { name: "Accept theirs" }));
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(within(block).getByLabelText("Result")).toHaveValue("o1\no2\no3\n");
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(within(block).getByText("Not chosen")).toBeInTheDocument();
+  });
+
+  it("stays quick on a 5,000-line file", async () => {
+    const run = (from: number) => Array.from({ length: 2500 }, (_, i) => `line ${from + i}\n`).join("");
+    const big: ConflictSegment[] = [
+      { kind: "Clean", content: run(1) },
+      { kind: "Conflict", ours: "ours\n", base: "base\n", theirs: "theirs\n" },
+      { kind: "Clean", content: run(2501) },
+    ];
+    const { onResolve } = renderPane(big);
+    const block = await screen.findByRole("region", { name: "Conflict 1 of 1" });
+    // Collapsed: only the lines next to the conflict are in the page.
+    expect(document.querySelectorAll("[data-line]").length).toBeLessThan(60);
+
+    fireEvent.click(screen.getAllByRole("button", { name: /unchanged lines/ })[0]);
+    const field = resultFieldWith("line 1");
+    expect(field.value.split("\n")).toHaveLength(2501);
+
+    const started = performance.now();
+    let text = run(1);
+    for (let i = 0; i < 20; i++) {
+      text = `${text}typed ${i}\n`;
+      fireEvent.change(field, { target: { value: text } });
+    }
+    fireEvent.click(within(cellOf(block, "theirs")).getByRole("button", { name: "Take theirs" }));
+    // Generous for a slow CI runner; each keystroke re-renders only what changed.
+    expect(performance.now() - started).toBeLessThan(8000);
+    expect(linesOf("typed 19")).toEqual([["result", 2520]]);
+    expect(numbersIn(cellOf(block, "result"))).toEqual([2521]);
+
+    undoKey(field);
+    expect(within(block).getByLabelText("Result")).toHaveValue(
+      "<<<<<<< ours\nours\n||||||| base\nbase\n=======\ntheirs\n>>>>>>> theirs\n",
+    );
+    redoKey(field);
+    fireEvent.click(screen.getByRole("button", { name: "Save resolution" }));
+    expect(onResolve).toHaveBeenCalledWith("shared.txt", `${text}theirs\n${run(2501)}`);
+  }, 30000);
 });

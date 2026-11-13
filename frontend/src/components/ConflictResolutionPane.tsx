@@ -1,8 +1,9 @@
-import { Fragment, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { errorKind, type ConflictSegment, type ConflictSide, type FileConflictChoice, type RepoClient } from "../ipc/RepoClient";
 import { conflictSideNames, type ConflictSideNames } from "../lib/conflictSides";
 import {
   assembleResult,
+  blockResolved,
   blockResult,
   hasConflictMarkers,
   takeSide,
@@ -13,13 +14,18 @@ import {
 import { useConflictTokens } from "../lib/conflictHighlight";
 import type { Token } from "../lib/highlight";
 import {
+  ariaKeyShortcuts,
+  chordsFor,
+  formatChords,
   matchMergeEditorShortcut,
+  matchShortcut,
   mergeEditorAriaKeyShortcuts,
   mergeEditorShortcutLabel,
   type MergeEditorShortcutId,
 } from "../lib/keybindings";
 import { languageForPath } from "../lib/languageForPath";
 import { logFailure } from "../lib/logger";
+import { historyOf, record, redo, undo, type History } from "../lib/mergeHistory";
 import { useRegisterMergeEditor } from "../state/useCurrentMergeEditor";
 import { useMergeEditorView } from "../state/useMergeEditorView";
 import { useNarrowLayout } from "../state/useNarrowLayout";
@@ -142,8 +148,10 @@ export function ConflictResolutionPane({
   onMarkResolved?: () => void;
 }) {
   const [segments, setSegments] = useState<ConflictSegment[]>([]);
-  // Every block starts unchosen, so Save never takes a side the user didn't pick (#654).
-  const [states, setStates] = useState<BlockState[]>([]);
+  // Every block starts unchosen, so Save never takes a side the user didn't pick (#654). An
+  // unchanged run typed over (#878) is `edited` too. Every change is a step in the undo history.
+  const [history, setHistory] = useState<History<BlockState[]>>(() => historyOf([]));
+  const states = history.present;
   const [names, setNames] = useState<ConflictSideNames>(NO_NAMES);
   const [showBase, setShowBase] = useState(false);
   // Unchanged runs the user expanded, by segment index.
@@ -171,7 +179,7 @@ export function ConflictResolutionPane({
       .then((next) => {
         if (!ignore) {
           setSegments(next);
-          setStates(next.map(() => ({ kind: "unchosen" })));
+          setHistory(historyOf(next.map((): BlockState => ({ kind: "unchosen" }))));
           setExpanded(new Set());
           setWholeEdit(null);
           setConfirmLeave(false);
@@ -213,8 +221,23 @@ export function ConflictResolutionPane({
   }, [repoPath, client]);
 
   const setStateAt = (index: number, state: BlockState) => {
-    setStates((prev) => prev.map((s, i) => (i === index ? state : s)));
+    setHistory((prev) => record(prev, prev.present.map((s, i) => (i === index ? state : s)), null, Date.now()));
   };
+  // Text typed into a segment's result; keystrokes in one field make one undo step (#878).
+  // Stable, so the panes' unchanged rows don't re-render while typing.
+  const editAt = useCallback((index: number, text: string) => {
+    const now = Date.now();
+    setHistory((prev) =>
+      record(
+        prev,
+        prev.present.map((s, i): BlockState => (i === index ? { kind: "edited", text } : s)),
+        `edit-${index}`,
+        now,
+      ),
+    );
+  }, []);
+  const undoEdit = () => setHistory(undo);
+  const redoEdit = () => setHistory(redo);
 
   const conflictIndices = segments.flatMap((segment, index) => (segment.kind === "Conflict" ? [index] : []));
 
@@ -320,8 +343,14 @@ export function ConflictResolutionPane({
   }
 
   const stateAt = (index: number): BlockState => states[index] ?? { kind: "unchosen" };
-  const resolvedCount = conflictIndices.filter((index) => stateAt(index).kind !== "unchosen").length;
-  const allResolved = resolvedCount === conflictIndices.length;
+  const resolvedCount = conflictIndices.filter((index) => {
+    const segment = segments[index];
+    return segment.kind === "Conflict" && blockResolved(segment, stateAt(index));
+  }).length;
+  const unchosenLeft = conflictIndices.some((index) => stateAt(index).kind === "unchosen");
+  // A conflict's start or end marker left anywhere, typed or not, keeps Save disabled (#878).
+  const markersLeft = !unchosenLeft && hasConflictMarkers(assembleResult(segments, states));
+  const canSave = loaded && !unchosenLeft && !markersLeft;
 
   const startWholeEdit = () => {
     const text = assembleResult(segments, states);
@@ -381,7 +410,7 @@ export function ConflictResolutionPane({
   }
 
   const save = () => {
-    if (!allResolved) return;
+    if (!canSave) return;
     onResolve(path, assembleResult(segments, states));
   };
 
@@ -529,7 +558,7 @@ export function ConflictResolutionPane({
           placeholder="Not chosen yet: take a side above, or type the result."
           rows={Math.min(20, Math.max(2, lineCount(result ?? "")))}
           value={result ?? ""}
-          onChange={(event) => setStateAt(index, { kind: "edited", text: event.target.value })}
+          onChange={(event) => editAt(index, event.target.value)}
         />
         {result === "" && <p className={styles.hint}>Empty: the block&apos;s lines are removed.</p>}
       </>,
@@ -537,7 +566,17 @@ export function ConflictResolutionPane({
   };
 
   // F7 / Shift+F7 (#764) from anywhere in the blocks, the result fields too (they type no F7).
+  // Undo and Redo (#878) undo the merge editor's own changes, in a result field too, and don't
+  // reach the app's Git undo while the focus is in the editor.
   const onEditorKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const global = matchShortcut(event)?.id;
+    if (global === "undo" || global === "redo") {
+      event.preventDefault();
+      event.stopPropagation();
+      if (global === "undo") undoEdit();
+      else redoEdit();
+      return;
+    }
     const id = matchMergeEditorShortcut(event)?.id;
     if (id !== "next-conflict" && id !== "previous-conflict") return;
     event.preventDefault();
@@ -572,6 +611,22 @@ export function ConflictResolutionPane({
             </button>
             <button aria-pressed={showBase} onClick={() => setShowBase(!showBase)}>
               Show base
+            </button>
+            <button
+              disabled={history.past.length === 0}
+              aria-keyshortcuts={ariaKeyShortcuts("undo")}
+              title={`Undo the last change in the merge editor (${formatChords(chordsFor("undo"))})`}
+              onClick={undoEdit}
+            >
+              Undo
+            </button>
+            <button
+              disabled={history.future.length === 0}
+              aria-keyshortcuts={ariaKeyShortcuts("redo")}
+              title={`Redo the change undone in the merge editor (${formatChords(chordsFor("redo"))})`}
+              onClick={redoEdit}
+            >
+              Redo
             </button>
             <button onClick={startWholeEdit}>Edit whole result</button>
             <span className={styles.segmented} role="group" aria-label="Merge editor layout">
@@ -617,7 +672,7 @@ export function ConflictResolutionPane({
                 </>,
               )
             }
-            onEdit={(index, text) => setStateAt(index, { kind: "edited", text })}
+            onEdit={editAt}
             onTake={(index, side) => setStateAt(index, takeSide(stateAt(index), side))}
             blockTitle={blockTitle}
           />
@@ -627,10 +682,14 @@ export function ConflictResolutionPane({
           )
         )}
       </div>
-      {loaded && !allResolved && (
-        <p className={styles.hint}>Choose or type a result for every conflict to save.</p>
+      {loaded && unchosenLeft && <p className={styles.hint}>Choose or type a result for every conflict to save.</p>}
+      {loaded && markersLeft && (
+        <p className={styles.hint}>
+          Remove the conflict markers (lines starting with &lt;&lt;&lt;&lt;&lt;&lt;&lt; or
+          &gt;&gt;&gt;&gt;&gt;&gt;&gt;) to save.
+        </p>
       )}
-      <button onClick={save} disabled={!loaded || !allResolved}>
+      <button onClick={save} disabled={!canSave}>
         Save resolution
       </button>
     </Panel>
