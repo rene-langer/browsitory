@@ -20,8 +20,9 @@ Right-click a commit in the graph:
   (see [Editing older commits](#editing-older-commits) below).
 
 The command palette also has commands to cherry-pick, revert, check out and reset to the
-selected commit, to reword, edit, squash, fixup, move or drop it (**Reword 1a2b3c4…**, **Drop
-1a2b3c4** and so on), and to amend the last commit (where the commit menu offers them), plus
+selected commit, to reword, edit, split, squash, fixup, move or drop it (**Reword 1a2b3c4…**,
+**Drop 1a2b3c4** and so on), to fold staged changes into it (**Fold staged changes into
+1a2b3c4**), and to amend the last commit (where the commit menu offers them), plus
 **Continue cherry-pick** / **Abort cherry-pick** (or revert) while a sequence is paused.
 
 ??? note "Details"

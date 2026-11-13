@@ -51,7 +51,9 @@ operations still run, but can't be undone. After that, while the other window st
 action waits about a second for it instead of 10; a quick run of actions waits only once.
 Undo, Redo, discards and **Reset hard** still wait about a second each before they say so.
 
-Typing in a text field keeps that field's own undo. In the VSCode extension, use the toolbar
+Typing in a text field keeps that field's own undo. With the focus in the merge editor, the same
+keys undo and redo the merge editor's own changes, not a Git operation (see
+[Resolving conflicts](conflicts.md)). In the VSCode extension, use the toolbar
 buttons or the command palette if Ctrl+Z is taken by VSCode.
 
 Tools that show all refs (`git log --all`, gitk) show a "browsitory undo anchor" commit; it
