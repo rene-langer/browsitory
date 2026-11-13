@@ -62,6 +62,33 @@ describe("BranchTree — local branches", () => {
     expect(screen.getByRole("menuitem", { name: "Merge into current branch…" })).toBeInTheDocument();
   });
 
+  it("lists the user commands set for branches and runs one on the branch (#895)", () => {
+    const onRunUserCommand = vi.fn();
+    const deploy = {
+      id: "deploy",
+      name: "Deploy branch",
+      commandLine: "deploy ${branch}",
+      workingDirectory: null,
+      targets: ["Branch" as const],
+      confirm: false,
+      showOutput: true,
+      refresh: false,
+      variables: ["branch" as const],
+      problem: null,
+    };
+    renderTree({ userCommands: [deploy], onRunUserCommand });
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
+    const items = screen.getAllByRole("menuitem");
+    expect(items[items.length - 1]).toHaveTextContent("Deploy branch");
+    fireEvent.click(screen.getByRole("menuitem", { name: /Deploy branch/ }));
+    expect(onRunUserCommand).toHaveBeenCalledWith(deploy, {
+      commitId: null,
+      branch: "feat/foo",
+      refName: "refs/heads/feat/foo",
+      paths: [],
+    });
+  });
+
   it("does not offer Merge from the current branch's context menu", () => {
     renderTree();
     fireEvent.contextMenu(screen.getByText(/main.*\(current\)/));

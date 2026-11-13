@@ -295,6 +295,55 @@ describe("buildPaletteCommands (#644)", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
+  it("offers the user commands as Run: <name> on the selected commit and current branch (#895)", () => {
+    const run = vi.fn();
+    const base = {
+      workingDirectory: null,
+      targets: [],
+      confirm: false,
+      showOutput: true,
+      refresh: false,
+      problem: null,
+    };
+    const show = { ...base, id: "show", name: "Show", commandLine: "x ${commit} ${branch}", variables: ["commit" as const, "branch" as const] };
+    const lint = { ...base, id: "lint", name: "Lint", commandLine: "x ${paths}", variables: ["paths" as const] };
+    const all = buildPaletteCommands({
+      appState: makeAppState({ selectedRow: { commitId: "c1" } }),
+      sidebar: sidebar(),
+      tabs: tabs(),
+      userCommands: { commands: [show, lint], run },
+    });
+    const runShow = all.find((command) => command.label === "Run: Show");
+    expect(runShow?.disabledReason).toBeUndefined();
+    runShow?.run();
+    expect(run).toHaveBeenCalledWith(show, { commitId: "c1", branch: "main", refName: null, paths: [] });
+    expect(all.find((command) => command.label === "Run: Lint")?.disabledReason).toBe("Needs a file");
+  });
+
+  it("runs a user command on the changed files selected, or the current one (#895)", () => {
+    const run = vi.fn();
+    const lint = {
+      id: "lint",
+      name: "Lint",
+      commandLine: "x ${paths}",
+      workingDirectory: null,
+      targets: [],
+      confirm: false,
+      showOutput: true,
+      refresh: false,
+      problem: null,
+      variables: ["paths" as const],
+    };
+    const diff = (currentFile: string | null, selection: { staged: boolean; paths: string[] } | null) =>
+      ({ currentFile, selection }) as unknown as NonNullable<CommandContext["diff"]>;
+    const palette = (d: NonNullable<CommandContext["diff"]>) =>
+      buildPaletteCommands({ appState: makeAppState(), sidebar: sidebar(), tabs: tabs(), diff: d, userCommands: { commands: [lint], run } });
+    palette(diff("a.txt", null)).find((command) => command.label === "Run: Lint")?.run();
+    expect(run).toHaveBeenLastCalledWith(lint, { commitId: null, branch: "main", refName: null, paths: ["a.txt"] });
+    palette(diff("a.txt", { staged: false, paths: ["a.txt", "b.txt"] })).find((command) => command.label === "Run: Lint")?.run();
+    expect(run).toHaveBeenLastCalledWith(lint, { commitId: null, branch: "main", refName: null, paths: ["a.txt", "b.txt"] });
+  });
+
   it("lists nothing as unavailable twice when nothing blocks", () => {
     const ids = paletteFor(makeAppState()).map((command) => command.id);
     expect(new Set(ids).size).toBe(ids.length);

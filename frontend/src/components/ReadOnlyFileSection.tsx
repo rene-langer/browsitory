@@ -16,6 +16,8 @@ import { ImageDiff, ImageTextToggle } from "./ImageDiff";
 import { imageMimeType, isSvgPath } from "../lib/imageTypes";
 import { commitFileMenuItems, type FileAction } from "./FileActionsMenu";
 import { ContextMenu } from "./primitives/ContextMenu";
+import { NO_SELECTION, userCommandMenuItems } from "../lib/userCommands";
+import { useUserCommandsContext } from "../state/userCommandsContext";
 import { isMenuKey, menuAnchor, rectAnchor } from "../lib/menuKeys";
 import { InlineError } from "./primitives/InlineError";
 import { LineStatsBadge } from "./LineStatsBadge";
@@ -105,7 +107,21 @@ export function ReadOnlyFileSection({
   const [menu, setMenu] = useState<{ x: number; y: number; returnFocusTo?: HTMLElement } | null>(null);
   const actionsRef = useRef<HTMLButtonElement>(null);
   const tools = externalTools !== undefined && toolSource !== undefined ? { externalTools, toolSource } : null;
-  const hasMenu = tools !== null || patch !== undefined;
+  const userCommands = useUserCommandsContext();
+  const userCommandItems =
+    userCommands === null
+      ? []
+      : userCommandMenuItems(
+          userCommands.commands,
+          "File",
+          {
+            ...NO_SELECTION,
+            commitId: toolSource?.kind === "Commit" ? toolSource.commitId : null,
+            paths: [path],
+          },
+          userCommands.run,
+        );
+  const hasMenu = tools !== null || patch !== undefined || userCommandItems.length > 0;
   const onPickFileAction = (action: FileAction) => {
     if (patch !== undefined) {
       if (action.kind === "revertCommitFile") return patch.onRevertFile(action.stage);
@@ -326,7 +342,7 @@ export function ReadOnlyFileSection({
           items={commitFileMenuItems(onPickFileAction, {
             tools: tools !== null,
             patch: patch === undefined ? null : { blockedReason: patch.blockedReason },
-          })}
+          }).concat(userCommandItems)}
           onClose={() => setMenu(null)}
         />
       )}

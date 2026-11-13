@@ -3,6 +3,8 @@ import { useRef, useState, type MouseEvent } from "react";
 import type { StatusEntry } from "../ipc/RepoClient";
 import { menuAnchor, rectAnchor } from "../lib/menuKeys";
 import { useWorkspaceActions } from "../state/useWorkspaceActions";
+import { useUserCommandsContext } from "../state/userCommandsContext";
+import { NO_SELECTION, userCommandMenuItems } from "../lib/userCommands";
 import type { SelectionActionKind } from "./diffPaneShared";
 import styles from "./DiffPane.module.css";
 import {
@@ -100,6 +102,7 @@ export function UncommittedFileRow({
   };
   // Without external tools, conflicted entries have no actions and staged ones only "Stash file…"
   // (see `fileMenuItems`).
+  const userCommands = useUserCommandsContext();
   const tools =
     externalTools === undefined ? undefined : { mergeToolRunning: externalTools.mergeToolRunning.has(entry.path) };
   // A row in a multi-file selection offers the selection's actions (like the commit graph's
@@ -110,7 +113,12 @@ export function UncommittedFileRow({
           ...selectionMenuItems(selectionSummary, onPickFileAction, selectionBusyReason, stashDisabledReason),
           ...(tools === undefined ? [] : fileToolItems(entry, onPickFileAction, tools)),
         ]
-      : fileMenuItems(entry, onPickFileAction, tools, stashDisabledReason);
+      : [
+          ...fileMenuItems(entry, onPickFileAction, tools, stashDisabledReason),
+          ...(userCommands === null
+            ? []
+            : userCommandMenuItems(userCommands.commands, "File", { ...NO_SELECTION, paths: [entry.path] }, userCommands.run)),
+        ];
   const hasFileActions = menuItems.length > 0;
   const mergeToolResult = externalTools?.mergeToolResults.get(entry.path);
   const isConflicted = entry.kind === "Conflicted";

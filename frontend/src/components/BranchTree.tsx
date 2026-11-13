@@ -53,6 +53,9 @@ import { NewBranchForm } from "./NewBranchForm";
 import { SetUpstreamDialog } from "./SetUpstreamDialog";
 import { useRemoteBranchCache } from "./useRemoteBranchCache";
 import styles from "./BranchTree.module.css";
+import type { UserCommand } from "../ipc/RepoClient";
+import { NO_SELECTION, userCommandMenuItems, type RunUserCommand } from "../lib/userCommands";
+import { useUserCommandsContext } from "../state/userCommandsContext";
 
 /**
  * The sidebar's Branches section: the local and remote branch tree (`BranchTreeView`), its
@@ -101,7 +104,12 @@ function BranchTreeContent({
   refreshGeneration,
   onOpenRemoteDialog,
   revealRequest,
+  userCommands: userCommandsProp,
+  onRunUserCommand: onRunUserCommandProp,
 }: {
+  /** The user commands (#895); those set for branches close the branch menus. */
+  userCommands?: UserCommand[];
+  onRunUserCommand?: RunUserCommand;
   branches: BranchInfo[];
   createBranchDraft: { startPoint: string } | null;
   onSwitchBranch: (name: string) => void;
@@ -196,6 +204,9 @@ function BranchTreeContent({
    */
   revealRequest?: Pick<SidebarRevealRequest, "nonce" | "remote">;
 }) {
+  const userCommandsApi = useUserCommandsContext();
+  const userCommands = userCommandsProp ?? userCommandsApi?.commands ?? [];
+  const onRunUserCommand = onRunUserCommandProp ?? userCommandsApi?.run;
   const [pendingForceFor, setPendingForceFor] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -592,7 +603,16 @@ function BranchTreeContent({
                   onIsolateGraphBranch,
                   onCopy: copyToClipboard,
                   onDelete: (name) => void handleDeleteClick(name),
-                })}
+                }).concat(
+                  onRunUserCommand === undefined
+                    ? []
+                    : userCommandMenuItems(
+                        userCommands,
+                        "Branch",
+                        { ...NO_SELECTION, branch: branch.name, refName: `refs/heads/${branch.name}` },
+                        onRunUserCommand,
+                      ),
+                )}
               />
             ) : null;
           })()}
@@ -677,7 +697,20 @@ function BranchTreeContent({
               onIsolateGraphBranch,
               onCopy: copyToClipboard,
               onOpenDeleteRemoteBranch,
-            })}
+            }).concat(
+              onRunUserCommand === undefined
+                ? []
+                : userCommandMenuItems(
+                    userCommands,
+                    "Branch",
+                    {
+                      ...NO_SELECTION,
+                      branch: `${rowMenu.remoteName}/${rowMenu.branchName}`,
+                      refName: `refs/remotes/${rowMenu.remoteName}/${rowMenu.branchName}`,
+                    },
+                    onRunUserCommand,
+                  ),
+            )}
           />
         )}
 

@@ -2470,6 +2470,15 @@ User-defined commands (epic #897) are programs the user adds to menus and the pa
   (collected with `record_runs` around `user_command::run`), and `Succeeded`, `Failed` (with
   "Exited with code N.", a time-out, or why it couldn't start) or `Cancelled`. A run refused while
   being prepared (gone, a value missing, a path outside) logs nothing. It has no Run again.
+- Menus and palette (#895): `RepoWorkspace` loads the commands (`useUserCommands`, which reloads
+  when Preferences saves) and runs them through `useUserCommandRunner` (confirmation, the output
+  dialog with Stop, toasts, the refresh). The graph, branch and tag menus take them as props or
+  from `UserCommandsContext`, the file menus from the context only.
+  `lib/userCommands.ts` decides, from the variables the backend listed, whether a command can run
+  on a selection, mirroring what `user_command::values` fills (a branch or ref also gives a
+  commit). The repository tab menu lives in `App`: it loads the tab's commands when it opens and
+  hands a pick to that tab's workspace through `requestUserCommand` (like a history request),
+  which runs it with the current branch.
 
 ## Fetch all
 

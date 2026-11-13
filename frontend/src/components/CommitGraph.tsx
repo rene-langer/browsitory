@@ -44,6 +44,9 @@ import { expansionHasMore, MERGE_PAGE_SIZE, type MergeExpansion } from "../lib/m
 import { RefBadges } from "./RefBadges";
 import { useVirtualRows } from "./useVirtualRows";
 import { tagMenuItems } from "./tagMenuItems";
+import type { UserCommand } from "../ipc/RepoClient";
+import { NO_SELECTION, userCommandMenuItems, type RunUserCommand } from "../lib/userCommands";
+import { useUserCommandsContext } from "../state/userCommandsContext";
 import styles from "./CommitGraph.module.css";
 
 const PAGE_SIZE = 10;
@@ -65,6 +68,8 @@ function CommitGraphContent({
   onRebaseSelection,
   headInfo,
   currentBranch,
+  userCommands: userCommandsProp,
+  onRunUserCommand: onRunUserCommandProp,
   onCherryPick,
   onRevert,
   onCherryPickMany,
@@ -123,6 +128,9 @@ function CommitGraphContent({
   headInfo: HeadInfo;
   // Name of the checked-out branch; `null` on a detached HEAD (reset is then unavailable).
   currentBranch: string | null;
+  /** The user commands (#895), else the workspace's; those set for commits close the commit menu. */
+  userCommands?: UserCommand[];
+  onRunUserCommand?: RunUserCommand;
   // A non-merge commit's pick or revert (`mainline` is always `null` here).
   onCherryPick: (commitId: string, mainline: number | null) => void;
   onRevert: (commitId: string, mainline: number | null) => void;
@@ -294,6 +302,10 @@ function CommitGraphContent({
   const rowElement = (list: HTMLElement, index: number) =>
     list.querySelector<HTMLElement>(`:scope > li[data-row-index="${index}"]`) ?? undefined;
 
+  const userCommandsApi = useUserCommandsContext();
+  const userCommands = userCommandsProp ?? userCommandsApi?.commands ?? [];
+  const onRunUserCommand = onRunUserCommandProp ?? userCommandsApi?.run;
+
   function singleCommitItems(commitId: string): ContextMenuItem[] {
     const commit = commits.find((candidate) => candidate.id === commitId);
     const isHead = headInfo.headId === commitId;
@@ -358,6 +370,9 @@ function CommitGraphContent({
       items.push({ label: "Save as patch…", onSelect: () => onSavePatch([commitId]), group: "export" });
     }
     items.push(...copyItems(commitId, commit));
+    if (onRunUserCommand !== undefined) {
+      items.push(...userCommandMenuItems(userCommands, "Commit", { ...NO_SELECTION, commitId }, onRunUserCommand));
+    }
     return items;
   }
 

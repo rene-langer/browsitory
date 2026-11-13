@@ -1,4 +1,5 @@
-import { MAX_CONTEXT_LINES, type DiffSettings, type GraphCommit, type PullStrategy } from "../ipc/RepoClient";
+import { MAX_CONTEXT_LINES, type DiffSettings, type GraphCommit, type PullStrategy, type UserCommand, type UserCommandContext } from "../ipc/RepoClient";
+import { userCommandPaletteCommands, type RunUserCommand } from "./userCommands";
 import { foldStagedCheck, historyEditChecks, type HistoryEditCheck, type HistoryEditRequest } from "./historyEdits";
 import { UNAVAILABLE_REASON, type PaletteAction } from "./actions/action";
 import { branchActions, rebaseOntoAction } from "./actions/branchActions";
@@ -267,6 +268,8 @@ export interface CommandContext {
   goTo?: GoToCommands;
   commit?: CommitCommands;
   branchSwitch?: BranchSwitchCommands;
+  /** The user commands (#895), each offered as "Run: <name>". */
+  userCommands?: { commands: UserCommand[]; run: RunUserCommand };
 }
 
 /** `CommandContext` plus what several families derive from the repository state. */
@@ -402,7 +405,24 @@ function buildAllCommands(context: CommandContext, blockers: OperationBlockers):
     ...diffCommands(ctx),
     ...goToCommands(ctx),
     ...repositoryCommands(ctx),
+    ...userCommandFamily(ctx),
   ]);
+}
+
+/**
+ * The user commands (#895) on what is selected: the selected commit, the current branch, and the
+ * selected changed files (else the current one).
+ */
+function userCommandFamily({ userCommands, state, diff }: FamilyContext): Command[] {
+  if (userCommands === undefined) return [];
+  const paths = diff?.selection?.paths ?? (diff?.currentFile != null ? [diff.currentFile] : []);
+  const selection: UserCommandContext = {
+    commitId: typeof state.selectedRow === "object" ? state.selectedRow.commitId : null,
+    branch: state.branches.find((branch) => branch.isCurrent)?.name ?? null,
+    refName: null,
+    paths,
+  };
+  return userCommandPaletteCommands(userCommands.commands, selection, userCommands.run);
 }
 
 /**
