@@ -98,7 +98,8 @@ the right:
 - The gear button opens **Preferences** (see below).
 - The sparkle button (**What's new**) opens what changed in each version (see below).
 - The question mark button (**Help**) opens a menu: **User guide** opens this guide in your
-  browser, **Keyboard shortcuts** shows the list of shortcuts (while a repository is open),
+  browser, **Keyboard shortcuts** shows the list of shortcuts and **Operation log** what the app
+  ran in the repository (both while a repository is open, see [Operation log](operation-log.md)),
   **What's new** opens the same dialog, and **Check for updates** (desktop app) checks for a new
   version now (see below).
 
