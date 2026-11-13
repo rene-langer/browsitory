@@ -7,6 +7,8 @@
 export type WorkspaceRequest =
   | "palette"
   | "shortcuts"
+  /** The operation log (#889), from the Help menu. */
+  | "operationLog"
   | { kind: "applyPatches"; paths: string[] }
   /** A global shortcut the VSCode extension handed over (#679); `index` is Ctrl/Cmd+1…9's tab. */
   | { kind: "shortcut"; id: string; index?: number };

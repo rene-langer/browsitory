@@ -1,0 +1,173 @@
+/* frontend/src/components/OperationLogDialog.module.css */
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  font-size: var(--text-sm);
+}
+
+.muted {
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.error {
+  color: var(--color-danger-text);
+  margin: 0;
+}
+
+/* The list beside the details where there is room; one above the other in a narrow window. */
+.columns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: flex-start;
+}
+
+.listColumn {
+  flex: 1 1 260px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1.25em minmax(0, 1fr);
+  column-gap: var(--space-2);
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  color: inherit;
+  cursor: pointer;
+}
+
+.row:hover {
+  background: var(--color-hover-bg);
+}
+
+.row[aria-current="true"] {
+  background: var(--color-selected-bg);
+  color: var(--color-selected-text);
+}
+
+.icon {
+  grid-row: span 2;
+  text-align: center;
+}
+
+.failed .icon {
+  color: var(--color-danger-text);
+}
+
+.rowTitle,
+.rowMeta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.rowMeta {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.details {
+  flex: 2 1 320px;
+  min-width: 0;
+}
+
+.detailsTitle {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-md);
+  overflow-wrap: anywhere;
+}
+
+.subTitle {
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: var(--text-sm);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.facts dt {
+  color: var(--color-text-muted);
+}
+
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.message {
+  margin: var(--space-3) 0 0;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.failures {
+  margin: 0;
+  padding-left: var(--space-4);
+  font-size: var(--text-sm);
+}
+
+.run {
+  margin-top: var(--space-3);
+}
+
+.runHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.command {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.runStatus {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.output {
+  margin: var(--space-1) 0 0;
+  padding: var(--space-2);
+  max-height: 16em;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
+  background: var(--color-bg-subtle);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  user-select: text;
+}

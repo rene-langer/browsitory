@@ -6,6 +6,7 @@ import { folderSearchQuery } from "./lib/folderHistory";
 import { repoPanelId, repoTabId } from "./components/repoTabIds";
 import { OperationStatusStrip } from "./components/OperationStatusStrip";
 import { HookRunStrip } from "./components/HookRunStrip";
+import { OperationLogDialog } from "./components/OperationLogDialog";
 import type { PushToast } from "./state/useToasts";
 import { InlineError } from "./components/primitives/InlineError";
 import { SplitView, type SplitViewLeftState, type SplitViewRequest } from "./components/primitives/SplitView";
@@ -518,6 +519,7 @@ export function RepoWorkspace({
     buildPaletteCommands({
       appState: { ...appState, abortRebase, abortSequence: paletteAbortSequence, abortMerge: paletteAbortMerge },
       onShowShortcuts: () => setShortcutsOpen(true),
+      onShowOperationLog: () => setOperationLog("latest"),
       onFocusCommitMessage: () => {
         selectRowClosingCompare("uncommitted");
         setFocusCommitMessage(true);
@@ -739,6 +741,16 @@ export function RepoWorkspace({
   // commit dock) skip the workspace's other updates.
   const stableWorkspaceActions = useStableValue(workspaceActions);
 
+  // The operation log (#889): from the palette, the Help menu, and the error banner's "Show
+  // details", which opens it on the newest failed operation.
+  const [operationLog, setOperationLog] = useState<"latest" | "latestFailed" | null>(null);
+  useEffect(() => {
+    if (!active) return;
+    return onWorkspaceRequest((request) => {
+      if (request === "operationLog") setOperationLog("latest");
+    });
+  }, [active]);
+
   // Patch files dropped on the window (#649), applied like "Apply patch…": behind the repository
   // guard, whose reason a warning names instead.
   const { applyPatchFiles } = appState;
@@ -843,7 +855,18 @@ export function RepoWorkspace({
               Show hook output…
             </button>
           )}
+          <button type="button" onClick={() => setOperationLog("latestFailed")}>
+            Show details
+          </button>
         </div>
+      )}
+      {operationLog !== null && (
+        <OperationLogDialog
+          client={client}
+          repoPath={repoPath}
+          focus={operationLog}
+          onClose={() => setOperationLog(null)}
+        />
       )}
       <WorkspaceDialogs
         active={active}
