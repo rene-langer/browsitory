@@ -334,8 +334,31 @@ fn main() {
             Ok(())
         })
         .invoke_handler(invoke_handler())
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                let_running_writes_finish(app);
+            }
+        });
+}
+
+/// How long the app waits at exit for running repository commands, like the VSCode extension's
+/// `SIDECAR_EXIT_GRACE_MS` (#961).
+const EXIT_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Runs once the last window is closed or the app quits (also before an update's restart), just
+/// before the process exits (#965). Exiting at once cut a worker off wherever it was: in the
+/// middle of a libgit2 write that leaves `.git/index.lock` behind, and every later git command in
+/// that repository fails on it. So the workers finish the command they run, start no other, and
+/// the exit waits for them up to `EXIT_GRACE`.
+fn let_running_writes_finish(app: &tauri::AppHandle) {
+    if !app.state::<AppState>().registry.stop_all(EXIT_GRACE) {
+        log::warn!(
+            "exiting while a repository command still runs after {EXIT_GRACE:?}; \
+             it may leave a git lock file behind"
+        );
+    }
 }
 
 // Hide the developer's / CI runner's global and system git config from every test (#111).

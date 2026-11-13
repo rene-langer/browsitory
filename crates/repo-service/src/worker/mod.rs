@@ -39,6 +39,7 @@ mod gate;
 mod history;
 mod hooks;
 mod journal;
+mod lifecycle;
 mod merge;
 mod patch;
 mod policy;
@@ -908,6 +909,8 @@ pub struct Worker {
     search_generation: SearchGeneration,
     workdir: Option<PathBuf>,
     journal: Arc<crate::oplog::Journal>,
+    /// Shared with the worker thread — see `lifecycle`.
+    lifecycle: Arc<lifecycle::Lifecycle>,
 }
 
 /// Cheap, cloneable handle to a `Worker`'s command channel.
@@ -1029,6 +1032,8 @@ impl Worker {
         let cancelled = CancelRegistry::default();
         let search_generation: SearchGeneration = Arc::new(AtomicU64::new(0));
         let worker_search_generation = Arc::clone(&search_generation);
+        let lifecycle = Arc::new(lifecycle::Lifecycle::default());
+        let worker_lifecycle = Arc::clone(&lifecycle);
 
         thread::spawn(move || {
             worker_loop::WorkerLoop::new(
@@ -1040,6 +1045,7 @@ impl Worker {
                 forge_api,
                 pause,
                 worker_journal,
+                worker_lifecycle,
             )
             .run();
         });
@@ -1050,12 +1056,16 @@ impl Worker {
             search_generation,
             workdir,
             journal,
+            lifecycle,
         })
     }
 
-    /// Stops the worker (#965). Stub: the implementation follows.
-    pub fn stop(&self, _grace: std::time::Duration) -> bool {
-        true
+    /// Stops the worker when the app exits (#965, see `lifecycle`): it finishes the command it
+    /// is running and starts no other; a command sent later is answered `WorkerStopped`. Waits
+    /// up to `grace` for the running command and returns whether it finished (or none ran).
+    pub fn stop(&self, grace: std::time::Duration) -> bool {
+        self.lifecycle.request_stop();
+        self.lifecycle.wait_idle(std::time::Instant::now() + grace)
     }
 
     /// A cloneable handle to this worker, cheap enough to take out of a mutex guard.

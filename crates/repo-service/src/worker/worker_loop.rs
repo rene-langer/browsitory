@@ -61,6 +61,8 @@ pub(super) struct WorkerLoop<S: CredentialStore, A: ForgeApi> {
     pause: Option<PauseHook>,
     // The repository's operation log (#887).
     journal: Arc<crate::oplog::Journal>,
+    // Whether a command runs and whether the app asked the worker to stop (#965).
+    lifecycle: Arc<super::lifecycle::Lifecycle>,
 }
 
 /// The paused operations a command may run under.
@@ -130,6 +132,7 @@ where
         forge_api: A,
         pause: Option<PauseHook>,
         journal: Arc<crate::oplog::Journal>,
+        lifecycle: Arc<super::lifecycle::Lifecycle>,
     ) -> Self {
         let credential_service = Arc::new(CredentialService::new(credential_store));
         let background_memory = background_fetch::Memory::default();
@@ -163,12 +166,15 @@ where
             contention: state_lock::Contention::default(),
             pause,
             journal,
+            lifecycle,
         }
     }
 
-    /// Runs the commands sent to this worker, one at a time, until every handle is gone. The
-    /// commands a transfer deferred come first.
+    /// Runs the commands sent to this worker, one at a time, until every handle is gone or the
+    /// worker is stopped (#965): a stopped worker runs no further command, and dropping the
+    /// queue answers the rest `WorkerStopped`. The commands a transfer deferred come first.
     pub(super) fn run(mut self) {
+        let lifecycle = Arc::clone(&self.lifecycle);
         loop {
             let command = match self.deferred.pop_front() {
                 Some(command) => command,
@@ -176,6 +182,9 @@ where
                     Ok(command) => command,
                     Err(_) => return,
                 },
+            };
+            let Some(_running) = lifecycle.begin() else {
+                return;
             };
             self.step(command);
         }
