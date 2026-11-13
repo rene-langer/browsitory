@@ -65,7 +65,8 @@ one). Browsitory never runs a program from the current folder, so `./script.sh` 
 
 With **Show output** on, a window shows the command's output while it runs, with **Stop**; with
 it off, a message says when it is done, and offers **Show output** if it failed. Each run is
-also in the operation log. A command that runs longer than 30 minutes is stopped.
+also in the [operation log](operation-log.md); there, **Run again** on a failed run runs the
+same command on the same selection. A command that runs longer than 30 minutes is stopped.
 
 ??? note "Details"
     - Output keeps the last 256 KiB of what the program wrote to its standard output and error.

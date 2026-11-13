@@ -32,7 +32,9 @@ and save a group of them as a **workspace** you open and close in one step.
 - **Stashes, tags, worktrees and submodules**, each in its own sidebar section.
 - **Pull requests** for GitHub and Bitbucket remotes.
 - **Command palette** (Ctrl+K, or Cmd+K on macOS) with almost every action, plus keyboard
-  shortcuts and keyboard-driven menus.
+  shortcuts you can change and keyboard-driven menus.
+- **Your own commands** in the menus and the palette, run on the selected commit, branch or
+  files, and an **operation log** of what the app ran, with its hooks' output.
 - **Light and dark theme.**
 
 ## Install

@@ -43,8 +43,10 @@ The palette has almost every action in Browsitory, grouped like this:
   (cherry-pick, revert, reset, check out, reword, edit, split, squash, fixup, move, drop, fold
   staged changes into it; for a search
   result or file history commit older than the loaded history, all but the history edits),
-  worktree and submodule actions, **Preferences…**, **Show keyboard shortcuts**, **Check for
-  updates** (desktop app), **Third-party licences** and **Open user guide**.
+  worktree and submodule actions, **Preferences…**, **Show keyboard shortcuts**, **Show
+  operation log** (see [Operation log](operation-log.md)), **Check for updates** (desktop app),
+  **Third-party licences** and **Open user guide**, and your own commands as **Run: ⟨name⟩**
+  (see [Your own commands](user-commands.md)).
 
 Before you type, commands that can't run right now are left out. For example, while a rebase is
 paused, the list offers only the commands that are safe until it is finished. Once you type, the

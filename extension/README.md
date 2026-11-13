@@ -26,6 +26,9 @@ undo for most of it. It is the same app as the
 - **Pull requests** for GitHub and Bitbucket remotes: list them and open new ones.
 - **Command palette** (Ctrl+K, or Cmd+K on macOS) with almost every action, and keyboard
   shortcuts for the rest.
+- **Your own commands** in the menus and the palette, run on the selected commit, branch or
+  files (in trusted workspaces), and an **operation log** of what Browsitory ran, with its
+  hooks' output.
 - **VSCode integration.** Files open in VSCode's editor, diffs in its diff view, conflicts in
   its merge editor, and terminals in its integrated terminal. **Open in Browsitory**, **Show
   File History in Browsitory** and **Show Line History in Browsitory** in the Explorer, editor

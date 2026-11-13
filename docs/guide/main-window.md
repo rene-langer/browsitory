@@ -115,8 +115,12 @@ the arrow keys. The groups are:
   [Staging and committing](staging-and-committing.md)).
 - **Fetch**: **Fetch automatically** (see
   [Branches and remotes](branches-and-remotes.md#fetching-automatically)).
+- **Keyboard**: the keyboard shortcuts and their keys (see
+  [Change the shortcuts](command-palette.md#change-the-shortcuts)).
 - **External tools**: your editor, terminal and diff tools (see
   [External tools](external-tools.md)).
+- **Commands**: your own commands for the menus and the palette (see
+  [Your own commands](user-commands.md)).
 - **Updates**, in the desktop app (see below).
 
 Type in **Filter settings** above the list to keep only the groups with a setting whose name
