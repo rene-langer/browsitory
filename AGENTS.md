@@ -110,9 +110,9 @@ keeps it accurate. Bypass once with `SKIP_CHANGELOG_CHECK=1 git push`. A diff th
 `skip-changelog` PR label bypasses it).
 
 The same hook then runs `cargo fmt --all -- --check`, CI's format check, and blocks the push
-when Rust code isn't formatted; run `cargo fmt --all` and commit. It needs rustfmt (`rustup
-component add rustfmt`, or the distro's `rustfmt` package); without it the check is skipped with a
-note. Bypass once with `SKIP_FMT_CHECK=1 git push`. Agents without rustfmt must format by hand in
+when Rust code isn't formatted; run `cargo fmt --all` and commit. It needs rustfmt (rustup
+installs it with the pinned toolchain, see "Dependency updates"; or the distro's `rustfmt`
+package); without it the check is skipped with a note. Bypass once with `SKIP_FMT_CHECK=1 git push`. Agents without rustfmt must format by hand in
 default rustfmt style: there is no `rustfmt.toml`, so a call's arguments, a method chain or an
 array longer than 60 characters is split, not only lines over 100 columns.
 
@@ -146,6 +146,13 @@ them: pnpm 12 (pinned in all four `packageManager` fields) refuses to install, e
 runs no dependency build script that the project's `pnpm-workspace.yaml` `allowBuilds` doesn't
 list, and an unlisted one fails the install: a new dependency with a postinstall needs an
 entry (`true`, or `false` when the script isn't needed; see `docs/ARCHITECTURE.md`).
+
+`rust-toolchain.toml` pins the exact Rust version (with rustfmt and clippy) for local builds
+and every CI and release job (#220): rustup installs it on the first cargo call, and the
+workflows' "Install Rust" steps run `rustup toolchain install`, which reads it. So a new lint
+shows up locally and on CI at the same time. Renovate proposes each new Rust release a week
+after it ships (`minimumReleaseAge`, so a quick point release is skipped), in the "Rust
+toolchain" group; fix the new lints in that PR.
 
 The license policy and the CI `audit` and `licenses` jobs still apply to these PRs. The
 `licenses` job checks every licence in the full Rust and npm trees, transitive and dev
