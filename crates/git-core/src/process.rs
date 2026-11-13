@@ -463,14 +463,8 @@ pub(crate) fn run_captured_split(
     stderr_limit: usize,
 ) -> Result<SplitCaptured, RunError> {
     let noting = runs::describe(&command);
-    let result = run_captured_split_unnoted(
-        command,
-        stdin,
-        cancel,
-        timeout,
-        stdout_limit,
-        stderr_limit,
-    );
+    let result =
+        run_captured_split_unnoted(command, stdin, cancel, timeout, stdout_limit, stderr_limit);
     if let Some(noting) = noting {
         match &result {
             // Stdout is data (a signature); stderr says what the program did.

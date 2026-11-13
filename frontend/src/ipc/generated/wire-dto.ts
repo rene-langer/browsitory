@@ -236,6 +236,36 @@ export type OpenRepoEntryInput = { path: string, workspaceId: string | null, };
 
 export type OperationKind = "Merge" | "CherryPick" | "Revert";
 
+export type OperationLogChange = { repo: string, entryId: number, };
+
+export type OperationLogEntry = { id: number, name: string, target: string | null, params: Array<OperationParam>, 
+/**
+ * Milliseconds since the Unix epoch.
+ */
+startedAt: number, 
+/**
+ * `null` while it runs.
+ */
+durationMs: number | null, outcome: OperationOutcome, message: string | null, errorKind: ErrorKind | null, transferError: TransferErrorKind | null, remoteFailures: Array<RemoteFailure>, runs: Array<ProgramRun>, 
+/**
+ * What Run again sends; `null` when the operation can't be run again (#890).
+ */
+rerun: Rerun | null, };
+
+export type OperationLogPage = { 
+/**
+ * The repository key: `OperationLogChange.repo` names the same one.
+ */
+repo: string, entries: Array<OperationLogEntry>, 
+/**
+ * Older entries follow; ask for them with `before` = the last entry's id.
+ */
+hasMore: boolean, };
+
+export type OperationOutcome = "Running" | "Succeeded" | "Stopped" | "Failed" | "Cancelled";
+
+export type OperationParam = { name: string, value: string, };
+
 export type PatchApply = "WorkTree" | "Stage" | "Commits";
 
 export type PatchApplyOutcome = { "kind": "Applied" } | { "kind": "HookFailed", hook: string, output: string, subject: string, };
@@ -271,6 +301,10 @@ mail: PatchMail | null, files: Array<PatchPreviewFile>, };
 export type PatchSource = { "kind": "Commits", commitIds: Array<string>, } | { "kind": "CommitFile", commitId: string, path: string, oldPath: string | null, } | { "kind": "Staged" };
 
 export type PickOutcome = { "kind": "Committed", commitId: string, } | { "kind": "Conflicted", files: Array<string>, } | { "kind": "HookFailed", hook: string, output: string, };
+
+export type ProgramRun = { program: string, args: Array<string>, output: string, status: ProgramRunStatus, };
+
+export type ProgramRunStatus = "Succeeded" | "Failed" | "TimedOut" | "Cancelled" | "NotStarted";
 
 export type PullOutcome = { "kind": "UpToDate" } | { "kind": "FastForwarded", upstreamRef: string, } | { "kind": "Diverged", upstreamRef: string, } | { "kind": "NoFastForward", upstreamRef: string, };
 
@@ -308,6 +342,8 @@ export type ReflogEntry = { reference: string, oldId: string, newId: string, com
 
 export type RemoteAuthMode = "HttpsToken" | "SshAgent";
 
+export type RemoteFailure = { remoteName: string, error: TransferErrorKind, message: string, };
+
 export type RemoteInfo = { name: string, fetchUrl: string, pushUrl: string | null, authMode: RemoteAuthMode | null, authUsername: string | null, 
 /**
  * Effective git-config prune default for this remote (the UI's Prune toggle fallback).
@@ -321,6 +357,8 @@ export type RepoErrorPayload = { kind: ErrorKind, message: string, };
 export type RepoWatch = { repoPath: string, kind: RepoWatchKind, };
 
 export type RepoWatchKind = "Changed" | "Stopped";
+
+export type Rerun = { "kind": "Fetch", remoteName: string, prune: boolean | null, } | { "kind": "FetchAll", prune: boolean | null, } | { "kind": "Pull" } | { "kind": "PushCurrentBranch", remoteName: string, noVerify: boolean, } | { "kind": "PushBranch", remoteName: string, localBranch: string, remoteBranch: string, setUpstream: boolean, noVerify: boolean, } | { "kind": "PushTags", remoteName: string, names: Array<string>, noVerify: boolean, };
 
 export type ResetMode = "soft" | "mixed" | "hard";
 

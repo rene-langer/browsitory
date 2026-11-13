@@ -205,7 +205,13 @@ mod tests {
                 Duration::from_millis(100),
                 1024,
             );
-            let _ = run_captured(sh("sleep 30"), None, &|| true, Duration::from_secs(30), 1024);
+            let _ = run_captured(
+                sh("sleep 30"),
+                None,
+                &|| true,
+                Duration::from_secs(30),
+                1024,
+            );
             let _ = run_captured(
                 Command::new("browsitory-no-such-program"),
                 None,
@@ -233,10 +239,23 @@ mod tests {
         record_runs(&outer, || {
             assert!(current_run_log().is_some());
             record_runs(&inner, || {
-                run_captured(sh("echo inner"), None, &|| false, Duration::from_secs(30), 64)
-                    .unwrap();
+                run_captured(
+                    sh("echo inner"),
+                    None,
+                    &|| false,
+                    Duration::from_secs(30),
+                    64,
+                )
+                .unwrap();
             });
-            run_captured(sh("echo outer"), None, &|| false, Duration::from_secs(30), 64).unwrap();
+            run_captured(
+                sh("echo outer"),
+                None,
+                &|| false,
+                Duration::from_secs(30),
+                64,
+            )
+            .unwrap();
         });
         assert!(current_run_log().is_none());
         assert_eq!(inner.take()[0].output, "inner\n");
@@ -252,8 +271,14 @@ mod tests {
             let handed = current_run_log().expect("installed");
             std::thread::spawn(move || {
                 record_runs(&handed, || {
-                    run_captured(sh("echo helper"), None, &|| false, Duration::from_secs(30), 64)
-                        .unwrap();
+                    run_captured(
+                        sh("echo helper"),
+                        None,
+                        &|| false,
+                        Duration::from_secs(30),
+                        64,
+                    )
+                    .unwrap();
                 })
             })
             .join()

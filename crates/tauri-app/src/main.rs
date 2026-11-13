@@ -51,6 +51,8 @@ use commands::{
 use commands::{ignore_paths, stage_paths, unstage_paths};
 // The repository tab names (#625).
 use commands::{list_repo_aliases, set_repo_alias};
+// The operation log (#888).
+use commands::list_operations;
 // The picker's recent repositories: remove one, and which folders are gone (#690).
 use commands::{list_missing_recent_repos, remove_recent_repo};
 // Pinned recent repositories (#766).
@@ -208,6 +210,7 @@ commands![
     get_undo_state,
     undo_last,
     redo_last,
+    list_operations,
     cherry_pick,
     revert_commit,
     cherry_pick_many,
