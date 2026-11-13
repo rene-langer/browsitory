@@ -549,7 +549,9 @@ describe("App", () => {
       getCommitGraph: async () => graphPage([]),
       listBranches: async () => [],
       listStashes: async () => [],
-      listRemotes: async () => [{ name: "origin", fetchUrl: "https://example.test/r.git", pushUrl: null, prune: false }],
+      listRemotes: async () => [
+        { name: "origin", fetchUrl: "https://example.test/r.git", pushUrl: null, prune: false, authMode: null, authUsername: null },
+      ],
       listOperations: async () => ({
         repo: "/repos/a",
         entries: [
