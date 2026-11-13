@@ -42,6 +42,7 @@ export type DtoContract = [
   Expect<Equal<Hand.CommitHunk, Wire.CommitHunk>>,
   Expect<Equal<Hand.CommitMessageSettings, Wire.CommitMessageSettings>>,
   Expect<Equal<Hand.FetchSettings, Wire.FetchSettings>>,
+  Expect<Equal<Hand.KeybindingSettings, Wire.KeybindingSettings>>,
   Expect<Equal<Hand.AppearanceSettings, Wire.AppearanceSettings>>,
   Expect<Equal<Hand.FontFamily, Wire.FontFamily>>,
   Expect<Equal<Hand.UiSize, Wire.UiSize>>,

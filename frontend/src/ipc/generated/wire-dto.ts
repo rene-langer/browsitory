@@ -205,6 +205,8 @@ export type HookProgressPhase = "Started" | "Finished";
 
 export type HookSource = "Commit" | "Checkout" | "Merge" | "Pick" | "Patch";
 
+export type KeybindingSettings = { overrides: { [key in string]: Array<string> }, };
+
 export type LineHistory = { entries: Array<LineHistoryEntry>, 
 /**
  * The walk stopped at its commit cap, so older changes may be missing.

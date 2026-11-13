@@ -7,6 +7,7 @@ export const PREFERENCES_GROUP_IDS = [
   "diff",
   "commit-message",
   "fetch",
+  "keyboard",
   "external-tools",
   "user-commands",
   "updates",

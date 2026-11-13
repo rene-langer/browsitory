@@ -1,4 +1,5 @@
 import { ariaKeyShortcuts, shortcutLabel } from "../lib/keybindings";
+import { useKeymap } from "../lib/keymap";
 import { requestWorkspace } from "../lib/workspaceRequests";
 import styles from "./CommandsButton.module.css";
 
@@ -7,15 +8,17 @@ import styles from "./CommandsButton.module.css";
  * as its shortcut (see `useWorkspaceShortcuts`), which it shows.
  */
 export function CommandsButton() {
+  useKeymap();
+  const keys = shortcutLabel("palette");
   return (
     <button
       type="button"
       className={styles.button}
       title="Open the command palette"
-      aria-keyshortcuts={ariaKeyShortcuts("palette")}
+      aria-keyshortcuts={ariaKeyShortcuts("palette") || undefined}
       onClick={() => requestWorkspace("palette")}
     >
-      Commands <kbd>{shortcutLabel("palette")}</kbd>
+      Commands{keys !== "" && <> <kbd>{keys}</kbd></>}
     </button>
   );
 }

@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetAllShortcuts, setShortcutChords } from "../lib/keymap";
 import { RepoError, type ConflictSegment, type RepoClient } from "../ipc/RepoClient";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import { fakeRepoClient } from "../test/fakeRepoClient";
@@ -723,5 +724,28 @@ describe("ConflictResolutionPane keyboard shortcuts", () => {
     expect(within(second).getByLabelText("Result")).toHaveValue("b base\n");
     act(() => registry!.current!.previous());
     expect(first).toHaveFocus();
+  });
+  describe("the user's keys (#898)", () => {
+    afterEach(() => {
+      resetAllShortcuts();
+    });
+
+    it("takes a choice and moves between conflicts with rebound keys", async () => {
+      setShortcutChords("conflict-ours", [{ key: "q" }]);
+      setShortcutChords("next-conflict", [{ key: "F8" }]);
+      renderPane();
+      const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+      const ours = within(first).getByRole("button", { name: "Accept ours" });
+      expect(ours).toHaveAttribute("aria-keyshortcuts", "Q");
+      expect(ours).toHaveAttribute("title", expect.stringContaining("(q)"));
+      expect(screen.getByRole("button", { name: "Next conflict" })).toHaveAttribute("aria-keyshortcuts", "F8");
+      first.focus();
+      fireEvent.keyDown(first, { key: "1", code: "Digit1" });
+      expect(ours).toHaveAttribute("aria-pressed", "false");
+      fireEvent.keyDown(first, { key: "q", code: "KeyQ" });
+      expect(ours).toHaveAttribute("aria-pressed", "true");
+      fireEvent.keyDown(first, { key: "F8" });
+      expect(screen.getByRole("region", { name: "Conflict 2 of 2" })).toHaveFocus();
+    });
   });
 });
