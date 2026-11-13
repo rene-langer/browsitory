@@ -15,6 +15,7 @@ export function RebaseProgressPanel({
   abortLabel = "Abort rebase",
   abortDisabled = false,
   hooks,
+  message,
 }: {
   currentStep: number;
   totalSteps: number;
@@ -30,12 +31,25 @@ export function RebaseProgressPanel({
   abortDisabled?: boolean;
   /** A sequence's Continue runs the commit hooks: the running hook's status line and Cancel. */
   hooks?: { running: { operationId: string; hook: string } | null; onCancel: () => void };
+  /** An edit stop's message for the recommitted commit, editable (Edit commit…, #882). */
+  message?: { value: string; onChange: (value: string) => void };
 }) {
   return (
     <Panel title={title}>
       <p>
         Step {currentStep} of {totalSteps}
       </p>
+      {message !== undefined && (
+        <label className={styles.message}>
+          Commit message
+          <textarea
+            value={message.value}
+            rows={4}
+            spellCheck
+            onChange={(event) => message.onChange(event.target.value)}
+          />
+        </label>
+      )}
       {disabled && disabledReason !== undefined && (
         <p id="rebase-continue-reason" className={styles.reason}>
           {disabledReason}

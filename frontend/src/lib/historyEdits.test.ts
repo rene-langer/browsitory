@@ -54,6 +54,21 @@ describe("historyEditChecks", () => {
       MoveUp: { ok: true, onto: "B" },
       MoveDown: { ok: true, onto: "A" },
       Drop: { ok: true, onto: "B" },
+      Edit: { ok: true, onto: "B" },
+    });
+  });
+
+  it("edits a commit, HEAD included, from its parent (#882)", () => {
+    expect(historyEditChecks(context(), "C").Edit).toEqual({ ok: true, onto: "B" });
+    expect(historyEditChecks(context(), "E").Edit).toEqual({ ok: true, onto: "D" });
+    const modified: StatusEntry = { path: "a.txt", oldPath: null, staged: false, kind: "Modified" };
+    expect(historyEditChecks(context({ status: [modified] }), "C").Edit).toEqual({
+      ok: false,
+      reason: "Commit or stash your changes first.",
+    });
+    expect(historyEditChecks(context(), "A").Edit).toEqual({
+      ok: false,
+      reason: "The first commit of the history can't be edited here.",
     });
   });
 
@@ -125,7 +140,7 @@ describe("historyEditChecks", () => {
     const busy = "Finish or abort the operation in progress first.";
     const paused: Partial<HeadInfo>[] = [
       { operation: "Merge" },
-      { rebase: { currentStep: 1, totalSteps: 2, onto: "B", branch: "main", health: { kind: "Paused" } } },
+      { rebase: { currentStep: 1, totalSteps: 2, onto: "B", branch: "main", health: { kind: "Paused" }, editing: null } },
       { sequence: { kind: "CherryPick", currentStep: 1, totalSteps: 2, currentCommit: "X" } },
       { terminalRebase: { kind: "Rebase", branch: "main", onto: "B", currentStep: 1, totalSteps: 2 } },
       {
@@ -189,6 +204,15 @@ describe("buildHistoryEditPlan", () => {
   it("moves a commit up or down by swapping it with its neighbour", () => {
     expect(buildHistoryEditPlan({ kind: "MoveUp" }, "C", fromB)).toEqual([pick("D"), pick("C"), pick("E")]);
     expect(buildHistoryEditPlan({ kind: "MoveDown" }, "C", fromA)).toEqual([pick("C"), pick("B"), pick("D"), pick("E")]);
+  });
+
+  it("stops at the edited commit and picks the rest (#882)", () => {
+    expect(buildHistoryEditPlan({ kind: "Edit" }, "C", fromB)).toEqual([
+      { commitId: "C", action: { kind: "Edit" }, combinedMessage: null },
+      pick("D"),
+      pick("E"),
+    ]);
+    expect(() => buildHistoryEditPlan({ kind: "Edit" }, "C", fromA)).toThrow("The history changed. Refresh and try again.");
   });
 
   it("drops one commit", () => {

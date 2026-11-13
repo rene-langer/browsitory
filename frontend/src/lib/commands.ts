@@ -712,6 +712,7 @@ function historyCommands({ appState, state, blockers, blocked, commit }: FamilyC
     const edits: [string, string, HistoryEditCheck, string[], (onto: string) => void][] = [
       ["reword-selected", `Reword ${short}…`, isHead ? { ok: false, reason: "" } : checks.Reword, ["reword", "message"],
         (onto) => appState.openDialog({ kind: "reword", commitId, onto })],
+      ["edit-selected", `Edit ${short}…`, checks.Edit, ["edit", "change", "files", "amend"], edit({ kind: "Edit" })],
       ["squash-selected", `Squash ${short} with parent`, checks.Squash, ["squash", "combine", "parent"], edit({ kind: "Squash" })],
       ["fixup-selected", `Fixup ${short} into parent`, checks.Fixup, ["fixup", "squash", "parent"], edit({ kind: "Fixup" })],
       ["move-up-selected", `Move ${short} up`, checks.MoveUp, ["move", "up", "reorder"], edit({ kind: "MoveUp" })],

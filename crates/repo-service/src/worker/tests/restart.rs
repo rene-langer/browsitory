@@ -144,6 +144,59 @@ fn a_restarted_worker_continues_the_rebase_to_completion() {
     assert_eq!(rebase_progress(&handle), None);
 }
 
+/// Edit commit… (#882): the stop survives a restart with the edited commit named, and the
+/// restarted worker recommits it under the message Continue passes.
+#[test]
+fn a_restarted_worker_continues_an_edit_with_a_new_message() {
+    let (dir, repo) = init_repo();
+    let (onto, plan, branch, _) = edit_then_pick(dir.path(), &repo);
+    let a = plan[0].commit_id.clone();
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let edit = crate::worker::HistoryEdit {
+        kind: crate::worker::HistoryEditKind::Edit,
+        commit_id: a.clone(),
+    };
+    assert_eq!(
+        handle.start_rebase(onto, plan, Some(edit)).unwrap(),
+        git_core::rebase::RebaseStepResult::PausedForEdit
+    );
+    write_file(dir.path(), "a.txt", "a, edited\n");
+    handle.stage_file("a.txt".to_string()).unwrap();
+    let (_worker, handle) = restart(worker, handle, dir.path());
+    let editing = handle.get_head_info().unwrap().rebase.unwrap().editing;
+    assert_eq!(editing.as_deref(), Some(a.as_str()));
+
+    assert_eq!(
+        handle
+            .rebase_continue_with_message(Some("a, edited\n".to_string()))
+            .unwrap(),
+        git_core::rebase::RebaseStepResult::Done
+    );
+
+    let reopened = Repository::open(dir.path()).unwrap();
+    assert_eq!(reopened.head().unwrap().name().unwrap(), branch);
+    let head = reopened.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.summary().unwrap(), Some("b"));
+    let edited = head.parent(0).unwrap();
+    assert_eq!(edited.message().unwrap(), "a, edited\n");
+    let blob = edited
+        .tree()
+        .unwrap()
+        .get_path(Path::new("a.txt"))
+        .unwrap()
+        .to_object(&reopened)
+        .unwrap()
+        .peel_to_blob()
+        .unwrap();
+    assert_eq!(blob.content(), b"a, edited\n");
+    assert_eq!(
+        handle.get_undo_state().unwrap().undo,
+        Some(format!("Edit {}", &a[..7]))
+    );
+    assert!(!rebase_file(&repo).exists());
+}
+
 #[test]
 fn a_restarted_worker_aborts_the_rebase() {
     let (dir, repo) = init_repo();
@@ -995,7 +1048,7 @@ fn cancelling_a_rebase_steps_signer_stops_it() {
     let (events_tx, events) = mpsc::channel();
 
     let result = std::thread::scope(|scope| {
-        let continued = scope.spawn(|| handle.rebase_continue_reporting(events_tx));
+        let continued = scope.spawn(|| handle.rebase_continue_reporting(None, events_tx));
         let first = events.recv().unwrap();
         let super::super::HookEvent::Started {
             operation_id,

@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import type {
   RebaseAbort,
   ConflictSide,
@@ -70,7 +70,16 @@ export interface MergeRebaseActions {
    * step result (`Done`, or a pause), or `null` when it failed (the error is in `state.error`).
    */
   editHistory(commitId: string, onto: string, request: HistoryEditRequest): Promise<RebaseStepResult | null>;
+  /**
+   * Continues the paused rebase. At an edit stop, an edited message (`setRebaseEditMessage`) is
+   * sent along once, as the recommitted commit's message (#882).
+   */
   rebaseContinue(): Promise<void>;
+  /**
+   * The message the commit dock's edit stop holds for the recommit, or `null` when it is the
+   * commit's own (unchanged): what the next Continue sends (#882).
+   */
+  setRebaseEditMessage(message: string | null): void;
   /** The abort's outcome, or `null` when it failed (the error is in `state.error`). */
   abortRebase(): Promise<RebaseAbort | null>;
 }
@@ -224,10 +233,19 @@ export function useMergeRebaseActions(
     },
     [client, runMutation, repoPath, setState],
   );
+  // Not state: only Continue reads it, and typing in the message box re-renders nothing else.
+  const rebaseEditMessage = useRef<string | null>(null);
+  const setRebaseEditMessage = useCallback((message: string | null) => {
+    rebaseEditMessage.current = message;
+  }, []);
   const rebaseContinue = useCallback(
     (): Promise<void> =>
       runMutation(async () => {
-        const result: RebaseStepResult = await client.rebaseContinue(repoPath);
+        const message = rebaseEditMessage.current;
+        const result: RebaseStepResult =
+          message === null ? await client.rebaseContinue(repoPath) : await client.rebaseContinue(repoPath, message);
+        // Landed: the message belonged to that stop, not to the next one.
+        rebaseEditMessage.current = null;
         void result;
       }),
     [client, runMutation, repoPath],
@@ -261,6 +279,7 @@ export function useMergeRebaseActions(
     startRebase,
     editHistory,
     rebaseContinue,
+    setRebaseEditMessage,
     abortRebase,
   };
 }

@@ -183,8 +183,12 @@ export function OperationStatusStrip({
         ? null
         : `onto ${currentBranch}`
       : mergeContext(mergeMessage, currentBranch);
+  // An Edit step's stop (Edit commit…, #882) says which commit is being edited and what to do.
+  const editing = rebaseProgress !== null && rebase !== null ? rebase.editing : null;
   const label =
-    rebaseProgress !== null
+    editing !== null
+      ? `Editing ${editing.slice(0, 7)}:`
+      : rebaseProgress !== null
       ? `Rebasing, step ${rebaseProgress.currentStep} of ${rebaseProgress.totalSteps}`
       : terminalStep
         ? terminalSequenceLabel({ ...terminalSequence, pausedOnConflict: true })
@@ -196,7 +200,15 @@ export function OperationStatusStrip({
   return (
     <div role="status" aria-label="Operation status" className={styles.strip}>
       <strong>{label}</strong>
-      <span>{leftover ? leftoverText(operation) : (reason ?? "No conflicts remaining")}</span>
+      {/* A space for the text (screen readers, copying); the flex gap spaces it on screen. */}
+      {editing !== null && " "}
+      <span>
+        {editing !== null
+          ? "change the files, then Continue"
+          : leftover
+            ? leftoverText(operation)
+            : (reason ?? "No conflicts remaining")}
+      </span>
       <span className={styles.spacer} />
       {!leftover && goToConflict}
       {rebaseProgress !== null && onContinueRebase !== undefined && (

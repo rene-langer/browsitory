@@ -682,6 +682,8 @@ pub(crate) enum Command {
     },
     #[allow(dead_code)]
     RebaseContinue {
+        /// Replaces the message of the step Continue lands (#882).
+        message: Option<String>,
         /// As for `StartRebase`.
         operation_id: cancel::OperationId,
         events: Sender<HookEvent>,

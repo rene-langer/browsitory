@@ -100,6 +100,8 @@ export interface WorkspaceActions {
   // "Stash…" (paths empty) and a file's "Stash file…" (that path): open the stash dialog.
   onOpenStashDialog: (paths: string[]) => void;
   onRebaseContinue: () => void;
+  /** The commit dock's edited message at an edit stop, `null` when unchanged (#882). */
+  onRebaseEditMessage?: (message: string | null) => void;
   onRebaseAbort: () => void;
   // Continue/Abort for a stopped cherry-pick/revert sequence (`headInfo.sequence`).
   onSequenceContinue: () => void;

@@ -403,6 +403,8 @@ function CommitGraphContent({
     const edit = (request: HistoryEditRequest) => (onto: string) => onEditHistory(commitId, onto, request);
     return [
       isHead ? headReword : item("Reword…", checks.Reword, (onto) => onRewordCommit?.(commitId, onto)),
+      // Stops at the commit with its changes staged (#882).
+      item("Edit commit…", checks.Edit, edit({ kind: "Edit" })),
       item("Squash with parent", checks.Squash, edit({ kind: "Squash" })),
       item("Fixup into parent", checks.Fixup, edit({ kind: "Fixup" })),
       item("Move up", checks.MoveUp, edit({ kind: "MoveUp" })),

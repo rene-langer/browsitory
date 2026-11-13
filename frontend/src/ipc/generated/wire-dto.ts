@@ -193,7 +193,7 @@ terminalSequence: TerminalSequence | null,
  */
 terminalRebase: TerminalRebase | null, };
 
-export type HistoryEditKind = "Reword" | "Squash" | "Fixup" | "MoveUp" | "MoveDown" | "Drop";
+export type HistoryEditKind = "Reword" | "Squash" | "Fixup" | "MoveUp" | "MoveDown" | "Drop" | "Edit";
 
 export type HistoryEditTarget = { kind: HistoryEditKind, commitId: string, };
 
@@ -286,7 +286,11 @@ export type RebaseDivergence = "HeadMoved" | "BranchMoved" | "BranchMissing" | "
 
 export type RebaseHealth = { "kind": "Paused" } | { "kind": "Diverged", "reason": RebaseDivergence };
 
-export type RebaseInfo = { branch: string, onto: string, currentStep: number, totalSteps: number, health: RebaseHealth, };
+export type RebaseInfo = { branch: string, onto: string, currentStep: number, totalSteps: number, health: RebaseHealth, 
+/**
+ * Full id of the commit an Edit step stopped at (#882); `null` at any other stop.
+ */
+editing: string | null, };
 
 export type RebasePlanCommit = { id: string, shortId: string, summary: string, authorName: string, timestamp: number, };
 

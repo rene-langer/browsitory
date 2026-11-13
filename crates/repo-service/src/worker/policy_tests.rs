@@ -739,6 +739,7 @@ pub(super) fn table() -> Vec<((&'static str, Command), &'static str)> {
         ),
         (
             cmd!(RebaseContinue {
+                message: None,
                 operation_id: op(),
                 events: channel().0
             }),

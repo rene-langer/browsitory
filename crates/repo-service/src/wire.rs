@@ -1203,6 +1203,8 @@ pub struct RebaseInfoDto {
     pub current_step: usize,
     pub total_steps: usize,
     pub health: RebaseHealthDto,
+    /// Full id of the commit an Edit step stopped at (#882); `null` at any other stop.
+    pub editing: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -1226,6 +1228,7 @@ impl From<git_core::repo::RebaseInfo> for RebaseInfoDto {
                 RebaseHealth::Paused => RebaseHealthDto::Paused,
                 RebaseHealth::Diverged(reason) => RebaseHealthDto::Diverged(reason),
             },
+            editing: info.editing,
         }
     }
 }
@@ -2322,6 +2325,7 @@ pub enum HistoryEditKindDto {
     MoveUp,
     MoveDown,
     Drop,
+    Edit,
 }
 
 impl From<HistoryEditTargetDto> for crate::worker::HistoryEdit {
@@ -2335,6 +2339,7 @@ impl From<HistoryEditTargetDto> for crate::worker::HistoryEdit {
                 HistoryEditKindDto::MoveUp => Kind::MoveUp,
                 HistoryEditKindDto::MoveDown => Kind::MoveDown,
                 HistoryEditKindDto::Drop => Kind::Drop,
+                HistoryEditKindDto::Edit => Kind::Edit,
             },
             commit_id: dto.commit_id,
         }

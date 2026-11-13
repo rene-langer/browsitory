@@ -1449,11 +1449,22 @@ fn rebase_info(health: RebaseHealth) -> git_core::repo::RebaseInfo {
         current_step: 1,
         total_steps: 4,
         health,
+        editing: None,
     }
 }
 
 pub fn rebase_infos() -> Cases<git_core::repo::RebaseInfo> {
-    let mut cases = vec![case("Paused", rebase_info(RebaseHealth::Paused))];
+    let mut cases = vec![
+        case("Paused", rebase_info(RebaseHealth::Paused)),
+        // An Edit step's stop names the commit being edited (#882).
+        case(
+            "Editing",
+            git_core::repo::RebaseInfo {
+                editing: Some("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".to_string()),
+                ..rebase_info(RebaseHealth::Paused)
+            },
+        ),
+    ];
     cases.extend(rebase_divergences().into_iter().map(|reason| {
         case(
             format!("Diverged-{reason:?}"),

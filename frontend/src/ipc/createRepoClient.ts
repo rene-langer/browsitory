@@ -443,7 +443,8 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
       call<RebasePlanCommit[]>("commits_since", { repoPath, onto }),
     startRebase: (repoPath: string, onto: string, plan: RebasePlanEntry[], edit?: HistoryEditTarget | null) =>
       call<RebaseStepResult>("start_rebase", { repoPath, onto, plan, edit: edit ?? null }),
-    rebaseContinue: (repoPath: string) => call<RebaseStepResult>("rebase_continue", { repoPath }),
+    rebaseContinue: (repoPath: string, message?: string) =>
+      call<RebaseStepResult>("rebase_continue", message === undefined ? { repoPath } : { repoPath, message }),
     abortRebase: (repoPath: string) => call<RebaseAbort>("abort_rebase", { repoPath }),
     detectForgeRepository: (repoPath: string) =>
       call<ForgeRepository[]>("detect_forge_repository", { repoPath }),

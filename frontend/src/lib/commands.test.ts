@@ -207,6 +207,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     startRebase: vi.fn(),
     editHistory: vi.fn(),
     rebaseContinue: vi.fn(),
+    setRebaseEditMessage: vi.fn(),
     abortRebase: vi.fn(),
     listPullRequests: vi.fn(),
     saveForgeToken: vi.fn(),
@@ -534,7 +535,7 @@ describe("buildCommands", () => {
   });
 
   it("omits Continue rebase while the rebase is interrupted but keeps Abort", () => {
-    const rebase = { branch: "main", onto: "o", currentStep: 1, totalSteps: 3, health: { kind: "Diverged" as const, reason: "HeadMoved" as const } };
+    const rebase = { branch: "main", onto: "o", currentStep: 1, totalSteps: 3, editing: null, health: { kind: "Diverged" as const, reason: "HeadMoved" as const } };
     const base = makeAppState().state.headInfo;
     const commands = commandsFor(makeAppState({ rebaseProgress: { currentStep: 1, totalSteps: 3 }, headInfo: { ...base, rebase } }));
     expect(commands.some((c) => c.id === "rebase-continue")).toBe(false);
@@ -1470,6 +1471,19 @@ describe("history commands", () => {
       expect(appState.editHistory).toHaveBeenLastCalledWith("c2", "c3", { kind: "Drop" });
       byId("reword-selected").run();
       expect(appState.openDialog).toHaveBeenCalledWith({ kind: "reword", commitId: "c2", onto: "c3" });
+    });
+
+    it("offers Edit commit… for a commit, HEAD included, from its parent (#882)", () => {
+      const appState = makeAppState(editState);
+      const edit = commandsFor(appState).find((command) => command.id === "edit-selected")!;
+      expect(edit.label).toBe("Edit c2…");
+      edit.run();
+      expect(appState.editHistory).toHaveBeenLastCalledWith("c2", "c3", { kind: "Edit" });
+      const head = makeAppState({ ...editState, selectedRow: { commitId: "c1" } });
+      commandsFor(head).find((command) => command.id === "edit-selected")!.run();
+      expect(head.editHistory).toHaveBeenLastCalledWith("c1", "c2", { kind: "Edit" });
+      const dirty = commandsFor(makeAppState({ ...editState, status: [{ path: "a", oldPath: null, staged: false, kind: "Modified" }] }));
+      expect(dirty.map((c) => c.id)).not.toContain("edit-selected");
     });
 
     it("leaves out edits the menu disables", () => {

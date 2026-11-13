@@ -497,6 +497,7 @@ fn head_info_with_rebase(health: git_core::rebase::RebaseHealth) -> serde_json::
             current_step: 1,
             total_steps: 2,
             health,
+            editing: None,
         }),
         bisect: None,
         terminal_sequence: None,
@@ -662,6 +663,7 @@ fn head_info_dto_serializes_a_paused_rebase() {
             "currentStep": 1,
             "totalSteps": 2,
             "health": { "kind": "Paused" },
+            "editing": null,
         })
     );
 }

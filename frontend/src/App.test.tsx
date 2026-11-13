@@ -771,7 +771,7 @@ describe("App", () => {
       // it: a backgrounded tab mid-rebase is not kept busy.
       getHeadInfo: async () => ({
         headId: "h1", detachedAt: "h1", headPushed: false, operation: "CherryPick" as const, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null,
-        rebase: { branch: "main", onto: "o1", currentStep: 1, totalSteps: 3, health: { kind: "Paused" as const } },
+        rebase: { branch: "main", onto: "o1", currentStep: 1, totalSteps: 3, editing: null, health: { kind: "Paused" as const } },
         bisect: null, terminalSequence: null, terminalRebase: null,
       }),
     });
@@ -2298,7 +2298,7 @@ describe("App", () => {
     });
 
     it("toasts \"Stopped the rebase. HEAD had moved…\" when abort did not restore", async () => {
-      const rebase = { branch: "main", onto: "c1", currentStep: 1, totalSteps: 2, health: { kind: "Diverged" as const, reason: "HeadMoved" as const } };
+      const rebase = { branch: "main", onto: "c1", currentStep: 1, totalSteps: 2, editing: null, health: { kind: "Diverged" as const, reason: "HeadMoved" as const } };
       const abortRebase = vi.fn(async () => ({ restored: false }));
       render(
         <App
@@ -2316,7 +2316,7 @@ describe("App", () => {
     });
 
     it("offers Switch to the branch after aborting a rebase whose branch moved", async () => {
-      const rebase = { branch: "main", onto: "c1", currentStep: 1, totalSteps: 2, health: { kind: "Diverged" as const, reason: "BranchMoved" as const } };
+      const rebase = { branch: "main", onto: "c1", currentStep: 1, totalSteps: 2, editing: null, health: { kind: "Diverged" as const, reason: "BranchMoved" as const } };
       const abortRebase = vi.fn(async () => ({ restored: false }));
       const switchBranch = vi.fn(async () => {});
       render(
@@ -2337,7 +2337,7 @@ describe("App", () => {
 
     it("a paused rebase reported on the first refresh shows the strip and the dock", async () => {
       // The restart case: the backend restored the rebase from disk before the app asked.
-      const rebase = { branch: "main", onto: "c1", currentStep: 1, totalSteps: 2, health: { kind: "Paused" as const } };
+      const rebase = { branch: "main", onto: "c1", currentStep: 1, totalSteps: 2, editing: null, health: { kind: "Paused" as const } };
       const abortRebase = vi.fn(async () => ({ restored: true }));
       render(
         <App
@@ -2354,6 +2354,37 @@ describe("App", () => {
       expect(within(dock).getByRole("button", { name: "Continue rebase" })).toBeEnabled();
       fireEvent.click(within(strip).getByRole("button", { name: "Abort rebase" }));
       expect(await screen.findByText("Aborted rebase")).toBeInTheDocument();
+    });
+
+    it("an edit stop offers the commit's message for the recommit, and Continue sends an edited one (#882)", async () => {
+      const rebase = { branch: "main", onto: "c1", currentStep: 1, totalSteps: 1, health: { kind: "Paused" as const }, editing: "c2" };
+      const rebaseContinue = vi.fn(async () => ({ kind: "Done" as const }));
+      const getCommitMessage = vi.fn(async () => "two\n\nbody\n");
+      render(
+        <App
+          client={pickClient({
+            getHeadInfo: async () => ({ headId: "c1", detachedAt: "c1", headPushed: false, operation: "CherryPick" as const, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase, bisect: null, terminalSequence: null, terminalRebase: null }),
+            getMergeMessage: async () => "two\n\nbody\n",
+            getCommitMessage,
+            rebaseContinue,
+          })}
+        />,
+      );
+      const strip = await screen.findByRole("status", { name: "Operation status" });
+      expect(strip).toHaveTextContent("Editing c2: change the files, then Continue");
+      const dock = await screen.findByRole("group", { name: "Commit actions" });
+      const message = await within(dock).findByRole("textbox", { name: "Commit message" });
+      await waitFor(() => expect(message).toHaveValue("two\n\nbody\n"));
+      expect(getCommitMessage).toHaveBeenCalledWith("/repos/a", "c2");
+
+      fireEvent.change(message, { target: { value: "two, edited\n" } });
+      fireEvent.click(within(strip).getByRole("button", { name: "Continue" }));
+      await waitFor(() => expect(rebaseContinue).toHaveBeenCalledWith("/repos/a", "two, edited\n"));
+
+      // An empty message can't be continued with from the dock.
+      fireEvent.change(message, { target: { value: "  " } });
+      expect(within(dock).getByRole("button", { name: "Continue rebase" })).toBeDisabled();
+      expect(within(dock).getByText("Write a commit message.")).toBeInTheDocument();
     });
 
     it("toasts a finished multi-commit revert with its skipped count", async () => {

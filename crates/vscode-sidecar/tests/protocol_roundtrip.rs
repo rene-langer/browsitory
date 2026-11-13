@@ -3445,6 +3445,7 @@ fn a_paused_rebase_survives_a_sidecar_restart() {
             "currentStep": 1,
             "totalSteps": 2,
             "health": { "kind": "Paused" },
+            "editing": a,
         })
     );
     let done = sidecar.call(

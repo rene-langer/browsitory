@@ -69,6 +69,10 @@ pub enum RebaseError {
     /// the branch with force, so it only starts from a clean tracked tree, as `git rebase` does.
     #[error("{}", local_changes_message(paths))]
     LocalChanges { paths: Vec<String> },
+    /// Continue was given a message for the paused step that is empty or only whitespace
+    /// (#882); nothing was changed.
+    #[error("The commit message is empty. Write a message, then continue.")]
+    EmptyMessage,
 }
 
 /// The refusal copy for [`RebaseError::OperationPaused`] (#265).
@@ -504,18 +508,25 @@ pub fn rebase_continue(
     rebase_continue_with(repo, state, HookOptions::default())
 }
 
-/// `rebase_continue` with a cancel check and a reporter for the signing program, as in
-/// `start_rebase_with` (#151). A cancelled signer is an error like a timed-out one: the step
-/// stays paused (or stops as an error), and Continue tries it again.
-pub fn rebase_continue_with(
+/// `rebase_continue_with`, landing the paused step under `message` instead of its planned one
+/// when given (Edit commit…, #882).
+///
+/// The message only replaces the one of a step this call lands from the index (a resolved
+/// conflict or an edit stop); a step committed by hand keeps its own. An empty (or whitespace)
+/// message is refused before anything changes.
+pub fn rebase_continue_with_message(
     repo: &Repository,
     state: &mut RebaseState,
+    message: Option<&str>,
     mut hooks: HookOptions<'_>,
 ) -> Result<RebaseStepResult, RebaseError> {
+    if message.is_some_and(|message| message.trim().is_empty()) {
+        return Err(RebaseError::EmptyMessage);
+    }
     let hooks = &mut hooks;
     let resume = resume_kind(repo, state)?;
     let result = match resume {
-        Resume::Land => land_current_step(repo, state, hooks).and_then(|()| {
+        Resume::Land => land_current_step(repo, state, message, hooks).and_then(|()| {
             state.cursor += 1;
             advance(repo, state, hooks)
         }),
@@ -542,6 +553,17 @@ pub fn rebase_continue_with(
         };
     }
     result
+}
+
+/// `rebase_continue` with a cancel check and a reporter for the signing program, as in
+/// `start_rebase_with` (#151). A cancelled signer is an error like a timed-out one: the step
+/// stays paused (or stops as an error), and Continue tries it again.
+pub fn rebase_continue_with(
+    repo: &Repository,
+    state: &mut RebaseState,
+    hooks: HookOptions<'_>,
+) -> Result<RebaseStepResult, RebaseError> {
+    rebase_continue_with_message(repo, state, None, hooks)
 }
 
 enum Resume {
@@ -844,7 +866,7 @@ fn advance(
             return Ok(RebaseStepResult::PausedForEdit);
         }
 
-        land_current_step(repo, state, hooks)?;
+        land_current_step(repo, state, None, hooks)?;
         state.cursor += 1;
     }
 }
@@ -914,16 +936,20 @@ fn ends_a_group(plan: &[RebasePlanEntry], index: usize) -> bool {
 /// neither `Squash`/`Fixup` nor `Drop` (a `Drop` never lands a commit, so it can't be the leader
 /// either, even if one sits between the leader and the group) — guaranteed to exist, since
 /// `validate_plan` rejects a plan whose first non-`Drop` entry is `Squash`/`Fixup`.
+///
+/// `message`, when given, replaces the step's own (Continue at an edit stop, #882).
 fn land_current_step(
     repo: &Repository,
     state: &mut RebaseState,
+    message: Option<&str>,
     hooks: &mut HookOptions<'_>,
 ) -> Result<(), RebaseError> {
     let entry = state.plan[state.cursor].clone();
     let original_commit = repo.find_commit(Oid::from_str(&entry.commit_id)?)?;
-    let message = match &entry.action {
-        RebaseAction::Reword { message } => message.clone(),
-        _ => original_commit
+    let message = match (message, &entry.action) {
+        (Some(message), _) => message.to_string(),
+        (None, RebaseAction::Reword { message }) => message.clone(),
+        (None, _) => original_commit
             .message()
             .ok()
             .unwrap_or_default()

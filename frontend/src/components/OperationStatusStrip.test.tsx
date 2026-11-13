@@ -191,7 +191,7 @@ describe("OperationStatusStrip", () => {
         merging={false}
         operation={null}
         rebaseProgress={{ currentStep: 1, totalSteps: 2 }}
-        rebase={{ branch: "topic", onto: "o", currentStep: 1, totalSteps: 2, health: { kind: "Diverged", reason: "HeadMoved" } }}
+        rebase={{ branch: "topic", onto: "o", currentStep: 1, totalSteps: 2, editing: null, health: { kind: "Diverged", reason: "HeadMoved" } }}
         conflictCount={0}
         pending
         onAbortMerge={noop}
@@ -226,7 +226,7 @@ describe("OperationStatusStrip", () => {
   });
 
   describe("a stored rebase", () => {
-    const rebase = (health: RebaseInfo["health"]): RebaseInfo => ({ branch: "topic", onto: "o", currentStep: 1, totalSteps: 2, health });
+    const rebase = (health: RebaseInfo["health"]): RebaseInfo => ({ branch: "topic", onto: "o", currentStep: 1, totalSteps: 2, health, editing: null });
 
     it("keeps \"Rebasing, step N of M\" while paused", () => {
       render(
@@ -242,6 +242,30 @@ describe("OperationStatusStrip", () => {
       );
       expect(screen.getByRole("status")).toHaveTextContent("Rebasing, step 1 of 2");
       expect(screen.queryByText(/interrupted/)).toBeNull();
+    });
+
+    it("says which commit an edit stop is editing, with Continue and Abort (#882)", () => {
+      const onContinueRebase = vi.fn();
+      const onAbortRebase = vi.fn();
+      render(
+        <OperationStatusStrip
+          merging
+          operation="CherryPick"
+          rebaseProgress={{ currentStep: 1, totalSteps: 2 }}
+          rebase={{ ...rebase({ kind: "Paused" }), editing: "1a2b3c4d5e6f7081" }}
+          conflictCount={0}
+          onAbortMerge={noop}
+          onAbortRebase={onAbortRebase}
+          onContinueRebase={onContinueRebase}
+        />,
+      );
+      const strip = screen.getByRole("status");
+      expect(strip).toHaveTextContent("Editing 1a2b3c4: change the files, then Continue");
+      expect(strip).not.toHaveTextContent("Rebasing");
+      fireEvent.click(within(strip).getByRole("button", { name: "Continue" }));
+      fireEvent.click(within(strip).getByRole("button", { name: "Abort rebase" }));
+      expect(onContinueRebase).toHaveBeenCalledTimes(1);
+      expect(onAbortRebase).toHaveBeenCalledTimes(1);
     });
 
     it("shows the interrupted label and reason for a diverged rebase", () => {

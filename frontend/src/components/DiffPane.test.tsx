@@ -932,7 +932,7 @@ describe("DiffPane", () => {
         rebaseProgress: { currentStep: 1, totalSteps: 3 },
         headInfo: {
           headId: "abc", detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null,
-          rebase: { branch: "topic", onto: "o", currentStep: 1, totalSteps: 3, health: { kind: "Diverged", reason: "BranchMoved" } },
+          rebase: { branch: "topic", onto: "o", currentStep: 1, totalSteps: 3, editing: null, health: { kind: "Diverged", reason: "BranchMoved" } },
           bisect: null, terminalSequence: null, terminalRebase: null,
         },
         onRebaseAbort,

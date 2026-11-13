@@ -52,6 +52,7 @@ export function CommitDock({
     onSequenceContinue,
     onSequenceAbort,
     onRebaseContinue,
+    onRebaseEditMessage,
     onRebaseAbort,
     onCommit,
     onAbortMerge,
@@ -95,6 +96,34 @@ export function CommitDock({
       cancelled = true;
     };
   }, [amendMode, headInfo.headId, client, repoPath]);
+  // An Edit step's stop (Edit commit…, #882): the commit's message, editable for the recommit.
+  // `original` is what Continue keeps when the text is left as it is.
+  const editing = headInfo.rebase?.health.kind === "Paused" ? headInfo.rebase.editing : null;
+  const [editMessage, setEditMessage] = useState<{ commitId: string; original: string; text: string } | null>(null);
+  useEffect(() => {
+    // Whatever was typed for another stop (or before a remount) is not this box's text.
+    onRebaseEditMessage?.(null);
+    if (editing === null) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setEditMessage(null);
+      return;
+    }
+    let cancelled = false;
+    void client.getCommitMessage(repoPath, editing).then(
+      (text) => !cancelled && setEditMessage({ commitId: editing, original: text, text }),
+      // Without the message there is nothing to edit; Continue keeps it.
+      () => !cancelled && setEditMessage(null),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [editing, client, repoPath, onRebaseEditMessage]);
+  const shownEditMessage = editMessage !== null && editMessage.commitId === editing ? editMessage : null;
+  const emptyEditMessage = shownEditMessage !== null && shownEditMessage.text.trim() === "";
+  const rebaseBlockedReason =
+    rebaseInterruption(headInfo.rebase) ??
+    conflictReason(conflictCount) ??
+    (emptyEditMessage ? "Write a commit message." : undefined);
   return (
     <div className={styles.commitDock} role="group" aria-label="Commit actions">
       {headInfo.sequence !== null ? (
@@ -120,10 +149,22 @@ export function CommitDock({
         <RebaseProgressPanel
           currentStep={rebaseProgress.currentStep}
           totalSteps={rebaseProgress.totalSteps}
-          disabled={conflictCount > 0 || rebaseInterruption(headInfo.rebase) !== undefined}
-          disabledReason={rebaseInterruption(headInfo.rebase) ?? conflictReason(conflictCount)}
+          disabled={rebaseBlockedReason !== undefined}
+          disabledReason={rebaseBlockedReason}
           onContinue={onRebaseContinue}
           onAbort={onRebaseAbort}
+          title={editing === null ? undefined : `Editing ${editing.slice(0, 7)}`}
+          message={
+            shownEditMessage === null
+              ? undefined
+              : {
+                  value: shownEditMessage.text,
+                  onChange: (text) => {
+                    setEditMessage({ ...shownEditMessage, text });
+                    onRebaseEditMessage?.(text === shownEditMessage.original ? null : text);
+                  },
+                }
+          }
         />
       ) : (
         <CommitBox
