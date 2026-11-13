@@ -56,10 +56,9 @@ describe("Browsitory user commands", () => {
   before(function () {
     if (process.platform === "win32") this.skip();
     original = fs.readFileSync(CONFIG_FILE, "utf8");
-    // Arrays of tables go last in the file, as the app writes them. The app writes an empty list
-    // as `user_commands = []`, which the table would then repeat: drop that line first.
-    const withoutEmpty = original.replace(/^user_commands = \[\]\n/m, "");
-    fs.writeFileSync(CONFIG_FILE, `${withoutEmpty.trimEnd()}\n${COMMAND_TABLE}`);
+    // Arrays of tables go last in the file, as the app writes them; an empty list it leaves out
+    // (#967), so the table can simply be appended.
+    fs.writeFileSync(CONFIG_FILE, `${original.trimEnd()}\n${COMMAND_TABLE}`);
     fs.rmSync(OUTPUT, { force: true });
   });
 

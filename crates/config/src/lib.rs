@@ -415,7 +415,8 @@ struct ConfigFile {
     // Tables must follow plain `key = value` lines, so they sit after the plain keys.
     // The fields after it serialize as TOML array-of-tables because their element type is a
     // struct. TOML requires plain `key = value` lines and tables to precede an array-of-tables
-    // section, so they must remain last.
+    // section, so they must remain last. An empty one is left out of the file (#967): written as
+    // `key = []`, it would clash with a `[[key]]` section added by hand.
     #[serde(default)]
     diff: DiffSettings,
     #[serde(default)]
@@ -430,25 +431,29 @@ struct ConfigFile {
     updates: UpdateSettings,
     #[serde(default, skip_serializing_if = "KeybindingSettings::is_empty")]
     keybindings: KeybindingSettings,
-    #[serde(default, deserialize_with = "deserialize_open_repos")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_open_repos",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     open_repos: Vec<OpenRepoEntry>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     workspaces: Vec<Workspace>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     graph_branch_selections: Vec<GraphBranchSelection>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     graph_remote_branch_selections: Vec<GraphRemoteBranchSelection>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     merge_preferences: Vec<MergePreference>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pull_preferences: Vec<PullPreference>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     repo_aliases: Vec<RepoAlias>,
     /// The app-wide user commands (#893).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     user_commands: Vec<UserCommand>,
     /// Each repository's own user commands (#893), by path.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     repo_user_commands: Vec<RepoUserCommands>,
 }
 
