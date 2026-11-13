@@ -30,6 +30,7 @@ import {
   PreferencesDialog,
   UpdatesSection,
 } from "./components/PreferencesDialog";
+import { UserCommandsSection } from "./components/UserCommandsSection";
 import type { PreferencesGroupId } from "./lib/preferencesGroup";
 import { OpenPreferencesContext } from "./state/openPreferences";
 import { cloneToastMessage, createNewRepository } from "./lib/newRepository";
@@ -511,6 +512,11 @@ function AppContent({
                 id: "external-tools",
                 label: "External tools",
                 content: <ExternalToolsSection client={client} repoPath={openRepos.activePath} toolHost={toolHost} />,
+              },
+              {
+                id: "user-commands",
+                label: "Commands",
+                content: <UserCommandsSection client={client} repoPath={openRepos.activePath} />,
               },
               ...(updaterAvailable
                 ? [{ id: "updates" as const, label: "Updates", content: <UpdatesSection onCheckNow={runUpdateCheck} /> }]

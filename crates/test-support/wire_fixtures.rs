@@ -798,6 +798,72 @@ pub fn external_tool_settings() -> Cases<config::ExternalToolSettings> {
     ]
 }
 
+fn user_command(name: &str, command_line: &str) -> config::UserCommand {
+    config::UserCommand {
+        id: format!("id-{name}"),
+        name: name.to_string(),
+        command_line: command_line.to_string(),
+        working_directory: None,
+        targets: Vec::new(),
+        confirm: false,
+        show_output: true,
+        refresh: true,
+    }
+}
+
+/// Every target and every variable, a working directory and none, and a hand-written command
+/// that doesn't parse (`problem`).
+pub fn user_commands() -> Cases<config::UserCommand> {
+    use config::UserCommandTarget;
+    let targets = every!(UserCommandTarget {
+        Commit,
+        Branch,
+        Tag,
+        File,
+        Repository,
+    });
+    vec![
+        case("plain", user_command("Status", "git status")),
+        case(
+            "everything",
+            config::UserCommand {
+                working_directory: some("${repo}/sub"),
+                targets,
+                confirm: true,
+                show_output: false,
+                refresh: false,
+                ..user_command(
+                    "All",
+                    "tool ${commit} ${shortCommit} ${branch} ${ref} ${path} ${paths}",
+                )
+            },
+        ),
+        case("problem", user_command("Odd", "echo ${what}")),
+    ]
+}
+
+pub fn user_command_lists() -> Cases<config::UserCommands> {
+    vec![
+        case("empty", config::UserCommands::default()),
+        case(
+            "both",
+            config::UserCommands {
+                global: vec![user_command("Status", "git status")],
+                repository: vec![user_command("Deploy", "deploy ${branch}")],
+            },
+        ),
+    ]
+}
+
+/// A command line and whether its program is found (`/usr/bin/<name>` stands in for `PATH`).
+pub fn user_command_checks() -> Cases<(String, bool)> {
+    vec![
+        case("found", ("git log -1 '${commit} x'".to_string(), true)),
+        case("not-found", ("nope".to_string(), false)),
+        case("program-variable", ("${repo}/run.sh".to_string(), true)),
+    ]
+}
+
 pub fn commit_message_settings() -> Cases<config::CommitMessageSettings> {
     vec![case(
         "plain",

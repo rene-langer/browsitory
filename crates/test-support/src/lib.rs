@@ -56,14 +56,16 @@ macro_rules! ts_declarations {
         $crate::ts_declarations!($header; import "" {}; $($ty),*)
     };
     ($header:expr; import $module:literal { $($import:ty),* $(,)? }; $($ty:ty),* $(,)?) => {{
-        use $crate::__ts_rs::TS as _;
+        // Fully qualified: a type's own inherent `name` (such as `user_command::Variable::name`)
+        // would win over the trait's.
+        use $crate::__ts_rs::TS;
         let cfg = $crate::__ts_rs::Config::new().with_large_int("number");
-        let imports: Vec<String> = vec![$(<$import>::name(&cfg)),*];
+        let imports: Vec<String> = vec![$(<$import as TS>::name(&cfg)),*];
         let mut declarations: Vec<(String, String)> = Vec::new();
         let mut used: Vec<String> = Vec::new();
         $(
-            declarations.push((<$ty>::name(&cfg), <$ty>::decl(&cfg)));
-            used.extend(<$ty>::dependencies(&cfg).into_iter().map(|dep| dep.ts_name));
+            declarations.push((<$ty as TS>::name(&cfg), <$ty as TS>::decl(&cfg)));
+            used.extend(<$ty as TS>::dependencies(&cfg).into_iter().map(|dep| dep.ts_name));
         )*
         $crate::join_ts_declarations($header, ($module, imports), declarations, used)
     }};

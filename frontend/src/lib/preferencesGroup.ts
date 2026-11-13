@@ -8,6 +8,7 @@ export const PREFERENCES_GROUP_IDS = [
   "commit-message",
   "fetch",
   "external-tools",
+  "user-commands",
   "updates",
 ] as const;
 

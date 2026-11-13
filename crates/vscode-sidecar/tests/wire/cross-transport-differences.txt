@@ -186,6 +186,13 @@ UndoState/both key-order
 UndoState/none key-order
 UpstreamInfo/known key-order
 UpstreamInfo/unknown key-order
+UserCommand/everything key-order
+UserCommand/plain key-order
+UserCommand/problem key-order
+UserCommandCheck/found key-order
+UserCommandCheck/not-found key-order
+UserCommandCheck/program-variable key-order
+UserCommands/both key-order
 Workspace/empty key-order
 Workspace/members key-order
 WorktreeInfo/main key-order

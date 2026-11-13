@@ -109,6 +109,31 @@ pub fn shared_wire_cases(s: &mut impl WireCases) {
         ExternalToolSettingsDto::from,
     );
     s.add(
+        "UserCommand",
+        fixtures::user_commands(),
+        UserCommandDto::from,
+    );
+    s.add(
+        "UserCommands",
+        fixtures::user_command_lists(),
+        UserCommandsDto::from,
+    );
+    s.add(
+        "UserCommandCheck",
+        fixtures::user_command_checks(),
+        |(command_line, found)| {
+            let template = git_core::user_command::parse(
+                &command_line,
+                None,
+                git_core::process::CommandStyle::Posix,
+            )
+            .expect("fixture parses");
+            UserCommandCheckDto::from_template(&template, |name| {
+                found.then(|| std::path::PathBuf::from(format!("/usr/bin/{name}")))
+            })
+        },
+    );
+    s.add(
         "CommitMessageSettings",
         fixtures::commit_message_settings(),
         CommitMessageSettingsDto::from,

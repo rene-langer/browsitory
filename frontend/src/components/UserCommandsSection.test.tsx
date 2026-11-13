@@ -21,8 +21,16 @@ function stored(name: string, overrides: Partial<UserCommand> = {}): UserCommand
 }
 
 function input(command: UserCommand): UserCommandInput {
-  const { variables: _variables, problem: _problem, ...rest } = command;
-  return rest;
+  return {
+    id: command.id,
+    name: command.name,
+    commandLine: command.commandLine,
+    workingDirectory: command.workingDirectory,
+    targets: command.targets,
+    confirm: command.confirm,
+    showOutput: command.showOutput,
+    refresh: command.refresh,
+  };
 }
 
 /** A client whose stored lists answer `listUserCommands` and follow `setUserCommands`. */

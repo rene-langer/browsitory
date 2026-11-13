@@ -50,6 +50,14 @@ DiffSettings/algorithm-Default {"ignoreWhitespace":false,"contextLines":3,"synta
 DiffSettings/algorithm-Minimal {"ignoreWhitespace":false,"contextLines":3,"syntaxHighlight":true,"wordWrap":"Auto","algorithm":"Minimal","showWhitespace":false,"expandUntracked":true}
 ExternalToolSettings/unset {"editor":null,"terminal":null}
 ExternalToolSettings/set {"editor":"code -w","terminal":"wt"}
+UserCommand/plain {"id":"id-Status","name":"Status","commandLine":"git status","workingDirectory":null,"targets":[],"confirm":false,"showOutput":true,"refresh":true,"variables":[],"problem":null}
+UserCommand/everything {"id":"id-All","name":"All","commandLine":"tool ${commit} ${shortCommit} ${branch} ${ref} ${path} ${paths}","workingDirectory":"${repo}/sub","targets":["Commit","Branch","Tag","File","Repository"],"confirm":true,"showOutput":false,"refresh":false,"variables":["repo","commit","shortCommit","branch","ref","path","paths"],"problem":null}
+UserCommand/problem {"id":"id-Odd","name":"Odd","commandLine":"echo ${what}","workingDirectory":null,"targets":[],"confirm":false,"showOutput":true,"refresh":true,"variables":[],"problem":"Unknown variable ${what}: use ${repo}, ${commit}, ${shortCommit}, ${branch}, ${ref}, ${path} or ${paths}."}
+UserCommands/empty {"global":[],"repository":[]}
+UserCommands/both {"global":[{"id":"id-Status","name":"Status","commandLine":"git status","workingDirectory":null,"targets":[],"confirm":false,"showOutput":true,"refresh":true,"variables":[],"problem":null}],"repository":[{"id":"id-Deploy","name":"Deploy","commandLine":"deploy ${branch}","workingDirectory":null,"targets":[],"confirm":false,"showOutput":true,"refresh":true,"variables":["branch"],"problem":null}]}
+UserCommandCheck/found {"words":["git","log","-1","${commit} x"],"program":"git","programPath":"/usr/bin/git","variables":["commit"]}
+UserCommandCheck/not-found {"words":["nope"],"program":"nope","programPath":null,"variables":[]}
+UserCommandCheck/program-variable {"words":["${repo}/run.sh"],"program":null,"programPath":null,"variables":["repo"]}
 CommitMessageSettings/plain {"summaryLimit":50,"bodyRuler":72,"showRuler":true}
 FetchSettings/off {"autoFetchMinutes":0}
 FetchSettings/every-10 {"autoFetchMinutes":10}

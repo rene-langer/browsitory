@@ -1,7 +1,8 @@
 //! User command lines (#893): split like the external tools' commands, then each `${…}` expanded
 //! inside its own word, so no value can add, split or quote arguments.
 
-mod common;
+// Hide the developer's / CI runner's global and system git config (#111).
+test_support::hermetic_git!();
 
 use git_core::process::{CommandStyle, SplitError};
 use git_core::user_command::{parse, Expanded, MissingValue, TemplateError, Values, Variable};

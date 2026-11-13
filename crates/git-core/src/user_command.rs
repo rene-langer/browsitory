@@ -9,7 +9,7 @@
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::process::{CommandStyle, SplitError};
+use crate::process::{split_command_line, CommandStyle, SplitError};
 
 /// A variable a user command can use, written `${name}`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -95,6 +95,79 @@ pub enum TemplateError {
 #[error("This command needs {0}, which isn't available here.")]
 pub struct MissingValue(pub Variable);
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Piece {
+    Text(String),
+    Var(Variable),
+}
+
+/// One argument before expansion.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Word(Vec<Piece>);
+
+impl Word {
+    fn parse(text: &str) -> Result<Self, TemplateError> {
+        let mut pieces = Vec::new();
+        let mut literal = String::new();
+        let mut rest = text;
+        while let Some(at) = rest.find('$') {
+            literal.push_str(&rest[..at]);
+            let after = &rest[at + 1..];
+            if let Some(escaped) = after.strip_prefix("${") {
+                literal.push_str("${");
+                rest = escaped;
+            } else if let Some(open) = after.strip_prefix('{') {
+                let close = open.find('}').ok_or(TemplateError::UnclosedVariable)?;
+                let name = &open[..close];
+                let variable = Variable::from_name(name)
+                    .ok_or_else(|| TemplateError::UnknownVariable(name.to_string()))?;
+                if !literal.is_empty() {
+                    pieces.push(Piece::Text(std::mem::take(&mut literal)));
+                }
+                pieces.push(Piece::Var(variable));
+                rest = &open[close + 1..];
+            } else {
+                literal.push('$');
+                rest = after;
+            }
+        }
+        literal.push_str(rest);
+        if !literal.is_empty() || pieces.is_empty() {
+            pieces.push(Piece::Text(literal));
+        }
+        Ok(Word(pieces))
+    }
+
+    fn uses(&self, variable: Variable) -> bool {
+        self.0.contains(&Piece::Var(variable))
+    }
+
+    fn is_only(&self, variable: Variable) -> bool {
+        self.0 == [Piece::Var(variable)]
+    }
+
+    fn display(&self) -> String {
+        self.0
+            .iter()
+            .map(|piece| match piece {
+                Piece::Text(text) => text.replace("${", "$${"),
+                Piece::Var(variable) => variable.to_string(),
+            })
+            .collect()
+    }
+
+    fn expand(&self, values: &Values) -> Result<String, MissingValue> {
+        let mut out = String::new();
+        for piece in &self.0 {
+            match piece {
+                Piece::Text(text) => out.push_str(text),
+                Piece::Var(variable) => out.push_str(values.single(*variable)?),
+            }
+        }
+        Ok(out)
+    }
+}
+
 /// What the variables stand for where a command runs; `None` where there is nothing to fill in.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Values {
@@ -107,9 +180,28 @@ pub struct Values {
     pub paths: Option<Vec<String>>,
 }
 
+impl Values {
+    fn single(&self, variable: Variable) -> Result<&str, MissingValue> {
+        let value = match variable {
+            Variable::Repo => Some(&self.repo),
+            Variable::Commit => self.commit.as_ref(),
+            Variable::ShortCommit => self.short_commit.as_ref(),
+            Variable::Branch => self.branch.as_ref(),
+            Variable::Ref => self.git_ref.as_ref(),
+            Variable::Path => self.path.as_ref(),
+            // Only ever a word of its own (`PathsNotAlone`), expanded by `CommandTemplate`.
+            Variable::Paths => None,
+        };
+        value.map(String::as_str).ok_or(MissingValue(variable))
+    }
+}
+
 /// A parsed command line and working directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommandTemplate {}
+pub struct CommandTemplate {
+    words: Vec<Word>,
+    directory: Option<Word>,
+}
 
 /// The program's arguments and working directory after expansion.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,25 +219,74 @@ pub fn parse(
     working_directory: Option<&str>,
     style: CommandStyle,
 ) -> Result<CommandTemplate, TemplateError> {
-    let _ = (command_line, working_directory, style);
-    todo!()
+    let words = split_command_line(command_line, style)?
+        .iter()
+        .map(|word| Word::parse(word))
+        .collect::<Result<Vec<_>, _>>()?;
+    if words
+        .iter()
+        .any(|word| word.uses(Variable::Paths) && !word.is_only(Variable::Paths))
+    {
+        return Err(TemplateError::PathsNotAlone);
+    }
+    let directory = match working_directory
+        .map(str::trim)
+        .filter(|dir| !dir.is_empty())
+    {
+        Some(dir) => {
+            let word = Word::parse(dir)?;
+            if word.uses(Variable::Paths) {
+                return Err(TemplateError::PathsInDirectory);
+            }
+            Some(word)
+        }
+        None => None,
+    };
+    Ok(CommandTemplate { words, directory })
 }
 
 impl CommandTemplate {
+    /// Every variable the command line and working directory use, in `Variable::ALL` order.
     pub fn variables(&self) -> Vec<Variable> {
-        todo!()
+        Variable::ALL
+            .into_iter()
+            .filter(|variable| {
+                self.words
+                    .iter()
+                    .chain(self.directory.iter())
+                    .any(|word| word.uses(*variable))
+            })
+            .collect()
     }
 
+    /// The arguments as split, variables still written `${…}`: what "Test" shows.
     pub fn words(&self) -> Vec<String> {
-        todo!()
+        self.words.iter().map(Word::display).collect()
     }
 
+    /// The program word, if it names the program without a variable (it can be looked up now).
     pub fn literal_program(&self) -> Option<&str> {
-        todo!()
+        match self.words.first().map(|word| word.0.as_slice()) {
+            Some([Piece::Text(text)]) => Some(text),
+            _ => None,
+        }
     }
 
     pub fn expand(&self, values: &Values) -> Result<Expanded, MissingValue> {
-        let _ = values;
-        todo!()
+        let mut args = Vec::new();
+        for word in &self.words {
+            if word.is_only(Variable::Paths) {
+                let paths = values.paths.as_ref().ok_or(MissingValue(Variable::Paths))?;
+                args.extend(paths.iter().cloned());
+            } else {
+                args.push(word.expand(values)?);
+            }
+        }
+        let directory = self
+            .directory
+            .as_ref()
+            .map(|word| word.expand(values))
+            .transpose()?;
+        Ok(Expanded { args, directory })
     }
 }

@@ -36,6 +36,9 @@ cancel_transfer/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":
 check_merge_target/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct RepoFileParams","data":{"kind":"Other","message":"invalid type: null, expected struct RepoFileParams"}}}
 check_merge_target/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 check_merge_target/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct RepoFileParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct RepoFileParams"}}}
+check_user_command/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct CheckUserCommandParams","data":{"kind":"Other","message":"invalid type: null, expected struct CheckUserCommandParams"}}}
+check_user_command/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `commandLine`","data":{"kind":"Other","message":"missing field `commandLine`"}}}
+check_user_command/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct CheckUserCommandParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct CheckUserCommandParams"}}}
 checkout_commit/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct CommitIdParams","data":{"kind":"Other","message":"invalid type: null, expected struct CommitIdParams"}}}
 checkout_commit/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 checkout_commit/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct CommitIdParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct CommitIdParams"}}}
@@ -333,6 +336,9 @@ list_tags/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"inval
 list_untracked_folder/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct RepoFilePathParams","data":{"kind":"Other","message":"invalid type: null, expected struct RepoFilePathParams"}}}
 list_untracked_folder/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 list_untracked_folder/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct RepoFilePathParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct RepoFilePathParams"}}}
+list_user_commands/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct ListUserCommandsParams","data":{"kind":"Other","message":"invalid type: null, expected struct ListUserCommandsParams"}}}
+list_user_commands/empty {"jsonrpc":"2.0","id":7,"result":{"global":[],"repository":[]}}
+list_user_commands/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct ListUserCommandsParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct ListUserCommandsParams"}}}
 list_workspaces/absent {"jsonrpc":"2.0","id":7,"result":[]}
 list_workspaces/empty {"jsonrpc":"2.0","id":7,"result":[]}
 list_workspaces/string {"jsonrpc":"2.0","id":7,"result":[]}
@@ -492,6 +498,9 @@ set_repo_alias/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"
 set_update_settings/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct SetUpdateSettingsParams","data":{"kind":"Other","message":"invalid type: null, expected struct SetUpdateSettingsParams"}}}
 set_update_settings/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `settings`","data":{"kind":"Other","message":"missing field `settings`"}}}
 set_update_settings/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct SetUpdateSettingsParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct SetUpdateSettingsParams"}}}
+set_user_commands/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct SetUserCommandsParams","data":{"kind":"Other","message":"invalid type: null, expected struct SetUserCommandsParams"}}}
+set_user_commands/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `commands`","data":{"kind":"Other","message":"missing field `commands`"}}}
+set_user_commands/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct SetUserCommandsParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct SetUserCommandsParams"}}}
 stage_file/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct RepoFilePathParams","data":{"kind":"Other","message":"invalid type: null, expected struct RepoFilePathParams"}}}
 stage_file/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 stage_file/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct RepoFilePathParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct RepoFilePathParams"}}}
