@@ -1063,3 +1063,20 @@ pub fn set_repo_alias_at(
     }
     write_config(config_file, &config)
 }
+
+// Stubs for the test-first commit (#898, `[keybindings]`); the implementation commit replaces them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct KeybindingSettings {
+    pub overrides: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+pub fn get_keybinding_settings_at(_config_file: &Path) -> Result<KeybindingSettings, ConfigError> {
+    Ok(KeybindingSettings::default())
+}
+
+pub fn set_keybinding_settings_at(
+    _config_file: &Path,
+    _settings: &KeybindingSettings,
+) -> Result<(), ConfigError> {
+    Ok(())
+}
