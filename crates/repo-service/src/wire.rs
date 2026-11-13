@@ -3913,6 +3913,31 @@ impl From<&str> for ErrorDto {
 /// the hand-written types in `RepoClient.ts`, so a renamed field fails the frontend type check.
 /// Regenerate with `UPDATE_TRANSPORT_METHODS=1 cargo test -p repo-service wire_bindings_are_current`.
 #[cfg(test)]
+mod user_command_tests {
+    use super::*;
+
+    #[test]
+    fn a_user_command_context_keeps_every_field() {
+        let context: git_core::user_command::Context = UserCommandContextDto {
+            commit_id: Some("abc".to_string()),
+            branch: Some("main".to_string()),
+            ref_name: Some("refs/heads/main".to_string()),
+            paths: vec!["a.txt".to_string()],
+        }
+        .into();
+        assert_eq!(
+            context,
+            git_core::user_command::Context {
+                commit: Some("abc".to_string()),
+                branch: Some("main".to_string()),
+                git_ref: Some("refs/heads/main".to_string()),
+                paths: vec!["a.txt".to_string()],
+            }
+        );
+    }
+}
+
+#[cfg(test)]
 mod ts_bindings {
     use super::*;
 

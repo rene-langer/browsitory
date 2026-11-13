@@ -46,6 +46,14 @@ const NOT_DEFINED: &str = "This command doesn't exist any more.";
 /// The stored command `command_id` for `repo_path`: its own commands first, then the app-wide.
 fn find(repo_path: &Path, command_id: &str) -> Result<config::UserCommand, ErrorDto> {
     let commands = config::list_user_commands(Some(repo_path)).map_err(ErrorDto::from_error)?;
+    find_in(commands, command_id)
+}
+
+/// `command_id` among `commands`, the repository's own first.
+fn find_in(
+    commands: config::UserCommands,
+    command_id: &str,
+) -> Result<config::UserCommand, ErrorDto> {
     commands
         .repository
         .into_iter()
@@ -152,5 +160,132 @@ fn log_finish(result: &Result<user_command::RunOutcome, RunError>) -> oplog::Fin
             ..oplog::Finish::succeeded()
         },
         Err(error) => failed(error.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[cfg(unix)]
+    use std::time::Duration;
+
+    fn command(id: &str, name: &str) -> config::UserCommand {
+        config::UserCommand {
+            id: id.to_string(),
+            name: name.to_string(),
+            command_line: "true".to_string(),
+            working_directory: None,
+            targets: Vec::new(),
+            confirm: false,
+            show_output: true,
+            refresh: true,
+        }
+    }
+
+    #[test]
+    fn a_command_is_found_by_id_the_repositorys_own_first() {
+        let commands = config::UserCommands {
+            global: vec![command("a", "App-wide A"), command("b", "App-wide B")],
+            repository: vec![command("a", "Repository A")],
+        };
+        assert_eq!(find_in(commands.clone(), "a").unwrap().name, "Repository A");
+        assert_eq!(find_in(commands.clone(), "b").unwrap().name, "App-wide B");
+        assert_eq!(find_in(commands, "c").unwrap_err().message, NOT_DEFINED);
+    }
+
+    fn outcome(success: bool, timed_out: bool, exit_code: Option<i32>) -> user_command::RunOutcome {
+        user_command::RunOutcome {
+            exit_code,
+            success,
+            timed_out,
+            output: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_run_ends_in_the_log_as_it_ended() {
+        let finish = |result| {
+            let finish = log_finish(&result);
+            (finish.outcome, finish.message)
+        };
+        use oplog::OperationOutcome::*;
+        assert_eq!(finish(Ok(outcome(true, false, Some(0)))), (Succeeded, None));
+        assert_eq!(
+            finish(Ok(outcome(false, false, Some(3)))),
+            (Failed, Some("Exited with code 3.".to_string()))
+        );
+        assert_eq!(
+            finish(Ok(outcome(false, false, None))),
+            (Failed, Some("Failed.".to_string()))
+        );
+        assert_eq!(
+            finish(Ok(outcome(false, true, None))),
+            (Failed, Some("Took too long and was stopped.".to_string()))
+        );
+        assert_eq!(finish(Err(RunError::Cancelled)), (Cancelled, None));
+        assert_eq!(
+            finish(Err(RunError::NotFound("nope".to_string()))),
+            (
+                Failed,
+                Some(RunError::NotFound("nope".to_string()).to_string())
+            )
+        );
+    }
+
+    #[cfg(unix)]
+    fn prepared(script: &str, key: &str, root: &Path) -> Prepared {
+        Prepared {
+            expanded: user_command::Expanded {
+                args: vec!["sh".to_string(), "-c".to_string(), script.to_string()],
+                directory: None,
+            },
+            root: root.to_path_buf(),
+            name: "Unit".to_string(),
+            journal_key: Some(key.to_string()),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_run_is_logged_with_its_program_and_forgotten_when_it_ends() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let key = "user-commands-unit-logged";
+        let run = execute(&prepared("echo hi", key, dir.path()), "unit-run-1").unwrap();
+        assert!(run.success);
+        assert_eq!(run.output, "hi\n");
+        assert!(!runs().contains_key("unit-run-1"));
+        let page = oplog::journal(key).page(None, 10);
+        let entry = &page.entries[0];
+        assert_eq!(entry.name, "Run command");
+        assert_eq!(entry.target.as_deref(), Some("Unit"));
+        assert_eq!(entry.outcome, oplog::OperationOutcome::Succeeded);
+        assert_eq!(entry.runs.len(), 1);
+        assert_eq!(entry.runs[0].output, "hi\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancel_stops_a_run_and_only_that_one() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let key = "user-commands-unit-cancel";
+        // A cancel for a run that isn't going on is dropped, not kept for a later one.
+        cancel("unit-run-2");
+        assert!(!runs().contains_key("unit-run-2"));
+        let stopper = std::thread::spawn(|| {
+            for _ in 0..100 {
+                std::thread::sleep(Duration::from_millis(50));
+                if runs().contains_key("unit-run-2") {
+                    cancel("unit-run-2");
+                    return;
+                }
+            }
+        });
+        let run = execute(&prepared("sleep 30", key, dir.path()), "unit-run-2").unwrap();
+        stopper.join().unwrap();
+        assert!(run.cancelled);
+        assert_eq!(
+            oplog::journal(key).page(None, 10).entries[0].outcome,
+            oplog::OperationOutcome::Cancelled
+        );
     }
 }

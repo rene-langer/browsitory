@@ -600,3 +600,12 @@ fn windows_lookup_tries_pathext_and_skips_relative_entries() {
         None
     );
 }
+
+#[test]
+fn a_run_may_take_half_an_hour_and_keeps_256_kib_of_output() {
+    assert_eq!(
+        git_core::user_command::RUN_TIMEOUT,
+        Duration::from_secs(1800)
+    );
+    assert_eq!(git_core::user_command::OUTPUT_LIMIT, 262_144);
+}
