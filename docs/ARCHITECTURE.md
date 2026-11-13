@@ -76,7 +76,10 @@ Requests are never retained for replay, because repository methods include mutat
 completion is unknowable after transport loss. A later repository request makes one fresh spawn
 attempt; a synchronous spawn failure moves to `failed`, rejects that request, and waits for a
 later user retry rather than scheduling background restarts. Panel closure and extension
-deactivation dispose the webview listener and bridge, kill a live child, and drain pending ids.
+deactivation dispose the webview listener and bridge and drain pending ids. A live child's stdin
+is ended rather than the child killed (#961): the sidecar then lets its running request threads
+finish before it exits, since one cut off in a libgit2 write leaves `.git/index.lock` behind. The
+bridge kills it only if it is still running after `SIDECAR_EXIT_GRACE_MS` (5 s).
 
 **Host requests and notifications (#677, #678, #679, #759).** The extension host asks the
 webview to open repositories, show a file's or lines' history, select a commit (from the Timeline
