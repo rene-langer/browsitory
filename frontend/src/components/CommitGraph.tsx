@@ -408,6 +408,8 @@ function CommitGraphContent({
       isHead ? headReword : item("Reword…", checks.Reword, (onto) => onRewordCommit?.(commitId, onto)),
       // Stops at the commit with its changes staged (#882).
       item("Edit commit…", checks.Edit, edit({ kind: "Edit" })),
+      // The same stop, to commit the changes as several parts (#884).
+      item("Split commit…", checks.Split, edit({ kind: "Split" })),
       item("Squash with parent", checks.Squash, edit({ kind: "Squash" })),
       item("Fixup into parent", checks.Fixup, edit({ kind: "Fixup" })),
       item("Move up", checks.MoveUp, edit({ kind: "MoveUp" })),

@@ -98,6 +98,7 @@ RebaseInfo/Diverged-HeadMoved key-order
 RebaseInfo/Diverged-OtherOperation key-order
 RebaseInfo/Editing key-order
 RebaseInfo/Paused key-order
+RebaseInfo/Splitting key-order
 RebasePlanCommit/plain key-order
 RebaseStepResult/Conflicted key-order
 ReflogEntry/no-summary key-order

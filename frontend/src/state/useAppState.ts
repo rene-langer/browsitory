@@ -170,6 +170,12 @@ export interface AppState {
   // A switch that local changes refused, with the files in the way, for the Stash and switch
   // dialog (#653).
   switchConflict: { branchName: string; files: string[] } | null;
+  // Continue at an edit stop refused for changes not staged, with those files, for the rest
+  // dialog: commit them, discard them, or cancel (#884).
+  editRest: string[] | null;
+  // The commit Split commit… stopped at in this session, so the stop reads "Splitting" before
+  // its first part (#884).
+  splitting: string | null;
   // The last Stash and switch, for its toast (#653).
   stashSwitchOutcome: { branchName: string; outcome: StashSwitchOutcome } | null;
   // A commit or amend refused for lack of a git identity: the identity dialog shows (#689).
@@ -337,6 +343,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     pendingPull: null,
     pullOutcome: null,
     switchConflict: null,
+    editRest: null,
+    splitting: null,
     stashSwitchOutcome: null,
     identityRequired: null,
     mergeOutcome: null,

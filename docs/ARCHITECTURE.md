@@ -1382,7 +1382,7 @@ certificate.
   `Edit` mean the step at `cursor` is applied to the index; `Error` means it isn't.
   `cursor == plan.len()` after a failed `finish`.
 - **Persistence**: `repo-service`'s `RebaseStore` (`worker/rebase_store.rs`) writes
-  `<gitdir>/browsitory/rebase.json` (per worktree, `version` 1, camelCase, temp file +
+  `<gitdir>/browsitory/rebase.json` (per worktree, `version` 3, camelCase, temp file +
   `sync_all` + rename) when a start or Continue pauses or fails, deletes it on `Done` and after a
   successful Abort, and is read on every use (no cache), so a restarted or respawned worker and
   the other app see the same rebase. On load the plan must be non-empty with `cursor <=
@@ -1409,6 +1409,19 @@ certificate.
   commit as a `Fixup` right after the target. `RebaseState::fold_base` (`foldBase` in
   `rebase.json`, format version 2) is the tip before the fold: Abort and a failed start move the
   branch back there (a soft reset), so the changes are staged again.
+- **Split a commit** (#884): `rebase_commit_part` commits the index at an Edit step's stop as a
+  part (the edited commit's author, no hooks, signed like a step), moves `expected_head` to it
+  and counts it in `RebaseState::split_parts` (`splitParts` in `rebase.json`, format version 3;
+  `RebaseInfo.split_parts` while editing). The pick's `CHERRY_PICK_HEAD` stays, so the stop is
+  still this rebase's own paused pick. Continue then lands what is staged as the last part, or,
+  with nothing staged, ends the step without a commit: after parts, no last part; without
+  any, the commit is dropped (owner decision: nothing of it is left). Refused at a commit
+  that squash/fixup steps fold into (they would fold the parts back together).
+- **An edit stop's rest** (#884, owner decision: no silent carry-over): `edit_rest` lists the
+  unstaged changes to tracked files and the untracked files at paths the edited commit changes.
+  Continue at an edit stop refuses with `RestLeft` (`ErrorKind::RestLeft`; `get_edit_rest`
+  names the files) unless `rebase_continue_with_rest` gets `EditRest::Commit` (`stage_paths`,
+  then land) or `Discard` (`discard_all_unstaged`, as Discard does).
 - **Continue** (`rebase_continue`; `rebase_continue_with_message` passes a message for the step
   it lands from the index, refusing an empty one, which is how Edit commit… recommits under an
   edited message, #882):
@@ -1726,7 +1739,11 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   written through a second, normal handle (so the file system filter sees it), opened by its
   file ID (`FILE_OPEN_BY_FILE_ID`, so a link swapped in under the name isn't followed; by name
   only where the file system has no opens by ID: FAT/exFAT, which have no links, and SMB
-  shares) and accepted only with the same file ID. Leaves are opened for reading with no more
+  shares) and accepted only with the same file ID. Known limit (#228): that by-name open of a
+  file reopened through the filter follows a symbolic link swapped in under the name
+  meanwhile; the file ID check refuses the handle, so nothing is read or written through it,
+  but the link's target, possibly remote (local-to-remote links are allowed by default), has
+  been opened. Leaves are opened for reading with no more
   access than attributes, so a file whose ACL denies writing still reads; acts that may delete
   ask for `DELETE` and, where the ACL allows it, `FILE_WRITE_ATTRIBUTES`. A write classifies
   the leaf for reading and probes it for writing, but its rename replaces the old file, which
@@ -1769,8 +1786,11 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   still fails (not possible when the ACL denies `FILE_WRITE_ATTRIBUTES`). Tests turn a held
   folder into a junction in place (`FSCTL_SET_REPARSE_POINT`) during a write, a read and a
   folder creation (#164, #193), and use a work tree through the admin share
-  `\\localhost\C$\…` (SMB). Hand-declared `kernel32` and `ntdll` imports, no new dependency. A
-  `Step` seam in both walkers makes the races deterministic in tests.
+  `\\localhost\C$\…` (SMB). On CI the windows-latest job also mounts FAT32, exFAT and ReFS
+  VHDs (`scripts/ci-windows-test-volumes.ps1`, #228) for the by-name and classic fallbacks
+  and ReFS's attribute bits. Hand-declared `kernel32` and `ntdll` imports, no new dependency. A
+  `Step` seam in both walkers makes the races deterministic in tests; on Windows it also marks
+  the moment between classifying a leaf and reopening it (`Step::Classified`, #228).
 - `write_beneath` replaces the file whole and never truncates it first (#239). It writes a new
   temporary file `.{name}.browsitory-{pid}-{n}.tmp` (at most 64 bytes or UTF-16 units of the
   name) in the held parent, flushes it (`sync_all`) and renames it over the name in that same
@@ -1784,7 +1804,8 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   name is the existing entry's own spelling (a `readdir` of the held parent: the exact name,
   else the single entry equal ignoring case, `fold_name`). Windows: the leaf is classified as
   before; an existing file must reopen for reading and writing by its file ID (read-only →
-  #209), its settable attributes (`FileBasicInfo`) are copied to the temporary file, and its
+  #209), its settable attributes (`FileBasicInfo`; ReFS's no-scrub-data among them, #228,
+  while an integrity stream comes from the folder) are copied to the temporary file, and its
   on-disk name comes from `GetFinalPathNameByHandleW` when that equals the leaf ignoring case
   (else the leaf as given: a short 8.3 name, or another name of a hardlinked file in the same
   folder), or for a hardlinked file whose final path is in another folder from its name entry

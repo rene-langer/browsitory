@@ -100,7 +100,6 @@ EXCEPTIONS: tuple[LicenseException, ...] = (
     LicenseException("lightningcss", "1", "MPL-2.0", "Vite's CSS minifier; build tool, its output isn't covered"),
     LicenseException("lightningcss-*-*", "1", "MPL-2.0", "lightningcss's per-platform native binaries"),
     LicenseException("caniuse-lite", "1", "CC-BY-4.0", "browser support data for browserslist (eslint-plugin-react-hooks > @babel/core)"),
-    LicenseException("mdn-data", "2", "CC0-1.0", "CSS data for css-tree (jsdom, tests only)"),
     LicenseException("spdx-license-ids", "3", "CC0-1.0", "SPDX id list for package metadata tools (@wdio/cli)"),
     LicenseException("spdx-exceptions", "2", "CC-BY-3.0", "SPDX exception list for package metadata tools (@wdio/cli)"),
     LicenseException("stream-buffers", "3", "Unlicense", "@wdio/local-runner (e2e only)"),

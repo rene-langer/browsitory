@@ -16,6 +16,7 @@ export function RebaseProgressPanel({
   abortDisabled = false,
   hooks,
   message,
+  commitPart,
 }: {
   currentStep: number;
   totalSteps: number;
@@ -33,6 +34,11 @@ export function RebaseProgressPanel({
   hooks?: { running: { operationId: string; hook: string } | null; onCancel: () => void };
   /** An edit stop's message for the recommitted commit, editable (Edit commit…, #882). */
   message?: { value: string; onChange: (value: string) => void };
+  /**
+   * Split a commit (#884): "Commit part" commits what is staged as a part, under the message
+   * box's text; disabled while the box is empty.
+   */
+  commitPart?: { onCommit: () => void; disabled: boolean };
 }) {
   return (
     <Panel title={title}>
@@ -57,6 +63,11 @@ export function RebaseProgressPanel({
       )}
       {hooks?.running != null && <HookStatus running={hooks.running} onCancel={hooks.onCancel} />}
       <Toolbar>
+        {commitPart !== undefined && (
+          <button type="button" onClick={commitPart.onCommit} disabled={commitPart.disabled}>
+            Commit part
+          </button>
+        )}
         <button
           onClick={onContinue}
           disabled={disabled}

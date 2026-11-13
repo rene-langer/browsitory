@@ -180,6 +180,12 @@ pub fn errors() -> Cases<repo_service::wire::ErrorDto> {
             "MissingIdentity",
             ErrorDto::from_error(git_core::commit::CommitError::MissingIdentity),
         ),
+        case(
+            "RestLeft",
+            ErrorDto::from_error(git_core::rebase::RebaseError::RestLeft {
+                paths: vec!["c.txt".into()],
+            }),
+        ),
     ];
     assert_every_variant!(
         cases
@@ -198,6 +204,7 @@ pub fn errors() -> Cases<repo_service::wire::ErrorDto> {
         ErrorKind::PermissionDenied,
         ErrorKind::LocalChanges,
         ErrorKind::MissingIdentity,
+        ErrorKind::RestLeft,
     );
     cases
 }
@@ -1450,6 +1457,7 @@ fn rebase_info(health: RebaseHealth) -> git_core::repo::RebaseInfo {
         total_steps: 4,
         health,
         editing: None,
+        split_parts: 0,
     }
 }
 
@@ -1461,6 +1469,15 @@ pub fn rebase_infos() -> Cases<git_core::repo::RebaseInfo> {
             "Editing",
             git_core::repo::RebaseInfo {
                 editing: Some("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".to_string()),
+                ..rebase_info(RebaseHealth::Paused)
+            },
+        ),
+        // A split with parts committed (#884).
+        case(
+            "Splitting",
+            git_core::repo::RebaseInfo {
+                editing: Some("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".to_string()),
+                split_parts: 2,
                 ..rebase_info(RebaseHealth::Paused)
             },
         ),

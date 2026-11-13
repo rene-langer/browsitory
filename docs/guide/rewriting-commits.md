@@ -53,7 +53,7 @@ amend starts without the chips you added for your next commit and gives them bac
 
 ## Editing older commits
 
-The commit menu has seven one-click edits for commits of the current branch:
+The commit menu has eight one-click edits for commits of the current branch:
 
 - **Reword…** changes the commit's message.
 - **Edit commit…** stops at the commit with its changes staged on its parent. The status strip
@@ -61,6 +61,13 @@ The commit menu has seven one-click edits for commits of the current branch:
   the message in the commit area if you like, then **Continue**: the staged result is committed
   with that message (and the commit's author), and the commits after it are replayed.
   **Abort rebase** puts the branch back as it was.
+- **Split commit…** stops the same way, to commit the changes as several commits. Unstage what
+  belongs in a later commit, write the first commit's message in the commit area (it offers the
+  original one) and click **Commit part**; the box is then empty for the next part. Stage the
+  next part, write its message, and so on. **Continue** commits what is still staged as the
+  last part, or nothing more when every change went into a part, then replays the commits after
+  it. Every part keeps the original commit's author. The status strip says "Splitting 1a2b3c4:
+  commit each part, then Continue". Edit commit… has **Commit part** too.
 - **Squash with parent** combines the commit with the one below it. The result keeps the
   parent's author and has both messages, the parent's first.
 - **Fixup into parent** combines them too, but keeps only the parent's message.
@@ -71,7 +78,17 @@ Each one is a small interactive rebase (see [Rebase](rebase.md)): the commits af
 one are rewritten, so they get new ids. A conflict pauses it like any rebase: the progress panel
 shows **Continue rebase** and **Abort rebase**, the paused rebase survives a restart, and Abort
 puts the branch back as it was. A finished edit is one **Undo** step named after the edit
-("Drop 1a2b3c4", "Squash 1a2b3c4 into its parent", "Move 1a2b3c4 up", "Edit 1a2b3c4").
+("Drop 1a2b3c4", "Squash 1a2b3c4 into its parent", "Move 1a2b3c4 up", "Edit 1a2b3c4",
+"Split 1a2b3c4").
+
+**Changes left over when you continue.** At an edit stop, **Continue** commits only what is
+staged. When a tracked file still has changes that aren't staged, or a file the commit added is
+no longer staged, Continue asks what to do with them: **Commit the rest** stages them and
+commits them with the commit (the last part of a split), **Discard the rest** throws them away
+(the history then doesn't have them; Undo of the whole edit brings them back), or **Cancel** to
+go back and stage what belongs where. Untracked files of your own don't count. When nothing
+of the commit is left (nothing staged, and nothing unstaged either), Continue drops the commit,
+as **Drop** would; **Undo** brings it back.
 
 **Fold staged changes into this commit.** While you have changes staged, the commit menu (and
 the palette) also offers to fold them into a commit of the current branch, like `git commit

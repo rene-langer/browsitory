@@ -2,7 +2,7 @@ import { IdentityDialog } from "./IdentityDialog";
 import { useCallback, useEffect, useState } from "react";
 import type { GraphCommit, HeadInfo, RepoClient } from "../ipc/RepoClient";
 import { messageHistoryEntries, readCommitMessages, recentBranchCommits } from "../lib/commitMessageHistory";
-import { conflictReason, rebaseInterruption, sequenceNoun } from "../lib/operationStatus";
+import { conflictReason, isSplitting, rebaseInterruption, sequenceNoun } from "../lib/operationStatus";
 import { useCommitMessageSettingsContext } from "../state/useCommitMessageSettings";
 import { useWorkspaceActions } from "../state/useWorkspaceActions";
 import { CommitBox, type CommitDraft } from "./CommitBox";
@@ -53,6 +53,8 @@ export function CommitDock({
     onSequenceAbort,
     onRebaseContinue,
     onRebaseEditMessage,
+    onRebaseCommitPart,
+    splittingCommit = null,
     onRebaseAbort,
     onCommit,
     onAbortMerge,
@@ -120,10 +122,21 @@ export function CommitDock({
   }, [editing, client, repoPath, onRebaseEditMessage]);
   const shownEditMessage = editMessage !== null && editMessage.commitId === editing ? editMessage : null;
   const emptyEditMessage = shownEditMessage !== null && shownEditMessage.text.trim() === "";
+  // Split a commit (#884): after a part, an empty box continues without a message of its own.
+  const splitParts = headInfo.rebase?.splitParts ?? 0;
+  const splitting = isSplitting(headInfo.rebase, splittingCommit);
   const rebaseBlockedReason =
     rebaseInterruption(headInfo.rebase) ??
     conflictReason(conflictCount) ??
-    (emptyEditMessage ? "Write a commit message." : undefined);
+    (emptyEditMessage && splitParts === 0 ? "Write a commit message." : undefined);
+  const commitPart = async () => {
+    if (shownEditMessage === null || onRebaseCommitPart === undefined) return;
+    const committed = await onRebaseCommitPart(shownEditMessage.text);
+    if (!committed) return;
+    // The next part starts from an empty box; Continue then sends no message unless one is typed.
+    setEditMessage({ commitId: shownEditMessage.commitId, original: "", text: "" });
+    onRebaseEditMessage?.(null);
+  };
   return (
     <div className={styles.commitDock} role="group" aria-label="Commit actions">
       {headInfo.sequence !== null ? (
@@ -153,7 +166,7 @@ export function CommitDock({
           disabledReason={rebaseBlockedReason}
           onContinue={onRebaseContinue}
           onAbort={onRebaseAbort}
-          title={editing === null ? undefined : `Editing ${editing.slice(0, 7)}`}
+          title={editing === null ? undefined : `${splitting ? "Splitting" : "Editing"} ${editing.slice(0, 7)}`}
           message={
             shownEditMessage === null
               ? undefined
@@ -163,6 +176,14 @@ export function CommitDock({
                     setEditMessage({ ...shownEditMessage, text });
                     onRebaseEditMessage?.(text === shownEditMessage.original ? null : text);
                   },
+                }
+          }
+          commitPart={
+            shownEditMessage === null || onRebaseCommitPart === undefined
+              ? undefined
+              : {
+                  onCommit: () => void commitPart(),
+                  disabled: emptyEditMessage || rebaseInterruption(headInfo.rebase) !== undefined,
                 }
           }
         />

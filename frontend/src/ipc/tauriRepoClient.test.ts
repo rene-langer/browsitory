@@ -641,7 +641,7 @@ describe("tauriRepoClient rebase wiring", () => {
         onto: "def",
         currentStep: 1,
         totalSteps: 2,
-        editing: null,
+        editing: null, splitParts: 0,
         health: { kind: "Diverged", reason: "BranchMissing" },
       },
       bisect: { startedFrom: "main" },

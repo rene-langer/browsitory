@@ -322,6 +322,12 @@ jobs:
       - name: Clippy
         if: env.RUN_STEPS == 'true'
         run: cargo clippy --workspace --all-targets -- -D warnings
+      # FAT32, exFAT and ReFS VHDs for git-core's Windows walker tests (#228), which fail on CI
+      # without them.
+      - name: Mount test volumes (Windows)
+        if: env.RUN_STEPS == 'true' && matrix.os == 'windows-latest'
+        shell: pwsh
+        run: scripts/ci-windows-test-volumes.ps1
       - name: Test
         if: env.RUN_STEPS == 'true'
         run: cargo test --workspace

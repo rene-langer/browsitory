@@ -121,6 +121,7 @@ pub(super) fn start_rebase_label(onto: &str, edit: Option<&HistoryEdit>) -> Stri
         HistoryEditKind::MoveDown => format!("Move {id} down"),
         HistoryEditKind::Drop => format!("Drop {id}"),
         HistoryEditKind::Edit => format!("Edit {id}"),
+        HistoryEditKind::Split => format!("Split {id}"),
     }
 }
 
@@ -1198,6 +1199,7 @@ mod tests {
             (HistoryEditKind::MoveDown, "Move 1a2b3c4 down"),
             (HistoryEditKind::Drop, "Drop 1a2b3c4"),
             (HistoryEditKind::Edit, "Edit 1a2b3c4"),
+            (HistoryEditKind::Split, "Split 1a2b3c4"),
         ];
         for (kind, expected) in cases {
             let edit = HistoryEdit {

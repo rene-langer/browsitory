@@ -1061,6 +1061,29 @@ fn a_then_b_changing_f(dir: &std::path::Path, repo: &git2::Repository) -> (Strin
     (onto, ids)
 }
 
+/// As `a_then_b_changing_f`, with b also adding g.txt ("g from b\n"): an untracked g.txt is in
+/// the way of b's pick. Continue at an Edit stop refuses unstaged changes to tracked files
+/// (#884), so an untracked file is what can still be in the way of the next step.
+fn a_then_b_changing_f_adding_g(
+    dir: &std::path::Path,
+    repo: &git2::Repository,
+) -> (String, Vec<String>) {
+    write_file(dir, "f.txt", "base\n");
+    commit_all(repo, "base commit");
+    let onto = commit_id_at(repo, 0);
+    write_file(dir, "a.txt", "a\n");
+    commit_all(repo, "a");
+    write_file(dir, "f.txt", "from b\n");
+    write_file(dir, "g.txt", "g from b\n");
+    commit_all(repo, "b");
+    let ids = git_core::rebase::commits_since(repo, &onto)
+        .unwrap()
+        .into_iter()
+        .map(|c| c.id)
+        .collect();
+    (onto, ids)
+}
+
 /// `git cherry-pick --abort` in a terminal: forget the pick and reset to HEAD.
 fn abort_pick_outside(repo: &git2::Repository) {
     repo.cleanup_state().unwrap();
@@ -1072,19 +1095,19 @@ fn abort_pick_outside(repo: &git2::Repository) {
 #[test]
 fn continue_after_an_error_stop_retries_the_step_instead_of_committing_it_empty() {
     let (dir, repo) = init_repo();
-    let (onto, ids) = a_then_b_changing_f(dir.path(), &repo);
+    let (onto, ids) = a_then_b_changing_f_adding_g(dir.path(), &repo);
     let (mut state, result) =
         git_core::rebase::start_rebase(&repo, &onto, vec![edit(&ids[0]), pick(&ids[1])]).unwrap();
     assert_eq!(result, RebaseStepResult::PausedForEdit);
 
-    // A local edit in the way of b: a lands, b's cherry-pick is refused.
-    write_file(dir.path(), "f.txt", "local\n");
+    // A local file in the way of b: a lands, b's cherry-pick is refused.
+    write_file(dir.path(), "g.txt", "local\n");
     assert!(git_core::rebase::rebase_continue(&repo, &mut state).is_err());
     assert_eq!(state.stop, RebaseStop::Error);
     assert_eq!(state.cursor, 1);
     assert_eq!(repo.state(), git2::RepositoryState::Clean);
 
-    write_file(dir.path(), "f.txt", "base\n");
+    std::fs::remove_file(dir.path().join("g.txt")).unwrap();
     let result = git_core::rebase::rebase_continue(&repo, &mut state).unwrap();
 
     assert_eq!(result, RebaseStepResult::Done);
@@ -1322,16 +1345,18 @@ fn continue_adopts_a_squash_member_and_still_collapses_the_group() {
 #[test]
 fn continue_does_not_adopt_after_an_error_stop() {
     let (dir, repo) = init_repo();
-    let (onto, ids) = a_then_b_changing_f(dir.path(), &repo);
+    let (onto, ids) = a_then_b_changing_f_adding_g(dir.path(), &repo);
     let (mut state, _) =
         git_core::rebase::start_rebase(&repo, &onto, vec![edit(&ids[0]), pick(&ids[1])]).unwrap();
-    write_file(dir.path(), "f.txt", "local\n");
+    write_file(dir.path(), "g.txt", "local\n");
     assert!(git_core::rebase::rebase_continue(&repo, &mut state).is_err());
     assert_eq!(state.stop, RebaseStop::Error);
     // A commit with b's author on top of the stop, but b was never applied by the rebase.
     write_file(dir.path(), "f.txt", "from b\n");
+    write_file(dir.path(), "g.txt", "g from b\n");
     let mut index = repo.index().unwrap();
     index.add_path(std::path::Path::new("f.txt")).unwrap();
+    index.add_path(std::path::Path::new("g.txt")).unwrap();
     index.write().unwrap();
     commit_by_hand(&repo, &author_of(&repo, &ids[1]), "b");
 

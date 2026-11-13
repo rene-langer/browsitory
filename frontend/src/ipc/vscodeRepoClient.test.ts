@@ -18,7 +18,7 @@ const DIVERGED_HEAD: HeadInfo = {
     onto: "def",
     currentStep: 2,
     totalSteps: 3,
-    editing: null,
+    editing: null, splitParts: 0,
     health: { kind: "Diverged", reason: "HeadMoved" },
   },
   bisect: null, terminalSequence: null,
@@ -1318,6 +1318,38 @@ describe("vscodeRepoClient", () => {
     });
     respond(6, { kind: "Done" });
     await expect(messagePromise).resolves.toEqual({ kind: "Done" });
+  });
+
+  it("wires rebaseCommitPart, getEditRest and Continue's rest (#884)", async () => {
+    const partPromise = vscodeRepoClient.rebaseCommitPart("/repo", "Part\n");
+    expect(postMessage).toHaveBeenLastCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "rebase_commit_part",
+      params: { repoPath: "/repo", message: "Part\n" },
+    });
+    respond(1, "abc");
+    await expect(partPromise).resolves.toBe("abc");
+
+    const restPromise = vscodeRepoClient.getEditRest("/repo");
+    expect(postMessage).toHaveBeenLastCalledWith({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "get_edit_rest",
+      params: { repoPath: "/repo" },
+    });
+    respond(2, ["c.txt"]);
+    await expect(restPromise).resolves.toEqual(["c.txt"]);
+
+    const continuePromise = vscodeRepoClient.rebaseContinue("/repo", undefined, "Discard");
+    expect(postMessage).toHaveBeenLastCalledWith({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "rebase_continue",
+      params: { repoPath: "/repo", rest: "Discard" },
+    });
+    respond(3, { kind: "Done" });
+    await expect(continuePromise).resolves.toEqual({ kind: "Done" });
   });
 
   it("wires detectForgeRepository, saveForgeToken, and forgetForgeToken", async () => {
