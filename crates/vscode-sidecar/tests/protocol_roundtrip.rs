@@ -3446,6 +3446,7 @@ fn a_paused_rebase_survives_a_sidecar_restart() {
             "totalSteps": 2,
             "health": { "kind": "Paused" },
             "editing": a,
+            "splitParts": 0,
         })
     );
     let done = sidecar.call(
