@@ -150,6 +150,32 @@ describe("Browsitory one-click history edits", () => {
     expect(git("status", "--porcelain", "--untracked-files=no")).toBe("");
   });
 
+  // Edit an older commit (#882, #885): the stop has the commit's changes staged on its parent;
+  // a changed file staged there goes into the commit, and Continue replays the rest.
+  it("edits an older commit's file and continues: the history keeps the edit", async () => {
+    commitFile("edit-older.txt", "first\n", "e2e: edit older");
+    commitFile("edit-newer.txt", "newer\n", "e2e: edit newer");
+    await browser.refresh();
+
+    await chooseFromCommitMenu(idOf("e2e: edit older"), "Edit commit…");
+    await waitUntilInPage("[role='status'][aria-label='Operation status']", "Editing ", {
+      contains: true,
+      timeout: SLOW_UI_TIMEOUT,
+    });
+    fs.writeFileSync(path.join(E2E_REPO_PATH, "edit-older.txt"), "first, edited\n");
+    git("add", "edit-older.txt");
+    await clickInPage("[role='status'][aria-label='Operation status'] button", "Continue");
+
+    await browser.waitUntil(() => git("rev-parse", "--abbrev-ref", "HEAD") !== "HEAD", {
+      timeout: SLOW_UI_TIMEOUT,
+      timeoutMsg: "the edit never finished: HEAD is still detached",
+    });
+    await waitForSubjects(["e2e: edit newer", "e2e: edit older"]);
+    expect(git("show", `${idOf("e2e: edit older")}:edit-older.txt`)).toBe("first, edited");
+    expect(git("show", "HEAD:edit-newer.txt")).toBe("newer");
+    expect(git("status", "--porcelain", "--untracked-files=no")).toBe("");
+  });
+
   it("pauses a move that conflicts, and Abort puts the branch back", async () => {
     commitFile("edit-move.txt", "one\n", "e2e: move base");
     commitFile("edit-move.txt", "two\n", "e2e: move first");
