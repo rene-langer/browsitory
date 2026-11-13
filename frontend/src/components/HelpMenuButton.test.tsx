@@ -29,6 +29,7 @@ describe("HelpMenuButton (#647)", () => {
       "User guide",
       // The `?` that opens the sheet, as a hint after the label (#645).
       "Keyboard shortcuts?",
+      "Operation log",
       "What’s new",
     ]);
     expect(screen.getByRole("menuitem", { name: "Keyboard shortcuts" })).toHaveAttribute("aria-keyshortcuts", "?");
@@ -56,6 +57,16 @@ describe("HelpMenuButton (#647)", () => {
     stop();
   });
 
+  it("asks the active workspace for the operation log (#889)", () => {
+    const listener = vi.fn();
+    const stop = onWorkspaceRequest(listener);
+    const { button } = setup();
+    fireEvent.click(button);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Operation log" }));
+    expect(listener).toHaveBeenCalledWith("operationLog");
+    stop();
+  });
+
   it("leaves out the shortcuts without a repository open", () => {
     const { button } = setup(false);
     fireEvent.click(button);
@@ -69,6 +80,7 @@ describe("HelpMenuButton (#647)", () => {
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
       "User guide",
       "Keyboard shortcuts?",
+      "Operation log",
       "What’s new",
       "Check for updates",
     ]);

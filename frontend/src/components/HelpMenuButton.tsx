@@ -5,9 +5,9 @@ import { requestWorkspace } from "../lib/workspaceRequests";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 
 /**
- * The header's Help menu (#647): the user guide, the keyboard shortcut sheet (while a repository
- * is open: the active workspace owns it), what's new and, in the desktop app, Check for updates
- * (#852).
+ * The header's Help menu (#647): the user guide, the keyboard shortcut sheet and the operation log
+ * (#889; both while a repository is open: the active workspace owns them), what's new and, in the
+ * desktop app, Check for updates (#852).
  */
 export function HelpMenuButton({
   className,
@@ -28,7 +28,10 @@ export function HelpMenuButton({
   const items: ContextMenuItem[] = [
     { label: "User guide", onSelect: onOpenUserGuide },
     ...(shortcuts
-      ? [{ label: "Keyboard shortcuts", onSelect: () => requestWorkspace("shortcuts"), shortcut: "?", ariaKeyShortcuts: "?" }]
+      ? [
+          { label: "Keyboard shortcuts", onSelect: () => requestWorkspace("shortcuts"), shortcut: "?", ariaKeyShortcuts: "?" },
+          { label: "Operation log", onSelect: () => requestWorkspace("operationLog") },
+        ]
       : []),
     { label: "What’s new", onSelect: onShowReleaseNotes },
     ...(onCheckForUpdates !== undefined ? [{ label: "Check for updates", onSelect: onCheckForUpdates }] : []),
