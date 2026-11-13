@@ -3,6 +3,7 @@
 //! Phase 1 scope: a recent-repos list backed by a single TOML file in the OS config
 //! directory. See `list_recent_repos`/`add_recent_repo`.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -251,6 +252,48 @@ pub struct FetchSettings {
 /// The longest "Fetch automatically" interval `set_fetch_settings_at` keeps (a day).
 pub const MAX_AUTO_FETCH_MINUTES: u32 = 24 * 60;
 
+/// The user's keyboard shortcuts (#898), persisted as the `[keybindings]` TOML table: each
+/// shortcut the user changed, by id (`refresh`, `conflict-ours`), with its keys as names such as
+/// `"mod+shift+k"` or `"F4"` (`mod` is Cmd on macOS, Ctrl elsewhere); an empty list is a shortcut
+/// without keys. The frontend owns the ids and the key names and drops what it can't use. An
+/// entry that is no list of strings is dropped on read, so a hand edit can't break the file. The
+/// VS Code extension ignores the table: VS Code's own keybindings apply there (#900).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct KeybindingSettings {
+    #[serde(deserialize_with = "deserialize_keybindings")]
+    pub overrides: BTreeMap<String, Vec<String>>,
+}
+
+impl KeybindingSettings {
+    fn is_empty(&self) -> bool {
+        self.overrides.is_empty()
+    }
+}
+
+/// `[keybindings]`, without the entries that are no list of strings.
+fn deserialize_keybindings<'de, D>(
+    deserializer: D,
+) -> Result<BTreeMap<String, Vec<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Entry {
+        Keys(Vec<String>),
+        Other(serde::de::IgnoredAny),
+    }
+    let entries = BTreeMap::<String, Entry>::deserialize(deserializer)?;
+    Ok(entries
+        .into_iter()
+        .filter_map(|(id, entry)| match entry {
+            Entry::Keys(keys) => Some((id, keys)),
+            Entry::Other(_) => None,
+        })
+        .collect())
+}
+
 /// Appearance preferences, persisted as the `[appearance]` TOML table (#615). `code_font` is a
 /// font family tried before the default monospace stack, and `code_font_size` the pixel size of
 /// file content; `None` keeps the built-in look for both. `tab_size` is the width of a tab in
@@ -360,8 +403,9 @@ struct ConfigFile {
     // `key = [...]` line that must stay ahead of the tables below.
     #[serde(default)]
     graph_collapse_merges: Vec<PathBuf>,
-    // `diff`, `tools`, `commit_message`, `fetch`, `appearance` and `updates` serialize as TOML
-    // tables (`[diff]`, `[tools]`, `[commit_message]`, `[fetch]`, `[appearance]`, `[updates]`).
+    // `diff`, `tools`, `commit_message`, `fetch`, `appearance`, `updates` and `keybindings`
+    // serialize as TOML tables (`[diff]`, `[tools]`, `[commit_message]`, `[fetch]`,
+    // `[appearance]`, `[updates]`, `[keybindings]`).
     // Tables must follow plain `key = value` lines, so they sit after the plain keys.
     // The fields after it serialize as TOML array-of-tables because their element type is a
     // struct. TOML requires plain `key = value` lines and tables to precede an array-of-tables
@@ -378,6 +422,8 @@ struct ConfigFile {
     appearance: AppearanceSettings,
     #[serde(default)]
     updates: UpdateSettings,
+    #[serde(default, skip_serializing_if = "KeybindingSettings::is_empty")]
+    keybindings: KeybindingSettings,
     #[serde(default, deserialize_with = "deserialize_open_repos")]
     open_repos: Vec<OpenRepoEntry>,
     #[serde(default)]
@@ -1061,5 +1107,27 @@ pub fn set_repo_alias_at(
             alias: alias.to_string(),
         });
     }
+    write_config(config_file, &config)
+}
+
+pub fn get_keybinding_settings() -> Result<KeybindingSettings, ConfigError> {
+    get_keybinding_settings_at(&config_file_path()?)
+}
+
+pub fn set_keybinding_settings(settings: &KeybindingSettings) -> Result<(), ConfigError> {
+    set_keybinding_settings_at(&config_file_path()?, settings)
+}
+
+pub fn get_keybinding_settings_at(config_file: &Path) -> Result<KeybindingSettings, ConfigError> {
+    Ok(read_config(config_file)?.keybindings)
+}
+
+/// Persists `settings`; no overrides leave no `[keybindings]` table.
+pub fn set_keybinding_settings_at(
+    config_file: &Path,
+    settings: &KeybindingSettings,
+) -> Result<(), ConfigError> {
+    let mut config = read_config(config_file)?;
+    config.keybindings = settings.clone();
     write_config(config_file, &config)
 }

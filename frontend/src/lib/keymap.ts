@@ -10,6 +10,8 @@ import {
   type BindableId,
   type KeyChord,
 } from "./keybindings";
+import type { KeybindingSettings, RepoClient } from "../ipc/RepoClient";
+import { logFailure } from "./logger";
 import { isApplePlatform, isVscodeHost } from "./platform";
 
 /**
@@ -17,9 +19,12 @@ import { isApplePlatform, isVscodeHost } from "./platform";
  * key, or none. `lib/keybindings.ts` reads them wherever it reads a shortcut's keys, so the
  * window shortcuts, the merge editor, the shortcut sheet, the palette and the tooltips follow.
  *
- * A per-machine preference in `localStorage`, like the other UI preferences (`lineStatsPreference.ts`).
- * Only the desktop app applies it: in VSCode the extension's keybindings run the shortcuts, and
- * VSCode's own Keyboard Shortcuts editor rebinds them (#900, owner decision).
+ * Kept in `config.toml`'s `[keybindings]` section with the other Preferences settings (owner
+ * decision), through `RepoClient.getKeybindingSettings`/`setKeybindingSettings`: each changed
+ * shortcut's keys as names such as "mod+shift+k" or "F4" (`chordToText`). `main.tsx` connects
+ * the desktop app's client once at start (`connectKeymap`). Only the desktop app applies them:
+ * in VSCode the extension's keybindings run the shortcuts, and VSCode's own Keyboard Shortcuts
+ * editor rebinds them (#900, owner decision).
  *
  * The reserved keys (owner decision) can't be given to any shortcut: copy, paste, cut, select
  * all, undo and redo (Ctrl/Cmd+C/V/X/A/Z/Y), Esc, Tab, Shift+Tab, Enter, Space, the arrow keys
@@ -29,8 +34,6 @@ import { isApplePlatform, isVscodeHost } from "./platform";
  */
 
 export type { BindableId };
-
-export const KEYMAP_STORAGE_KEY = "keybindings";
 
 export interface RebindableShortcut {
   id: BindableId;
@@ -161,12 +164,47 @@ function publish(): void {
   setUserChords(new Map(overrides));
 }
 
+/** Where the keys are kept; `null` until `connectKeymap` (and in tests that don't connect). */
+type KeymapStorage = Pick<RepoClient, "getKeybindingSettings" | "setKeybindingSettings">;
+
+let storage: KeymapStorage | null = null;
+// Set by a change: one made before the saved keys arrive wins over them.
+let changed = false;
+
+const MODIFIER_NAMES = ["mod", "ctrl", "alt", "shift"] as const;
+
+/** A chord as `config.toml` keeps it: "mod+shift+k", "ctrl+Tab", "F4", "?" ("mod++" for plus). */
+export function chordToText(chord: KeyChord): string {
+  return [...MODIFIER_NAMES.filter((name) => chord[name] === true), chord.key].join("+");
+}
+
+/** The chord a kept key name is; `null` for a name it can't be (an unknown modifier, no key). */
+export function chordFromText(text: string): KeyChord | null {
+  const plus = text.endsWith("++") || text === "+";
+  const parts = plus ? [...text.slice(0, -1).split("+").slice(0, -1), "+"] : text.split("+");
+  const key = parts[parts.length - 1];
+  if (key === undefined || key === "") return null;
+  if (key.length > 1 && !/^[A-Z][A-Za-z0-9]*$/.test(key)) return null;
+  const chord: KeyChord = { key };
+  for (const name of parts.slice(0, -1)) {
+    if (!(MODIFIER_NAMES as readonly string[]).includes(name)) return null;
+    chord[name as (typeof MODIFIER_NAMES)[number]] = true;
+  }
+  return normalize(chord);
+}
+
 function save(): void {
+  changed = true;
+  if (storage === null) return;
+  const settings: KeybindingSettings = {
+    overrides: Object.fromEntries([...overrides].map(([id, chords]) => [id, chords.map(chordToText)])),
+  };
+  // A failed save keeps the keys for this session.
+  const failed = (error: unknown) => logFailure("Saving the keyboard shortcuts failed", error);
   try {
-    if (overrides.size === 0) localStorage.removeItem(KEYMAP_STORAGE_KEY);
-    else localStorage.setItem(KEYMAP_STORAGE_KEY, JSON.stringify(Object.fromEntries(overrides)));
-  } catch {
-    // Blocked storage: the keys still apply until the app restarts.
+    storage.setKeybindingSettings(settings).catch(failed);
+  } catch (error) {
+    failed(error);
   }
 }
 
@@ -243,36 +281,46 @@ export function resetAllShortcuts(): void {
   publish();
 }
 
-function isChord(value: unknown): value is KeyChord {
-  if (typeof value !== "object" || value === null) return false;
-  const chord = value as Record<string, unknown>;
-  if (typeof chord.key !== "string" || chord.key === "") return false;
-  return ["mod", "ctrl", "alt", "shift"].every((flag) => chord[flag] === undefined || typeof chord[flag] === "boolean");
+/** The usable overrides among the kept ones: no unknown or fixed shortcut, no unknown or reserved key. */
+function usableOverrides(kept: KeybindingSettings["overrides"], apple: boolean): Overrides {
+  const usable: Overrides = new Map();
+  for (const [id, keys] of Object.entries(kept)) {
+    if (!REBINDABLE_IDS.has(id) || !Array.isArray(keys)) continue;
+    const parsed = keys.map((key) => (typeof key === "string" ? chordFromText(key) : null));
+    if (parsed.some((chord) => chord === null)) continue;
+    const bindable = id as BindableId;
+    const chords = withoutDuplicates(parsed as KeyChord[], apple);
+    if (chords.some((chord) => refused(bindable, chord, apple))) continue;
+    usable.set(bindable, chords);
+  }
+  return usable;
 }
 
 /**
- * Loads the saved keys, once at start. Drops what it can't use: unknown or fixed shortcuts,
- * malformed or reserved keys. In VSCode the built-in keys apply (#900).
+ * Connects the keymap to where the keys are kept and loads them, once at start (`main.tsx`).
+ * Drops what it can't use; an unreadable config keeps the built-in keys. In VSCode it neither
+ * reads nor saves (#900).
  */
-export function loadKeymap(apple: boolean = isApplePlatform()): void {
-  overrides = new Map();
-  if (!isVscodeHost()) {
-    let stored: unknown;
-    try {
-      stored = JSON.parse(localStorage.getItem(KEYMAP_STORAGE_KEY) ?? "null");
-    } catch {
-      stored = null;
-    }
-    if (typeof stored === "object" && stored !== null && !Array.isArray(stored)) {
-      for (const [id, value] of Object.entries(stored)) {
-        if (!REBINDABLE_IDS.has(id) || !Array.isArray(value) || !value.every(isChord)) continue;
-        const bindable = id as BindableId;
-        const chords = withoutDuplicates(value, apple);
-        if (chords.some((chord) => refused(bindable, chord, apple))) continue;
-        overrides.set(bindable, chords);
-      }
-    }
+export async function connectKeymap(keptIn: KeymapStorage, apple: boolean = isApplePlatform()): Promise<void> {
+  if (isVscodeHost()) return;
+  storage = keptIn;
+  let kept: KeybindingSettings;
+  try {
+    kept = await keptIn.getKeybindingSettings();
+  } catch (error) {
+    logFailure("Loading the keyboard shortcuts failed", error);
+    return;
   }
+  if (changed || storage !== keptIn) return;
+  overrides = usableOverrides(kept.overrides, apple);
+  publish();
+}
+
+/** Test-only: no storage, the built-in keys, nothing changed. */
+export function __resetKeymapForTests(): void {
+  storage = null;
+  changed = false;
+  overrides = new Map();
   publish();
 }
 

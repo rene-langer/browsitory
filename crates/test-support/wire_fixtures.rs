@@ -826,6 +826,26 @@ pub fn fetch_settings() -> Cases<config::FetchSettings> {
     ]
 }
 
+pub fn keybinding_settings() -> Cases<config::KeybindingSettings> {
+    vec![
+        case("none", config::KeybindingSettings::default()),
+        case(
+            "rebound",
+            config::KeybindingSettings {
+                overrides: [
+                    ("push".to_string(), vec![]),
+                    (
+                        "refresh".to_string(),
+                        vec!["F5".to_string(), "mod+alt+r".to_string()],
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            },
+        ),
+    ]
+}
+
 pub fn appearance_settings() -> Cases<config::AppearanceSettings> {
     vec![
         case("default", config::AppearanceSettings::default()),

@@ -1,7 +1,7 @@
 use repo_service::wire::ErrorDto;
 use repo_service::wire::{
     AppearanceSettingsDto, CommitMessageSettingsDto, DiffSettingsDto, FetchSettingsDto,
-    FontFamilyDto, UpdateSettingsDto,
+    FontFamilyDto, KeybindingSettingsDto, UpdateSettingsDto,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -50,6 +50,25 @@ pub(super) fn get_fetch_settings() -> Result<Value, ErrorDto> {
 
 pub(super) fn set_fetch_settings(params: SetFetchSettingsParams) -> Result<Value, ErrorDto> {
     config::set_fetch_settings(&params.settings.into()).map_err(ErrorDto::from_error)?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+pub(super) struct SetKeybindingSettingsParams {
+    settings: KeybindingSettingsDto,
+}
+
+/// The `[keybindings]` table (#898). The webview in VS Code never asks: VS Code's own
+/// keybindings apply there (#900). Answered like the desktop app, so the transports stay alike.
+pub(super) fn get_keybinding_settings() -> Result<Value, ErrorDto> {
+    let settings = config::get_keybinding_settings().map_err(ErrorDto::from_error)?;
+    serde_json::to_value(KeybindingSettingsDto::from(settings)).map_err(ErrorDto::from_error)
+}
+
+pub(super) fn set_keybinding_settings(
+    params: SetKeybindingSettingsParams,
+) -> Result<Value, ErrorDto> {
+    config::set_keybinding_settings(&params.settings.into()).map_err(ErrorDto::from_error)?;
     Ok(Value::Null)
 }
 

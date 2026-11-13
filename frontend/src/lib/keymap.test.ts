@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { KeybindingSettings } from "../ipc/RepoClient";
 import {
   chordsFor,
   matchMergeEditorShortcut,
@@ -10,14 +11,14 @@ import {
   type KeyChord,
 } from "./keybindings";
 import {
-  KEYMAP_STORAGE_KEY,
   addShortcutChord,
   chordConflict,
   chordFromEvent,
   effectiveChords,
   isCustomized,
   isReservedChord,
-  loadKeymap,
+  connectKeymap,
+  __resetKeymapForTests,
   rebindableShortcuts,
   removeShortcutChord,
   resetAllShortcuts,
@@ -31,8 +32,7 @@ const press = (
 ) => ({ key, code: "", altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, ...mods });
 
 afterEach(() => {
-  resetAllShortcuts();
-  localStorage.clear();
+  __resetKeymapForTests();
   delete document.documentElement.dataset.host;
 });
 
@@ -267,36 +267,69 @@ describe("recording a chord from a key press (#898)", () => {
   });
 });
 
-describe("persistence (#898)", () => {
-  it("saves the overrides and loads them back", () => {
-    setShortcutChords("refresh", [{ key: "F4" }]);
+// Owner decision on #898: the keys are kept in config.toml (`[keybindings]`), through the client.
+describe("persistence in config.toml (#898)", () => {
+  function fakeStorage(stored: Record<string, string[]> = {}) {
+    const saved: KeybindingSettings[] = [];
+    const storage = {
+      getKeybindingSettings: vi.fn(async (): Promise<KeybindingSettings> => ({ overrides: stored })),
+      setKeybindingSettings: vi.fn(async (settings: KeybindingSettings) => {
+        saved.push(settings);
+      }),
+    };
+    return { storage, saved };
+  }
+
+  it("saves the overrides as key names and loads them back", async () => {
+    const first = fakeStorage();
+    await connectKeymap(first.storage, false);
+    setShortcutChords("refresh", [{ key: "F4" }], false);
     removeShortcutChord("push", { mod: true, shift: true, key: "k" }, false);
-    const stored = JSON.parse(localStorage.getItem(KEYMAP_STORAGE_KEY) ?? "null");
-    expect(stored).toEqual({ refresh: [{ key: "F4" }], push: [] });
+    setShortcutChords("pull", [{ mod: true, alt: true, key: "p" }], false);
+    setShortcutChords("go-back", [{ ctrl: true, shift: true, key: "ArrowLeft" }], false);
+    setShortcutChords("show-shortcuts", [{ key: "?" }, { key: "/" }], false);
+    expect(first.saved.at(-1)).toEqual({
+      overrides: {
+        refresh: ["F4"],
+        push: [],
+        pull: ["mod+alt+p"],
+        "go-back": ["ctrl+shift+ArrowLeft"],
+        "show-shortcuts": ["?", "/"],
+      },
+    });
+
     // A new start: the module forgets, then loads what was saved.
-    const saved = localStorage.getItem(KEYMAP_STORAGE_KEY);
-    resetAllShortcuts();
-    expect(localStorage.getItem(KEYMAP_STORAGE_KEY)).toBeNull();
-    localStorage.setItem(KEYMAP_STORAGE_KEY, saved!);
-    loadKeymap();
+    __resetKeymapForTests();
+    expect(chordsFor("refresh", false)).toEqual([{ key: "F5" }]);
+    await connectKeymap(fakeStorage(first.saved.at(-1)!.overrides).storage, false);
     expect(chordsFor("refresh", false)).toEqual([{ key: "F4" }]);
     expect(chordsFor("push", false)).toEqual([]);
+    expect(chordsFor("pull", false)).toEqual([{ mod: true, alt: true, key: "p" }]);
+    expect(chordsFor("go-back", false)).toEqual([{ ctrl: true, shift: true, key: "ArrowLeft" }]);
+    expect(chordsFor("show-shortcuts", false)).toEqual([{ key: "?" }, { key: "/" }]);
     expect(effectiveChords("refresh", false)).toEqual([{ key: "F4" }]);
   });
 
-  it("drops what it can't use: unknown ids, malformed or reserved chords, fixed shortcuts", () => {
-    localStorage.setItem(
-      KEYMAP_STORAGE_KEY,
-      JSON.stringify({
-        refresh: [{ key: "F4" }],
-        bogus: [{ key: "F9" }],
-        push: [{ key: "Escape" }],
-        pull: "nope",
-        fetch: [{ key: "F8", mod: "yes" }],
-        "tab-by-number": [{ key: "F9" }],
-      }),
+  it("saves no override for keys back at the built-in ones", async () => {
+    const { storage, saved } = fakeStorage();
+    await connectKeymap(storage, false);
+    setShortcutChords("refresh", [{ key: "F4" }], false);
+    resetAllShortcuts();
+    expect(saved.at(-1)).toEqual({ overrides: {} });
+  });
+
+  it("drops what it can't use: unknown ids, unknown or reserved keys, fixed shortcuts", async () => {
+    await connectKeymap(
+      fakeStorage({
+        refresh: ["F4"],
+        bogus: ["F9"],
+        push: ["Escape"],
+        pull: ["mod+"],
+        fetch: ["hyper+F8"],
+        "tab-by-number": ["F9"],
+      }).storage,
+      false,
     );
-    loadKeymap();
     expect(chordsFor("refresh", false)).toEqual([{ key: "F4" }]);
     expect(chordsFor("push", false)).toEqual([{ mod: true, shift: true, key: "k" }]);
     expect(chordsFor("pull", false)).toEqual([{ mod: true, shift: true, key: "l" }]);
@@ -304,16 +337,39 @@ describe("persistence (#898)", () => {
     expect(chordsFor("tab-by-number", false)).toHaveLength(9);
   });
 
-  it("starts with the built-in keys from unreadable storage", () => {
-    localStorage.setItem(KEYMAP_STORAGE_KEY, "{not json");
-    expect(() => loadKeymap()).not.toThrow();
+  it("starts with the built-in keys when the settings can't be read", async () => {
+    const { storage } = fakeStorage();
+    storage.getKeybindingSettings.mockRejectedValue(new Error("broken config"));
+    await expect(connectKeymap(storage, false)).resolves.toBeUndefined();
     expect(chordsFor("refresh", false)).toEqual([{ key: "F5" }]);
   });
 
-  it("ignores the overrides in VSCode, whose own Keyboard Shortcuts editor rebinds there (#900)", () => {
-    localStorage.setItem(KEYMAP_STORAGE_KEY, JSON.stringify({ refresh: [{ key: "F4" }] }));
+  it("keeps a change for the session when saving fails", async () => {
+    const { storage } = fakeStorage();
+    storage.setKeybindingSettings.mockRejectedValue(new Error("read-only"));
+    await connectKeymap(storage, false);
+    expect(setShortcutChords("refresh", [{ key: "F4" }], false)).toEqual({ ok: true });
+    await Promise.resolve();
+    expect(chordsFor("refresh", false)).toEqual([{ key: "F4" }]);
+  });
+
+  it("keeps a change made before the saved keys arrive", async () => {
+    let answer: (settings: KeybindingSettings) => void = () => {};
+    const { storage, saved } = fakeStorage();
+    storage.getKeybindingSettings.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    const connected = connectKeymap(storage, false);
+    setShortcutChords("refresh", [{ key: "F4" }], false);
+    answer({ overrides: { refresh: ["F8"], fetch: ["F9"] } });
+    await connected;
+    expect(chordsFor("refresh", false)).toEqual([{ key: "F4" }]);
+    expect(saved.at(-1)).toEqual({ overrides: { refresh: ["F4"] } });
+  });
+
+  it("neither reads nor saves in VSCode, whose own Keyboard Shortcuts rebind there (#900)", async () => {
     document.documentElement.dataset.host = "vscode";
-    loadKeymap();
+    const { storage } = fakeStorage({ refresh: ["F4"] });
+    await connectKeymap(storage, false);
+    expect(storage.getKeybindingSettings).not.toHaveBeenCalled();
     expect(chordsFor("refresh", false)).toEqual([{ key: "F5" }]);
   });
 });

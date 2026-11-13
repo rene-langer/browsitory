@@ -198,6 +198,8 @@ methods!(|params, repos, stdout| {
     "set_commit_message_settings" => set_commit_message_settings(SetCommitMessageSettingsParams),
     "get_fetch_settings" => get_fetch_settings(),
     "set_fetch_settings" => set_fetch_settings(SetFetchSettingsParams),
+    "get_keybinding_settings" => get_keybinding_settings(),
+    "set_keybinding_settings" => set_keybinding_settings(SetKeybindingSettingsParams),
     "get_appearance_settings" => get_appearance_settings(),
     "set_appearance_settings" => set_appearance_settings(SetAppearanceSettingsParams),
     "list_font_families" => list_font_families(),

@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { KEYMAP_STORAGE_KEY, resetAllShortcuts, setShortcutChords } from "../lib/keymap";
+import { resetAllShortcuts, setShortcutChords } from "../lib/keymap";
 import { RepoError, type ConflictSegment, type RepoClient } from "../ipc/RepoClient";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import { fakeRepoClient } from "../test/fakeRepoClient";
@@ -728,7 +728,6 @@ describe("ConflictResolutionPane keyboard shortcuts", () => {
   describe("the user's keys (#898)", () => {
     afterEach(() => {
       resetAllShortcuts();
-      localStorage.removeItem(KEYMAP_STORAGE_KEY);
     });
 
     it("takes a choice and moves between conflicts with rebound keys", async () => {

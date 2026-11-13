@@ -4,7 +4,7 @@ import './index.css'
 import App from './App.tsx'
 import { UpdateBanner } from './components/UpdateBanner'
 import { installGlobalErrorLogging } from './lib/logger'
-import { loadKeymap } from './lib/keymap'
+import { connectKeymap } from './lib/keymap'
 import { tauriRepoClient } from './ipc/tauriRepoClient'
 import { thirdPartyNoticesLoader, thirdPartyNoticesUrl } from './lib/thirdPartyNotices'
 import { setHighlightTransport } from './lib/highlight'
@@ -13,7 +13,7 @@ import { workerTransport } from './lib/highlightWorkerProtocol'
 
 installGlobalErrorLogging(tauriRepoClient)
 // The user's keyboard shortcuts (#898), before anything shows or binds a key.
-loadKeymap()
+void connectKeymap(tauriRepoClient)
 // Syntax highlighting runs in a Web Worker (#843); on the page in chunks if it can't start.
 setHighlightTransport(
   workerTransport(
