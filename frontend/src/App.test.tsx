@@ -2404,7 +2404,9 @@ describe("App", () => {
         />,
       );
       const dock = await screen.findByRole("group", { name: "Commit actions" });
-      const message = await within(dock).findByRole("textbox", { name: "Commit message" });
+      // The rebase panel, not the commit box the dock shows before the head info has loaded.
+      const panel = await within(dock).findByRole("region", { name: "Editing c2" });
+      const message = await within(panel).findByRole("textbox", { name: "Commit message" });
       await waitFor(() => expect(message).toHaveValue("two\n"));
       fireEvent.change(message, { target: { value: "two, part 1\n" } });
 
