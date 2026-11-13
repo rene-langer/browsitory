@@ -271,3 +271,37 @@ fn redact_removes_user_information_and_authorization_values() {
     );
     assert_eq!(redact("plain text"), "plain text");
 }
+
+/// The end of `journal`'s newest entry's first run's output, after finishing it with `output`.
+fn kept_output(journal: &Journal, output: String) -> String {
+    let id = journal.begin(start("Commit"));
+    journal.finish(
+        id,
+        Finish {
+            runs: vec![ProgramRun {
+                program: "hook".into(),
+                args: Vec::new(),
+                output,
+                status: ProgramRunStatus::Succeeded,
+            }],
+            ..Finish::succeeded()
+        },
+    );
+    journal.page(None, 1).entries[0].runs[0].output.clone()
+}
+
+#[test]
+fn a_run_keeps_16_kib_of_output_whole_and_cuts_more_at_a_character() {
+    let journal = journal(&unique_key("run-output"));
+    assert_eq!(MAX_RUN_OUTPUT, 16 * 1024);
+
+    let exactly = "x".repeat(MAX_RUN_OUTPUT);
+    assert_eq!(kept_output(&journal, exactly.clone()), exactly);
+
+    // Two-byte characters and one byte more: the cut falls inside the first character, and the
+    // tail starts at the next one, never earlier.
+    let output = format!("{}a", "é".repeat(MAX_RUN_OUTPUT / 2));
+    let kept = kept_output(&journal, output);
+    let tail = kept.strip_prefix(OUTPUT_OMITTED).expect("marked as cut");
+    assert_eq!(tail, format!("{}a", "é".repeat(MAX_RUN_OUTPUT / 2 - 1)));
+}
