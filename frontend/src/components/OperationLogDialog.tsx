@@ -84,6 +84,8 @@ export function OperationLogDialog({
   client: RepoClient;
   repoPath: string;
   focus: "latest" | "latestFailed";
+  /** Run again (#890), stubbed for the tests. */
+  runAgain?: { run: (rerun: import("../ipc/RepoClient").Rerun) => void; blockedReason: (rerun: import("../ipc/RepoClient").Rerun) => string | null };
   onClose: () => void;
 }) {
   const [entries, setEntries] = useState<OperationLogEntry[] | null>(null);

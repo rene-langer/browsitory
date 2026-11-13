@@ -216,3 +216,58 @@ describe("OperationLogDialog (#889)", () => {
     expect(unsubscribe).toHaveBeenCalled();
   });
 });
+
+describe("OperationLogDialog's Run again (#890)", () => {
+  const fetchAgain = { kind: "Fetch" as const, remoteName: "origin", prune: null };
+
+  function renderWithRunAgain(entries: OperationLogEntry[], blockedReason: string | null = null) {
+    const { repoClient } = client([page(entries)]);
+    const run = vi.fn();
+    render(
+      <OperationLogDialog
+        client={repoClient}
+        repoPath="/repo"
+        focus="latest"
+        onClose={() => {}}
+        runAgain={{ run, blockedReason: () => blockedReason }}
+      />,
+    );
+    return run;
+  }
+
+  it("runs a failed fetch, pull or push again with its parameters", async () => {
+    const run = renderWithRunAgain([entry(1, "Fetch", { target: "origin", outcome: "Failed", rerun: fetchAgain })]);
+    const details = await screen.findByRole("region", { name: "Operation details" });
+
+    fireEvent.click(within(details).getByRole("button", { name: "Run again" }));
+
+    expect(run).toHaveBeenCalledWith(fetchAgain);
+  });
+
+  it("offers it only for a failed operation that can be run again", async () => {
+    renderWithRunAgain([
+      entry(3, "Fetch", { target: "origin", rerun: fetchAgain }),
+      entry(2, "Commit", { outcome: "Failed" }),
+      entry(1, "Fetch", { target: "backup", outcome: "Cancelled", rerun: fetchAgain }),
+    ]);
+    for (const name of [/^Fetch origin/, /^Commit/, /^Fetch backup/]) {
+      fireEvent.click(await screen.findByRole("button", { name }));
+      const details = screen.getByRole("region", { name: "Operation details" });
+      expect(within(details).queryByRole("button", { name: "Run again" })).toBeNull();
+    }
+  });
+
+  it("refuses it, saying why, when the repository changed since", async () => {
+    const run = renderWithRunAgain(
+      [entry(1, "Fetch", { target: "origin", outcome: "Failed", rerun: fetchAgain })],
+      "The remote origin no longer exists.",
+    );
+    const details = await screen.findByRole("region", { name: "Operation details" });
+
+    const button = within(details).getByRole("button", { name: "Run again" });
+    expect(button).toBeDisabled();
+    expect(details).toHaveTextContent("The remote origin no longer exists.");
+    fireEvent.click(button);
+    expect(run).not.toHaveBeenCalled();
+  });
+});
