@@ -634,3 +634,41 @@ fn a_root_commit_at_an_edit_stop_has_its_rest_found() {
         ["r.txt"]
     );
 }
+
+/// Owner decision (#884): when nothing of the commit is left at its edit stop, Continue drops
+/// it, as Drop would; Undo of the edit brings it back.
+#[test]
+fn continue_with_nothing_of_the_commit_left_drops_it() {
+    let (dir, repo) = init_repo();
+    let (onto, ids, branch) = base_ac_b(dir.path(), &repo);
+    let mut state = edit_first(&repo, &onto, &ids);
+    unstage(&repo, "a.txt");
+    unstage(&repo, "c.txt");
+
+    let result = continue_with_rest(&repo, &mut state, None, Some(EditRest::Discard)).unwrap();
+
+    assert_eq!(result, RebaseStepResult::Done);
+    assert_eq!(
+        history(&repo, &branch, &onto),
+        [(
+            "add b\n".to_string(),
+            files(&[("b.txt", "b\n"), ("f.txt", "base\n")])
+        )]
+    );
+    assert!(repo.statuses(None).unwrap().is_empty());
+}
+
+#[test]
+fn an_edit_of_the_latest_commit_with_nothing_left_drops_it() {
+    let (dir, repo) = init_repo();
+    let (_, ids, branch) = base_ac_b(dir.path(), &repo);
+    let mut state = edit_first(&repo, &ids[0], &ids[1..]);
+    unstage(&repo, "b.txt");
+    std::fs::remove_file(dir.path().join("b.txt")).unwrap();
+
+    let result = continue_with(&repo, &mut state, None).unwrap();
+
+    assert_eq!(result, RebaseStepResult::Done);
+    let tip = repo.find_reference(&branch).unwrap().target().unwrap();
+    assert_eq!(tip.to_string(), ids[0]);
+}
