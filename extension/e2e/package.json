@@ -6,7 +6,7 @@
     "test": "tsc -p tsconfig.json && node out/runTests.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "smoke:vsix": "tsc -p tsconfig.json && node out/runVsixSmoke.js",
-    "test:unit": "tsc -p tsconfig.json && node --test out/support/vscodeDownload.test.js"
+    "test:unit": "tsc -p tsconfig.json && node --test out/support/vscodeDownload.test.js out/support/staleLocks.test.js"
   },
   "devDependencies": {
     "@types/mocha": "10.0.10",
