@@ -141,7 +141,7 @@ jobs:
     timeout-minutes: 10
     env:
       # renovate: datasource=crate depName=cargo-audit
-      CARGO_AUDIT_VERSION: 0.22.2
+      CARGO_AUDIT_VERSION: 0.23.0
     steps:
       - uses: actions/checkout@v7
       - uses: taiki-e/install-action@v2
