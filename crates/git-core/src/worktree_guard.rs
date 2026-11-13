@@ -60,7 +60,6 @@ mod walk_types {
         /// Windows: the leaf was opened as itself and found to be a file; it is opened a second
         /// time next (by its file ID, `reopen_same`) to read or write it (#228).
         #[cfg(windows)]
-        #[cfg_attr(not(test), allow(dead_code))]
         Classified(&'a OsStr),
     }
 
@@ -558,7 +557,7 @@ mod walk_types {
         }
     }
 }
-#[cfg(all(test, any(unix, windows)))]
+#[cfg(all(test, unix))]
 use walk_types::Step;
 #[cfg(any(unix, windows))]
 use walk_types::{no_step, OnLink, OnMissing, StepFn, Walk};

@@ -34,7 +34,10 @@
 //! write), which must have the same file ID. That second open is by the file ID
 //! (`FILE_OPEN_BY_FILE_ID`), so a link swapped in under the name meanwhile isn't followed; only
 //! where the file system has no opens by ID (FAT/exFAT, which have no links, and SMB shares) is
-//! it by name.
+//! it by name. Known limit (#228): that by-name open of a file reopened through the filter
+//! follows a symbolic link swapped in under the name meanwhile. The file ID check then refuses
+//! the handle, so nothing is read or written through it, but the link's target has been opened,
+//! and it may be remote (Windows allows local-to-remote links by default).
 //!
 //! Leaves are opened for reading with no more access than attributes, so a file whose ACL
 //! denies writing still reads; only acts that may delete ask for `DELETE` (and
@@ -54,11 +57,10 @@ use std::path::{Path, PathBuf};
 use super::reparse::{
     self, leaf_action, LeafAction, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
 };
+use super::walk_types::Step;
 use super::walk_types::{
     next_temp_number, temp_name_units, Child, Held, HeldDir, ATTEMPTS, TEMP_PREFIX_LEN,
 };
-#[cfg(test)]
-use super::Step;
 use super::{Content, HeldFolder, Kind, Leaf, OnLink, OnMissing, Opened, Probe, StepFn, Walk};
 
 const FILE_LIST_DIRECTORY: u32 = 0x0001;
@@ -869,7 +871,8 @@ fn open_leaf(at: &Beneath, purpose: Purpose) -> io::Result<Option<(File, Found)>
 /// a OneDrive file) or as itself, by its file ID (see [`open_by_id`]), so a link swapped in under
 /// its name meanwhile is never followed. Where the file system has no opens by ID (FAT/exFAT,
 /// which have no links either, and SMB shares) it is opened by its name in the held parent
-/// instead. Either way the second handle must have `first`'s file ID and still be directly in
+/// instead; with `reopen` that open follows a link swapped in meanwhile (see the module docs'
+/// known limit). Either way the second handle must have `first`'s file ID and still be directly in
 /// the held parent; `None` when it isn't or the file is gone.
 fn reopen_same(at: &Beneath, first: &File, reopen: bool, access: u32) -> io::Result<Option<File>> {
     let mut options = FILE_NON_DIRECTORY_FILE;
@@ -1010,8 +1013,8 @@ fn unreadable(error: &io::Error) -> bool {
 /// Opens the regular file at `at`'s leaf for reading: as itself, or (a non-surrogate reparse
 /// point, such as an online-only OneDrive file) reopened normally so it hydrates. Either way the
 /// read handle must be the file classified in the held parent. `None` for a link, a folder or
-/// anything missing.
-fn open_leaf_for_reading(at: &Beneath) -> io::Result<Option<File>> {
+/// anything missing. `step` sees [`Step::Classified`] between the two opens.
+fn open_leaf_for_reading(at: &Beneath, step: StepFn<'_>) -> io::Result<Option<File>> {
     let (first, found) = match open_leaf(at, Purpose::Read) {
         Ok(Some(leaf)) => leaf,
         Ok(None) => return Ok(None),
@@ -1021,6 +1024,7 @@ fn open_leaf_for_reading(at: &Beneath) -> io::Result<Option<File>> {
     let Found::File { reopen } = found else {
         return Ok(None);
     };
+    step(Step::Classified(at.leaf_name()));
     match reopen_same(at, &first, reopen, GENERIC_READ) {
         Ok(file) => Ok(file),
         Err(error) if unreadable(&error) => Ok(None),
@@ -1030,8 +1034,8 @@ fn open_leaf_for_reading(at: &Beneath) -> io::Result<Option<File>> {
 
 /// See `worktree_guard::open_beneath`.
 pub(super) fn open_file(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<Option<File>> {
-    match walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, step) {
-        Ok(Walk::Found(at)) => open_leaf_for_reading(&at),
+    match walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, &mut *step) {
+        Ok(Walk::Found(at)) => open_leaf_for_reading(&at, step),
         Ok(_) => Ok(None),
         Err(error) if unreadable(&error) => Ok(None),
         Err(error) => Err(error),
@@ -1063,12 +1067,12 @@ fn write_with(
     fill: &mut dyn FnMut(&mut File) -> io::Result<()>,
     on_wait: &mut dyn FnMut(),
 ) -> io::Result<bool> {
-    let at = match walk(workdir, rel, OnLink::Refuse, OnMissing::Create, step)? {
+    let at = match walk(workdir, rel, OnLink::Refuse, OnMissing::Create, &mut *step)? {
         Walk::Found(at) => at,
         Walk::Link | Walk::NotDir | Walk::Missing => return Ok(false),
     };
     let in_use = || file_in_use(rel);
-    let (attributes, target) = classify_for_writing(&at, &in_use, on_wait)?;
+    let (attributes, target) = classify_for_writing(&at, &in_use, on_wait, step)?;
     swap_in(
         &at,
         &mut || Ok(target.clone()),
@@ -1183,10 +1187,12 @@ fn file_in_use(rel: &Path) -> io::Error {
 /// as such (#209) and a file another program holds without sharing writing as in use (after
 /// `IN_USE_TRIES`). The rename that follows also needs to delete the old file, so a file whose
 /// ACL lets the user write but not delete it fails there with the system's access denied.
+/// `step` sees [`Step::Classified`] before each reopen.
 fn classify_for_writing(
     at: &Beneath,
     in_use: &dyn Fn() -> io::Error,
     on_wait: &mut dyn FnMut(),
+    step: StepFn<'_>,
 ) -> io::Result<(u32, OsString)> {
     let mut busy = 0;
     for _ in 0..ATTEMPTS + IN_USE_TRIES {
@@ -1206,6 +1212,7 @@ fn classify_for_writing(
                 ))
             }
             Some((first, Found::File { reopen })) => {
+                step(Step::Classified(at.leaf_name()));
                 match reopen_same(at, &first, reopen, GENERIC_READ | GENERIC_WRITE) {
                     Ok(Some(_writable)) => {
                         let attributes = attribute_tag(&first)?.file_attributes;
@@ -1618,14 +1625,18 @@ pub(super) fn link_count(full: &Path) -> io::Result<u64> {
 /// See `worktree_guard::read_beneath`.
 pub(super) fn read(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<Option<Leaf>> {
     read_walked(
-        walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, step),
+        walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, &mut *step),
         u64::MAX,
+        step,
     )
 }
 
 /// See `worktree_guard::open_leaf_beneath`.
 pub(super) fn open(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<Option<Opened>> {
-    open_walked(walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, step))
+    open_walked(
+        walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, &mut *step),
+        step,
+    )
 }
 
 /// A folder held open by its handle (see `worktree_guard::HeldFolder`), without sharing delete,
@@ -1667,8 +1678,9 @@ impl Folder {
     ) -> io::Result<Option<Leaf>> {
         let root = self.0.try_clone()?;
         read_walked(
-            walk_from(root, rel, OnLink::Refuse, OnMissing::Stop, step),
+            walk_from(root, rel, OnLink::Refuse, OnMissing::Stop, &mut *step),
             limit,
+            step,
         )
     }
 
@@ -1753,14 +1765,18 @@ fn open_dir_in(parent: &File, name: &OsStr) -> io::Result<File> {
 }
 
 /// [`read`] after the walk; a file over `limit` bytes is `worktree_guard::TooLarge`.
-fn read_walked(walked: io::Result<Walk<Beneath>>, limit: u64) -> io::Result<Option<Leaf>> {
-    open_walked(walked)?
+fn read_walked(
+    walked: io::Result<Walk<Beneath>>,
+    limit: u64,
+    step: StepFn<'_>,
+) -> io::Result<Option<Leaf>> {
+    open_walked(walked, step)?
         .map(|opened| opened.read(limit))
         .transpose()
 }
 
 /// [`open`] after the walk: a link's target, or the file opened for reading.
-fn open_walked(walked: io::Result<Walk<Beneath>>) -> io::Result<Option<Opened>> {
+fn open_walked(walked: io::Result<Walk<Beneath>>, step: StepFn<'_>) -> io::Result<Option<Opened>> {
     let at = match walked {
         Ok(Walk::Found(at)) => at,
         Ok(_) => return Ok(None),
@@ -1782,7 +1798,7 @@ fn open_walked(walked: io::Result<Walk<Beneath>>) -> io::Result<Option<Opened>> 
         })),
         Found::File { .. } => {
             drop(leaf);
-            let Some(file) = open_leaf_for_reading(&at)? else {
+            let Some(file) = open_leaf_for_reading(&at, step)? else {
                 return Ok(None);
             };
             let stat = super::FileStat::of(&file.metadata()?);
