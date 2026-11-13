@@ -32,6 +32,8 @@ fn main() {
     let stdin = io::stdin();
     let stdout = Arc::new(Mutex::new(io::stdout()));
     let repos: dispatch::Repos = Arc::default();
+    // The request threads still running, finished ones dropped as new requests arrive.
+    let mut running: Vec<thread::JoinHandle<()>> = Vec::new();
 
     for line in stdin.lock().lines() {
         let Ok(line) = line else { break };
@@ -49,7 +51,8 @@ fn main() {
 
         let repos = Arc::clone(&repos);
         let stdout = Arc::clone(&stdout);
-        thread::spawn(move || {
+        running.retain(|request| !request.is_finished());
+        running.push(thread::spawn(move || {
             let response =
                 match dispatch::dispatch(&request.method, request.params, &repos, &stdout) {
                     Ok(result) => JsonRpcResponse::ok(request.id, result),
@@ -68,7 +71,16 @@ fn main() {
                 // same "reading end is gone, stop" outcome.
                 std::process::exit(0);
             }
-        });
+        }));
+    }
+
+    // Stdin ended: the extension closes it when its panel closes (#961). Returning from `main`
+    // would end the process at once, cutting a running request off wherever it is; in the middle
+    // of a libgit2 index write that leaves `.git/index.lock` behind, and every later git command
+    // in the repository fails on it. So the running requests finish (and are answered) first.
+    // The extension kills the sidecar if they take longer than its grace period.
+    for request in running {
+        let _ = request.join();
     }
 }
 
