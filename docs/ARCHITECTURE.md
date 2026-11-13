@@ -111,6 +111,18 @@ re-render through `useKeymap`. Reserved keys (copy, paste, Esc, Tab, Enter, Spac
 F6, the OS quit/close keys) can't be taken; a shortcut keeps its own reserved built-in keys, and
 Ctrl/Cmd+1 … 9 stays fixed. A key that types a character never runs a shortcut from a text field.
 
+**VSCode's keys (#900).** In VSCode the keys are rebound in VSCode's own Keyboard Shortcuts
+(owner decision); Preferences → Keyboard links there (`open_vscode_keybindings` runs
+`workbench.action.openGlobalKeybindings` filtered to `browsitory.shortcut.`). VSCode has no API
+for resolved keybindings, so `extension/src/keybindingsFile.ts` reads the user's
+`keybindings.json` (JSONC, next to the extension's global storage folder; in a profile, the
+profile's file, else the default one) and applies it to the contributed keybindings as VSCode
+does: added keys, `-command` removals, and another command's key without a `when` clause winning.
+The host sends the result as a `keybindings` host request when a panel starts and whenever the
+file changes; `applyHostKeybindings` shows and matches those keys for the VSCode-bound shortcuts
+(not saved, not user overrides). A two-step key or a `when` clause it can't evaluate is the
+limit: such a key still works in VSCode but isn't shown.
+
 ## Why Tauri + a web frontend, not egui again
 
 A prior pass (see git history on this branch before 2026-08-11) used `egui` for a

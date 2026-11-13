@@ -147,4 +147,15 @@ describe("ShortcutSheet", () => {
     render(<ShortcutSheet onClose={vi.fn()} vscode={false} />);
     expect(screen.queryByRole("button", { name: "Change shortcuts…" })).toBeNull();
   });
+
+  it("in VSCode, also opens Preferences on the Keyboard group, which links to VSCode's Keyboard Shortcuts (#900)", () => {
+    const openPreferences = vi.fn();
+    render(
+      <OpenPreferencesContext.Provider value={openPreferences}>
+        <ShortcutSheet onClose={vi.fn()} vscode />
+      </OpenPreferencesContext.Provider>,
+    );
+    screen.getByRole("button", { name: "Change shortcuts…" }).click();
+    expect(openPreferences).toHaveBeenCalledWith("keyboard");
+  });
 });

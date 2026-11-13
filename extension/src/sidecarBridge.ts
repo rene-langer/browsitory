@@ -33,6 +33,8 @@ export const NATIVE_METHODS: ReadonlySet<string> = new Set([
   "open_patch_file",
   // The picker's Clone… and New repository… buttons (#680): VSCode's own Git commands.
   "run_vscode_git_command",
+  // Preferences > Keyboard (#900): VSCode's Keyboard Shortcuts, on Browsitory's shortcuts.
+  "open_vscode_keybindings",
 ]);
 
 /** The VSCode Git commands the webview may run (#680), by the name it sends. */
@@ -133,7 +135,7 @@ export interface SidecarBridgeDependencies {
     output: string;
   }) => PromiseLike<boolean>;
   /** Runs a VSCode command (`vscode.commands.executeCommand`). */
-  readonly executeCommand: (command: string) => PromiseLike<unknown>;
+  readonly executeCommand: (command: string, ...args: unknown[]) => PromiseLike<unknown>;
 }
 
 class InvalidParamsError extends Error {}
@@ -705,6 +707,11 @@ export class SidecarBridge {
           result = null;
           break;
         }
+        case "open_vscode_keybindings":
+          // Filtered to the commands the shortcut keybindings run (#900).
+          await this.dependencies.executeCommand("workbench.action.openGlobalKeybindings", "browsitory.shortcut.");
+          result = null;
+          break;
         default:
           // A name in NATIVE_METHODS without a case here: reply, so the webview's call
           // doesn't wait forever.

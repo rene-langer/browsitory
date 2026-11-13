@@ -103,6 +103,8 @@ export type BackendCall = <T>(method: string, params?: Record<string, unknown>) 
  *
  * - clone and init: the desktop app clones and initializes; the extension leaves that to VSCode's
  *   own commands (`supportsCloneAndInit: false`), which `runHostGitCommand` runs there (#680).
+ * - `openHostKeybindings` (#900): VSCode's Keyboard Shortcuts; the desktop app rebinds the keys
+ *   in Preferences itself.
  * - `listOpenRepos`: the Tauri command answers a `[entries, activePath]` tuple, the sidecar an
  *   object.
  * - the two progress subscriptions and the repository watchers' reports: Tauri events on the
@@ -119,6 +121,7 @@ export type TransportSpecific =
   | "initRepo"
   | "supportsHostGitCommands"
   | "runHostGitCommand"
+  | "openHostKeybindings"
   | "listOpenRepos"
   | "subscribeTransferProgress"
   | "subscribeHookProgress"

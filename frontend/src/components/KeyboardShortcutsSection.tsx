@@ -35,7 +35,42 @@ function describe(id: BindableId): string {
  * named, with Replace; each key can be removed, and a shortcut or all of them reset. Keys are a
  * per-machine preference (`lib/keymap.ts`).
  */
-export function KeyboardShortcutsSection({ apple = isApplePlatform() }: { apple?: boolean }) {
+export function KeyboardShortcutsSection({
+  apple = isApplePlatform(),
+  vscode = false,
+  onOpenHostKeybindings,
+}: {
+  apple?: boolean;
+  /** In VSCode, whose own Keyboard Shortcuts rebind the keys (#900, owner decision). */
+  vscode?: boolean;
+  /** Opens VSCode's Keyboard Shortcuts on Browsitory's commands. */
+  onOpenHostKeybindings?: () => void;
+}) {
+  if (vscode) return <HostKeyboardShortcuts onOpen={onOpenHostKeybindings} />;
+  return <KeymapEditor apple={apple} />;
+}
+
+/** In VSCode (#900): the keys are VSCode keybindings, changed in VSCode's own editor. */
+function HostKeyboardShortcuts({ onOpen }: { onOpen?: () => void }) {
+  return (
+    <PreferencesSection title="Keyboard shortcuts">
+      <p className={styles.hint}>
+        In VSCode, change Browsitory&apos;s keys in VSCode&apos;s Keyboard Shortcuts. The keys VSCode handles itself
+        (F5, F6, the tab keys and others) are listed there as &quot;browsitory.shortcut&quot; commands; the
+        shortcut sheet shows the keys that work.
+      </p>
+      {onOpen !== undefined && (
+        <div>
+          <button type="button" onClick={onOpen}>
+            Open Keyboard Shortcuts
+          </button>
+        </div>
+      )}
+    </PreferencesSection>
+  );
+}
+
+function KeymapEditor({ apple }: { apple: boolean }) {
   useKeymap();
   const baseId = useId();
   const [query, setQuery] = useState("");

@@ -331,6 +331,13 @@ describe("vscodeRepoClient", () => {
     await expect(clone).resolves.toBeNull();
   });
 
+  it("opens VSCode's Keyboard Shortcuts through the host (#900)", async () => {
+    const opened = vscodeRepoClient.openHostKeybindings();
+    expect(postMessage).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 1, method: "open_vscode_keybindings", params: {} });
+    respond(1, null);
+    await expect(opened).resolves.toBeNull();
+  });
+
   it("wires listOpenRepos", async () => {
     const promise = vscodeRepoClient.listOpenRepos();
     respond(1, { entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" });
