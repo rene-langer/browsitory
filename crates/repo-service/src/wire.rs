@@ -3675,6 +3675,30 @@ mod update_settings_conversion {
     }
 }
 
+/// #898: the keyboard shortcuts a client saves reach `config` as sent, both ways.
+#[cfg(test)]
+mod keybinding_settings_conversion {
+    use super::KeybindingSettingsDto;
+
+    #[test]
+    fn saved_keys_reach_config_unchanged() {
+        let overrides: std::collections::BTreeMap<String, Vec<String>> = [
+            ("push".to_string(), vec![]),
+            (
+                "refresh".to_string(),
+                vec!["F4".to_string(), "mod+alt+r".to_string()],
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let settings = config::KeybindingSettings::from(KeybindingSettingsDto {
+            overrides: overrides.clone(),
+        });
+        assert_eq!(settings.overrides, overrides);
+        assert_eq!(KeybindingSettingsDto::from(settings).overrides, overrides);
+    }
+}
+
 #[cfg(test)]
 mod error_kinds {
     use super::*;
