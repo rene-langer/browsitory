@@ -36,8 +36,10 @@ describe("ConflictResolutionPane", () => {
     render(<ConflictResolutionPane repoPath={TEST_REPO_PATH} client={client} path="shared.txt" onResolve={vi.fn()} onResolveAddDelete={vi.fn()} />);
 
     await waitFor(() => screen.getByText(/line one/));
-    expect(screen.getByText(/main two/)).toBeInTheDocument();
-    expect(screen.getByText(/feature two/)).toBeInTheDocument();
+    // A side's line is cut where its changed words are marked (#879): match each side as a whole.
+    const sides = [...document.querySelectorAll("pre")].map((part) => part.textContent);
+    expect(sides).toContainEqual(expect.stringMatching(/main two/));
+    expect(sides).toContainEqual(expect.stringMatching(/feature two/));
     expect(screen.getByText(/line three/)).toBeInTheDocument();
   });
 
@@ -601,7 +603,8 @@ describe("ConflictResolutionPane syntax highlighting", () => {
     // Give a highlighter that would run a chance to finish.
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(highlighted(container)).toBe(false);
-    expect(screen.getByText("const ours = 2;")).toBeInTheDocument();
+    // Its changed words are marked (#879), which cuts the line: match the side as a whole.
+    expect([...container.querySelectorAll("pre")].map((part) => part.textContent)).toContain("const ours = 2;\n");
   });
 
   it("leaves a file of an unknown language plain", async () => {

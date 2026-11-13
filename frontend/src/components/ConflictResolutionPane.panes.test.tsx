@@ -1035,7 +1035,7 @@ describe("ConflictResolutionPane navigation, save and word marks (#879)", () => 
     expect(marksIn(third, "ours")).toEqual([]);
     expect(marksIn(third, "theirs")).toEqual([]);
     // The line keeps its text, and the result is not marked.
-    expect(within(cellOf(first, "ours")).getByText("let total = 1;")).toBeInTheDocument();
+    expect(cellOf(first, "ours").querySelector('[data-line="2"]')).toHaveTextContent(/^2let total = 1;$/);
     expect(marksIn(first, "result")).toEqual([]);
   });
 
