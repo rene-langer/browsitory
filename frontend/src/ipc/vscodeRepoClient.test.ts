@@ -18,7 +18,7 @@ const DIVERGED_HEAD: HeadInfo = {
     onto: "def",
     currentStep: 2,
     totalSteps: 3,
-    editing: null,
+    editing: null, splitParts: 0,
     health: { kind: "Diverged", reason: "HeadMoved" },
   },
   bisect: null, terminalSequence: null,

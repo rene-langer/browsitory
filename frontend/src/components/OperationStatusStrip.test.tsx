@@ -191,7 +191,7 @@ describe("OperationStatusStrip", () => {
         merging={false}
         operation={null}
         rebaseProgress={{ currentStep: 1, totalSteps: 2 }}
-        rebase={{ branch: "topic", onto: "o", currentStep: 1, totalSteps: 2, editing: null, health: { kind: "Diverged", reason: "HeadMoved" } }}
+        rebase={{ branch: "topic", onto: "o", currentStep: 1, totalSteps: 2, editing: null, splitParts: 0, health: { kind: "Diverged", reason: "HeadMoved" } }}
         conflictCount={0}
         pending
         onAbortMerge={noop}
@@ -226,7 +226,7 @@ describe("OperationStatusStrip", () => {
   });
 
   describe("a stored rebase", () => {
-    const rebase = (health: RebaseInfo["health"]): RebaseInfo => ({ branch: "topic", onto: "o", currentStep: 1, totalSteps: 2, health, editing: null });
+    const rebase = (health: RebaseInfo["health"]): RebaseInfo => ({ branch: "topic", onto: "o", currentStep: 1, totalSteps: 2, health, editing: null, splitParts: 0 });
 
     it("keeps \"Rebasing, step N of M\" while paused", () => {
       render(
@@ -252,7 +252,7 @@ describe("OperationStatusStrip", () => {
           merging
           operation="CherryPick"
           rebaseProgress={{ currentStep: 1, totalSteps: 2 }}
-          rebase={{ ...rebase({ kind: "Paused" }), editing: "1a2b3c4d5e6f7081" }}
+          rebase={{ ...rebase({ kind: "Paused" }), editing: "1a2b3c4d5e6f7081", splitParts: 0 }}
           conflictCount={0}
           onAbortMerge={noop}
           onAbortRebase={onAbortRebase}

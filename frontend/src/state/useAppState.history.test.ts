@@ -70,7 +70,7 @@ describe("history actions", () => {
 
   it("derives rebase progress from headInfo.rebase on the first refresh", async () => {
     // What a restarted app sees: the backend restored the paused rebase from disk.
-    const rebase = { branch: "main", onto: "o1", currentStep: 1, totalSteps: 2, editing: null, health: { kind: "Paused" as const } };
+    const rebase = { branch: "main", onto: "o1", currentStep: 1, totalSteps: 2, editing: null, splitParts: 0, health: { kind: "Paused" as const } };
     const info = { headId: "h1", detachedAt: "h1", headPushed: false, operation: "CherryPick" as const, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase, bisect: null, terminalSequence: null, terminalRebase: null };
     const { result } = renderHook(() => useAppState(transferClient({ getHeadInfo: async () => info }), TEST_REPO_PATH));
     await act(() => result.current.refresh());
@@ -78,7 +78,7 @@ describe("history actions", () => {
   });
 
   it("clears rebase progress when headInfo.rebase is null", async () => {
-    const rebase = { branch: "main", onto: "o1", currentStep: 2, totalSteps: 2, editing: null, health: { kind: "Paused" as const } };
+    const rebase = { branch: "main", onto: "o1", currentStep: 2, totalSteps: 2, editing: null, splitParts: 0, health: { kind: "Paused" as const } };
     let current: typeof rebase | null = rebase;
     const getHeadInfo = async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: current, bisect: null, terminalSequence: null, terminalRebase: null });
     const { result } = renderHook(() => useAppState(transferClient({ getHeadInfo }), TEST_REPO_PATH));

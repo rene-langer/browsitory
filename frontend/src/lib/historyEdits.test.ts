@@ -55,6 +55,7 @@ describe("historyEditChecks", () => {
       MoveDown: { ok: true, onto: "A" },
       Drop: { ok: true, onto: "B" },
       Edit: { ok: true, onto: "B" },
+      Split: { ok: true, onto: "B" },
     });
   });
 
@@ -146,7 +147,7 @@ describe("historyEditChecks", () => {
     const busy = "Finish or abort the operation in progress first.";
     const paused: Partial<HeadInfo>[] = [
       { operation: "Merge" },
-      { rebase: { currentStep: 1, totalSteps: 2, onto: "B", branch: "main", health: { kind: "Paused" }, editing: null } },
+      { rebase: { currentStep: 1, totalSteps: 2, onto: "B", branch: "main", health: { kind: "Paused" }, editing: null, splitParts: 0 } },
       { sequence: { kind: "CherryPick", currentStep: 1, totalSteps: 2, currentCommit: "X" } },
       { terminalRebase: { kind: "Rebase", branch: "main", onto: "B", currentStep: 1, totalSteps: 2 } },
       {

@@ -96,6 +96,8 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       patchOutcome: null,
       pendingPull: null,
       switchConflict: null,
+      editRest: null,
+      splitting: null,
       stashSwitchOutcome: null,
       identityRequired: null,
       pullOutcome: null,
@@ -209,6 +211,8 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     foldStaged: vi.fn(),
     rebaseContinue: vi.fn(),
     setRebaseEditMessage: vi.fn(),
+    closeEditRest: vi.fn(),
+    rebaseCommitPart: vi.fn(),
     abortRebase: vi.fn(),
     listPullRequests: vi.fn(),
     saveForgeToken: vi.fn(),
@@ -536,7 +540,7 @@ describe("buildCommands", () => {
   });
 
   it("omits Continue rebase while the rebase is interrupted but keeps Abort", () => {
-    const rebase = { branch: "main", onto: "o", currentStep: 1, totalSteps: 3, editing: null, health: { kind: "Diverged" as const, reason: "HeadMoved" as const } };
+    const rebase = { branch: "main", onto: "o", currentStep: 1, totalSteps: 3, editing: null, splitParts: 0, health: { kind: "Diverged" as const, reason: "HeadMoved" as const } };
     const base = makeAppState().state.headInfo;
     const commands = commandsFor(makeAppState({ rebaseProgress: { currentStep: 1, totalSteps: 3 }, headInfo: { ...base, rebase } }));
     expect(commands.some((c) => c.id === "rebase-continue")).toBe(false);
