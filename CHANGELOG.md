@@ -6,6 +6,96 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-13
+
+0.13.0 brings the three-way merge editor (#881): the whole conflicted file in three panes,
+ours, the result and theirs, with an optional base pane, take-side arrows, an editable result
+with Undo and Redo, and word marks. It also edits older commits (#886): Edit commit…, folding
+staged changes into a commit and splitting a commit, also from the rebase planner's Edit step.
+Besides: on Windows, changing files on a FAT32 or exFAT drive works and rewriting a file
+on ReFS keeps its attributes; and the Rust toolchain is pinned.
+
+### Three-way merge editor
+
+- Added: the merge editor shows the whole conflicted file in three panes, ours, the result and
+  theirs, each with its own line numbers; the unchanged lines stay level across the panes, which
+  scroll together, and every block keeps its choices, keys and editable result. **Blocks**
+  switches back to one block per conflict, and the editor remembers the layout; a pane too narrow
+  for three (the VS Code side panel) shows the blocks (#875).
+- Added: in the three-pane merge editor, an arrow next to each block's lines in the ours and the
+  theirs pane puts that side into the result; taking the second side adds it after the first,
+  as Ours then theirs or Theirs then ours. The arrows, the choices and keys 1–5 stay in sync, and
+  Reset undoes them (#876).
+- Added: in the three-pane merge editor, Show base adds the common ancestor as a fourth pane,
+  Base, on the left: aligned with the other panes, with its own line numbers, and marked when a
+  block takes the base. It replaces the base strip above each block; the block view keeps its
+  strip (#877).
+- Added: in the three-pane merge editor the whole result is editable, unchanged lines included.
+  A block without a choice shows git's conflict markers there; each result line is marked with
+  where it came from (ours, theirs, the base, typed, or still in conflict), and typing into a
+  resolved block marks it Edited. Save resolution stays disabled while a `<<<<<<<` or `>>>>>>>`
+  line is left (#878).
+- Added: Undo and Redo in the merge editor (also Ctrl+Z, Ctrl+Shift+Z and Ctrl+Y while the focus
+  is in it) step through typing, take-side arrows, choices and Reset; keystrokes in one place
+  are one step (#878).
+- Added: inside a conflict block the merge editor marks the words that differ between our line
+  and their line, in the three panes and in the block view, as the diff does (#879).
+- Changed: with the focus in an unchanged part of the three-pane result, F7 and Shift+F7, the
+  Previous and Next conflict buttons and the command palette go to the conflict after or before
+  it, not the one focused last (#879).
+- Changed: for screen readers, the three-pane merge editor names a block's side panes after
+  their side ("Ours (main)", "Theirs (feature)", "Base") and reads the unchanged lines once, from
+  the result, instead of once per pane (#880).
+- Added: the shortcut sheet and the guide list the merge editor's own Undo and Redo keys; the
+  guide describes resolving a file from the keyboard alone and with a screen reader (#880).
+
+### Edit older commits
+
+- Added: **Edit commit…** in the commit menu (and the palette) stops at the commit with its
+  changes staged on its parent. The status strip says "Editing 1a2b3c4: change the files, then
+  Continue", and the commit area offers the commit's message, editable. Continue commits the
+  staged result with that message and the commit's author, then replays the commits after it;
+  Abort puts the branch back. A paused edit survives a restart, and the whole edit is one Undo
+  step ("Edit 1a2b3c4") (#882).
+- Added: with changes staged, the commit menu (and the palette) offers **Fold staged changes
+  into this commit**: like `git commit --fixup` and `git rebase --autosquash` in one step, the
+  commit keeps its message and author and the commits after it are replayed (the latest commit
+  is amended). A conflict pauses it like any rebase; Abort puts the branch back with the changes
+  staged again. One Undo step ("Fold staged changes into 1a2b3c4") (#883).
+- Added: **Split commit…** in the commit menu (and the palette) stops at the commit with its
+  changes staged, like Edit commit…. Unstage what belongs in a later commit, then **Commit
+  part** commits what is staged with the message in the commit area (the original one is
+  offered first); repeat for each part. Continue commits what is still staged as the last part
+  and replays the commits after it. Every part keeps the commit's author; the status strip says
+  "Splitting 1a2b3c4", and the whole split is one Undo step ("Split 1a2b3c4"). Edit commit… has
+  Commit part too (#884).
+- Changed: Continue at an edit stop no longer carries changes that aren't staged into the
+  replay: it asks whether to commit them with the commit, discard them, or cancel. When nothing
+  of the commit is left, Continue drops it, as Drop would (#884).
+- Changed: the rebase planner's **Edit** step stops like Edit commit…: the commit's changes
+  staged on its parent, "Editing 1a2b3c4: change the files, then Continue" in the status strip,
+  the commit's message editable in the commit area, and **Commit part** to split it. The guide's
+  Rebase and Rewriting pages describe it, with a new screenshot (#885).
+- Internal: an E2E flow per app edits an older commit's file, continues and checks the history
+  (#885). The guide's merge editor screenshot shows the three panes (#933).
+
+### Windows: FAT32, exFAT and ReFS drives
+
+- Fixed: on a FAT32 or exFAT drive (a USB stick, an SD card), changing files in a working tree
+  failed with "The parameter is incorrect." (#228).
+- Fixed: on ReFS and Dev Drive, rewriting a file dropped its "no scrub data" attribute (#228).
+- Internal: Windows CI tests on FAT32, exFAT and ReFS volumes, and tests that swap a link in or
+  rename the file between classifying a leaf and reopening it (#228).
+
+### Internal
+
+- Fixed: the guide's merge editor screenshot cut off the editor's toolbar row ("0 of 1
+  resolved", Previous conflict); the capture now scrolls to the toolbar (#944).
+- Added: tests for the delete fallback to the classic disposition and for a hook that can't be
+  resumed, both on Windows (#195).
+- Changed: `rust-toolchain.toml` pins Rust 1.100.0 for local builds and every CI and release job,
+  which install it from there; Renovate proposes each new release a week after it ships (#220).
+
 ## [0.12.0] - 2026-11-12
 
 0.12.0 is the performance release. History, blame and file history read large repositories
