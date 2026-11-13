@@ -942,6 +942,7 @@ export function RepoWorkspace({
                     remotes: appState.state.remotes.map((remote) => remote.name),
                     branches: appState.state.branches.map((branch) => branch.name),
                     userCommands: userCommandsApi?.commands.map((command) => command.id) ?? [],
+                    userCommandsBlocked,
                   }),
           }}
           onClose={() => setOperationLog(null)}
