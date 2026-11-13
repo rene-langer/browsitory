@@ -943,6 +943,15 @@ fn run_user_command_runs_a_stored_command_with_the_selection() {
     assert!(entries.iter().all(|entry| entry["name"] == "Run command"));
     assert_eq!(entries[2]["target"], "Show");
     assert_eq!(entries[2]["outcome"], "Succeeded");
+    // Run again (#890): the command by id, on the selection it ran on.
+    assert_eq!(
+        entries[2]["rerun"],
+        serde_json::json!({
+            "kind": "UserCommand",
+            "commandId": global[0],
+            "context": {"commitId": head, "branch": null, "refName": null, "paths": ["a b.txt"]},
+        })
+    );
     assert_eq!(entries[2]["runs"][0]["output"], ran["result"]["output"]);
     assert!(entries[2]["runs"][0]["program"]
         .as_str()

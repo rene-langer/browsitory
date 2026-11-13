@@ -62,3 +62,30 @@ describe("rerunBlockedReason (#890)", () => {
     expect(rerunBlockedReason(fetchAll, { ...state, remotes: [] })).toBe("The repository has no remotes any more.");
   });
 });
+
+describe("user command reruns (#890, #894)", () => {
+  const context = { commitId: "abc", branch: null, refName: null, paths: ["a.txt"] };
+  const rerun = { kind: "UserCommand" as const, commandId: "cmd-1", context };
+
+  it("runs the command by id on the selection it ran on", () => {
+    const runUserCommand = vi.fn();
+    const actions = {
+      fetchRemote: vi.fn(),
+      fetchAllRemotes: vi.fn(),
+      pullCurrentUpstream: vi.fn(),
+      pushCurrentBranch: vi.fn(),
+      pushBranch: vi.fn(),
+      pushTags: vi.fn(),
+      runUserCommand,
+    };
+    runRerun(rerun, actions);
+    expect(runUserCommand).toHaveBeenCalledWith("cmd-1", context);
+  });
+
+  it("is blocked once the command is no longer defined, and needs no remote", () => {
+    expect(rerunBlockedReason(rerun, { remotes: [], branches: [], userCommands: ["cmd-1"] })).toBeNull();
+    expect(rerunBlockedReason(rerun, { remotes: [], branches: [], userCommands: ["other"] })).toBe(
+      "The command no longer exists.",
+    );
+  });
+});

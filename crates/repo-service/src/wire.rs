@@ -1685,6 +1685,10 @@ pub enum RerunDto {
         names: Vec<String>,
         no_verify: bool,
     },
+    UserCommand {
+        command_id: String,
+        context: UserCommandContextDto,
+    },
 }
 
 impl From<crate::oplog::Rerun> for RerunDto {
@@ -1722,6 +1726,13 @@ impl From<crate::oplog::Rerun> for RerunDto {
                 remote_name,
                 names,
                 no_verify,
+            },
+            Rerun::UserCommand {
+                command_id,
+                context,
+            } => Self::UserCommand {
+                command_id,
+                context: context.into(),
             },
         }
     }
@@ -2353,7 +2364,7 @@ impl From<config::UserCommands> for UserCommandsDto {
 
 /// What a user command runs on (#894): the selection it was started from. Paths are relative to
 /// the work tree root.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[cfg_attr(any(test, feature = "ts"), ts(rename = "UserCommandContext"))]
 #[serde(rename_all = "camelCase")]
@@ -2362,6 +2373,17 @@ pub struct UserCommandContextDto {
     pub branch: Option<String>,
     pub ref_name: Option<String>,
     pub paths: Vec<String>,
+}
+
+impl From<git_core::user_command::Context> for UserCommandContextDto {
+    fn from(context: git_core::user_command::Context) -> Self {
+        Self {
+            commit_id: context.commit,
+            branch: context.branch,
+            ref_name: context.git_ref,
+            paths: context.paths,
+        }
+    }
 }
 
 impl From<UserCommandContextDto> for git_core::user_command::Context {

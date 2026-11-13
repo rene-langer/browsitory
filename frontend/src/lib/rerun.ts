@@ -1,4 +1,4 @@
-import type { Rerun } from "../ipc/RepoClient";
+import type { Rerun, UserCommandContext } from "../ipc/RepoClient";
 
 /**
  * The workspace actions Run again starts (#890): the same ones the toolbar and menus use, so a
@@ -11,6 +11,8 @@ export interface RerunActions {
   pushCurrentBranch(remoteName: string, noVerify: boolean): unknown;
   pushBranch(remoteName: string, localBranch: string, remoteBranch: string, setUpstream: boolean, noVerify: boolean): unknown;
   pushTags(remoteName: string, names: string[], noVerify: boolean): unknown;
+  /** Runs the user command `commandId` on `context`, as its menu item would (#894). */
+  runUserCommand?(commandId: string, context: UserCommandContext): unknown;
 }
 
 /**
@@ -37,6 +39,9 @@ export function runRerun(rerun: Rerun, actions: RerunActions): void {
     case "PushTags":
       void actions.pushTags(rerun.remoteName, rerun.names, rerun.noVerify);
       return;
+    case "UserCommand":
+      void actions.runUserCommand?.(rerun.commandId, rerun.context);
+      return;
   }
 }
 
@@ -45,11 +50,18 @@ export function runRerun(rerun: Rerun, actions: RerunActions): void {
  * branch it named is gone. Anything else that changed (the upstream, the tags) the operation
  * itself reports, as a new failed entry.
  */
-export function rerunBlockedReason(rerun: Rerun, state: { remotes: string[]; branches: string[] }): string | null {
+export function rerunBlockedReason(
+  rerun: Rerun,
+  state: { remotes: string[]; branches: string[]; userCommands?: string[] },
+): string | null {
   if (rerun.kind === "FetchAll") {
     return state.remotes.length === 0 ? "The repository has no remotes any more." : null;
   }
   if (rerun.kind === "Pull") return null;
+  // A user command runs again only while it is still defined (#894); it needs no remote.
+  if (rerun.kind === "UserCommand") {
+    return state.userCommands?.includes(rerun.commandId) === true ? null : "The command no longer exists.";
+  }
   if (!state.remotes.includes(rerun.remoteName)) return `The remote ${rerun.remoteName} no longer exists.`;
   if (rerun.kind === "PushBranch" && !state.branches.includes(rerun.localBranch)) {
     return `The branch ${rerun.localBranch} no longer exists.`;

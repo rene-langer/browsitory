@@ -2345,6 +2345,15 @@ pub fn operation_log_pages() -> Cases<repo_service::oplog::OperationPage> {
             names: strings(&["v1", "v2"]),
             no_verify: false,
         },
+        Rerun::UserCommand {
+            command_id: "cmd-1".into(),
+            context: git_core::user_command::Context {
+                commit: some("0123abc"),
+                branch: some("main"),
+                git_ref: None,
+                paths: strings(&["a b.txt"]),
+            },
+        },
     ];
     assert_every_variant!(
         &reruns,
@@ -2354,6 +2363,7 @@ pub fn operation_log_pages() -> Cases<repo_service::oplog::OperationPage> {
         Rerun::PushCurrentBranch { .. },
         Rerun::PushBranch { .. },
         Rerun::PushTags { .. },
+        Rerun::UserCommand { .. },
     );
     let statuses = every!(ProgramRunStatus {
         Succeeded,

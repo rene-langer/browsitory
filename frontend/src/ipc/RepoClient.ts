@@ -493,7 +493,9 @@ export type Rerun =
       setUpstream: boolean;
       noVerify: boolean;
     }
-  | { kind: "PushTags"; remoteName: string; names: string[]; noVerify: boolean };
+  | { kind: "PushTags"; remoteName: string; names: string[]; noVerify: boolean }
+  /** A user command (#894), by id, on the selection it ran on. */
+  | { kind: "UserCommand"; commandId: string; context: UserCommandContext };
 export interface OperationLogEntry {
   /** Increasing: a later operation has a larger id. */
   id: number;
