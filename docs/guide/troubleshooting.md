@@ -1,7 +1,9 @@
 # Troubleshooting
 
 An error stays at the top of the window until you dismiss it or start another change (stage,
-commit, checkout, …); refreshing doesn't clear it.
+commit, checkout, …); refreshing doesn't clear it. **Show details** opens the
+[operation log](operation-log.md) on the failed operation: what it was given, its full error and
+the output of the hooks it ran.
 
 The desktop app writes a log file, `browsitory.log`, to your system's log folder, so a bug
 report doesn't require a live dev session to reproduce. When the file reaches 40 KB, it is

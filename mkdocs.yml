@@ -114,5 +114,6 @@ nav:
       - hooks.md
       - external-tools.md
       - command-palette.md
+      - operation-log.md
       - troubleshooting.md
       - privacy.md
