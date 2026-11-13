@@ -857,7 +857,7 @@ fn run_user_command_runs_a_stored_command_with_the_selection() {
             "output": format!(
                 "<{}><{}>{}\n",
                 &head[..7],
-                dir.path().join("a b.txt").display(),
+                root.join("a b.txt").display(),
                 root.display()
             ),
         }),
