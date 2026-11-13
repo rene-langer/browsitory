@@ -188,7 +188,26 @@ describe("Documentation screenshots", () => {
     const block = await $('section[aria-label="Conflict 1 of 1"]');
     await block.waitForExist();
     await waitUntilInPage('button[aria-pressed="true"]', "Three panes");
-    await browser.execute((el) => (el as HTMLElement).scrollIntoView({ block: "start" }), block);
+    // Scroll to the editor's toolbar ("0 of 1 resolved", Previous conflict), not to the block:
+    // the block at the top cut the toolbar off (#944). The block still fits below it. The pane's
+    // sticky "Diff view options" row covers the top of the scroll area: stop below it.
+    const toolbar = await $('[role="group"][aria-label="Conflicts"]');
+    await toolbar.waitForExist();
+    const options = await $('[role="group"][aria-label="Diff view options"]');
+    await browser.execute(
+      (el, sticky) => {
+        const target = el as HTMLElement;
+        target.scrollIntoView({ block: "start" });
+        let scroller = target.parentElement;
+        while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) {
+          scroller = scroller.parentElement;
+        }
+        const below = (sticky as HTMLElement).getBoundingClientRect().bottom + 2;
+        scroller?.scrollBy(0, target.getBoundingClientRect().top - below);
+      },
+      toolbar,
+      options,
+    );
     await shoot("merge-editor");
     await browser.setWindowSize(WINDOW.width, WINDOW.height);
   });
