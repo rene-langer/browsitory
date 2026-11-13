@@ -74,6 +74,8 @@ The commit menu has eight one-click edits for commits of the current branch:
 - **Move up** and **Move down** swap the commit with the newer or the older neighbour.
 - **Drop** removes the commit and its changes from the branch.
 
+![Edit commit… stopped at a commit: the status strip, the staged change and the commit area with Commit part](assets/edit-commit.png)
+
 Each one is a small interactive rebase (see [Rebase](rebase.md)): the commits after the edited
 one are rewritten, so they get new ids. A conflict pauses it like any rebase: the progress panel
 shows **Continue rebase** and **Abort rebase**, the paused rebase survives a restart, and Abort

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { clickInPage, waitUntilInPage } from "../support/dom";
 import { expandSidebarSection, sidebarBranchRow, sidebarRemoteFolder, sidebarSectionToggle } from "../support/sidebar";
 import { SLOW_UI_TIMEOUT } from "../support/timeouts";
-import { DEMO_REPO_PATH, startConflict } from "./demoRepo";
+import { cleanForEdit, DEMO_REPO_PATH, startConflict } from "./demoRepo";
 
 // Captures the documentation screenshots into docs/guide/assets/ (see ./README.md). Run it with
 // `pnpm screenshots`, never as part of the E2E suite: it asserts nothing beyond "the screen it
@@ -191,5 +191,47 @@ describe("Documentation screenshots", () => {
     await browser.execute((el) => (el as HTMLElement).scrollIntoView({ block: "start" }), block);
     await shoot("merge-editor");
     await browser.setWindowSize(WINDOW.width, WINDOW.height);
+  });
+
+  it("edit-commit", async () => {
+    // Edit commit… (#882, #885) needs a clean tracked tree: end the merge, stash the changes.
+    cleanForEdit();
+    // Reload status through the palette's "Refresh" command, as for the conflict.
+    await browser.keys(["Control", "k"]);
+    const input = await $('input[aria-label="Command palette"]');
+    await input.waitForDisplayed();
+    await input.setValue("Refresh");
+    await browser.keys(["Enter"]);
+    await browser.waitUntil(async () => !(await (await $("button*=Abort merge")).isExisting()), {
+      timeout: SLOW_UI_TIMEOUT,
+      timeoutMsg: "the app still shows the merge",
+    });
+    const subject = "Add setup steps to the README";
+    await $(`li*=${subject}`).waitForExist({ timeout: SLOW_UI_TIMEOUT });
+    // Found and clicked inside the page in one step, as history-rewrite.spec.ts does: a refresh
+    // can close the menu between finding the item and clicking it.
+    await browser.waitUntil(
+      () =>
+        browser.execute((wanted: string) => {
+          const item = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menu"] button')).find(
+            (button) => !button.disabled && (button.textContent ?? "").trim() === "Edit commit…",
+          );
+          if (item !== undefined) {
+            item.click();
+            return true;
+          }
+          Array.from(document.querySelectorAll("li"))
+            .find((li) => (li.textContent ?? "").includes(wanted))
+            ?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }));
+          return false;
+        }, subject),
+      { timeout: SLOW_UI_TIMEOUT, timeoutMsg: "could not pick Edit commit… from the menu" },
+    );
+    await waitUntilInPage("[role='status']", "Editing ", { contains: true, timeout: SLOW_UI_TIMEOUT });
+    await click("li*=Uncommitted changes");
+    await waitUntilInPage("button", "Commit part");
+    await clickInPage("span", "README.md (Modified)");
+    await waitUntilInPage(".diff-line-add");
+    await shoot("edit-commit");
   });
 });
