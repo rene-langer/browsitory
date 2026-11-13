@@ -2469,7 +2469,10 @@ User-defined commands (epic #897) are programs the user adds to menus and the pa
   `journal::describe`): "Run command" with the command's name as target, the program it ran
   (collected with `record_runs` around `user_command::run`), and `Succeeded`, `Failed` (with
   "Exited with code N.", a time-out, or why it couldn't start) or `Cancelled`. A run refused while
-  being prepared (gone, a value missing, a path outside) logs nothing. It has no Run again.
+  being prepared (gone, a value missing, a path outside) logs nothing. Its Run again
+  (`Rerun::UserCommand`, #890) keeps the command's id and the selection it ran on; the frontend
+  runs it like the menu item (`useUserCommandRunner`), so only a command still defined runs, and
+  its variables are filled anew from that selection.
 - Menus and palette (#895): `RepoWorkspace` loads the commands (`useUserCommands`, which reloads
   when Preferences saves) and runs them through `useUserCommandRunner` (confirmation, the output
   dialog with Stop, toasts, the refresh). The graph, branch and tag menus take them as props or

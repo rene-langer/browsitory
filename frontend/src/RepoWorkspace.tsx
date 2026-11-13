@@ -907,13 +907,22 @@ export function RepoWorkspace({
           repoPath={repoPath}
           focus={operationLog}
           runAgain={{
-            run: (rerun) => runRerun(rerun, appState),
+            run: (rerun) =>
+              runRerun(rerun, {
+                ...appState,
+                // As its menu item would: asking first, showing output, as the command is set up.
+                runUserCommand: (commandId, context) => {
+                  const command = userCommandsApi?.commands.find((candidate) => candidate.id === commandId);
+                  if (command !== undefined) userCommandsApi?.run(command, context);
+                },
+              }),
             blockedReason: (rerun) =>
               repositoryOperationDisabled
                 ? (operationDisabledReason ?? "Another action is running.")
                 : rerunBlockedReason(rerun, {
                     remotes: appState.state.remotes.map((remote) => remote.name),
                     branches: appState.state.branches.map((branch) => branch.name),
+                    userCommands: userCommandsApi?.commands.map((command) => command.id) ?? [],
                   }),
           }}
           onClose={() => setOperationLog(null)}

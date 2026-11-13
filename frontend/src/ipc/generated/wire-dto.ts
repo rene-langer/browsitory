@@ -360,7 +360,7 @@ export type RepoWatch = { repoPath: string, kind: RepoWatchKind, };
 
 export type RepoWatchKind = "Changed" | "Stopped";
 
-export type Rerun = { "kind": "Fetch", remoteName: string, prune: boolean | null, } | { "kind": "FetchAll", prune: boolean | null, } | { "kind": "Pull" } | { "kind": "PushCurrentBranch", remoteName: string, noVerify: boolean, } | { "kind": "PushBranch", remoteName: string, localBranch: string, remoteBranch: string, setUpstream: boolean, noVerify: boolean, } | { "kind": "PushTags", remoteName: string, names: Array<string>, noVerify: boolean, };
+export type Rerun = { "kind": "Fetch", remoteName: string, prune: boolean | null, } | { "kind": "FetchAll", prune: boolean | null, } | { "kind": "Pull" } | { "kind": "PushCurrentBranch", remoteName: string, noVerify: boolean, } | { "kind": "PushBranch", remoteName: string, localBranch: string, remoteBranch: string, setUpstream: boolean, noVerify: boolean, } | { "kind": "PushTags", remoteName: string, names: Array<string>, noVerify: boolean, } | { "kind": "UserCommand", commandId: string, context: UserCommandContext, };
 
 export type ResetMode = "soft" | "mixed" | "hard";
 

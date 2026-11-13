@@ -39,6 +39,9 @@ export function runRerun(rerun: Rerun, actions: RerunActions): void {
     case "PushTags":
       void actions.pushTags(rerun.remoteName, rerun.names, rerun.noVerify);
       return;
+    case "UserCommand":
+      void actions.runUserCommand?.(rerun.commandId, rerun.context);
+      return;
   }
 }
 
@@ -55,6 +58,10 @@ export function rerunBlockedReason(
     return state.remotes.length === 0 ? "The repository has no remotes any more." : null;
   }
   if (rerun.kind === "Pull") return null;
+  // A user command runs again only while it is still defined (#894); it needs no remote.
+  if (rerun.kind === "UserCommand") {
+    return state.userCommands?.includes(rerun.commandId) === true ? null : "The command no longer exists.";
+  }
   if (!state.remotes.includes(rerun.remoteName)) return `The remote ${rerun.remoteName} no longer exists.`;
   if (rerun.kind === "PushBranch" && !state.branches.includes(rerun.localBranch)) {
     return `The branch ${rerun.localBranch} no longer exists.`;

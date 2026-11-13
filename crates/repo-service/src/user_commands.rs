@@ -119,7 +119,11 @@ pub fn execute(prepared: &Prepared, run_id: &str) -> Result<UserCommandRunDto, E
         let id = journal.begin(oplog::Start {
             name: "Run command".to_string(),
             target: Some(prepared.name.clone()),
-            ..oplog::Start::default()
+            params: Vec::new(),
+            rerun: Some(oplog::Rerun::UserCommand {
+                command_id: prepared.command_id.clone(),
+                context: prepared.context.clone(),
+            }),
         });
         (journal, id)
     });
