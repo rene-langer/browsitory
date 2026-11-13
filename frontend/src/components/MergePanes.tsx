@@ -231,6 +231,11 @@ export function MergePanes({
     "--merge-gutter": `calc(${Math.max(digits, 2) + 1}ch + 4px)`,
   } as CSSProperties;
 
+  /**
+   * One row, a cell per pane. A block's side cells are named after their pane for screen readers
+   * (#880); an unchanged run's (`run`, its segment index) are hidden from them, since the result
+   * holds the same lines and the file would otherwise be read three or four times.
+   */
   const row = (
     key: string,
     cells: Record<MergePane, ReactNode>,
@@ -238,16 +243,22 @@ export function MergePanes({
     run?: number,
   ) => (
     <div key={key} className={styles.row} data-run={run}>
-      {panes.map((pane) => (
-        <div
-          key={pane}
-          data-pane={pane}
-          data-chosen={chosen.has(pane) ? "true" : undefined}
-          className={`${styles.cell} ${chosen.has(pane) ? styles.chosen : ""}`}
-        >
-          {cells[pane]}
-        </div>
-      ))}
+      {panes.map((pane) => {
+        const side = pane !== "result";
+        return (
+          <div
+            key={pane}
+            data-pane={pane}
+            data-chosen={chosen.has(pane) ? "true" : undefined}
+            role={side && run === undefined ? "group" : undefined}
+            aria-label={side && run === undefined ? headings[pane] : undefined}
+            aria-hidden={side && run !== undefined ? true : undefined}
+            className={`${styles.cell} ${chosen.has(pane) ? styles.chosen : ""}`}
+          >
+            {cells[pane]}
+          </div>
+        );
+      })}
     </div>
   );
 
@@ -255,12 +266,17 @@ export function MergePanes({
   const cleanRow = (key: string, content: string, index: number, from: number, to: number) => {
     const cleanTokens = tokens?.ours[index];
     const start = starts[index];
-    return row(key, {
-      base: <Lines text={content} tokens={cleanTokens} start={start.base} from={from} to={to} />,
-      ours: <Lines text={content} tokens={cleanTokens} start={start.ours} from={from} to={to} />,
-      result: <Lines text={content} tokens={cleanTokens} start={start.result} from={from} to={to} />,
-      theirs: <Lines text={content} tokens={cleanTokens} start={start.theirs} from={from} to={to} />,
-    });
+    return row(
+      key,
+      {
+        base: <Lines text={content} tokens={cleanTokens} start={start.base} from={from} to={to} />,
+        ours: <Lines text={content} tokens={cleanTokens} start={start.ours} from={from} to={to} />,
+        result: <Lines text={content} tokens={cleanTokens} start={start.result} from={from} to={to} />,
+        theirs: <Lines text={content} tokens={cleanTokens} start={start.theirs} from={from} to={to} />,
+      },
+      undefined,
+      index,
+    );
   };
 
   /** A whole unchanged run, its result editable (#878). */

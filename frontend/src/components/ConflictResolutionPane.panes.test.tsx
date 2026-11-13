@@ -1075,3 +1075,92 @@ describe("ConflictResolutionPane navigation, save and word marks (#879)", () => 
     expect(marks).toEqual(["1", "2"]);
   });
 });
+
+// #880: screen-reader names, focus order and resolving a file from the keyboard alone.
+describe("ConflictResolutionPane accessibility (#880)", () => {
+  /** What a block's Tab order reaches, by accessible name. */
+  function tabOrder(region: HTMLElement): string[] {
+    return [...region.querySelectorAll<HTMLElement>("button, textarea, input, select, [tabindex]")]
+      .filter((element) => element !== region && element.tabIndex >= 0 && !element.hasAttribute("disabled"))
+      .filter((element) => element.closest('[aria-hidden="true"]') === null)
+      .map((element) => element.getAttribute("aria-label") ?? element.textContent ?? "");
+  }
+
+  it("names each side pane of a block after its side", async () => {
+    renderPane(unequal, { client: mergeClient(unequal) });
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    await screen.findByText("Ours (main)");
+    const ours = within(first).getByRole("group", { name: "Ours (main)" });
+    const theirs = within(first).getByRole("group", { name: "Theirs (feature)" });
+    expect(ours).toBe(cellOf(first, "ours"));
+    expect(theirs).toBe(cellOf(first, "theirs"));
+    expect(within(ours).getByRole("button", { name: "Take ours" })).toBeInTheDocument();
+    expect(within(theirs).getByRole("button", { name: "Take theirs" })).toBeInTheDocument();
+    expect(within(first).getByRole("textbox", { name: "Result" })).toBe(within(cellOf(first, "result")).getByRole("textbox"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Show base" }));
+    expect(within(first).getByRole("group", { name: "Base" })).toBe(cellOf(first, "base"));
+  });
+
+  it("names each arrow's block and what it does", async () => {
+    renderPane(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    const take = within(cellOf(first, "ours")).getByRole("button", { name: "Take ours" });
+    expect(take).toHaveAccessibleDescription(/^Conflict 1 of 2: put our lines into the result/);
+    fireEvent.click(take);
+    expect(take).toHaveAccessibleDescription("Conflict 1 of 2: our lines are in the result.");
+  });
+
+  it("reads an unchanged run once, from the result, not three times", async () => {
+    renderPane(unequal);
+    await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    const cells = screen
+      .getAllByText("c", { ignore: "script, style, textarea" })
+      .map((text) => text.closest<HTMLElement>("[data-pane]")!);
+    expect(cells.map((cell) => [cell.getAttribute("data-pane"), cell.getAttribute("aria-hidden")])).toEqual([
+      ["ours", "true"],
+      ["result", null],
+      ["theirs", "true"],
+    ]);
+    expect(within(cells[1]).getByRole("textbox", { name: "Result" })).toHaveValue("c\n");
+  });
+
+  it("tabs through a block from its choices to the arrows and the result between them", async () => {
+    renderPane(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    expect(tabOrder(first)).toEqual([
+      "Accept ours",
+      "Accept theirs",
+      "Ours then theirs",
+      "Theirs then ours",
+      "Accept base",
+      "Take ours",
+      "Result",
+      "Take theirs",
+    ]);
+  });
+
+  it("resolves a file from the keyboard alone", async () => {
+    const { onResolve } = renderPane(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    const second = screen.getByRole("region", { name: "Conflict 2 of 2" });
+    const next = screen.getByRole("button", { name: "Next conflict" });
+    act(() => next.focus());
+    fireEvent.keyDown(next, { key: "F7" });
+    expect(first).toHaveFocus();
+    fireEvent.keyDown(first, { key: "1", code: "Digit1" });
+    fireEvent.keyDown(first, { key: "F7" });
+    expect(second).toHaveFocus();
+    fireEvent.keyDown(second, { key: "2", code: "Digit2" });
+    const field = within(second).getByRole("textbox", { name: "Result" });
+    act(() => field.focus());
+    fireEvent.change(field, { target: { value: "t2\nt3, typed\n" } });
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(second).toHaveFocus();
+    expect(screen.getByRole("status")).toHaveTextContent("2 of 2 resolved");
+    const save = screen.getByRole("button", { name: "Save resolution" });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    expect(onResolve).toHaveBeenCalledWith("shared.txt", "a\nb\no1\no2\no3\nc\nt2\nt3, typed\nd\n");
+  });
+});

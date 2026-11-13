@@ -98,4 +98,14 @@ describe("ShortcutSheet", () => {
     expect(within(group).getByText("Shift+F7")).toBeInTheDocument();
     expect(within(group).getByText(/back to its block/)).toBeInTheDocument();
   });
+
+  // #880: the merge editor's own Undo and Redo (#878).
+  it("lists the merge editor's undo and redo", () => {
+    render(<ShortcutSheet onClose={vi.fn()} apple={false} />);
+    const heading = screen.getByRole("heading", { name: "Merge editor" });
+    const group = heading.closest("section") ?? heading.parentElement!;
+    // One row: the global sheet already lists Redo's keys on their own, for the Git undo.
+    expect(within(group).getByText(/^Undo \/ redo the last change in the merge editor/)).toBeInTheDocument();
+    expect(within(group).getByText("Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y")).toBeInTheDocument();
+  });
 });

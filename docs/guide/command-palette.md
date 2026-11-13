@@ -145,8 +145,9 @@ In the merge editor of the conflict pane (see [Conflicts](conflicts.md)):
 | Keys | What they do |
 |---|---|
 | 1 … 5 | Accept ours, Accept theirs, Ours then theirs, Theirs then ours, Accept base (with a conflict block focused, outside its result field) |
-| F7 / Shift+F7 | Next and previous conflict (⇧F7 on macOS) |
+| F7 / Shift+F7 | Next and previous conflict (⇧F7 on macOS); from an unchanged part of the result, the conflict after or before it |
 | Esc | Leave a block's result field, back to the block |
+| Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y | Undo and redo the merge editor's own changes (⌘Z and ⇧⌘Z on macOS), not a Git operation |
 
 **Context menus from the keyboard.** The Menu key or Shift+F10 (Fn+Shift+F10 on most Mac
 keyboards) opens the menu of the focused branch, remote, changed file, commit or tab. In a menu,

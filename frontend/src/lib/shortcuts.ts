@@ -1,6 +1,7 @@
 import {
   GLOBAL_SHORTCUTS,
   MERGE_EDITOR_SHORTCUTS,
+  chordsFor,
   formatChords,
   shortcutLabel,
   type GlobalShortcut,
@@ -137,6 +138,11 @@ export function shortcutGroups(apple: boolean = isApplePlatform(), vscode: boole
           ),
         ),
         row([k("Escape")], "Leave a conflict's result field, back to its block"),
+        // #878: inside the merge editor these keys undo its own changes, not a Git operation.
+        row(
+          [...chordsFor("undo", apple), ...chordsFor("redo", apple)],
+          "Undo / redo the last change in the merge editor (with the focus in it)",
+        ),
       ],
     },
     {
