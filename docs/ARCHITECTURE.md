@@ -1414,7 +1414,8 @@ certificate.
   and counts it in `RebaseState::split_parts` (`splitParts` in `rebase.json`, format version 3;
   `RebaseInfo.split_parts` while editing). The pick's `CHERRY_PICK_HEAD` stays, so the stop is
   still this rebase's own paused pick. Continue then lands what is staged as the last part, or,
-  with parts committed and nothing staged, ends the step without a commit. Refused at a commit
+  with nothing staged, ends the step without a commit: after parts, no last part; without
+  any, the commit is dropped (owner decision: nothing of it is left). Refused at a commit
   that squash/fixup steps fold into (they would fold the parts back together).
 - **An edit stop's rest** (#884, owner decision: no silent carry-over): `edit_rest` lists the
   unstaged changes to tracked files and the untracked files at paths the edited commit changes.

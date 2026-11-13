@@ -759,15 +759,16 @@ pub fn rebase_continue_with_rest(
     result
 }
 
-/// Lands the paused step from the index, except a split (#884) whose parts took every change:
-/// nothing is staged, so no last part is committed, and the step simply ends.
+/// Lands the paused step from the index, except at an edit stop with nothing staged (#884): a
+/// split whose parts took every change commits no last part, and an edit that left nothing of
+/// the commit drops it, as Drop would (owner decision). Either way the step simply ends.
 fn land_or_close_split(
     repo: &Repository,
     state: &mut RebaseState,
     message: Option<&str>,
     hooks: &mut HookOptions<'_>,
 ) -> Result<(), RebaseError> {
-    if state.split_parts > 0 {
+    if editing_entry(state).is_some() {
         let mut index = repo.index()?;
         index.read(false)?;
         let staged = index.write_tree()?;

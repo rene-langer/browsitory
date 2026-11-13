@@ -86,7 +86,9 @@ staged. When a tracked file still has changes that aren't staged, or a file the 
 no longer staged, Continue asks what to do with them: **Commit the rest** stages them and
 commits them with the commit (the last part of a split), **Discard the rest** throws them away
 (the history then doesn't have them; Undo of the whole edit brings them back), or **Cancel** to
-go back and stage what belongs where. Untracked files of your own don't count.
+go back and stage what belongs where. Untracked files of your own don't count. When nothing
+of the commit is left (nothing staged, and nothing unstaged either), Continue drops the commit,
+as **Drop** would; **Undo** brings it back.
 
 **Fold staged changes into this commit.** While you have changes staged, the commit menu (and
 the palette) also offers to fold them into a commit of the current branch, like `git commit

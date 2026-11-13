@@ -8,4 +8,5 @@
   "Splitting 1a2b3c4", and the whole split is one Undo step ("Split 1a2b3c4"). Edit commit… has
   Commit part too (#884).
 - Changed: Continue at an edit stop no longer carries changes that aren't staged into the
-  replay: it asks whether to commit them with the commit, discard them, or cancel (#884).
+  replay: it asks whether to commit them with the commit, discard them, or cancel. When nothing
+  of the commit is left, Continue drops it, as Drop would (#884).
