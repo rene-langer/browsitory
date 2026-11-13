@@ -220,6 +220,11 @@ impl WorkerRegistry {
         }
     }
 
+    /// Stops every worker (#965). Stub: the implementation follows.
+    pub fn stop_all(&self, _grace: std::time::Duration) -> bool {
+        true
+    }
+
     /// The number of workers (open repositories).
     pub fn len(&self) -> usize {
         self.lock().workers.len()

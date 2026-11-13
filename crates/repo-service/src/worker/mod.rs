@@ -1053,6 +1053,11 @@ impl Worker {
         })
     }
 
+    /// Stops the worker (#965). Stub: the implementation follows.
+    pub fn stop(&self, _grace: std::time::Duration) -> bool {
+        true
+    }
+
     /// A cloneable handle to this worker, cheap enough to take out of a mutex guard.
     pub fn handle(&self) -> WorkerHandle {
         WorkerHandle {
