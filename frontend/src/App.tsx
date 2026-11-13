@@ -30,6 +30,7 @@ import {
   PreferencesDialog,
   UpdatesSection,
 } from "./components/PreferencesDialog";
+import { KeyboardShortcutsSection } from "./components/KeyboardShortcutsSection";
 import type { PreferencesGroupId } from "./lib/preferencesGroup";
 import { OpenPreferencesContext } from "./state/openPreferences";
 import { cloneToastMessage, createNewRepository } from "./lib/newRepository";
@@ -507,6 +508,8 @@ function AppContent({
               { id: "diff", label: "Diff", content: <DiffSection /> },
               { id: "commit-message", label: "Commit message", content: <CommitMessageSection /> },
               { id: "fetch", label: "Fetch", content: <FetchSection repoPath={openRepos.activePath} /> },
+              // In VSCode its own Keyboard Shortcuts editor rebinds the keys (#900).
+              ...(toolHost === "vscode" ? [] : [{ id: "keyboard" as const, label: "Keyboard", content: <KeyboardShortcutsSection /> }]),
               {
                 id: "external-tools",
                 label: "External tools",
