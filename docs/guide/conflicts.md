@@ -68,7 +68,9 @@ A conflicted file opens the **Resolve conflict** pane:
   editor and focus that block. In a block's **Result** field the digits are typed as text: press
   **Esc**, **Shift+Tab** or **F7** first to get back to a block. The command palette offers the
   same moves and choices (**Next conflict**, **Accept theirs (current conflict)** and so on) for
-  the conflict last focused (the first one before that). A whole file can be resolved without
+  the conflict last focused (the first one before that); from an unchanged part of the result,
+  its **Next conflict** and **Previous conflict** go to the conflict after or before it, as the
+  buttons do. A whole file can be resolved without
   the mouse: **F7** to a block, a digit or **Tab** to its arrows (**Take ours**, then the
   **Result** field, then **Take theirs**) and **Enter**, type in the result, **Esc** back to the
   block, **F7** on to the next one, then **Tab** to **Save resolution**.
