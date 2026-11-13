@@ -889,6 +889,12 @@ describe("tauriRepoClient external tools", () => {
     expect(invoke).toHaveBeenLastCalledWith("set_external_tool_settings", { settings: { editor: "code", terminal: null } });
     await tauriRepoClient.getGitTools("/repo");
     expect(invoke).toHaveBeenLastCalledWith("get_git_tools", { repoPath: "/repo" });
+    await tauriRepoClient.listUserCommands("/repo");
+    expect(invoke).toHaveBeenLastCalledWith("list_user_commands", { repoPath: "/repo" });
+    await tauriRepoClient.setUserCommands(null, []);
+    expect(invoke).toHaveBeenLastCalledWith("set_user_commands", { repoPath: null, commands: [] });
+    await tauriRepoClient.checkUserCommand("make ${paths}", null);
+    expect(invoke).toHaveBeenLastCalledWith("check_user_command", { commandLine: "make ${paths}", workingDirectory: null });
   });
 });
 

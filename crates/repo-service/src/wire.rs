@@ -2221,6 +2221,186 @@ impl From<ExternalToolSettingsDto> for config::ExternalToolSettings {
     }
 }
 
+/// Where a user command (#893) appears besides the command palette.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "UserCommandTarget"))]
+pub enum UserCommandTargetDto {
+    Commit,
+    Branch,
+    Tag,
+    File,
+    Repository,
+}
+
+impl From<config::UserCommandTarget> for UserCommandTargetDto {
+    fn from(target: config::UserCommandTarget) -> Self {
+        match target {
+            config::UserCommandTarget::Commit => Self::Commit,
+            config::UserCommandTarget::Branch => Self::Branch,
+            config::UserCommandTarget::Tag => Self::Tag,
+            config::UserCommandTarget::File => Self::File,
+            config::UserCommandTarget::Repository => Self::Repository,
+        }
+    }
+}
+
+impl From<UserCommandTargetDto> for config::UserCommandTarget {
+    fn from(target: UserCommandTargetDto) -> Self {
+        match target {
+            UserCommandTargetDto::Commit => Self::Commit,
+            UserCommandTargetDto::Branch => Self::Branch,
+            UserCommandTargetDto::Tag => Self::Tag,
+            UserCommandTargetDto::File => Self::File,
+            UserCommandTargetDto::Repository => Self::Repository,
+        }
+    }
+}
+
+/// A user command as stored (#893), with the variables it uses, or why it can't run (a command
+/// written into the config file by hand that doesn't parse).
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "UserCommand"))]
+#[serde(rename_all = "camelCase")]
+pub struct UserCommandDto {
+    pub id: String,
+    pub name: String,
+    pub command_line: String,
+    pub working_directory: Option<String>,
+    pub targets: Vec<UserCommandTargetDto>,
+    pub confirm: bool,
+    pub show_output: bool,
+    pub refresh: bool,
+    pub variables: Vec<git_core::user_command::Variable>,
+    pub problem: Option<String>,
+}
+
+impl From<config::UserCommand> for UserCommandDto {
+    fn from(command: config::UserCommand) -> Self {
+        let parsed = git_core::user_command::parse(
+            &command.command_line,
+            command.working_directory.as_deref(),
+            git_core::process::CommandStyle::native(),
+        );
+        let (variables, problem) = match parsed {
+            Ok(template) => (template.variables(), None),
+            Err(error) => (Vec::new(), Some(error.to_string())),
+        };
+        Self {
+            id: command.id,
+            name: command.name,
+            command_line: command.command_line,
+            working_directory: command.working_directory,
+            targets: command.targets.into_iter().map(Into::into).collect(),
+            confirm: command.confirm,
+            show_output: command.show_output,
+            refresh: command.refresh,
+            variables,
+            problem,
+        }
+    }
+}
+
+/// A user command to store (#893); a blank `id` gets a new one.
+#[derive(Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "UserCommandInput"))]
+#[serde(rename_all = "camelCase")]
+pub struct UserCommandInput {
+    pub id: String,
+    pub name: String,
+    pub command_line: String,
+    pub working_directory: Option<String>,
+    pub targets: Vec<UserCommandTargetDto>,
+    pub confirm: bool,
+    pub show_output: bool,
+    pub refresh: bool,
+}
+
+impl From<UserCommandInput> for config::UserCommand {
+    fn from(input: UserCommandInput) -> Self {
+        Self {
+            id: input.id,
+            name: input.name,
+            command_line: input.command_line,
+            working_directory: input.working_directory,
+            targets: input.targets.into_iter().map(Into::into).collect(),
+            confirm: input.confirm,
+            show_output: input.show_output,
+            refresh: input.refresh,
+        }
+    }
+}
+
+/// The app-wide user commands and one repository's own (#893).
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "UserCommands"))]
+pub struct UserCommandsDto {
+    pub global: Vec<UserCommandDto>,
+    pub repository: Vec<UserCommandDto>,
+}
+
+impl From<config::UserCommands> for UserCommandsDto {
+    fn from(commands: config::UserCommands) -> Self {
+        Self {
+            global: commands.global.into_iter().map(Into::into).collect(),
+            repository: commands.repository.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// How a user command line splits, for "Test" in Preferences (#893): each argument with its
+/// variables unexpanded, and where the program was found.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "UserCommandCheck"))]
+#[serde(rename_all = "camelCase")]
+pub struct UserCommandCheckDto {
+    pub words: Vec<String>,
+    /// The program as written, when it names one without a variable.
+    pub program: Option<String>,
+    /// Where `program` is on `PATH`; `None` when it isn't (or has a variable).
+    pub program_path: Option<String>,
+    pub variables: Vec<git_core::user_command::Variable>,
+}
+
+impl UserCommandCheckDto {
+    /// Parses `command_line` with the platform's quoting rules and looks up its program; an
+    /// invalid command line is the error.
+    pub fn check(command_line: &str, working_directory: Option<&str>) -> Result<Self, ErrorDto> {
+        let template = git_core::user_command::parse(
+            command_line,
+            working_directory,
+            git_core::process::CommandStyle::native(),
+        )
+        .map_err(ErrorDto::from_error)?;
+        Ok(Self::from_template(
+            &template,
+            git_core::process::find_program,
+        ))
+    }
+
+    /// `check`'s answer for a parsed `template`, looking the program up with `find`.
+    pub fn from_template(
+        template: &git_core::user_command::CommandTemplate,
+        find: impl Fn(&str) -> Option<std::path::PathBuf>,
+    ) -> Self {
+        let program = template.literal_program().map(str::to_string);
+        let program_path = program
+            .as_deref()
+            .and_then(find)
+            .map(|path| path.to_string_lossy().into_owned());
+        Self {
+            words: template.words(),
+            program,
+            program_path,
+            variables: template.variables(),
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[cfg_attr(any(test, feature = "ts"), ts(rename = "GitConfigSource"))]
@@ -3688,6 +3868,7 @@ mod ts_bindings {
             git_core::repo::TerminalRebaseKind,
             git_core::status::StatusKind,
             git_core::tree::TreeEntryKind,
+            git_core::user_command::Variable,
             ErrorKind,
             ErrorDto,
             crate::worker::HookSource,
@@ -3775,6 +3956,11 @@ mod ts_bindings {
             DiffSourceDto,
             MarkResolvedOutcomeDto,
             ExternalToolSettingsDto,
+            UserCommandTargetDto,
+            UserCommandDto,
+            UserCommandInput,
+            UserCommandsDto,
+            UserCommandCheckDto,
             GitConfigSourceDto,
             GitToolDto,
             GitToolsDto,

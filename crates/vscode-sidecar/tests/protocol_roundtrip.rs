@@ -604,6 +604,176 @@ fn persist_and_list_open_repos_round_trip() {
 }
 
 #[test]
+fn user_commands_round_trip_app_wide_and_per_repository() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+
+    let empty = sidecar.call(
+        1,
+        "list_user_commands",
+        serde_json::json!({"repoPath": "/repos/a"}),
+    );
+    assert_eq!(
+        empty["result"],
+        serde_json::json!({"global": [], "repository": []})
+    );
+
+    let set = sidecar.call(
+        2,
+        "set_user_commands",
+        serde_json::json!({"repoPath": null, "commands": [{
+            "id": "",
+            "name": " Show ",
+            "commandLine": "git show ${shortCommit} -- ${paths}",
+            "workingDirectory": "  ",
+            "targets": ["File", "Commit", "File"],
+            "confirm": true,
+            "showOutput": false,
+            "refresh": false,
+        }]}),
+    );
+    let stored = set["result"].as_array().expect("stored commands").clone();
+    assert_eq!(stored.len(), 1, "{set}");
+    let id = stored[0]["id"].as_str().unwrap().to_string();
+    assert!(!id.is_empty());
+    assert_eq!(
+        stored[0],
+        serde_json::json!({
+            "id": id,
+            "name": "Show",
+            "commandLine": "git show ${shortCommit} -- ${paths}",
+            "workingDirectory": null,
+            "targets": ["Commit", "File"],
+            "confirm": true,
+            "showOutput": false,
+            "refresh": false,
+            "variables": ["shortCommit", "paths"],
+            "problem": null,
+        })
+    );
+
+    let here = sidecar.call(
+        3,
+        "set_user_commands",
+        serde_json::json!({"repoPath": "/repos/a", "commands": [{
+            "id": "",
+            "name": "Deploy",
+            "commandLine": "deploy ${branch}",
+            "workingDirectory": "${repo}/ops",
+            "targets": ["Branch"],
+            "confirm": false,
+            "showOutput": true,
+            "refresh": true,
+        }]}),
+    );
+    assert_eq!(
+        here["result"][0]["workingDirectory"], "${repo}/ops",
+        "{here}"
+    );
+    assert_eq!(
+        here["result"][0]["variables"],
+        serde_json::json!(["repo", "branch"])
+    );
+
+    let listed = sidecar.call(
+        4,
+        "list_user_commands",
+        serde_json::json!({"repoPath": "/repos/a"}),
+    );
+    assert_eq!(listed["result"]["global"], set["result"]);
+    assert_eq!(listed["result"]["repository"], here["result"]);
+    let elsewhere = sidecar.call(
+        5,
+        "list_user_commands",
+        serde_json::json!({"repoPath": null}),
+    );
+    assert_eq!(elsewhere["result"]["repository"], serde_json::json!([]));
+
+    let invalid = sidecar.call(
+        6,
+        "set_user_commands",
+        serde_json::json!({"repoPath": null, "commands": [{
+            "id": "",
+            "name": "Bad",
+            "commandLine": "echo ${nope}",
+            "workingDirectory": null,
+            "targets": [],
+            "confirm": false,
+            "showOutput": true,
+            "refresh": true,
+        }]}),
+    );
+    let message = invalid["error"]["message"].as_str().unwrap();
+    assert!(
+        message.starts_with("Bad: Unknown variable ${nope}"),
+        "{message}"
+    );
+}
+
+#[test]
+fn check_user_command_shows_the_split_arguments_and_the_program() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+
+    let checked = sidecar.call(
+        1,
+        "check_user_command",
+        serde_json::json!({
+            "commandLine": "browsitory-surely-missing-program \"${branch} notes\" ${commit}",
+            "workingDirectory": null,
+        }),
+    );
+    assert_eq!(
+        checked["result"],
+        serde_json::json!({
+            "words": ["browsitory-surely-missing-program", "${branch} notes", "${commit}"],
+            "program": "browsitory-surely-missing-program",
+            "programPath": null,
+            "variables": ["commit", "branch"],
+        })
+    );
+
+    let in_repo = sidecar.call(
+        2,
+        "check_user_command",
+        serde_json::json!({"commandLine": "${repo}/run.sh", "workingDirectory": "${path}"}),
+    );
+    assert_eq!(in_repo["result"]["program"], serde_json::Value::Null);
+    assert_eq!(in_repo["result"]["programPath"], serde_json::Value::Null);
+    assert_eq!(
+        in_repo["result"]["variables"],
+        serde_json::json!(["repo", "path"])
+    );
+
+    let invalid = sidecar.call(
+        3,
+        "check_user_command",
+        serde_json::json!({"commandLine": "x --all=${paths}", "workingDirectory": null}),
+    );
+    assert_eq!(
+        invalid["error"]["message"],
+        "${paths} must be an argument of its own."
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn check_user_command_finds_a_program_on_the_path() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    let checked = sidecar.call(
+        1,
+        "check_user_command",
+        serde_json::json!({"commandLine": "sh -c true", "workingDirectory": null}),
+    );
+    let found = checked["result"]["programPath"]
+        .as_str()
+        .expect("sh is on PATH");
+    assert!(std::path::Path::new(found).is_absolute(), "{found}");
+    assert!(found.ends_with("/sh"), "{found}");
+}
+
+#[test]
 fn set_and_list_repo_aliases_round_trip() {
     let (_guard, config_dir) = ConfigDirGuard::new();
     let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);

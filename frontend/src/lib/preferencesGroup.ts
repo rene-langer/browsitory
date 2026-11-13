@@ -9,6 +9,7 @@ export const PREFERENCES_GROUP_IDS = [
   "fetch",
   "keyboard",
   "external-tools",
+  "user-commands",
   "updates",
 ] as const;
 

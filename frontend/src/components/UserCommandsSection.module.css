@@ -1,0 +1,124 @@
+.hint {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.problem {
+  margin: 0;
+  color: var(--color-danger-text);
+}
+
+.scope {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.scopeTitle {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.list:empty {
+  display: none;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.rowText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.name {
+  font-weight: 500;
+}
+
+.commandLine,
+.mono {
+  font-family: var(--font-mono, monospace);
+  overflow-wrap: anywhere;
+}
+
+.commandLine {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.rowActions {
+  display: flex;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+.add {
+  align-self: flex-start;
+}
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+}
+
+.targets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+.targets legend {
+  padding: 0;
+  margin-bottom: var(--space-1);
+  width: 100%;
+}
+
+.checkbox {
+  display: flex;
+  gap: var(--space-1);
+  align-items: center;
+}
+
+.check {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.args {
+  margin: 0;
+  padding-left: 1.5rem;
+  font-size: var(--text-xs);
+}
+
+.buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}

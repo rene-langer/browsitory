@@ -2426,6 +2426,27 @@ work to a `HighlightTransport` (`highlightWorkerProtocol.ts`):
 - Work tree paths come from `WorkerHandle::workdir()` (captured at spawn), never from the raw
   repo path, which may be a subdirectory (`Repository::discover`).
 
+## User commands
+
+User-defined commands (epic #897) are programs the user adds to menus and the palette.
+
+- Stored only in the app's config (`config::user_commands`): app-wide as `[[user_commands]]`,
+  per repository as `[[repo_user_commands]]` keyed by the repository path the frontend opened.
+  Nothing is read from inside a repository, so a cloned repository can't define a command
+  (owner decision on #893). `set_user_commands` replaces one list at once and refuses it,
+  storing nothing, when a command doesn't parse; a blank or repeated id gets a new one. A
+  command written by hand without an id is listed as `global-<n>` / `repository-<n>`.
+- `git-core::user_command` parses a command line: `process::split_command_line` first (the
+  platform's quoting rules, never a shell), then `${repo}`, `${commit}`, `${shortCommit}`,
+  `${branch}`, `${ref}`, `${path}` and `${paths}` inside each word, so a value can't add,
+  split or quote arguments. `${paths}` must be a word of its own and becomes one argument per
+  path. `$${` is a literal `${`; an unknown name is an error. The working directory is one word
+  (blank: the repository root) and can't use `${paths}`.
+- The wire `UserCommand` carries the variables a command uses (computed when listed), so the
+  frontend can tell where it can run, and `problem` for a hand-written one that doesn't parse.
+  `check_user_command` ("Test" in Preferences) returns the words as split and the program's
+  `find_program` result without running anything.
+
 ## Fetch all
 
 - `git-core::remote::fetch_all` fetches every remote in `repo.remotes()` order under one

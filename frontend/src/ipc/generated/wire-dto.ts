@@ -460,6 +460,26 @@ export type UpstreamInfo = { localBranch: string, remoteName: string, remoteBran
  */
 pushBranch: string | null, };
 
+export type UserCommand = { id: string, name: string, commandLine: string, workingDirectory: string | null, targets: Array<UserCommandTarget>, confirm: boolean, showOutput: boolean, refresh: boolean, variables: Array<UserCommandVariable>, problem: string | null, };
+
+export type UserCommandCheck = { words: Array<string>, 
+/**
+ * The program as written, when it names one without a variable.
+ */
+program: string | null, 
+/**
+ * Where `program` is on `PATH`; `None` when it isn't (or has a variable).
+ */
+programPath: string | null, variables: Array<UserCommandVariable>, };
+
+export type UserCommandInput = { id: string, name: string, commandLine: string, workingDirectory: string | null, targets: Array<UserCommandTarget>, confirm: boolean, showOutput: boolean, refresh: boolean, };
+
+export type UserCommandTarget = "Commit" | "Branch" | "Tag" | "File" | "Repository";
+
+export type UserCommandVariable = "repo" | "commit" | "shortCommit" | "branch" | "ref" | "path" | "paths";
+
+export type UserCommands = { global: Array<UserCommand>, repository: Array<UserCommand>, };
+
 export type WordWrap = "Auto" | "On" | "Off";
 
 export type Workspace = { id: string, name: string, rootPath: string, memberPaths: Array<string>, };

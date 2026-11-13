@@ -21,7 +21,13 @@ pub enum ConfigError {
     Parse(#[from] toml::de::Error),
     #[error("failed to serialize config: {0}")]
     Serialize(#[from] toml::ser::Error),
+    /// A user command that can't be stored (#893), with the command's name and the problem.
+    #[error("{0}")]
+    InvalidUserCommand(String),
 }
+
+mod user_commands;
+pub use user_commands::*;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -438,6 +444,12 @@ struct ConfigFile {
     pull_preferences: Vec<PullPreference>,
     #[serde(default)]
     repo_aliases: Vec<RepoAlias>,
+    /// The app-wide user commands (#893).
+    #[serde(default)]
+    user_commands: Vec<UserCommand>,
+    /// Each repository's own user commands (#893), by path.
+    #[serde(default)]
+    repo_user_commands: Vec<RepoUserCommands>,
 }
 
 fn config_file_path() -> Result<PathBuf, ConfigError> {

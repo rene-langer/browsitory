@@ -1092,6 +1092,52 @@ export interface ExternalToolSettings {
   terminal: string | null;
 }
 export type GitConfigSource = "System" | "Xdg" | "Global" | "Local" | "Worktree" | "Other";
+/** Where a user command (#893) appears besides the command palette. */
+export type UserCommandTarget = "Commit" | "Branch" | "Tag" | "File" | "Repository";
+/** A `${…}` variable a user command line can use (#893). */
+export type UserCommandVariable = "repo" | "commit" | "shortCommit" | "branch" | "ref" | "path" | "paths";
+/** A user command as stored, app-wide or for one repository (#893). */
+export interface UserCommand {
+  id: string;
+  name: string;
+  commandLine: string;
+  /** `null`: the repository's root. */
+  workingDirectory: string | null;
+  targets: UserCommandTarget[];
+  confirm: boolean;
+  showOutput: boolean;
+  refresh: boolean;
+  /** The variables the command line and working directory use. */
+  variables: UserCommandVariable[];
+  /** Why a command written into the config by hand can't run; `null` when it can. */
+  problem: string | null;
+}
+/** A user command to store; a blank `id` gets a new one. */
+export interface UserCommandInput {
+  id: string;
+  name: string;
+  commandLine: string;
+  workingDirectory: string | null;
+  targets: UserCommandTarget[];
+  confirm: boolean;
+  showOutput: boolean;
+  refresh: boolean;
+}
+/** The app-wide user commands, and the active repository's own. */
+export interface UserCommands {
+  global: UserCommand[];
+  repository: UserCommand[];
+}
+/** How a user command line splits into arguments, for "Test" in Preferences. */
+export interface UserCommandCheck {
+  /** Each argument as split, variables unexpanded. */
+  words: string[];
+  /** The program as written, when it names one without a variable. */
+  program: string | null;
+  /** Where `program` was found on `PATH`; `null` when it wasn't (or has a variable). */
+  programPath: string | null;
+  variables: UserCommandVariable[];
+}
 export interface GitToolInfo {
   name: string;
   command: string | null;
@@ -1745,6 +1791,15 @@ export interface RepoClient {
   markResolved(repoPath: string, path: string, force: boolean): Promise<MarkResolvedOutcome>;
   getExternalToolSettings(): Promise<ExternalToolSettings>;
   setExternalToolSettings(settings: ExternalToolSettings): Promise<void>;
+  /** The app-wide user commands and, with `repoPath`, that repository's own (#893). */
+  listUserCommands(repoPath: string | null): Promise<UserCommands>;
+  /**
+   * Replaces the app-wide user commands (`repoPath` `null`) or one repository's, in order, and
+   * resolves them as stored. Rejects, storing nothing, when one is invalid.
+   */
+  setUserCommands(repoPath: string | null, commands: UserCommandInput[]): Promise<UserCommand[]>;
+  /** Splits and checks a user command line without running it; rejects when it is invalid. */
+  checkUserCommand(commandLine: string, workingDirectory: string | null): Promise<UserCommandCheck>;
   // The `diff.tool`/`merge.tool` git would use for this repo (repository-level tool settings
   // are reported with a `problem`, because Browsitory ignores them).
   getGitTools(repoPath: string): Promise<GitTools>;
