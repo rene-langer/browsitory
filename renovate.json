@@ -64,8 +64,10 @@
       "minimumReleaseAge": "3 days"
     },
     {
+      "description": "rust-toolchain.toml pins the one Rust version for local builds, CI and releases (#220): wait a week, so a release that gets a quick point fix (1.99.1) is skipped",
       "matchManagers": ["rust-toolchain"],
-      "groupName": "Rust toolchain"
+      "groupName": "Rust toolchain",
+      "minimumReleaseAge": "7 days"
     },
     {
       "matchPackageNames": ["/^tauri/", "/^@tauri-apps//"],

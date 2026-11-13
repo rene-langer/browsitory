@@ -13,7 +13,8 @@ by two hosts: a Tauri desktop app (`crates/tauri-app`) and a VSCode extension (`
 
 ## Run the desktop app from source
 
-You need Rust, Node.js 22 or newer (CI uses 24; packaging the extension with `vsce` needs 22),
+You need Rust through [rustup](https://rustup.rs) (it installs the version `rust-toolchain.toml`
+pins, the one CI uses, on the first build), Node.js 22 or newer (CI uses 24; packaging the extension with `vsce` needs 22),
 [pnpm](https://pnpm.io) 11 or newer (it switches to the version each `package.json` pins) and
 the [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your system. The Tauri CLI
 comes with the frontend's dependencies (`@tauri-apps/cli`, locked in `frontend/pnpm-lock.yaml`),

@@ -25,6 +25,11 @@ env:
   # extension/package.json's engines.vscode.
   # renovate: datasource=github-releases depName=microsoft/vscode
   BROWSITORY_E2E_VSCODE_VERSION: 1.146.0
+  # Set by the dtolnay/rust-toolchain action these jobs used before rust-toolchain.toml pinned
+  # the version (#220): no incremental builds (CI builds once; rust-cache skips them anyway) and
+  # colored cargo output in the logs.
+  CARGO_INCREMENTAL: 0
+  CARGO_TERM_COLOR: always
 
 # A new push to a pull request cancels that pull request's older, still-running run: only the
 # newest commit's checks matter there. Every other run (push to main, schedule, dispatch) gets a
@@ -299,10 +304,10 @@ jobs:
           scripts/ci-apt-install.sh libwebkit2gtk-4.1-dev libgtk-3-dev \
             libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev libxdo-dev build-essential
-      - uses: dtolnay/rust-toolchain@stable
+      # The version rust-toolchain.toml pins (#220), with its components.
+      - name: Install Rust
         if: env.RUN_STEPS == 'true'
-        with:
-          components: rustfmt, clippy
+        run: rustup toolchain install
       # Caches ~/.cargo and the dependencies in target/ (#308). The key is the job id plus the
       # rustc version and host, so each OS gets its own cache. Only main saves; PRs restore
       # main's cache and never write one, so a PR can't evict or poison it. The action sets
@@ -392,8 +397,10 @@ jobs:
         # the cache (under 1 min so far); see the script's "Time budget".
         timeout-minutes: 15
         run: scripts/ci-apt-install.sh libdbus-1-dev pkg-config
-      - uses: dtolnay/rust-toolchain@stable
+      # The version rust-toolchain.toml pins (#220), with its components.
+      - name: Install Rust
         if: steps.diff.outputs.relevant == 'true'
+        run: rustup toolchain install
       # Restores the `rust` job's Linux cache, so the baseline build only compiles the workspace
       # crates. rust-cache's restore key is `shared-key`, OS, arch and a hash of the rustc version
       # and every CARGO*/RUST*/CC*/CFLAGS*/CXX*/CMAKE* env var, so `shared-key: rust` matches
@@ -600,8 +607,10 @@ jobs:
         run: echo "Nothing this pull request changes affects this job." >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@v7
         if: env.RUN_STEPS == 'true'
-      - uses: dtolnay/rust-toolchain@stable
+      # The version rust-toolchain.toml pins (#220), with its components.
+      - name: Install Rust
         if: env.RUN_STEPS == 'true'
+        run: rustup toolchain install
       # Own cache (job-id key): this job builds only the dev vscode-sidecar. See the `rust` job.
       - uses: Swatinem/rust-cache@v2
         if: env.RUN_STEPS == 'true'
@@ -663,9 +672,14 @@ jobs:
           scripts/ci-apt-install.sh libwebkit2gtk-4.1-dev libgtk-3-dev \
             libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev libxdo-dev build-essential
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      # The version rust-toolchain.toml pins (#220), with its components.
+      - name: Install Rust
+        env:
+          TARGETS: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+        shell: bash
+        run: |
+          rustup toolchain install
+          for target in ${TARGETS//,/ }; do rustup target add "$target"; done
       # Caches ~/.cargo only (the registry), not target/:
       # the release builds for three OSes would take a large share of the 10 GB repository
       # cache limit and evict the caches the PR jobs use. This job runs only on main.
@@ -747,9 +761,14 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust_target }}
+      # The version rust-toolchain.toml pins (#220), with its components.
+      - name: Install Rust
+        env:
+          TARGETS: ${{ matrix.rust_target }}
+        shell: bash
+        run: |
+          rustup toolchain install
+          for target in ${TARGETS//,/ }; do rustup target add "$target"; done
       - uses: pnpm/action-setup@v6
         with:
           version: 12
@@ -812,8 +831,10 @@ jobs:
         # the cache (under 1 min so far); see the script's "Time budget".
         timeout-minutes: 15
         run: scripts/ci-apt-install.sh xvfb dbus
-      - uses: dtolnay/rust-toolchain@stable
+      # The version rust-toolchain.toml pins (#220), with its components.
+      - name: Install Rust
         if: env.RUN_STEPS == 'true'
+        run: rustup toolchain install
       # Own cache (job-id key): only the release vscode-sidecar.
       - uses: Swatinem/rust-cache@v2
         if: env.RUN_STEPS == 'true'
@@ -905,8 +926,10 @@ jobs:
           scripts/ci-apt-install.sh xvfb dbus libwebkit2gtk-4.1-dev libgtk-3-dev \
             libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev libxdo-dev build-essential
-      - uses: dtolnay/rust-toolchain@stable
+      # The version rust-toolchain.toml pins (#220), with its components.
+      - name: Install Rust
         if: env.RUN_STEPS == 'true'
+        run: rustup toolchain install
       # Own cache (job-id key): a plain `cargo build --workspace`. See the `rust` job.
       - uses: Swatinem/rust-cache@v2
         if: env.RUN_STEPS == 'true'
@@ -1021,8 +1044,10 @@ jobs:
             libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev libxdo-dev build-essential \
             "$webdriver" xvfb dbus
-      - uses: dtolnay/rust-toolchain@stable
+      # The version rust-toolchain.toml pins (#220), with its components.
+      - name: Install Rust
         if: env.RUN_STEPS == 'true'
+        run: rustup toolchain install
       # Own cache (job-id key): this build enables the custom-protocol and
       # forge-fixture-override features, so it must not share a cache with a plain build.
       # Placed before `cargo install tauri-driver` so the installed binary is cached too.
