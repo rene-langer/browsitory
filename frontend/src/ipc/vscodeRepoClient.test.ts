@@ -1052,6 +1052,19 @@ describe("vscodeRepoClient", () => {
     expect(received).toHaveLength(1);
   });
 
+  it("delivers operationLog notifications to subscribed listeners and stops after unsubscribe (#888)", () => {
+    const received: unknown[] = [];
+    const unsubscribe = vscodeRepoClient.subscribeOperationLog((change) => received.push(change));
+    const change = { repo: "/r", entryId: 7 };
+
+    notify("operationLog", change);
+    expect(received).toEqual([change]);
+
+    unsubscribe();
+    notify("operationLog", change);
+    expect(received).toHaveLength(1);
+  });
+
   it("delivers transferProgress notifications to subscribed listeners and stops after unsubscribe", () => {
     const received: unknown[] = [];
     const unsubscribe = vscodeRepoClient.subscribeTransferProgress((p) => received.push(p));
@@ -1470,6 +1483,18 @@ describe("vscodeRepoClient", () => {
       respond(id, null);
       await promise;
     }
+  });
+
+  it("wires listOperations (#888)", async () => {
+    const promise = vscodeRepoClient.listOperations("/repo", 42, 10);
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "list_operations",
+      params: { repoPath: "/repo", before: 42, limit: 10 },
+    });
+    respond(1, { repo: "/repo", entries: [], hasMore: false });
+    await expect(promise).resolves.toEqual({ repo: "/repo", entries: [], hasMore: false });
   });
 
   it("wires getCommitSignature", async () => {

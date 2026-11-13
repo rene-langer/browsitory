@@ -3781,3 +3781,83 @@ fn multi_path_staging_and_ignore_round_trip_through_the_sidecar() {
         "a.txt\nb.txt\n"
     );
 }
+
+/// #888: `list_operations` answers the repository's operation log, newest first, and from then
+/// on every entry added or ended is an `operationLog` notification naming the page's `repo`.
+#[test]
+fn the_operation_log_lists_and_notifies_through_the_sidecar() {
+    let (dir, _repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a");
+    write_file(dir.path(), "b.txt", "b");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+    // Before any listing, a change sends no notification: the next line is the response.
+    let staged = sidecar.call(
+        2,
+        "stage_file",
+        serde_json::json!({"repoPath": repo_path, "path": "a.txt"}),
+    );
+    assert_eq!(staged["id"], 2, "{staged}");
+
+    let listed = sidecar.call(
+        3,
+        "list_operations",
+        serde_json::json!({"repoPath": repo_path, "before": null, "limit": 10}),
+    );
+    let page = &listed["result"];
+    let repo = page["repo"].as_str().expect("repo key").to_string();
+    assert_eq!(page["hasMore"], false, "{page}");
+    let entries = page["entries"].as_array().expect("entries");
+    assert_eq!(entries.len(), 1, "{page}");
+    assert_eq!(entries[0]["name"], "Stage");
+    assert_eq!(entries[0]["target"], "a.txt");
+    assert_eq!(entries[0]["outcome"], "Succeeded");
+    assert!(entries[0]["startedAt"].is_number());
+    assert!(entries[0]["durationMs"].is_number());
+    assert_eq!(entries[0]["rerun"], serde_json::Value::Null);
+    let first_id = entries[0]["id"].as_u64().expect("id");
+
+    let (response, mut notifications) = sidecar.call_and_collect_notifications(
+        4,
+        "stage_file",
+        serde_json::json!({"repoPath": repo_path, "path": "b.txt"}),
+        false,
+    );
+    assert_eq!(response["result"], serde_json::Value::Null, "{response}");
+    // The entry's start and its end: two notifications, either side of the response.
+    while notifications.len() < 2 {
+        notifications.push(sidecar.read_line());
+    }
+    for notification in &notifications {
+        assert_eq!(notification["method"], "operationLog", "{notification}");
+        assert!(notification.get("id").is_none());
+        assert_eq!(notification["params"]["repo"], repo.as_str());
+    }
+    let new_id = notifications[0]["params"]["entryId"]
+        .as_u64()
+        .expect("entry id");
+    assert_eq!(notifications[1]["params"]["entryId"], new_id);
+    assert!(new_id > first_id);
+
+    // Older than the newest entry: the first one alone.
+    let older = sidecar.call(
+        5,
+        "list_operations",
+        serde_json::json!({"repoPath": repo_path, "before": new_id, "limit": 10}),
+    );
+    let older_entries = older["result"]["entries"].as_array().expect("entries");
+    assert_eq!(older_entries.len(), 1, "{older}");
+    assert_eq!(older_entries[0]["id"], first_id);
+}
+
+#[test]
+fn list_operations_on_an_unopened_repo_returns_an_error() {
+    let mut sidecar = Sidecar::spawn();
+    let response = sidecar.call(
+        1,
+        "list_operations",
+        serde_json::json!({"repoPath": "/not/open", "before": null, "limit": 10}),
+    );
+    assert!(response["error"].is_object(), "{response}");
+}
