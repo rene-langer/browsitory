@@ -104,9 +104,8 @@ describe("ShortcutSheet", () => {
     render(<ShortcutSheet onClose={vi.fn()} apple={false} />);
     const heading = screen.getByRole("heading", { name: "Merge editor" });
     const group = heading.closest("section") ?? heading.parentElement!;
-    expect(within(group).getByText(/^Undo the last change in the merge editor/)).toBeInTheDocument();
-    expect(within(group).getByText(/^Redo the change undone in the merge editor/)).toBeInTheDocument();
-    expect(within(group).getByText("Ctrl+Z")).toBeInTheDocument();
-    expect(within(group).getByText("Ctrl+Shift+Z")).toBeInTheDocument();
+    // One row: the global sheet already lists Redo's keys on their own, for the Git undo.
+    expect(within(group).getByText(/^Undo \/ redo the last change in the merge editor/)).toBeInTheDocument();
+    expect(within(group).getByText("Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y")).toBeInTheDocument();
   });
 });
