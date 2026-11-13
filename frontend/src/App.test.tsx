@@ -493,6 +493,37 @@ describe("App", () => {
       expect(await screen.findByRole("button", { name: "User guide" })).toBeInTheDocument();
     });
 
+    it("opens the operation log from the Help menu and the palette (#889)", async () => {
+      const listOperations = vi.fn(async () => ({ repo: "/repos/a", entries: [], hasMore: false }));
+      const client = fakeClient({
+        listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+        openRepo: async () => {},
+        persistOpenRepos: async () => {},
+        getStatus: async () => [],
+        getCommitGraph: async () => graphPage([]),
+        listBranches: async () => [],
+        listStashes: async () => [],
+        listOperations,
+        subscribeOperationLog: () => () => {},
+      });
+      const { container } = render(<App client={client} />);
+      await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+
+      fireEvent.click(screen.getByRole("button", { name: "Help" }));
+      fireEvent.click(await screen.findByRole("menuitem", { name: "Operation log" }));
+      const dialog = await screen.findByRole("dialog", { name: "Operation log" });
+      expect(await within(dialog).findByText("No operations yet.")).toBeInTheDocument();
+      expect(listOperations).toHaveBeenCalledWith("/repos/a", null, 100);
+      fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Operation log" })).not.toBeInTheDocument());
+
+      fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+      const input = await screen.findByRole("combobox", { name: "Command palette" });
+      fireEvent.change(input, { target: { value: "Show operation log" } });
+      fireEvent.click(await screen.findByRole("option", { name: "Show operation log" }));
+      expect(await screen.findByRole("dialog", { name: "Operation log" })).toBeInTheDocument();
+    });
+
     it("offers the Help menu, without the shortcuts, before any repository is open", async () => {
       const client = fakeClient({
         listOpenRepos: async () => ({ entries: [], activePath: null }),
@@ -504,7 +535,59 @@ describe("App", () => {
       fireEvent.click(help);
       expect(await screen.findByRole("menuitem", { name: "User guide" })).toBeInTheDocument();
       expect(screen.queryByRole("menuitem", { name: "Keyboard shortcuts" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: "Operation log" })).not.toBeInTheDocument();
     });
+  });
+
+  it("shows a failed action's details in the operation log from the error banner (#889)", async () => {
+    const listOperations = vi.fn(async () => ({
+      repo: "/repos/a",
+      entries: [
+        {
+          id: 7,
+          name: "Commit",
+          target: "feat: x",
+          params: [],
+          startedAt: 0,
+          durationMs: 3,
+          outcome: "Failed" as const,
+          message: "failed to create commit: disk full",
+          errorKind: "Other" as const,
+          transferError: null,
+          remoteFailures: [],
+          runs: [],
+          rerun: null,
+        },
+      ],
+      hasMore: false,
+    }));
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" }],
+      getCommitGraph: async () => graphPage([]),
+      listBranches: async () => [],
+      listStashes: async () => [],
+      commit: async () => {
+        throw new RepoError("Other", "failed to create commit: disk full");
+      },
+      listOperations,
+      subscribeOperationLog: () => () => {},
+    });
+    render(<App client={client} />);
+
+    const box = await screen.findByRole("textbox", { name: "Commit message" });
+    fireEvent.change(box, { target: { value: "feat: x" } });
+    const commitButton = screen.getByRole("button", { name: "Commit 1 file" });
+    await waitFor(() => expect(commitButton).toBeEnabled());
+    fireEvent.click(commitButton);
+    fireEvent.click(await screen.findByRole("button", { name: "Show details" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Operation log" });
+    const details = await within(dialog).findByRole("region", { name: "Operation details" });
+    await waitFor(() => expect(within(details).getByRole("heading", { name: "Commit feat: x" })).toBeInTheDocument());
+    expect(details).toHaveTextContent("failed to create commit: disk full");
   });
 
   describe("palette discard commands", () => {

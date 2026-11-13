@@ -56,6 +56,16 @@ describe("HelpMenuButton (#647)", () => {
     stop();
   });
 
+  it("asks the active workspace for the operation log (#889)", () => {
+    const listener = vi.fn();
+    const stop = onWorkspaceRequest(listener);
+    const { button } = setup();
+    fireEvent.click(button);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Operation log" }));
+    expect(listener).toHaveBeenCalledWith("operationLog");
+    stop();
+  });
+
   it("leaves out the shortcuts without a repository open", () => {
     const { button } = setup(false);
     fireEvent.click(button);
