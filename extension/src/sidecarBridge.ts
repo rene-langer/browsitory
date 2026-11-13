@@ -74,6 +74,7 @@ interface SidecarReadable {
 
 interface SidecarWritable {
   write(chunk: string): boolean;
+  end(): unknown;
   on(event: "error", listener: (error: Error) => void): unknown;
   off(event: "error", listener: (error: Error) => void): unknown;
 }
@@ -153,6 +154,11 @@ type SidecarBridgeState = "idle" | "running" | "reconnecting" | "failed";
 
 const TRANSPORT_ERROR_CODE = -32001;
 const DISPOSED_MESSAGE = "Browsitory sidecar bridge disposed";
+/**
+ * How long a disposed bridge lets its sidecar finish the requests it is running before killing it
+ * (#961): ample for a libgit2 write, which a kill would cut off with `.git/index.lock` left behind.
+ */
+export const SIDECAR_EXIT_GRACE_MS = 5000;
 
 /**
  * Splits a text stream into `\n`-terminated lines. Only each new chunk is scanned for a newline,
@@ -254,7 +260,7 @@ export class SidecarBridge {
     this.sidecar = undefined;
     this.state = "idle";
     this.rejectInternalRequests(DISPOSED_MESSAGE);
-    if (sidecar) this.killSidecar(sidecar);
+    if (sidecar) this.stopSidecar(sidecar);
     if (this.pendingRequestIds.size > 0) {
       this.rejectPendingAndNotify("failed", DISPOSED_MESSAGE);
     }
@@ -426,6 +432,34 @@ export class SidecarBridge {
     const detach = this.detachSidecarListeners;
     this.detachSidecarListeners = undefined;
     detach?.();
+  }
+
+  /**
+   * Ends the sidecar's stdin, so it finishes the requests it is running and exits (#961), and
+   * kills it if it is still running after `SIDECAR_EXIT_GRACE_MS`. The timer doesn't keep the
+   * extension host alive.
+   */
+  private stopSidecar(sidecar: SidecarProcess): void {
+    // A stdin error now (the sidecar already gone) needs no handling, only a listener.
+    const ignoreStdinError = () => {};
+    const finish = () => {
+      clearTimeout(timer);
+      sidecar.off("exit", finish);
+      sidecar.stdin.off("error", ignoreStdinError);
+    };
+    const timer = setTimeout(() => {
+      finish();
+      this.killSidecar(sidecar);
+    }, SIDECAR_EXIT_GRACE_MS);
+    timer.unref?.();
+    sidecar.on("exit", finish);
+    sidecar.stdin.on("error", ignoreStdinError);
+    try {
+      sidecar.stdin.end();
+    } catch {
+      finish();
+      this.killSidecar(sidecar);
+    }
   }
 
   private killSidecar(sidecar: SidecarProcess): void {

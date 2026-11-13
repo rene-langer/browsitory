@@ -5,6 +5,7 @@ import {
   LineAccumulator,
   resolveDevelopmentSidecarPath,
   resolvePackagedSidecarPath,
+  SIDECAR_EXIT_GRACE_MS,
   SidecarBridge,
   type SidecarProcess,
 } from "./sidecarBridge";
@@ -17,6 +18,7 @@ class FakeReadable extends EventEmitter {
 
 class FakeWritable extends EventEmitter {
   readonly write = vi.fn((_chunk: string) => true);
+  readonly end = vi.fn();
 }
 
 class FakeSidecar extends EventEmitter implements SidecarProcess {
@@ -742,18 +744,57 @@ describe("SidecarBridge", () => {
     );
   });
 
-  it("kills the spawned sidecar when disposed", async () => {
-    const { bridge, child } = createBridge();
-    await bridge.handleWebviewMessage({
-      jsonrpc: "2.0",
-      id: 31,
-      method: "get_status",
-      params: { repoPath: "/repo" },
-    });
+  it("ends the sidecar's stdin when disposed and kills it only after the grace period (#961)", async () => {
+    vi.useFakeTimers();
+    try {
+      const { bridge, child } = createBridge();
+      await bridge.handleWebviewMessage({
+        jsonrpc: "2.0",
+        id: 31,
+        method: "get_status",
+        params: { repoPath: "/repo" },
+      });
 
-    await bridge.dispose();
+      await bridge.dispose();
 
-    expect(child.kill).toHaveBeenCalledOnce();
+      expect(child.stdin.end).toHaveBeenCalledOnce();
+      expect(child.kill).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(SIDECAR_EXIT_GRACE_MS - 1);
+      expect(child.kill).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(child.kill).toHaveBeenCalledOnce();
+      expect(child.listenerCount("exit")).toBe(0);
+      expect(child.stdin.listenerCount("error")).toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("never kills a disposed sidecar that exits within the grace period (#961)", async () => {
+    vi.useFakeTimers();
+    try {
+      const { bridge, child } = createBridge();
+      await bridge.handleWebviewMessage({
+        jsonrpc: "2.0",
+        id: 32,
+        method: "stage_file",
+        params: { repoPath: "/repo", path: "a.txt" },
+      });
+
+      await bridge.dispose();
+      vi.advanceTimersByTime(SIDECAR_EXIT_GRACE_MS - 1);
+      child.emit("exit", 0, null);
+      vi.advanceTimersByTime(SIDECAR_EXIT_GRACE_MS);
+
+      expect(child.stdin.end).toHaveBeenCalledOnce();
+      expect(child.kill).not.toHaveBeenCalled();
+      expect(child.listenerCount("exit")).toBe(0);
+      expect(child.stdin.listenerCount("error")).toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("restores persisted repositories before forwarding the first request after exit", async () => {
@@ -1046,7 +1087,9 @@ describe("SidecarBridge", () => {
       });
 
       await bridge.dispose();
+      vi.advanceTimersByTime(SIDECAR_EXIT_GRACE_MS);
 
+      expect(child.stdin.end).toHaveBeenCalledOnce();
       expect(child.kill).toHaveBeenCalledOnce();
       expect(postToWebview.mock.calls.map(([message]) => message)).toEqual([
         {
