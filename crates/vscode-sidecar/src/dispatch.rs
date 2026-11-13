@@ -194,6 +194,8 @@ methods!(|params, repos, stdout| {
     "list_user_commands" => list_user_commands(ListUserCommandsParams),
     "set_user_commands" => set_user_commands(SetUserCommandsParams),
     "check_user_command" => check_user_command(CheckUserCommandParams),
+    "run_user_command" => run_user_command(RunUserCommandParams, repos),
+    "cancel_user_command" => cancel_user_command(CancelUserCommandParams),
     "get_git_tools" => get_git_tools(RepoPathParams, repos),
     "get_file_sides" => get_file_sides(FileSidesParams, repos),
     "get_commit_tree" => get_commit_tree(GetCommitTreeParams, repos),

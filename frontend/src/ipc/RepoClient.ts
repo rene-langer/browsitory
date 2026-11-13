@@ -1128,6 +1128,23 @@ export interface UserCommands {
   global: UserCommand[];
   repository: UserCommand[];
 }
+/** What a user command runs on (#894); `paths` are relative to the work tree root. */
+export interface UserCommandContext {
+  commitId: string | null;
+  branch: string | null;
+  refName: string | null;
+  paths: string[];
+}
+/** How a user command ended; `cancelled` when `cancelUserCommand` stopped it (no output then). */
+export interface UserCommandRun {
+  /** `null` when it was stopped (time limit, cancel or a signal). */
+  exitCode: number | null;
+  success: boolean;
+  timedOut: boolean;
+  cancelled: boolean;
+  /** The end of its output, stdout and stderr together. */
+  output: string;
+}
 /** How a user command line splits into arguments, for "Test" in Preferences. */
 export interface UserCommandCheck {
   /** Each argument as split, variables unexpanded. */
@@ -1800,6 +1817,14 @@ export interface RepoClient {
   setUserCommands(repoPath: string | null, commands: UserCommandInput[]): Promise<UserCommand[]>;
   /** Splits and checks a user command line without running it; rejects when it is invalid. */
   checkUserCommand(commandLine: string, workingDirectory: string | null): Promise<UserCommandCheck>;
+  /**
+   * Runs the stored user command `commandId` on `context` (#894) as run `runId`, which
+   * `cancelUserCommand` stops. Resolves when it ends, also when it failed; rejects when it can't
+   * start (gone, a value missing, its program not found).
+   */
+  runUserCommand(repoPath: string, commandId: string, runId: string, context: UserCommandContext): Promise<UserCommandRun>;
+  /** Stops the run `runId`; nothing when it already ended. */
+  cancelUserCommand(runId: string): Promise<void>;
   // The `diff.tool`/`merge.tool` git would use for this repo (repository-level tool settings
   // are reported with a `problem`, because Browsitory ignores them).
   getGitTools(repoPath: string): Promise<GitTools>;

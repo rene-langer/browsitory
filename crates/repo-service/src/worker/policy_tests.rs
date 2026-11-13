@@ -677,6 +677,12 @@ pub(super) fn table() -> Vec<((&'static str, Command), &'static str)> {
         (cmd!(ListRecentAuthors), "read"),
         (cmd!(CheckMergeTarget { path: s("a.txt") }), "read"),
         (
+            cmd!(UserCommandValues {
+                context: git_core::user_command::Context::default()
+            }),
+            "read",
+        ),
+        (
             cmd!(ReadFileVersion {
                 path: s("a.txt"),
                 version: git_core::tools::FileVersion::Head

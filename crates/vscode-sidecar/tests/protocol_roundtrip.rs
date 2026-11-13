@@ -773,6 +773,260 @@ fn check_user_command_finds_a_program_on_the_path() {
     assert!(found.ends_with("/sh"), "{found}");
 }
 
+/// Stores `commands` (name, command line) app-wide and returns their ids.
+#[cfg(unix)]
+fn store_user_commands(
+    sidecar: &mut Sidecar,
+    repo_path: Option<&str>,
+    commands: &[(&str, &str)],
+) -> Vec<String> {
+    let inputs: Vec<serde_json::Value> = commands
+        .iter()
+        .map(|(name, line)| {
+            serde_json::json!({
+                "id": "", "name": name, "commandLine": line, "workingDirectory": null,
+                "targets": [], "confirm": false, "showOutput": true, "refresh": true,
+            })
+        })
+        .collect();
+    let stored = sidecar.call(
+        900,
+        "set_user_commands",
+        serde_json::json!({"repoPath": repo_path, "commands": inputs}),
+    );
+    stored["result"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{stored}"))
+        .iter()
+        .map(|command| command["id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[cfg(unix)]
+#[test]
+fn run_user_command_runs_a_stored_command_with_the_selection() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a b.txt", "a\n");
+    commit_all(&repo, "base");
+    let head = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let global = store_user_commands(
+        &mut sidecar,
+        None,
+        &[
+            (
+                "Show",
+                "sh -c 'printf \"<%s>\" \"$@\"; pwd' sh ${shortCommit} ${paths}",
+            ),
+            ("Needs branch", "echo ${branch}"),
+            ("Missing", "browsitory-surely-missing-program"),
+        ],
+    );
+    let here = store_user_commands(
+        &mut sidecar,
+        Some(&repo_path),
+        &[("Fail", "sh -c 'echo nope >&2; exit 3'")],
+    );
+
+    let ran = sidecar.call(
+        2,
+        "run_user_command",
+        serde_json::json!({
+            "repoPath": repo_path, "commandId": global[0], "runId": "run-1",
+            "context": {"commitId": head, "branch": null, "refName": null, "paths": ["a b.txt"]},
+        }),
+    );
+    let root = dir.path().canonicalize().unwrap();
+    assert_eq!(
+        ran["result"],
+        serde_json::json!({
+            "exitCode": 0,
+            "success": true,
+            "timedOut": false,
+            "cancelled": false,
+            "output": format!(
+                "<{}><{}>{}\n",
+                &head[..7],
+                root.join("a b.txt").display(),
+                root.display()
+            ),
+        }),
+        "{ran}"
+    );
+
+    let failed = sidecar.call(
+        3,
+        "run_user_command",
+        serde_json::json!({
+            "repoPath": repo_path, "commandId": here[0], "runId": "run-2",
+            "context": {"commitId": null, "branch": null, "refName": null, "paths": []},
+        }),
+    );
+    assert_eq!(failed["result"]["success"], false, "{failed}");
+    assert_eq!(failed["result"]["exitCode"], 3);
+    assert_eq!(failed["result"]["output"], "nope\n");
+
+    let missing_value = sidecar.call(
+        4,
+        "run_user_command",
+        serde_json::json!({
+            "repoPath": repo_path, "commandId": global[1], "runId": "run-3",
+            "context": {"commitId": null, "branch": null, "refName": null, "paths": []},
+        }),
+    );
+    assert_eq!(
+        missing_value["error"]["message"],
+        "This command needs ${branch}, which isn't available here."
+    );
+
+    let missing_program = sidecar.call(
+        5,
+        "run_user_command",
+        serde_json::json!({
+            "repoPath": repo_path, "commandId": global[2], "runId": "run-4",
+            "context": {"commitId": null, "branch": null, "refName": null, "paths": []},
+        }),
+    );
+    assert!(
+        missing_program["error"]["message"]
+            .as_str()
+            .unwrap()
+            .starts_with("Couldn't find the program 'browsitory-surely-missing-program'."),
+        "{missing_program}"
+    );
+
+    let unknown = sidecar.call(
+        6,
+        "run_user_command",
+        serde_json::json!({
+            "repoPath": repo_path, "commandId": "no-such-id", "runId": "run-5",
+            "context": {"commitId": null, "branch": null, "refName": null, "paths": []},
+        }),
+    );
+    assert_eq!(
+        unknown["error"]["message"],
+        "This command doesn't exist any more."
+    );
+
+    let outside = sidecar.call(
+        7,
+        "run_user_command",
+        serde_json::json!({
+            "repoPath": repo_path, "commandId": global[0], "runId": "run-6",
+            "context": {"commitId": head, "branch": null, "refName": null, "paths": ["../x"]},
+        }),
+    );
+    assert_eq!(
+        outside["error"]["message"],
+        "The path ../x isn't a path in the work tree."
+    );
+
+    // Each run that started is an operation log entry (#894), with the program it ran; those
+    // refused before they start (a value missing, gone, a path outside) are not.
+    let log = sidecar.call(
+        8,
+        "list_operations",
+        serde_json::json!({"repoPath": repo_path, "before": null, "limit": 10}),
+    );
+    let entries = log["result"]["entries"].as_array().expect("entries");
+    assert_eq!(entries.len(), 3, "{log}");
+    assert!(entries.iter().all(|entry| entry["name"] == "Run command"));
+    assert_eq!(entries[2]["target"], "Show");
+    assert_eq!(entries[2]["outcome"], "Succeeded");
+    assert_eq!(entries[2]["runs"][0]["output"], ran["result"]["output"]);
+    assert!(entries[2]["runs"][0]["program"]
+        .as_str()
+        .unwrap()
+        .ends_with("sh"));
+    assert_eq!(entries[1]["target"], "Fail");
+    assert_eq!(entries[1]["outcome"], "Failed");
+    assert_eq!(entries[1]["message"], "Exited with code 3.");
+    assert_eq!(entries[1]["runs"][0]["output"], "nope\n");
+    assert_eq!(entries[0]["target"], "Missing");
+    assert_eq!(entries[0]["outcome"], "Failed");
+    assert!(entries[0]["message"]
+        .as_str()
+        .unwrap()
+        .starts_with("Couldn't find the program"));
+}
+
+#[cfg(unix)]
+#[test]
+fn cancel_user_command_stops_a_running_command() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "base");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+    let ids = store_user_commands(&mut sidecar, None, &[("Slow", "sleep 30")]);
+
+    let started = Instant::now();
+    sidecar.send(
+        2,
+        "run_user_command",
+        serde_json::json!({
+            "repoPath": repo_path, "commandId": ids[0], "runId": "slow-run",
+            "context": {"commitId": null, "branch": null, "refName": null, "paths": []},
+        }),
+    );
+    std::thread::sleep(Duration::from_millis(500));
+    // The repository stays usable while the command runs.
+    let status = sidecar.call(3, "get_status", serde_json::json!({"repoPath": repo_path}));
+    assert!(status["error"].is_null(), "{status}");
+    sidecar.send(
+        4,
+        "cancel_user_command",
+        serde_json::json!({"runId": "slow-run"}),
+    );
+    let mut answers = [sidecar.read_response(), sidecar.read_response()];
+    answers.sort_by_key(|answer| answer["id"].as_u64());
+    assert_eq!(answers[0]["id"], 2);
+    assert_eq!(
+        answers[0]["result"],
+        serde_json::json!({
+            "exitCode": null, "success": false, "timedOut": false, "cancelled": true, "output": "",
+        }),
+        "{}",
+        answers[0]
+    );
+    assert_eq!(answers[1]["result"], serde_json::Value::Null);
+    assert!(started.elapsed() < Duration::from_secs(15));
+
+    // Cancelling a run that already ended (or never existed) is no error.
+    let late = sidecar.call(
+        5,
+        "cancel_user_command",
+        serde_json::json!({"runId": "slow-run"}),
+    );
+    assert_eq!(late["result"], serde_json::Value::Null);
+
+    // The stopped run is logged as cancelled (#894).
+    let log = sidecar.call(
+        6,
+        "list_operations",
+        serde_json::json!({"repoPath": repo_path, "before": null, "limit": 10}),
+    );
+    let entries = log["result"]["entries"].as_array().expect("entries");
+    let run = entries
+        .iter()
+        .find(|entry| entry["name"] == "Run command")
+        .unwrap_or_else(|| panic!("{log}"));
+    assert_eq!(run["target"], "Slow");
+    assert_eq!(run["outcome"], "Cancelled");
+}
+
 #[test]
 fn set_and_list_repo_aliases_round_trip() {
     let (_guard, config_dir) = ConfigDirGuard::new();

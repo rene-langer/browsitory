@@ -52,6 +52,8 @@ const OMITTED: &str = "[… earlier output omitted …]\n";
 #[derive(Debug)]
 pub(crate) struct Captured {
     pub success: bool,
+    /// The exit code; `None` when the program was killed (by the time limit, or a signal).
+    pub code: Option<i32>,
     pub output: String,
     pub timed_out: bool,
 }
@@ -430,6 +432,7 @@ fn run_captured_unnoted(
     );
     Ok(Captured {
         success: status.success() && !timed_out,
+        code: if timed_out { None } else { status.code() },
         output: collected.into_text(),
         timed_out,
     })

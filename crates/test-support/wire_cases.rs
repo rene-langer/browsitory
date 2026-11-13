@@ -118,6 +118,9 @@ pub fn shared_wire_cases(s: &mut impl WireCases) {
         fixtures::user_command_lists(),
         UserCommandsDto::from,
     );
+    s.add("UserCommandRun", fixtures::user_command_runs(), |outcome| {
+        outcome.map_or_else(UserCommandRunDto::cancelled, UserCommandRunDto::from)
+    });
     s.add(
         "UserCommandCheck",
         fixtures::user_command_checks(),

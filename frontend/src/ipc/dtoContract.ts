@@ -78,6 +78,8 @@ export type DtoContract = [
   Expect<Equal<Hand.ExternalToolSettings, Wire.ExternalToolSettings>>,
   Expect<Equal<Hand.UserCommand, Wire.UserCommand>>,
   Expect<Equal<Hand.UserCommandCheck, Wire.UserCommandCheck>>,
+  Expect<Equal<Hand.UserCommandContext, Wire.UserCommandContext>>,
+  Expect<Equal<Hand.UserCommandRun, Wire.UserCommandRun>>,
   Expect<Equal<Hand.UserCommandInput, Wire.UserCommandInput>>,
   Expect<Equal<Hand.UserCommands, Wire.UserCommands>>,
   Expect<Equal<Hand.UserCommandTarget, Wire.UserCommandTarget>>,

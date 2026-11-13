@@ -472,7 +472,11 @@ program: string | null,
  */
 programPath: string | null, variables: Array<UserCommandVariable>, };
 
+export type UserCommandContext = { commitId: string | null, branch: string | null, refName: string | null, paths: Array<string>, };
+
 export type UserCommandInput = { id: string, name: string, commandLine: string, workingDirectory: string | null, targets: Array<UserCommandTarget>, confirm: boolean, showOutput: boolean, refresh: boolean, };
+
+export type UserCommandRun = { exitCode: number | null, success: boolean, timedOut: boolean, cancelled: boolean, output: string, };
 
 export type UserCommandTarget = "Commit" | "Branch" | "Tag" | "File" | "Repository";
 

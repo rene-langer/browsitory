@@ -55,6 +55,10 @@ UserCommand/everything {"commandLine":"tool ${commit} ${shortCommit} ${branch} $
 UserCommand/problem {"commandLine":"echo ${what}","confirm":false,"id":"id-Odd","name":"Odd","problem":"Unknown variable ${what}: use ${repo}, ${commit}, ${shortCommit}, ${branch}, ${ref}, ${path} or ${paths}.","refresh":true,"showOutput":true,"targets":[],"variables":[],"workingDirectory":null}
 UserCommands/empty {"global":[],"repository":[]}
 UserCommands/both {"global":[{"commandLine":"git status","confirm":false,"id":"id-Status","name":"Status","problem":null,"refresh":true,"showOutput":true,"targets":[],"variables":[],"workingDirectory":null}],"repository":[{"commandLine":"deploy ${branch}","confirm":false,"id":"id-Deploy","name":"Deploy","problem":null,"refresh":true,"showOutput":true,"targets":[],"variables":["branch"],"workingDirectory":null}]}
+UserCommandRun/succeeded {"cancelled":false,"exitCode":0,"output":"done\n","success":true,"timedOut":false}
+UserCommandRun/failed {"cancelled":false,"exitCode":3,"output":"nope\n","success":false,"timedOut":false}
+UserCommandRun/timed-out {"cancelled":false,"exitCode":null,"output":"","success":false,"timedOut":true}
+UserCommandRun/cancelled {"cancelled":true,"exitCode":null,"output":"","success":false,"timedOut":false}
 UserCommandCheck/found {"program":"git","programPath":"/usr/bin/git","variables":["commit"],"words":["git","log","-1","${commit} x"]}
 UserCommandCheck/not-found {"program":"nope","programPath":null,"variables":[],"words":["nope"]}
 UserCommandCheck/program-variable {"program":null,"programPath":null,"variables":["repo"],"words":["${repo}/run.sh"]}

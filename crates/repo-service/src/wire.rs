@@ -2351,6 +2351,68 @@ impl From<config::UserCommands> for UserCommandsDto {
     }
 }
 
+/// What a user command runs on (#894): the selection it was started from. Paths are relative to
+/// the work tree root.
+#[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "UserCommandContext"))]
+#[serde(rename_all = "camelCase")]
+pub struct UserCommandContextDto {
+    pub commit_id: Option<String>,
+    pub branch: Option<String>,
+    pub ref_name: Option<String>,
+    pub paths: Vec<String>,
+}
+
+impl From<UserCommandContextDto> for git_core::user_command::Context {
+    fn from(dto: UserCommandContextDto) -> Self {
+        Self {
+            commit: dto.commit_id,
+            branch: dto.branch,
+            git_ref: dto.ref_name,
+            paths: dto.paths,
+        }
+    }
+}
+
+/// How a user command ended (#894). `cancelled`: stopped by `cancel_user_command`, with no output.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "UserCommandRun"))]
+#[serde(rename_all = "camelCase")]
+pub struct UserCommandRunDto {
+    pub exit_code: Option<i32>,
+    pub success: bool,
+    pub timed_out: bool,
+    pub cancelled: bool,
+    pub output: String,
+}
+
+impl From<git_core::user_command::RunOutcome> for UserCommandRunDto {
+    fn from(outcome: git_core::user_command::RunOutcome) -> Self {
+        Self {
+            exit_code: outcome.exit_code,
+            success: outcome.success,
+            timed_out: outcome.timed_out,
+            cancelled: false,
+            output: outcome.output,
+        }
+    }
+}
+
+impl UserCommandRunDto {
+    /// A run stopped by `cancel_user_command`.
+    pub fn cancelled() -> Self {
+        Self {
+            exit_code: None,
+            success: false,
+            timed_out: false,
+            cancelled: true,
+            output: String::new(),
+        }
+    }
+}
+
 /// How a user command line splits, for "Test" in Preferences (#893): each argument with its
 /// variables unexpanded, and where the program was found.
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -3851,6 +3913,31 @@ impl From<&str> for ErrorDto {
 /// the hand-written types in `RepoClient.ts`, so a renamed field fails the frontend type check.
 /// Regenerate with `UPDATE_TRANSPORT_METHODS=1 cargo test -p repo-service wire_bindings_are_current`.
 #[cfg(test)]
+mod user_command_tests {
+    use super::*;
+
+    #[test]
+    fn a_user_command_context_keeps_every_field() {
+        let context: git_core::user_command::Context = UserCommandContextDto {
+            commit_id: Some("abc".to_string()),
+            branch: Some("main".to_string()),
+            ref_name: Some("refs/heads/main".to_string()),
+            paths: vec!["a.txt".to_string()],
+        }
+        .into();
+        assert_eq!(
+            context,
+            git_core::user_command::Context {
+                commit: Some("abc".to_string()),
+                branch: Some("main".to_string()),
+                git_ref: Some("refs/heads/main".to_string()),
+                paths: vec!["a.txt".to_string()],
+            }
+        );
+    }
+}
+
+#[cfg(test)]
 mod ts_bindings {
     use super::*;
 
@@ -3961,6 +4048,8 @@ mod ts_bindings {
             UserCommandInput,
             UserCommandsDto,
             UserCommandCheckDto,
+            UserCommandContextDto,
+            UserCommandRunDto,
             GitConfigSourceDto,
             GitToolDto,
             GitToolsDto,

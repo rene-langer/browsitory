@@ -258,6 +258,9 @@ pub(super) fn dispatch(
             history::recent_authors(repo, state.recent_authors, reply)
         }
         Command::CheckMergeTarget { path, reply } => tools::check_merge_target(repo, path, reply),
+        Command::UserCommandValues { context, reply } => {
+            tools::user_command_values(repo, &context, reply)
+        }
         Command::ReadFileVersion {
             path,
             version,

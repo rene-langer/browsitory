@@ -495,3 +495,47 @@ fn the_read_handle_lists_a_remotes_branches() {
 
     assert_eq!(branches, vec!["feature".to_string(), "main".to_string()]);
 }
+
+#[test]
+fn user_command_values_are_filled_on_the_read_lane() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "base");
+    let head = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let values = worker
+        .handle()
+        .reads()
+        .user_command_values(git_core::user_command::Context {
+            commit: Some(head.clone()),
+            paths: vec!["a.txt".to_string()],
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(values.commit, Some(head.clone()));
+    assert_eq!(values.short_commit.as_deref(), Some(&head[..7]));
+    let root = repo.workdir().unwrap();
+    assert_eq!(values.repo, root.to_string_lossy());
+    assert_eq!(
+        values.path,
+        Some(root.join("a.txt").to_string_lossy().into_owned())
+    );
+    assert_eq!(
+        worker
+            .handle()
+            .reads()
+            .user_command_values(git_core::user_command::Context {
+                branch: Some("nope".to_string()),
+                ..Default::default()
+            })
+            .unwrap_err()
+            .message,
+        "The branch nope isn't in this repository."
+    );
+}
