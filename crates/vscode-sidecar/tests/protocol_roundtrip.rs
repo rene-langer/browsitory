@@ -774,6 +774,7 @@ fn check_user_command_finds_a_program_on_the_path() {
 }
 
 /// Stores `commands` (name, command line) app-wide and returns their ids.
+#[cfg(unix)]
 fn store_user_commands(
     sidecar: &mut Sidecar,
     repo_path: Option<&str>,
