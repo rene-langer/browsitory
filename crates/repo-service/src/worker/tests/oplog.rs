@@ -202,10 +202,12 @@ fn a_push_refused_before_it_starts_is_logged_as_failed() {
     commit_all(&repo, "base");
     let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
     let handle = worker.handle();
-    let (event_tx, _event_rx) = mpsc::channel();
+    let (event_tx, event_rx) = mpsc::channel();
 
     // No remote at all: refused before any transfer starts.
     let result = handle.push_current_branch("nowhere".into(), false, event_tx);
+    // A transfer that did start ends before its events do (reads still run while it waits).
+    let _: Vec<_> = event_rx.iter().collect();
 
     let entries = log(&handle);
     let entry = named(&entries, "Push");
