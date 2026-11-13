@@ -31,6 +31,9 @@ use thiserror::Error;
 
 #[cfg(windows)]
 mod job_windows;
+mod runs;
+
+pub use runs::{current_run_log, record_runs, ProgramRun, ProgramRunStatus, RunLog};
 
 /// The Windows job object holding a hook's process tree (#122). Uninhabited elsewhere, so
 /// `Option<&Job>` is always `None` there and one signature serves every platform.

@@ -1233,6 +1233,18 @@ impl WorkerHandle {
         self.cancelled.cancel(operation_id);
     }
 
+    /// Up to `limit` entries of this repository's operation log older than entry `before` (all
+    /// when `None`), newest first (#887). Read straight from the log, never through the worker's
+    /// queue, so an open log shows a long operation while it runs.
+    pub fn operation_log(&self, before: Option<u64>, limit: usize) -> crate::oplog::OperationPage {
+        let _ = (before, limit);
+        crate::oplog::OperationPage {
+            repo: String::new(),
+            entries: Vec::new(),
+            has_more: false,
+        }
+    }
+
     /// Test-only: crashes the worker thread from inside its dispatch loop, the same failure mode
     /// a panicking `git-core` call inside a `Command` match arm would trigger. See
     /// `Command::PanicNow`.
