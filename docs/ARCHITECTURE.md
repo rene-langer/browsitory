@@ -2552,9 +2552,11 @@ taken, so refusals (a busy lock, a paused operation's gate) are logged too, and 
 undo bookkeeping:
 
 - Most commands reply when they are done. The tracker swaps the reply for a proxy (`policy::Reply::
-  observe`, next to `hold`), reads the answer when the step ends and passes it on. An answer that
-  reports a failure or a stop as an `Ok` value (`CommitOutcome::HookFailed`, a merge or pick that
-  stopped on conflicts, a diverged pull) is recognised by downcasting it (`journal::seen_ok`).
+  observe`, next to `hold`), reads the answer when the step ends, ends the entry, and only then
+  passes the answer on, so a client that lists the log once it has its answer sees the outcome,
+  never `Running` (#958). An answer that reports a failure or a stop as an `Ok` value
+  (`CommitOutcome::HookFailed`, a merge or pick that stopped on conflicts, a diverged pull) is
+  recognised by downcasting it (`journal::seen_ok`).
 - A fetch or push replies with its operation id at once and reports its outcome in its last
   transfer event, so its reply is left alone (proxying it would hold it back until the transfer
   ends). The code that sends that event (`remote::complete`, `fetch_all`, `pull`) also calls
