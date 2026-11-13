@@ -438,6 +438,8 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
             P::recorded(fold_staged_label(commit_id), Full).gated(Refused)
         }
         Command::RebaseContinue { .. } => P::continuing(),
+        Command::RebaseCommitPart { .. } => P::free(),
+        Command::GetEditRest { .. } => P::free(),
         Command::AbortRebase { .. } => P::aborting(),
         Command::CherryPick { commit_id, .. } => {
             P::recorded(format!("Cherry-pick {}", short(commit_id)), Full).gated(Refused)
@@ -617,6 +619,8 @@ pub(super) fn reply_of(command: &mut Command) -> Option<&mut dyn Reply> {
         StartRebase,
         FoldStaged,
         RebaseContinue,
+        RebaseCommitPart,
+        GetEditRest,
         AbortRebase,
         FetchRemote,
         PullCurrentUpstream,

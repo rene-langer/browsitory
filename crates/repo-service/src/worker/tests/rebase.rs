@@ -203,3 +203,134 @@ fn folding_staged_changes_into_a_commit_is_one_undo_step() {
     assert_eq!(head(&Repository::open(dir.path()).unwrap()), b);
     assert_eq!(staged_content(dir.path(), "a.txt"), "a, folded\n");
 }
+
+/// `base` → "add a and c" (a.txt, c.txt) → "add b" (b.txt). Returns `(onto, plan stopping at
+/// "add a and c" then picking "add b", its id, the tip)`.
+fn split_fixture(
+    dir: &Path,
+    repo: &Repository,
+) -> (
+    String,
+    Vec<git_core::rebase::RebasePlanEntry>,
+    String,
+    git2::Oid,
+) {
+    use git_core::rebase::{RebaseAction, RebasePlanEntry};
+    let head = |repo: &Repository| repo.head().unwrap().target().unwrap();
+    write_file(dir, "base.txt", "v1\n");
+    commit_all(repo, "base commit");
+    let onto = head(repo).to_string();
+    write_file(dir, "a.txt", "a\n");
+    write_file(dir, "c.txt", "c\n");
+    commit_all(repo, "add a and c");
+    let ac = head(repo).to_string();
+    write_file(dir, "b.txt", "b\n");
+    commit_all(repo, "add b");
+    let b = head(repo);
+    let entry = |id: &str, action| RebasePlanEntry {
+        commit_id: id.to_string(),
+        action,
+        combined_message: None,
+    };
+    let plan = vec![
+        entry(&ac, RebaseAction::Edit),
+        entry(&b.to_string(), RebaseAction::Pick),
+    ];
+    (onto, plan, ac, b)
+}
+
+/// The branch's commit summaries after `onto`, oldest first.
+fn summaries_since(path: &Path, onto: &str) -> Vec<String> {
+    let repo = Repository::open(path).unwrap();
+    let mut walk = repo.revwalk().unwrap();
+    walk.push_head().unwrap();
+    walk.hide(git2::Oid::from_str(onto).unwrap()).unwrap();
+    walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::REVERSE)
+        .unwrap();
+    walk.map(|id| {
+        let commit = repo.find_commit(id.unwrap()).unwrap();
+        let summary = commit.summary().unwrap().unwrap().to_string();
+        summary
+    })
+    .collect()
+}
+
+/// #884: Split commit… through the worker. A part is committed at the stop, Continue with a
+/// rest left is refused with `RestLeft` (the rest named by `get_edit_rest`), and Continue
+/// committing the rest finishes it. The whole split is one Undo step, "Split 1a2b3c4".
+#[test]
+fn splitting_a_commit_is_one_undo_step() {
+    use crate::wire::ErrorKind;
+    use git_core::rebase::{EditRest, RebaseStepResult};
+    let (dir, repo) = init_repo();
+    let (onto, plan, ac, b) = split_fixture(dir.path(), &repo);
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let split = crate::worker::HistoryEdit {
+        kind: crate::worker::HistoryEditKind::Split,
+        commit_id: ac.clone(),
+    };
+    assert_eq!(
+        handle
+            .start_rebase(onto.clone(), plan, Some(split))
+            .unwrap(),
+        RebaseStepResult::PausedForEdit
+    );
+    handle.unstage_file("c.txt".to_string()).unwrap();
+
+    handle.rebase_commit_part("add a".to_string()).unwrap();
+
+    let info = handle.get_head_info().unwrap().rebase.unwrap();
+    assert_eq!(info.editing.as_deref(), Some(ac.as_str()));
+    assert_eq!(info.split_parts, 1);
+    let refused = handle
+        .rebase_continue_with_rest(Some("add c".to_string()), None)
+        .unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::RestLeft);
+    assert_eq!(handle.get_edit_rest().unwrap(), ["c.txt"]);
+
+    assert_eq!(
+        handle
+            .rebase_continue_with_rest(Some("add c".to_string()), Some(EditRest::Commit))
+            .unwrap(),
+        RebaseStepResult::Done
+    );
+
+    assert_eq!(
+        summaries_since(dir.path(), &onto),
+        ["add a", "add c", "add b"]
+    );
+    assert_eq!(
+        handle.get_undo_state().unwrap().undo,
+        Some(format!("Split {}", &ac[..7]))
+    );
+    handle.undo().unwrap();
+    let reopened = Repository::open(dir.path()).unwrap();
+    assert_eq!(reopened.head().unwrap().target().unwrap(), b);
+}
+
+/// #884: a part refused for an empty message changes nothing, and outside an edit stop there
+/// is no rest.
+#[test]
+fn a_part_with_an_empty_message_is_refused_and_no_rest_without_a_rebase() {
+    use git_core::rebase::RebaseStepResult;
+    let (dir, repo) = init_repo();
+    let (onto, plan, _, _) = split_fixture(dir.path(), &repo);
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    assert!(handle.get_edit_rest().unwrap().is_empty());
+    assert_eq!(
+        handle.start_rebase(onto.clone(), plan, None).unwrap(),
+        RebaseStepResult::PausedForEdit
+    );
+    handle.unstage_file("c.txt".to_string()).unwrap();
+
+    let error = handle.rebase_commit_part(" ".to_string()).unwrap_err();
+
+    assert!(error.message.contains("message is empty"), "{error:?}");
+    assert_eq!(
+        handle.get_head_info().unwrap().rebase.unwrap().split_parts,
+        0
+    );
+    assert_eq!(rebase_progress(&handle), Some((1, 2)));
+}

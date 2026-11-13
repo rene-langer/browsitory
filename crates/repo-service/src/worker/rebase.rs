@@ -27,6 +27,8 @@ pub enum HistoryEditKind {
     Drop,
     /// Edit commit… (#882): stops at the commit with its changes staged.
     Edit,
+    /// Split commit… (#884): the same stop as Edit, to commit the changes as several parts.
+    Split,
 }
 
 pub(super) fn commits_since(
@@ -273,8 +275,20 @@ impl WorkerHandle {
         message: Option<String>,
         events: Sender<super::HookEvent>,
     ) -> Result<RebaseStepResult, ErrorDto> {
+        self.rebase_continue_with_rest_reporting(message, None, events)
+    }
+
+    /// `rebase_continue_reporting`, deciding what happens to an edit stop's rest (#884): with
+    /// `None`, a rest refuses Continue (`ErrorKind::RestLeft`, named by `get_edit_rest`).
+    pub fn rebase_continue_with_rest_reporting(
+        &self,
+        message: Option<String>,
+        rest: Option<git_core::rebase::EditRest>,
+        events: Sender<super::HookEvent>,
+    ) -> Result<RebaseStepResult, ErrorDto> {
         self.request(|tx| Command::RebaseContinue {
             message,
+            rest,
             operation_id: self.cancelled.allocate("rebase"),
             events,
             reply: tx,
@@ -288,6 +302,44 @@ impl WorkerHandle {
         message: Option<String>,
     ) -> Result<RebaseStepResult, ErrorDto> {
         self.rebase_continue_reporting(message, std::sync::mpsc::channel().0)
+    }
+
+    /// `rebase_continue_with_rest_reporting` without anyone listening to the signing program.
+    #[allow(dead_code)]
+    pub fn rebase_continue_with_rest(
+        &self,
+        message: Option<String>,
+        rest: Option<git_core::rebase::EditRest>,
+    ) -> Result<RebaseStepResult, ErrorDto> {
+        self.rebase_continue_with_rest_reporting(message, rest, std::sync::mpsc::channel().0)
+    }
+
+    /// `rebase_commit_part_reporting` without anyone listening to the signing program.
+    #[allow(dead_code)]
+    pub fn rebase_commit_part(&self, message: String) -> Result<String, ErrorDto> {
+        self.rebase_commit_part_reporting(message, std::sync::mpsc::channel().0)
+    }
+
+    /// Split a commit (#884): commits what is staged at the edit stop as a part of the edited
+    /// commit; the rebase stays paused there. Returns the part's id. The signing program as for
+    /// `start_rebase_reporting`.
+    pub fn rebase_commit_part_reporting(
+        &self,
+        message: String,
+        events: Sender<super::HookEvent>,
+    ) -> Result<String, ErrorDto> {
+        self.request(|tx| Command::RebaseCommitPart {
+            message,
+            operation_id: self.cancelled.allocate("rebase"),
+            events,
+            reply: tx,
+        })
+    }
+
+    /// The paused edit stop's rest (#884): what Continue would not commit, sorted by path;
+    /// empty without one.
+    pub fn get_edit_rest(&self) -> Result<Vec<String>, ErrorDto> {
+        self.request(|tx| Command::GetEditRest { reply: tx })
     }
 
     /// `fold_staged_reporting` without anyone listening to the signing program.

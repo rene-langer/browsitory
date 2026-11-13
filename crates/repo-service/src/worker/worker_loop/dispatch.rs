@@ -619,8 +619,15 @@ where
                 undo::relabel_rebase_start(&mut self.undo_recorder, &self.repo, &label, &result);
                 let _ = reply.send(result);
             }
+            Command::RebaseCommitPart { reply, .. } => {
+                let _ = reply.send(Err("not implemented".into()));
+            }
+            Command::GetEditRest { reply } => {
+                let _ = reply.send(Err("not implemented".into()));
+            }
             Command::RebaseContinue {
                 message,
+                rest: _,
                 operation_id,
                 events,
                 reply,

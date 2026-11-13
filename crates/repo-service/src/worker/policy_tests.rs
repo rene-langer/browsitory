@@ -748,11 +748,23 @@ pub(super) fn table() -> Vec<((&'static str, Command), &'static str)> {
         (
             cmd!(RebaseContinue {
                 message: None,
+                rest: None,
                 operation_id: op(),
                 events: channel().0
             }),
             "lock hold",
         ),
+        // Split a commit (#884): a part is part of the paused rebase's one Undo step, like
+        // Continue; the rest is read from the stored rebase on the main lane.
+        (
+            cmd!(RebaseCommitPart {
+                message: s("part"),
+                operation_id: op(),
+                events: channel().0
+            }),
+            "lock hold",
+        ),
+        (cmd!(GetEditRest), "-"),
         (cmd!(AbortRebase), "lock hold abort"),
         (
             cmd!(FetchRemote {

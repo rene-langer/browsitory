@@ -3218,6 +3218,9 @@ pub enum ErrorKind {
     /// A commit or amend refused because git has no `user.name`/`user.email`; `set_identity`
     /// sets them (#689).
     MissingIdentity,
+    /// Continue at an edit stop refused because changes aren't staged (#884); `get_edit_rest`
+    /// names them, and Continue with a `rest` choice commits or discards them.
+    RestLeft,
 }
 
 impl ErrorKind {

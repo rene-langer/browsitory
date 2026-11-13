@@ -197,6 +197,59 @@ fn a_restarted_worker_continues_an_edit_with_a_new_message() {
     assert!(!rebase_file(&repo).exists());
 }
 
+/// Split a commit (#884): a part committed before a restart is still counted after it, and
+/// Continue with every change in parts adds no commit of its own.
+#[test]
+fn a_restarted_worker_keeps_a_splits_parts() {
+    let (dir, repo) = init_repo();
+    let (onto, plan, branch, _) = edit_then_pick(dir.path(), &repo);
+    let a = plan[0].commit_id.clone();
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let split = crate::worker::HistoryEdit {
+        kind: crate::worker::HistoryEditKind::Split,
+        commit_id: a.clone(),
+    };
+    assert_eq!(
+        handle.start_rebase(onto.clone(), plan, Some(split)).unwrap(),
+        git_core::rebase::RebaseStepResult::PausedForEdit
+    );
+    handle.rebase_commit_part("a, part 1".to_string()).unwrap();
+    write_file(dir.path(), "x.txt", "x\n");
+    handle.stage_file("x.txt".to_string()).unwrap();
+    handle.rebase_commit_part("a, part 2".to_string()).unwrap();
+    let (_worker, handle) = restart(worker, handle, dir.path());
+    let info = handle.get_head_info().unwrap().rebase.unwrap();
+    assert_eq!(info.editing.as_deref(), Some(a.as_str()));
+    assert_eq!(info.split_parts, 2);
+
+    assert_eq!(
+        handle.rebase_continue().unwrap(),
+        git_core::rebase::RebaseStepResult::Done
+    );
+
+    let reopened = Repository::open(dir.path()).unwrap();
+    assert_eq!(reopened.head().unwrap().name().unwrap(), branch);
+    let mut walk = reopened.revwalk().unwrap();
+    walk.push_head().unwrap();
+    walk.hide(git2::Oid::from_str(&onto).unwrap()).unwrap();
+    walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::REVERSE)
+        .unwrap();
+    let summaries: Vec<String> = walk
+        .map(|id| {
+            let commit = reopened.find_commit(id.unwrap()).unwrap();
+            let summary = commit.summary().unwrap().unwrap().to_string();
+            summary
+        })
+        .collect();
+    assert_eq!(summaries, ["a, part 1", "a, part 2", "b"]);
+    assert_eq!(
+        handle.get_undo_state().unwrap().undo,
+        Some(format!("Split {}", &a[..7]))
+    );
+    assert!(!rebase_file(&repo).exists());
+}
+
 /// #883: a fold paused on a conflict survives a restart, and Abort then puts the branch back
 /// with the changes staged again.
 #[test]
