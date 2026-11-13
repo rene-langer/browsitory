@@ -81,7 +81,8 @@ Press **?** (outside a text field), or choose **Keyboard shortcuts** in the head
 menu, for the full list of shortcuts, written for your platform: **Ctrl** on Windows and Linux,
 **⌘** and the other Apple symbols (⌥ Option, ⇧ Shift, ⌃ Control) on macOS. The command palette
 shows a command's shortcut at the right of its row, and the toolbar's tooltips show theirs
-(**Refresh (F5)**).
+(**Refresh (F5)**). They show your own keys once you change them (see
+[Change the shortcuts](#change-the-shortcuts)).
 
 The global shortcuts work anywhere in the window:
 
@@ -112,8 +113,8 @@ Browsitory sees it; the tab strip and the command palette close a tab too.
 In VSCode, every key in the table works while Browsitory has the focus. VSCode binds Ctrl+K,
 F5, Shift+F5, F6, Shift+F6, Ctrl+Alt+B, the tab keys, Ctrl+W, Ctrl+Shift+T and Alt+← / Alt+→
 itself, so the extension contributes keybindings that hand them to Browsitory while it has the
-focus; elsewhere they keep doing what VSCode does. To change one, search for "Browsitory" in VSCode's
-**Keyboard Shortcuts**; the sheet and the palette still show the default keys.
+focus; elsewhere they keep doing what VSCode does. To change them, see
+[Change the shortcuts](#change-the-shortcuts).
 
 **Moving between panes.** F6 moves the focus to the next pane (the repository toolbar, the
 sidebar, the history, the diff) and Shift+F6 to the previous one, wrapping around. A pane gets
@@ -157,3 +158,40 @@ Tab closes it and moves on.
 
 **Resizing.** With a divider between the columns focused, ← / → resize the columns.
 Double-click a divider to collapse or expand the sidebar.
+
+## Change the shortcuts
+
+In the desktop app, open **Preferences** (the gear in the header) and choose **Keyboard**, or
+click **Change shortcuts…** in the shortcut sheet. It lists the global shortcuts and the merge
+editor's keys with their keys; type in **Search shortcuts** to find one by name or key.
+
+- To add a key, click **Add key** next to the command and press the keys you want, for example
+  **Ctrl+Alt+R**. Esc cancels; Tab moves on without recording. A command can have several keys.
+- To remove a key, click **×** next to it. A command without keys runs only from the palette or
+  its button.
+- If another command already has the keys, Browsitory names it. **Replace** moves the keys to
+  this command, **Cancel** keeps them where they are.
+- **Reset** next to a command brings back its built-in keys; **Reset all shortcuts** does that for
+  every command.
+
+The new keys work at once, and the shortcut sheet, the palette and the tooltips show them. They
+are saved with your other preferences, in the `[keybindings]` section of Browsitory's
+`config.toml`.
+
+??? note "Details"
+
+    Some keys can't be used, so text fields, dialogs and the window keep working: Ctrl+C, Ctrl+V,
+    Ctrl+X, Ctrl+A, Ctrl+Z and Ctrl+Y (⌘ on macOS), Esc, Tab, Shift+Tab, Enter, Space, the arrow
+    keys on their own, F6 and Shift+F6, and the keys that quit or close the app (⌘Q and ⌘W on
+    macOS, Alt+F4). A command keeps these keys when they are its own built-in ones: Undo keeps
+    Ctrl+Z, and moving between panes keeps F6. Ctrl+1 … Ctrl+9 (⌘1 … ⌘9) can't be changed.
+
+    A key without Ctrl, Cmd or Alt, such as a single letter, works only outside text fields, so
+    you can still type it.
+
+**In VSCode** the keys are VSCode keybindings, so you change them in VSCode itself:
+**Preferences → Keyboard** has **Open Keyboard Shortcuts**, which opens VSCode's Keyboard
+Shortcuts on Browsitory's commands (`browsitory.shortcut.…`). There you can give a command
+other keys or remove them. The shortcut sheet, the palette and the tooltips show the keys you
+set there. The keys Browsitory handles itself in VSCode (Ctrl+Shift+L, Ctrl+Shift+K, the merge
+editor's keys and the others VSCode doesn't bind) keep their built-in keys.

@@ -6,6 +6,10 @@ import { isApplePlatform } from "./platform";
  * shortcut sheet (`lib/shortcuts.ts`), the command palette and the toolbar tooltips show them,
  * and the VSCode extension's contributed keybindings (#679) can be generated from them.
  *
+ * The user's own keys (#898, `lib/keymap.ts`) replace a shortcut's built-in ones: every function
+ * here that reads a shortcut's keys (`chordsFor`, the labels, the matching) reads the effective
+ * keys. The VSCode keybindings (`lib/vscodeKeybindings.ts`) stay the built-in ones.
+ *
  * Notation (`docs/CONTENT_GUIDELINES.md`): Apple platforms write the modifiers as symbols in
  * Apple's order with no separator ("⌥⌘B", "⇧⌘Z"); elsewhere they are words joined with "+"
  * ("Ctrl+Alt+B"). Arrow keys are always arrows ("Alt+←", "↑ / ↓").
@@ -155,16 +159,56 @@ export const GLOBAL_SHORTCUTS: readonly GlobalShortcut[] = [
 
 const BY_ID = new Map(GLOBAL_SHORTCUTS.map((shortcut) => [shortcut.id, shortcut]));
 
+/** A shortcut the user can give other keys (#898): a global one or a merge editor key. */
+export type BindableId = ShortcutId | MergeEditorShortcutId;
+
+// The user's keys by shortcut (#898), set by `lib/keymap.ts`; a shortcut missing here has its
+// built-in keys. An empty list is a shortcut the user removed.
+let userChords: ReadonlyMap<BindableId, readonly KeyChord[]> = new Map();
+let keymapVersion = 0;
+const keymapListeners = new Set<() => void>();
+
+/** Replaces the user's keys; `lib/keymap.ts` owns them. */
+export function setUserChords(chords: ReadonlyMap<BindableId, readonly KeyChord[]>): void {
+  userChords = chords;
+  keymapVersion += 1;
+  for (const listener of keymapListeners) listener();
+}
+
+/** Calls `listener` whenever the user's keys change. */
+export function subscribeKeymap(listener: () => void): () => void {
+  keymapListeners.add(listener);
+  return () => keymapListeners.delete(listener);
+}
+
+/** Changes with every change to the user's keys, for `useSyncExternalStore`. */
+export function getKeymapVersion(): number {
+  return keymapVersion;
+}
+
+/** The shortcut's built-in keys on this platform, whatever the user chose. */
+export function defaultChordsFor(id: BindableId, apple: boolean = isApplePlatform()): KeyChord[] {
+  const shortcut = BY_ID.get(id as ShortcutId);
+  if (shortcut !== undefined) return (apple ? shortcut.appleChords : undefined) ?? shortcut.chords;
+  return mergeEditorShortcut(id as MergeEditorShortcutId).chords;
+}
+
+/** The shortcut's keys on this platform: the user's, else the built-in ones. */
+export function effectiveChordsFor(id: BindableId, apple: boolean = isApplePlatform()): KeyChord[] {
+  const own = userChords.get(id);
+  return own !== undefined ? [...own] : defaultChordsFor(id, apple);
+}
+
 export function globalShortcut(id: ShortcutId): GlobalShortcut {
   const shortcut = BY_ID.get(id);
   if (shortcut === undefined) throw new Error(`Unknown shortcut ${id}`);
   return shortcut;
 }
 
-/** The shortcut's keys on this platform. */
+/** The shortcut's keys on this platform: the user's (#898), else the built-in ones. */
 export function chordsFor(id: ShortcutId, apple: boolean = isApplePlatform()): KeyChord[] {
-  const shortcut = globalShortcut(id);
-  return (apple ? shortcut.appleChords : undefined) ?? shortcut.chords;
+  globalShortcut(id);
+  return effectiveChordsFor(id, apple);
 }
 
 const APPLE_KEY_NAMES: Record<string, string> = {
@@ -194,6 +238,11 @@ export function formatKeyName(key: string, apple: boolean = isApplePlatform(), m
   return key.length === 1 && modified ? key.toUpperCase() : key;
 }
 
+/** "Refresh (F5)", or the text alone for a shortcut without keys (#898). */
+export function withShortcutLabel(text: string, label: string): string {
+  return label === "" ? text : `${text} (${label})`;
+}
+
 /** "Ctrl+Shift+Z" or "⇧⌘Z". */
 export function formatChord(chord: KeyChord, apple: boolean = isApplePlatform()): string {
   const modified = Boolean(chord.mod || chord.ctrl || chord.alt || chord.shift);
@@ -215,7 +264,10 @@ export function formatChords(chords: readonly KeyChord[], apple: boolean = isApp
   return chords.map((chord) => formatChord(chord, apple)).join(" / ");
 }
 
-/** The shortcut's keys as the platform writes them, for the sheet, the palette and tooltips. */
+/**
+ * The shortcut's keys as the platform writes them, for the sheet, the palette and tooltips; ""
+ * when the user removed them (#898).
+ */
 export function shortcutLabel(id: ShortcutId, apple: boolean = isApplePlatform()): string {
   const chords = chordsFor(id, apple);
   if (globalShortcut(id).range === true && chords.length > 1) {
@@ -316,19 +368,29 @@ export function mergeEditorShortcut(id: MergeEditorShortcutId): MergeEditorShort
   return shortcut;
 }
 
+/** The merge editor shortcut's keys: the user's (#898), else the built-in ones. */
+export function mergeEditorChordsFor(id: MergeEditorShortcutId, apple: boolean = isApplePlatform()): KeyChord[] {
+  mergeEditorShortcut(id);
+  return effectiveChordsFor(id, apple);
+}
+
 /** The merge editor shortcut's keys as the platform writes them ("Shift+F7", "⇧F7"). */
 export function mergeEditorShortcutLabel(id: MergeEditorShortcutId, apple: boolean = isApplePlatform()): string {
-  return formatChords(mergeEditorShortcut(id).chords, apple);
+  return formatChords(mergeEditorChordsFor(id, apple), apple);
 }
 
 /** The merge editor shortcut in `aria-keyshortcuts` syntax. */
 export function mergeEditorAriaKeyShortcuts(id: MergeEditorShortcutId, apple: boolean = isApplePlatform()): string {
-  return ariaChords(mergeEditorShortcut(id).chords, apple);
+  return ariaChords(mergeEditorChordsFor(id, apple), apple);
 }
 
 /** The merge editor shortcut `event` presses, if any. */
-export function matchMergeEditorShortcut(event: KeyEventLike): MergeEditorShortcut | null {
-  return MERGE_EDITOR_SHORTCUTS.find((shortcut) => shortcut.chords.some((chord) => matchesChord(event, chord))) ?? null;
+export function matchMergeEditorShortcut(event: KeyEventLike, apple: boolean = isApplePlatform()): MergeEditorShortcut | null {
+  return (
+    MERGE_EDITOR_SHORTCUTS.find((shortcut) =>
+      mergeEditorChordsFor(shortcut.id, apple).some((chord) => matchesChord(event, chord)),
+    ) ?? null
+  );
 }
 
 /** The global shortcut `event` presses on this platform, if any. */

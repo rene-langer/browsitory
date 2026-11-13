@@ -236,6 +236,7 @@ export const vscodeRepoClient: RepoClient = {
   initRepo: () => Promise.reject(new Error("Not supported in the VSCode extension")),
   supportsHostGitCommands: true,
   runHostGitCommand: (command: "clone" | "init") => call<void>("run_vscode_git_command", { command }),
+  openHostKeybindings: () => call<void>("open_vscode_keybindings"),
   subscribeTransferProgress: (listener: (progress: TransferProgress) => void) => {
     // Initialize eagerly: a caller may subscribe before it ever issues a request, and the
     // `message` listener registered here is what delivers notifications.

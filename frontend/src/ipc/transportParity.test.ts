@@ -77,8 +77,10 @@ const TAURI_NO_COMMAND = ["logFrontendError"] as const satisfies readonly Method
 /**
  * VSCode only (#680): the picker's Clone… and New repository… buttons run VSCode's own Git
  * commands there; the desktop app clones and initializes itself, so this rejects without a call.
+ * `openHostKeybindings` (#900) opens VSCode's Keyboard Shortcuts; the desktop app rebinds the
+ * keys in Preferences itself.
  */
-const TAURI_UNSUPPORTED = ["runHostGitCommand"] as const satisfies readonly Method[];
+const TAURI_UNSUPPORTED = ["runHostGitCommand", "openHostKeybindings"] as const satisfies readonly Method[];
 
 /**
  * Sidecar methods the webview never calls. The extension host itself calls them, to read file

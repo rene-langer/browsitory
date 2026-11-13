@@ -119,6 +119,11 @@ pub fn shared_wire_cases(s: &mut impl WireCases) {
         FetchSettingsDto::from,
     );
     s.add(
+        "KeybindingSettings",
+        fixtures::keybinding_settings(),
+        KeybindingSettingsDto::from,
+    );
+    s.add(
         "AppearanceSettings",
         fixtures::appearance_settings(),
         AppearanceSettingsDto::from,

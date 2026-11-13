@@ -1,5 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { removeShortcutChord, resetAllShortcuts, setShortcutChords } from "../lib/keymap";
+import { OpenPreferencesContext } from "../state/openPreferences";
 import { ShortcutSheet } from "./ShortcutSheet";
 
 describe("ShortcutSheet", () => {
@@ -107,5 +109,53 @@ describe("ShortcutSheet", () => {
     // One row: the global sheet already lists Redo's keys on their own, for the Git undo.
     expect(within(group).getByText(/^Undo \/ redo the last change in the merge editor/)).toBeInTheDocument();
     expect(within(group).getByText("Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y")).toBeInTheDocument();
+  });
+
+  describe("the user's keys (#898)", () => {
+    afterEach(() => {
+      resetAllShortcuts();
+      localStorage.clear();
+    });
+
+    it("shows rebound keys and leaves out a shortcut without keys", () => {
+      setShortcutChords("refresh", [{ key: "F4" }]);
+      setShortcutChords("next-conflict", [{ key: "F8" }]);
+      setShortcutChords("conflict-ours", [{ key: "q" }]);
+      removeShortcutChord("push", { mod: true, shift: true, key: "k" });
+      render(<ShortcutSheet onClose={vi.fn()} apple={false} />);
+      expect(screen.getByText("Refresh the repository").closest("div")).toHaveTextContent("F4");
+      expect(screen.getByText("Next conflict").closest("div")).toHaveTextContent("F8");
+      expect(screen.getByText("Accept ours (in a conflict block, outside its result)").closest("div")).toHaveTextContent("q");
+      expect(screen.queryByText("Push the current branch")).toBeNull();
+    });
+  });
+
+  it("opens Preferences on the Keyboard group to change the shortcuts (#899)", () => {
+    const onClose = vi.fn();
+    const openPreferences = vi.fn();
+    render(
+      <OpenPreferencesContext.Provider value={openPreferences}>
+        <ShortcutSheet onClose={onClose} vscode={false} />
+      </OpenPreferencesContext.Provider>,
+    );
+    screen.getByRole("button", { name: "Change shortcuts…" }).click();
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(openPreferences).toHaveBeenCalledWith("keyboard");
+  });
+
+  it("offers no Change shortcuts button without Preferences to open (#899)", () => {
+    render(<ShortcutSheet onClose={vi.fn()} vscode={false} />);
+    expect(screen.queryByRole("button", { name: "Change shortcuts…" })).toBeNull();
+  });
+
+  it("in VSCode, also opens Preferences on the Keyboard group, which links to VSCode's Keyboard Shortcuts (#900)", () => {
+    const openPreferences = vi.fn();
+    render(
+      <OpenPreferencesContext.Provider value={openPreferences}>
+        <ShortcutSheet onClose={vi.fn()} vscode />
+      </OpenPreferencesContext.Provider>,
+    );
+    screen.getByRole("button", { name: "Change shortcuts…" }).click();
+    expect(openPreferences).toHaveBeenCalledWith("keyboard");
   });
 });

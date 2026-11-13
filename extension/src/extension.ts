@@ -20,6 +20,7 @@ import {
   shortcutRequest,
   timelineCommitId,
 } from "./hostRequests";
+import { effectiveShortcutKeys, keybindingsFileCandidates, parseKeybindingsJson } from "./keybindingsFile";
 import { FILE_VERSION_SCHEME, parseFileVersionUri } from "./toolUris";
 import { renderWebviewHtml } from "./webviewHtml";
 
@@ -176,7 +177,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }),
       revealInOS: (target) => vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(target)),
       createTerminal: (cwd, name) => vscode.window.createTerminal({ cwd, name }).show(),
-      executeCommand: (command) => vscode.commands.executeCommand(command),
+      executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),
       openDiff: (left, right, title) =>
         vscode.commands.executeCommand(
           "vscode.diff",
@@ -206,6 +207,7 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(bridge);
     const started: PanelSession = { panel, bridge, ready: false, queued: [] };
     session = started;
+    void sendKeybindings(started);
 
     const script = vscode.Uri.joinPath(assetRoot, "assets", "vscode-main.js");
     const style = vscode.Uri.joinPath(assetRoot, "assets", "vscode-main.css");
@@ -253,6 +255,44 @@ export function activate(context: vscode.ExtensionContext): void {
     currentPanelSubscription = panelSubscription;
     context.subscriptions.push(panelSubscription);
     return started;
+  }
+
+  // The user's keybindings.json (#900): read for each panel and whenever it changes, so the
+  // webview shows and matches the keys VSCode runs the shortcuts with. Without the global
+  // storage folder (or the file) the webview keeps the built-in keys, which are the contributed ones.
+  const keybindingsFiles = context.globalStorageUri === undefined ? [] : keybindingsFileCandidates(context.globalStorageUri.fsPath);
+
+  /** The first readable keybindings.json's entries; `undefined` when none can be read. */
+  async function readUserKeybindings(): Promise<unknown[] | undefined> {
+    for (const file of keybindingsFiles) {
+      try {
+        const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(file));
+        return parseKeybindingsJson(new TextDecoder().decode(bytes));
+      } catch {
+        // Not there: the next candidate.
+      }
+    }
+    return undefined;
+  }
+
+  async function sendKeybindings(target: PanelSession): Promise<void> {
+    const user = await readUserKeybindings();
+    if (user === undefined || session !== target) return;
+    const contributed = (context.extension.packageJSON as { contributes?: { keybindings?: unknown[] } }).contributes?.keybindings ?? [];
+    sendHostRequest(target, {
+      kind: "keybindings",
+      keys: effectiveShortcutKeys(contributed, user, process.platform === "darwin"),
+    });
+  }
+
+  for (const file of keybindingsFiles) {
+    const watcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(vscode.Uri.file(path.dirname(file)), path.basename(file)),
+    );
+    const resend = () => {
+      if (session) void sendKeybindings(session);
+    };
+    context.subscriptions.push(watcher, watcher.onDidChange(resend), watcher.onDidCreate(resend), watcher.onDidDelete(resend));
   }
 
   /** The open panel, shown; else a new one in the active editor group (#678). */

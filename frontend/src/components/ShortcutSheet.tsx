@@ -1,4 +1,7 @@
+import { useContext } from "react";
+import { useKeymap } from "../lib/keymap";
 import { isVscodeHost } from "../lib/platform";
+import { OpenPreferencesContext } from "../state/openPreferences";
 import { shortcutGroups } from "../lib/shortcuts";
 import styles from "./ShortcutSheet.module.css";
 
@@ -13,6 +16,8 @@ export function ShortcutSheet({
   /** In VSCode's webview, whose keybindings run some of these keys (#679). */
   vscode?: boolean;
 }) {
+  useKeymap();
+  const openPreferences = useContext(OpenPreferencesContext);
   const groups = shortcutGroups(apple, vscode);
   return (
     <div className={styles.sheet} aria-labelledby="shortcut-sheet-title" role="group">
@@ -39,9 +44,23 @@ export function ShortcutSheet({
           </dl>
         </section>
       ))}
-      <button type="button" onClick={onClose}>
-        Close
-      </button>
+      <div className={styles.actions}>
+        {openPreferences !== null && (
+          // Preferences > Keyboard (#899), which in VSCode links to its Keyboard Shortcuts (#900).
+          <button
+            type="button"
+            onClick={() => {
+              onClose();
+              openPreferences("keyboard");
+            }}
+          >
+            Change shortcuts…
+          </button>
+        )}
+        <button type="button" onClick={onClose}>
+          Close
+        </button>
+      </div>
     </div>
   );
 }

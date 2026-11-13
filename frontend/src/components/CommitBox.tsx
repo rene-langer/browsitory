@@ -16,7 +16,8 @@ import { Field } from "./primitives/Field";
 import { SplitButton } from "./primitives/SplitButton";
 import { Toolbar } from "./primitives/Toolbar";
 import { HookStatus } from "./HookStatus";
-import { shortcutLabel } from "../lib/keybindings";
+import { shortcutLabel, withShortcutLabel } from "../lib/keybindings";
+import { useKeymap } from "../lib/keymap";
 import styles from "./CommitBox.module.css";
 
 /**
@@ -56,6 +57,7 @@ export function CommitBox({
   onAbortMerge,
   abortLabel = "Abort merge",
   initialMessage,
+  initialMessageIsSquash = false,
   showAbort = initialMessage !== undefined,
   initialDraft,
   onDraftChange,
@@ -92,6 +94,11 @@ export function CommitBox({
   onAbortMerge: () => void;
   abortLabel?: string;
   initialMessage?: string;
+  /**
+   * `initialMessage` is a pending squash merge's message (#142): co-authors can still be added
+   * to it. A merge's or a paused cherry-pick's or revert's message hides them.
+   */
+  initialMessageIsSquash?: boolean;
   /** Whether to offer `abortLabel`; defaults to "a message was seeded" (a merge/pick/revert). */
   showAbort?: boolean;
   /**
@@ -155,6 +162,7 @@ export function CommitBox({
     headAuthor?: SignatureInput | null;
   };
 }) {
+  useKeymap();
   const [message, setMessage] = useState(initialDraft?.message ?? "");
   // Tracks the last `initialMessage` value that was auto-seeded into `message`, so we can tell
   // "user hasn't touched the field since it was seeded" (message === lastSeeded) apart from "user
@@ -254,8 +262,9 @@ export function CommitBox({
   // the message stays in the field until the commit lands.
   const [submitting, setSubmitting] = useState(false);
 
-  // A merge/pick/revert (or squash) message is git's: no co-authors are added to it.
-  const showCoAuthors = loadRecentAuthors !== undefined && initialMessage === undefined;
+  // A merge/pick/revert message is git's: no co-authors are added to it. A squash message is
+  // the start of the user's own commit, which may have co-authors (#142).
+  const showCoAuthors = loadRecentAuthors !== undefined && (initialMessage === undefined || initialMessageIsSquash);
   const headAuthor = amend?.headAuthor ?? null;
   const headAuthorText = headAuthor === null ? "" : formatPerson(headAuthor);
   const authorText = amendAuthor ?? headAuthorText;
@@ -426,7 +435,7 @@ export function CommitBox({
           Summary {summaryLength}/{summaryLimit}
         </span>
         {canRestore && (
-          <button type="button" className={styles.historyButton} onClick={restoreReplaced} title={`Undo the pick (${shortcutLabel("undo")})`}>
+          <button type="button" className={styles.historyButton} onClick={restoreReplaced} title={withShortcutLabel("Undo the pick", shortcutLabel("undo"))}>
             Restore message
           </button>
         )}

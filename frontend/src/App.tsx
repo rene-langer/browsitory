@@ -30,6 +30,7 @@ import {
   PreferencesDialog,
   UpdatesSection,
 } from "./components/PreferencesDialog";
+import { KeyboardShortcutsSection } from "./components/KeyboardShortcutsSection";
 import type { PreferencesGroupId } from "./lib/preferencesGroup";
 import { OpenPreferencesContext } from "./state/openPreferences";
 import { cloneToastMessage, createNewRepository } from "./lib/newRepository";
@@ -358,8 +359,8 @@ function AppContent({
           disabled: !canReopenClosedRepo,
           title: canReopenClosedRepo ? undefined : "No closed tab to reopen",
           group: "reopen",
-          shortcut: shortcutLabel("reopen-closed-tab"),
-          ariaKeyShortcuts: ariaKeyShortcuts("reopen-closed-tab"),
+          shortcut: shortcutLabel("reopen-closed-tab") || undefined,
+          ariaKeyShortcuts: ariaKeyShortcuts("reopen-closed-tab") || undefined,
         },
       ];
     },
@@ -507,6 +508,19 @@ function AppContent({
               { id: "diff", label: "Diff", content: <DiffSection /> },
               { id: "commit-message", label: "Commit message", content: <CommitMessageSection /> },
               { id: "fetch", label: "Fetch", content: <FetchSection repoPath={openRepos.activePath} /> },
+              {
+                id: "keyboard",
+                label: "Keyboard",
+                // In VSCode its own Keyboard Shortcuts rebind the keys (#900).
+                content: (
+                  <KeyboardShortcutsSection
+                    vscode={toolHost === "vscode"}
+                    onOpenHostKeybindings={() => {
+                      client.openHostKeybindings().catch(() => {});
+                    }}
+                  />
+                ),
+              },
               {
                 id: "external-tools",
                 label: "External tools",

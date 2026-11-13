@@ -16,6 +16,7 @@ import type {
   PatchSource,
   CommitMessageSettings,
   FetchSettings,
+  KeybindingSettings,
   UpdateSettings,
   FileSides,
   FileContent,
@@ -103,6 +104,8 @@ export type BackendCall = <T>(method: string, params?: Record<string, unknown>) 
  *
  * - clone and init: the desktop app clones and initializes; the extension leaves that to VSCode's
  *   own commands (`supportsCloneAndInit: false`), which `runHostGitCommand` runs there (#680).
+ * - `openHostKeybindings` (#900): VSCode's Keyboard Shortcuts; the desktop app rebinds the keys
+ *   in Preferences itself.
  * - `listOpenRepos`: the Tauri command answers a `[entries, activePath]` tuple, the sidecar an
  *   object.
  * - the two progress subscriptions and the repository watchers' reports: Tauri events on the
@@ -119,6 +122,7 @@ export type TransportSpecific =
   | "initRepo"
   | "supportsHostGitCommands"
   | "runHostGitCommand"
+  | "openHostKeybindings"
   | "listOpenRepos"
   | "subscribeTransferProgress"
   | "subscribeHookProgress"
@@ -414,6 +418,8 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
       call<void>("set_commit_message_settings", { settings }),
     getFetchSettings: () => call<FetchSettings>("get_fetch_settings"),
     setFetchSettings: (settings: FetchSettings) => call<void>("set_fetch_settings", { settings }),
+    getKeybindingSettings: () => call<KeybindingSettings>("get_keybinding_settings"),
+    setKeybindingSettings: (settings: KeybindingSettings) => call<void>("set_keybinding_settings", { settings }),
     getAppearanceSettings: () => call<AppearanceSettings>("get_appearance_settings"),
     setAppearanceSettings: (settings: AppearanceSettings) => call<void>("set_appearance_settings", { settings }),
     listFontFamilies: () => call<FontFamily[]>("list_font_families"),

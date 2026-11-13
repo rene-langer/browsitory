@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { removeShortcutChord, resetAllShortcuts } from "../lib/keymap";
 import type { RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { SyncBar } from "./SyncBar";
 
@@ -243,5 +244,20 @@ describe("SyncBar leading slot", () => {
     expect(stash).toHaveAttribute("aria-disabled", "true");
     expect(stash).toHaveAccessibleDescription("A rebase is in progress.");
     expect(screen.getByRole("button", { name: "More stash options" })).toHaveAttribute("aria-disabled", "true");
+  });
+
+  describe("the user's keys (#898)", () => {
+    afterEach(() => {
+      resetAllShortcuts();
+      localStorage.clear();
+    });
+
+    it("leaves the keys out of a title when the shortcut has none", () => {
+      removeShortcutChord("push", { mod: true, shift: true, key: "k" });
+      removeShortcutChord("fetch", { shift: true, key: "F5" });
+      renderBar({ upstream: { ...upstream, pushBranch: "main" } });
+      expect(screen.getByRole("button", { name: "Push" })).toHaveAttribute("title", "Push to origin/main");
+      expect(screen.getByRole("button", { name: "Fetch" })).toHaveAttribute("title", "Fetch from origin");
+    });
   });
 });

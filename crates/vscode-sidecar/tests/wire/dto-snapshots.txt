@@ -53,6 +53,8 @@ ExternalToolSettings/set {"editor":"code -w","terminal":"wt"}
 CommitMessageSettings/plain {"bodyRuler":72,"showRuler":true,"summaryLimit":50}
 FetchSettings/off {"autoFetchMinutes":0}
 FetchSettings/every-10 {"autoFetchMinutes":10}
+KeybindingSettings/none {"overrides":{}}
+KeybindingSettings/rebound {"overrides":{"push":[],"refresh":["F5","mod+alt+r"]}}
 AppearanceSettings/default {"codeFont":null,"codeFontSize":null,"dateFormat":"Iso","tabSize":4,"uiSize":"Normal"}
 AppearanceSettings/set {"codeFont":"Example Mono","codeFontSize":15,"dateFormat":"System","tabSize":8,"uiSize":"Large"}
 AppearanceSettings/small {"codeFont":null,"codeFontSize":null,"dateFormat":"Iso","tabSize":4,"uiSize":"Small"}

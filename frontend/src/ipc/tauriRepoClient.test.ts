@@ -383,6 +383,11 @@ describe("tauriRepoClient transfer progress subscription", () => {
     expect(invoke).toHaveBeenLastCalledWith("get_fetch_settings", undefined);
     await tauriRepoClient.setFetchSettings({ autoFetchMinutes: 30 });
     expect(invoke).toHaveBeenLastCalledWith("set_fetch_settings", { settings: { autoFetchMinutes: 30 } });
+    // #898: the keyboard shortcuts in config.toml.
+    await tauriRepoClient.getKeybindingSettings();
+    expect(invoke).toHaveBeenLastCalledWith("get_keybinding_settings", undefined);
+    await tauriRepoClient.setKeybindingSettings({ overrides: { refresh: ["F4"] } });
+    expect(invoke).toHaveBeenLastCalledWith("set_keybinding_settings", { settings: { overrides: { refresh: ["F4"] } } });
     await tauriRepoClient.getAppearanceSettings();
     expect(invoke).toHaveBeenLastCalledWith("get_appearance_settings", undefined);
     await tauriRepoClient.setAppearanceSettings({ codeFont: "Mono", codeFontSize: 14, uiSize: "Large", tabSize: 2, dateFormat: "System" });

@@ -802,6 +802,28 @@ describe("CommitBox showAbort", () => {
       expect(onCommit).toHaveBeenCalledWith("Merge branch 'x'", []);
     });
 
+    // #142 (owner decision): a squash message is git's too, but the user may still add co-authors.
+    it("shows co-authors for a seeded squash message and commits them as trailers (#142)", async () => {
+      const onCommit = vi.fn(async () => true);
+      render(
+        <CommitBox
+          onCommit={onCommit}
+          disabled={false}
+          onAbortMerge={vi.fn()}
+          initialMessage="Squashed commit"
+          initialMessageIsSquash
+          showAbort={false}
+          initialDraft={{ message: "", lastSeeded: "", coAuthors: [{ name: "Ada", email: "ada@x.org" }] }}
+          loadRecentAuthors={async () => []}
+        />,
+      );
+      expect(screen.getByRole("button", { name: "Add co-author" })).toBeInTheDocument();
+      expect(within(screen.getByRole("list", { name: "Co-authors" })).getByText("Ada <ada@x.org>")).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByLabelText("Commit message")).toHaveValue("Squashed commit"));
+      fireEvent.click(screen.getByRole("button", { name: "Commit" }));
+      expect(onCommit).toHaveBeenCalledWith("Squashed commit", [{ key: "Co-authored-by", value: "Ada <ada@x.org>" }]);
+    });
+
     it("clears the chips with the message on a clear request after a retried commit", () => {
       const props = {
         onCommit: async () => true,

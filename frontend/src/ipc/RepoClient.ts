@@ -93,6 +93,15 @@ export interface CommitMessageSettings {
   showRuler: boolean;
 }
 
+/**
+ * The user's keyboard shortcuts (`[keybindings]`, #898): each shortcut the user changed, by id,
+ * with its keys as names ("mod+shift+k", "F4"); an empty list is a shortcut without keys
+ * (`lib/keymap.ts`). VSCode's own keybindings apply in the extension (#900).
+ */
+export interface KeybindingSettings {
+  overrides: { [key in string]: Array<string> };
+}
+
 /** Fetch settings (`[fetch]`): the app-wide "Fetch automatically" interval, 0 for off. */
 export interface FetchSettings {
   autoFetchMinutes: number;
@@ -1239,7 +1248,12 @@ export type HostRequest =
   /** Opens `repoPath`'s tab and selects commit `commitId` in the graph, as Go to does (#759). */
   | { kind: "showCommit"; repoPath: string; commitId: string }
   /** A global shortcut (`ShortcutId`) VSCode would otherwise take; `index` is Ctrl/Cmd+1…9's tab. */
-  | { kind: "shortcut"; id: string; index?: number };
+  | { kind: "shortcut"; id: string; index?: number }
+  /**
+   * The keys VSCode runs each shortcut it binds with (#900), by `ShortcutId`, in VSCode's syntax
+   * for this platform: the extension's keybindings with the user's `keybindings.json` on top.
+   */
+  | { kind: "keybindings"; keys: Record<string, string[]> };
 
 export interface RepoClient {
   pickRepoFolder(): Promise<string | null>;
@@ -1278,6 +1292,11 @@ export interface RepoClient {
   readonly supportsHostGitCommands: boolean;
   /** Rejects where `supportsHostGitCommands` is false, without calling the backend. */
   runHostGitCommand(command: "clone" | "init"): Promise<void>;
+  /**
+   * VSCode only (#900): opens VSCode's Keyboard Shortcuts on Browsitory's shortcut commands,
+   * where the keys are rebound there. Rejects in the desktop app without calling the backend.
+   */
+  openHostKeybindings(): Promise<void>;
   /**
    * Clones and resolves when done. `operationId` is chosen by the caller so it can
    * `cancelClone` before this resolves; progress arrives on `subscribeTransferProgress` with
@@ -1620,6 +1639,8 @@ export interface RepoClient {
   setCommitMessageSettings(settings: CommitMessageSettings): Promise<void>;
   getFetchSettings(): Promise<FetchSettings>;
   setFetchSettings(settings: FetchSettings): Promise<void>;
+  getKeybindingSettings(): Promise<KeybindingSettings>;
+  setKeybindingSettings(settings: KeybindingSettings): Promise<void>;
   getAppearanceSettings(): Promise<AppearanceSettings>;
   setAppearanceSettings(settings: AppearanceSettings): Promise<void>;
   /**

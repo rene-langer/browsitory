@@ -880,6 +880,40 @@ describe("DiffPane", () => {
       expect(screen.queryByRole("button", { name: "Abort merge" })).toBeNull();
     });
 
+    // #142 (owner decision): co-authors for a squash message; a merge or a paused cherry-pick or
+    // revert keeps git's message as it is.
+    it("offers co-authors for a pending squash message only (#142)", () => {
+      const headInfo = {
+        headId: "abc",
+        detachedAt: null,
+        headPushed: false,
+        operation: null,
+        operationLeftover: false,
+        squashMessage: null,
+        commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null,
+      };
+      const squash = renderUncommitted(fakeClient({}), status, {
+        mergeMessage: null,
+        headInfo: { ...headInfo, squashMessage: "Squashed commit of the following:\n" },
+      });
+      expect(screen.getByRole("button", { name: "Add co-author" })).toBeInTheDocument();
+      squash.unmount();
+
+      for (const operation of [null, "CherryPick", "Revert"] as const) {
+        const paused = renderUncommitted(fakeClient({}), status, {
+          mergeMessage: "git's message\n",
+          headInfo: { ...headInfo, operation },
+        });
+        expect(screen.getByPlaceholderText("Commit message")).toHaveValue("git's message\n");
+        expect(screen.queryByRole("button", { name: "Add co-author" }), String(operation)).toBeNull();
+        paused.unmount();
+      }
+
+      // Without anything pre-filled the user's own commit offers them too.
+      renderUncommitted(fakeClient({}), status, { mergeMessage: null, headInfo });
+      expect(screen.getByRole("button", { name: "Add co-author" })).toBeInTheDocument();
+    });
+
     it("offers amend and an empty message box after a leftover cherry-pick (#240, #232)", () => {
       const headInfo = {
         headId: "abc", detachedAt: null, headPushed: false, operation: "CherryPick" as const, operationLeftover: true,
