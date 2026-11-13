@@ -1,6 +1,9 @@
 //! Running user commands (#894): the variables' values from a real repository, and the program
 //! run without a shell, in its directory, with a time limit, a cancel and capped output.
 
+// Most run tests need `sh` and are Unix-only; their imports are unused elsewhere.
+#![cfg_attr(not(unix), allow(unused_imports))]
+
 mod common;
 
 use std::path::{Path, PathBuf};
