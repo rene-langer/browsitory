@@ -7,6 +7,7 @@ import { repoPanelId, repoTabId } from "./components/repoTabIds";
 import { OperationStatusStrip } from "./components/OperationStatusStrip";
 import { HookRunStrip } from "./components/HookRunStrip";
 import { OperationLogDialog } from "./components/OperationLogDialog";
+import { rerunBlockedReason, runRerun } from "./lib/rerun";
 import type { PushToast } from "./state/useToasts";
 import { InlineError } from "./components/primitives/InlineError";
 import { SplitView, type SplitViewLeftState, type SplitViewRequest } from "./components/primitives/SplitView";
@@ -865,6 +866,16 @@ export function RepoWorkspace({
           client={client}
           repoPath={repoPath}
           focus={operationLog}
+          runAgain={{
+            run: (rerun) => runRerun(rerun, appState),
+            blockedReason: (rerun) =>
+              repositoryOperationDisabled
+                ? (operationDisabledReason ?? "Another action is running.")
+                : rerunBlockedReason(rerun, {
+                    remotes: appState.state.remotes.map((remote) => remote.name),
+                    branches: appState.state.branches.map((branch) => branch.name),
+                  }),
+          }}
           onClose={() => setOperationLog(null)}
         />
       )}

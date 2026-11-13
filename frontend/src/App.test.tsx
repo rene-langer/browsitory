@@ -539,6 +539,59 @@ describe("App", () => {
     });
   });
 
+  it("runs a failed push again from the operation log (#890)", async () => {
+    const pushCurrentBranch = vi.fn(async () => "push-2");
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => graphPage([]),
+      listBranches: async () => [],
+      listStashes: async () => [],
+      listRemotes: async () => [
+        { name: "origin", fetchUrl: "https://example.test/r.git", pushUrl: null, prune: false, authMode: null, authUsername: null },
+      ],
+      listOperations: async () => ({
+        repo: "/repos/a",
+        entries: [
+          {
+            id: 3,
+            name: "Push",
+            target: "origin",
+            params: [],
+            startedAt: 0,
+            durationMs: 30,
+            outcome: "Failed" as const,
+            message: "could not resolve host",
+            errorKind: null,
+            transferError: "TransferFailed" as const,
+            remoteFailures: [],
+            runs: [],
+            rerun: { kind: "PushCurrentBranch" as const, remoteName: "origin", noVerify: true },
+          },
+        ],
+        hasMore: false,
+      }),
+      subscribeOperationLog: () => () => {},
+      pushCurrentBranch,
+    });
+    const { container } = render(<App client={client} />);
+    await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), {
+      target: { value: "Show operation log" },
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "Show operation log" }));
+    const details = await screen.findByRole("region", { name: "Operation details" });
+    const runAgain = await within(details).findByRole("button", { name: "Run again" });
+    await waitFor(() => expect(runAgain).toBeEnabled());
+    fireEvent.click(runAgain);
+
+    await waitFor(() => expect(pushCurrentBranch).toHaveBeenCalledWith("/repos/a", "origin", true));
+  });
+
   it("shows a failed action's details in the operation log from the error banner (#889)", async () => {
     const listOperations = vi.fn(async () => ({
       repo: "/repos/a",
