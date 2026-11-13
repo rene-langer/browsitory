@@ -619,14 +619,32 @@ where
                 undo::relabel_rebase_start(&mut self.undo_recorder, &self.repo, &label, &result);
                 let _ = reply.send(result);
             }
+            Command::RebaseCommitPart {
+                message,
+                operation_id,
+                events,
+                reply,
+            } => rebase::commit_part(
+                &self.repo,
+                &message,
+                self.operations.rebase_slot(),
+                remote::TransferOp::new(operation_id),
+                events,
+                reply,
+            ),
+            Command::GetEditRest { reply } => {
+                rebase::edit_rest(&self.repo, self.operations.rebase_slot(), reply)
+            }
             Command::RebaseContinue {
                 message,
+                rest,
                 operation_id,
                 events,
                 reply,
             } => rebase::continue_rebase(
                 &self.repo,
                 message.as_deref(),
+                rest,
                 self.operations.rebase_slot(),
                 remote::TransferOp::new(operation_id),
                 events,

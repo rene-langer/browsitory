@@ -80,6 +80,49 @@ pub enum RebaseError {
     /// rebase would discard them on Abort, as for any rebase.
     #[error("{}", unstaged_changes_message(paths))]
     UnstagedChanges { paths: Vec<String> },
+    /// Commit part (#884) when the rebase isn't stopped at an Edit step; nothing was changed.
+    #[error("The rebase isn't stopped to edit a commit.")]
+    NotEditing,
+    /// Continue at an edit stop with changes not staged (#884), sorted by path: the caller asks
+    /// whether to commit or discard them (`EditRest`). Nothing was changed.
+    #[error("{}", rest_left_message(paths))]
+    RestLeft { paths: Vec<String> },
+    /// Commit part (#884) with nothing staged; nothing was changed.
+    #[error("Nothing is staged. Stage the changes for this part first.")]
+    NothingStagedForPart,
+    /// Commit part (#884) at a commit that squash or fixup steps are folded into: the group
+    /// would fold the parts back into one commit.
+    #[error(
+        "This commit is followed by squash or fixup steps, so it can't be split. Abort the \
+         rebase and plan it without them."
+    )]
+    SplitInGroup,
+    /// Committing or discarding an edit stop's rest failed (#884).
+    #[error(transparent)]
+    Stage(#[from] crate::stage::StageError),
+}
+
+/// The refusal copy for [`RebaseError::RestLeft`]: the first path, and how many others there are.
+fn rest_left_message(paths: &[String]) -> String {
+    const ADVICE: &str = "Commit or discard them, then continue.";
+    let first = paths.first().map(String::as_str).unwrap_or("");
+    match paths.len() {
+        0 | 1 => format!("{first} has changes that aren't staged. {ADVICE}"),
+        2 => format!("{first} and 1 other file have changes that aren't staged. {ADVICE}"),
+        n => format!(
+            "{first} and {} other files have changes that aren't staged. {ADVICE}",
+            n - 1
+        ),
+    }
+}
+
+/// What Continue does with an edit stop's rest (#884): the changes not staged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditRest {
+    /// Stage it and commit it with the step (the last part).
+    Commit,
+    /// Throw it away, leaving it out of the history.
+    Discard,
 }
 
 /// The refusal copy for [`RebaseError::UnstagedChanges`].
@@ -333,6 +376,9 @@ pub struct RebaseState {
     /// (as `original_tip`, the fixup commit). Abort puts the branch back here with the changes
     /// staged again. `None` for any other rebase.
     pub fold_base: Option<Oid>,
+    /// Split a commit (#884): how many parts of the commit at an edit stop were committed with
+    /// `rebase_commit_part`; 0 at any other stop.
+    pub split_parts: usize,
 }
 
 impl RebaseState {
@@ -493,6 +539,7 @@ pub fn start_rebase_with(
         expected_head: onto_commit.id(),
         stop: RebaseStop::Error,
         fold_base: None,
+        split_parts: 0,
     };
 
     // Everything past the detach above must roll back on failure: an `Err` escaping here would
@@ -544,6 +591,127 @@ pub fn rebase_continue_with_message(
     repo: &Repository,
     state: &mut RebaseState,
     message: Option<&str>,
+    hooks: HookOptions<'_>,
+) -> Result<RebaseStepResult, RebaseError> {
+    rebase_continue_with_rest(repo, state, message, None, hooks)
+}
+
+/// The plan entry of the commit the rebase is stopped at to be edited, if it is.
+fn editing_entry(state: &RebaseState) -> Option<&RebasePlanEntry> {
+    state
+        .plan
+        .get(state.cursor)
+        .filter(|entry| state.stop == RebaseStop::Edit && entry.action == RebaseAction::Edit)
+}
+
+/// An edit stop's rest (#884), sorted by path: what Continue would not commit. Unstaged changes
+/// to tracked files, and untracked files at paths the edited commit changes (a file the commit
+/// adds is untracked once unstaged); other untracked files are the user's own and don't count.
+/// Empty when the rebase isn't stopped at an Edit step.
+pub fn edit_rest(repo: &Repository, state: &RebaseState) -> Result<Vec<String>, RebaseError> {
+    let Some(entry) = editing_entry(state) else {
+        return Ok(Vec::new());
+    };
+    let picked = repo.find_commit(Oid::from_str(&entry.commit_id)?)?;
+    let parent_tree = match picked.parent_count() {
+        0 => None,
+        _ => Some(picked.parent(0)?.tree()?),
+    };
+    let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&picked.tree()?), None)?;
+    let mut commit_paths = std::collections::HashSet::new();
+    for delta in diff.deltas() {
+        for file in [delta.old_file(), delta.new_file()] {
+            if let Some(path) = file.path_bytes() {
+                commit_paths.insert(path.to_vec());
+            }
+        }
+    }
+    let mut options = git2::StatusOptions::new();
+    options
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .include_ignored(false);
+    let unstaged = git2::Status::WT_MODIFIED
+        | git2::Status::WT_DELETED
+        | git2::Status::WT_TYPECHANGE
+        | git2::Status::WT_RENAMED;
+    let mut rest = std::collections::BTreeSet::new();
+    for status in repo.statuses(Some(&mut options))?.iter() {
+        let flags = status.status();
+        let ours = flags.intersects(unstaged)
+            || (flags.contains(git2::Status::WT_NEW) && commit_paths.contains(status.path_bytes()));
+        if ours {
+            rest.insert(String::from_utf8_lossy(status.path_bytes()).into_owned());
+        }
+    }
+    Ok(rest.into_iter().collect())
+}
+
+/// Split a commit (#884): commits what is staged at an Edit step's stop as a part of the edited
+/// commit, under `message`, with that commit's author (the committer is the current user). The
+/// rebase stays paused at the same step; Continue commits what is still staged as the last part
+/// (nothing more when every change went into a part). Like the rest of a rebase it runs no
+/// hooks; only a signing program, when commits are signed. Returns the part's id. Refuses,
+/// changing nothing, when the rebase isn't stopped to edit (`NotEditing`), the message is
+/// empty, nothing is staged, or squash/fixup steps fold into the commit.
+pub fn rebase_commit_part(
+    repo: &Repository,
+    state: &mut RebaseState,
+    message: &str,
+    mut hooks: HookOptions<'_>,
+) -> Result<String, RebaseError> {
+    let Some(entry) = editing_entry(state).cloned() else {
+        return Err(RebaseError::NotEditing);
+    };
+    if !is_own_paused_step(repo, state) {
+        return Err(RebaseError::NotEditing);
+    }
+    check_head_at_expected(repo, state)?;
+    if message.trim().is_empty() {
+        return Err(RebaseError::EmptyMessage);
+    }
+    if starts_a_group(&state.plan, state.cursor) {
+        return Err(RebaseError::SplitInGroup);
+    }
+    let mut index = repo.index()?;
+    index.read(false)?;
+    if index.has_conflicts() {
+        return Err(RebaseError::OperationInProgress);
+    }
+    let tree = repo.find_tree(index.write_tree()?)?;
+    let parent = repo.head()?.peel_to_commit()?;
+    if tree.id() == parent.tree_id() {
+        return Err(RebaseError::NothingStagedForPart);
+    }
+    let original = repo.find_commit(Oid::from_str(&entry.commit_id)?)?;
+    let committer = repo.signature()?;
+    let part = crate::commit::create_signed_reporting(
+        repo,
+        &mut hooks,
+        Some(crate::signing::HeadUpdate {
+            expected: Some(parent.id()),
+            reflog_operation: "commit",
+        }),
+        &original.author(),
+        &committer,
+        message,
+        &tree,
+        &[&parent],
+    )?;
+    state.expected_head = part;
+    state.split_parts += 1;
+    Ok(part.to_string())
+}
+
+/// `rebase_continue_with_message`, deciding what happens to an edit stop's rest (#884,
+/// [`edit_rest`]): `None` refuses with `RestLeft` while there is one, changing nothing;
+/// `Commit` stages it and commits it with the step; `Discard` throws it away (as Discard does
+/// for unstaged changes and untracked files), leaving it out of the history.
+pub fn rebase_continue_with_rest(
+    repo: &Repository,
+    state: &mut RebaseState,
+    message: Option<&str>,
+    rest: Option<EditRest>,
     mut hooks: HookOptions<'_>,
 ) -> Result<RebaseStepResult, RebaseError> {
     if message.is_some_and(|message| message.trim().is_empty()) {
@@ -551,8 +719,18 @@ pub fn rebase_continue_with_message(
     }
     let hooks = &mut hooks;
     let resume = resume_kind(repo, state)?;
+    if matches!(resume, Resume::Land) {
+        let left = edit_rest(repo, state)?;
+        if !left.is_empty() {
+            match rest {
+                None => return Err(RebaseError::RestLeft { paths: left }),
+                Some(EditRest::Commit) => crate::stage::stage_paths(repo, &left)?,
+                Some(EditRest::Discard) => crate::stage::discard_all_unstaged(repo, &left)?,
+            }
+        }
+    }
     let result = match resume {
-        Resume::Land => land_current_step(repo, state, message, hooks).and_then(|()| {
+        Resume::Land => land_or_close_split(repo, state, message, hooks).and_then(|()| {
             state.cursor += 1;
             advance(repo, state, hooks)
         }),
@@ -579,6 +757,26 @@ pub fn rebase_continue_with_message(
         };
     }
     result
+}
+
+/// Lands the paused step from the index, except at an edit stop with nothing staged (#884): a
+/// split whose parts took every change commits no last part, and an edit that left nothing of
+/// the commit drops it, as Drop would (owner decision). Either way the step simply ends.
+fn land_or_close_split(
+    repo: &Repository,
+    state: &mut RebaseState,
+    message: Option<&str>,
+    hooks: &mut HookOptions<'_>,
+) -> Result<(), RebaseError> {
+    if editing_entry(state).is_some() {
+        let mut index = repo.index()?;
+        index.read(false)?;
+        let staged = index.write_tree()?;
+        if staged == repo.head()?.peel_to_commit()?.tree_id() {
+            return after_landed(repo, state, hooks);
+        }
+    }
+    land_current_step(repo, state, message, hooks)
 }
 
 /// `rebase_continue` with a cancel check and a reporter for the signing program, as in
@@ -1084,6 +1282,7 @@ fn after_landed(
     // This function is the only place (besides `start_rebase`'s initial detach) that moves HEAD
     // during a rebase, so re-baseline the drift check from wherever it just landed.
     state.expected_head = repo.head()?.peel_to_commit()?.id();
+    state.split_parts = 0;
     // The step is committed: forget its CHERRY_PICK_HEAD/MERGE_MSG, so a later stop (an error
     // before the next pick, a failed `finish`) is a clean state, never a stale pick. Only the
     // pick's own files: a terminal bisect goes on (#249).

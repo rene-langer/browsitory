@@ -1205,6 +1205,8 @@ pub struct RebaseInfoDto {
     pub health: RebaseHealthDto,
     /// Full id of the commit an Edit step stopped at (#882); `null` at any other stop.
     pub editing: Option<String>,
+    /// Parts of the edited commit committed so far (Split a commit, #884); 0 when not editing.
+    pub split_parts: usize,
 }
 
 #[derive(Serialize)]
@@ -1229,6 +1231,7 @@ impl From<git_core::repo::RebaseInfo> for RebaseInfoDto {
                 RebaseHealth::Diverged(reason) => RebaseHealthDto::Diverged(reason),
             },
             editing: info.editing,
+            split_parts: info.split_parts,
         }
     }
 }
@@ -2304,6 +2307,25 @@ impl From<RebasePlanEntryDto> for git_core::rebase::RebasePlanEntry {
     }
 }
 
+/// `RepoClient.rebaseContinue`'s optional `rest` (#884): what Continue at an edit stop does
+/// with the changes not staged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "EditRest"))]
+pub enum EditRestDto {
+    Commit,
+    Discard,
+}
+
+impl From<EditRestDto> for git_core::rebase::EditRest {
+    fn from(dto: EditRestDto) -> Self {
+        match dto {
+            EditRestDto::Commit => Self::Commit,
+            EditRestDto::Discard => Self::Discard,
+        }
+    }
+}
+
 /// `RepoClient.startRebase`'s optional `edit`: the one-click history edit from the commit menu
 /// the rebase runs, `{ "kind", "commitId" }`, so its undo entry names it (#473).
 #[derive(Deserialize)]
@@ -2326,6 +2348,7 @@ pub enum HistoryEditKindDto {
     MoveDown,
     Drop,
     Edit,
+    Split,
 }
 
 impl From<HistoryEditTargetDto> for crate::worker::HistoryEdit {
@@ -2340,6 +2363,7 @@ impl From<HistoryEditTargetDto> for crate::worker::HistoryEdit {
                 HistoryEditKindDto::MoveDown => Kind::MoveDown,
                 HistoryEditKindDto::Drop => Kind::Drop,
                 HistoryEditKindDto::Edit => Kind::Edit,
+                HistoryEditKindDto::Split => Kind::Split,
             },
             commit_id: dto.commit_id,
         }
@@ -3218,6 +3242,9 @@ pub enum ErrorKind {
     /// A commit or amend refused because git has no `user.name`/`user.email`; `set_identity`
     /// sets them (#689).
     MissingIdentity,
+    /// Continue at an edit stop refused because changes aren't staged (#884); `get_edit_rest`
+    /// names them, and Continue with a `rest` choice commits or discards them.
+    RestLeft,
 }
 
 impl ErrorKind {
@@ -3243,12 +3270,15 @@ impl ErrorKind {
         use git_core::branch::BranchError;
         use git_core::commit::CommitError;
         use git_core::merge::MergeError;
+        use git_core::rebase::RebaseError;
         use git_core::remote::RemoteError;
         use git_core::search::SearchError;
         if let Some(BranchError::LocalChanges(_)) = error.downcast_ref::<BranchError>() {
             Some(Self::LocalChanges)
         } else if let Some(CommitError::MissingIdentity) = error.downcast_ref::<CommitError>() {
             Some(Self::MissingIdentity)
+        } else if let Some(RebaseError::RestLeft { .. }) = error.downcast_ref::<RebaseError>() {
+            Some(Self::RestLeft)
         } else if let Some(error) = error.downcast_ref::<RemoteError>() {
             match error {
                 RemoteError::DirtyWorktree => Some(Self::DirtyWorktree),
@@ -3469,6 +3499,7 @@ mod ts_bindings {
             RebasePlanEntryDto,
             HistoryEditTargetDto,
             HistoryEditKindDto,
+            EditRestDto,
             RebaseStepResultDto,
             DiffLineDto,
             DiffHunkDto,

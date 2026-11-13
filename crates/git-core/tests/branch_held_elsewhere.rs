@@ -396,6 +396,7 @@ fn stored_rebase(f: &Fixture, plan: Vec<RebasePlanEntry>) -> RebaseState {
         expected_head: f.commits[1],
         stop: RebaseStop::Edit,
         fold_base: None,
+        split_parts: 0,
     }
 }
 

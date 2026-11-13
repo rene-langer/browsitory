@@ -55,6 +55,7 @@ describe("historyEditChecks", () => {
       MoveDown: { ok: true, onto: "A" },
       Drop: { ok: true, onto: "B" },
       Edit: { ok: true, onto: "B" },
+      Split: { ok: true, onto: "B" },
     });
   });
 
@@ -70,6 +71,12 @@ describe("historyEditChecks", () => {
       ok: false,
       reason: "The first commit of the history can't be edited here.",
     });
+  });
+
+  it("splits a commit, HEAD included, from its parent like Edit (#884)", () => {
+    expect(historyEditChecks(context(), "C").Split).toEqual({ ok: true, onto: "B" });
+    expect(historyEditChecks(context(), "E").Split).toEqual({ ok: true, onto: "D" });
+    expect(historyEditChecks(context(), "A").Split).toEqual(historyEditChecks(context(), "A").Edit);
   });
 
   it("can't move HEAD up", () => {
@@ -140,7 +147,7 @@ describe("historyEditChecks", () => {
     const busy = "Finish or abort the operation in progress first.";
     const paused: Partial<HeadInfo>[] = [
       { operation: "Merge" },
-      { rebase: { currentStep: 1, totalSteps: 2, onto: "B", branch: "main", health: { kind: "Paused" }, editing: null } },
+      { rebase: { currentStep: 1, totalSteps: 2, onto: "B", branch: "main", health: { kind: "Paused" }, editing: null, splitParts: 0 } },
       { sequence: { kind: "CherryPick", currentStep: 1, totalSteps: 2, currentCommit: "X" } },
       { terminalRebase: { kind: "Rebase", branch: "main", onto: "B", currentStep: 1, totalSteps: 2 } },
       {
@@ -213,6 +220,14 @@ describe("buildHistoryEditPlan", () => {
       pick("E"),
     ]);
     expect(() => buildHistoryEditPlan({ kind: "Edit" }, "C", fromA)).toThrow("The history changed. Refresh and try again.");
+  });
+
+  it("stops at the commit to split and picks the rest (#884)", () => {
+    expect(buildHistoryEditPlan({ kind: "Split" }, "C", fromB)).toEqual([
+      { commitId: "C", action: { kind: "Edit" }, combinedMessage: null },
+      pick("D"),
+      pick("E"),
+    ]);
   });
 
   it("drops one commit", () => {

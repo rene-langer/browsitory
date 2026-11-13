@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { CommitOutcome, TransferProgress } from "../ipc/RepoClient";
+import { RepoError, type CommitOutcome, type TransferProgress } from "../ipc/RepoClient";
 import { useAppState } from "./useAppState";
 import { TEST_REPO_PATH, transferClient } from "./useAppStateTestClient";
 
@@ -70,7 +70,7 @@ describe("history actions", () => {
 
   it("derives rebase progress from headInfo.rebase on the first refresh", async () => {
     // What a restarted app sees: the backend restored the paused rebase from disk.
-    const rebase = { branch: "main", onto: "o1", currentStep: 1, totalSteps: 2, editing: null, health: { kind: "Paused" as const } };
+    const rebase = { branch: "main", onto: "o1", currentStep: 1, totalSteps: 2, editing: null, splitParts: 0, health: { kind: "Paused" as const } };
     const info = { headId: "h1", detachedAt: "h1", headPushed: false, operation: "CherryPick" as const, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase, bisect: null, terminalSequence: null, terminalRebase: null };
     const { result } = renderHook(() => useAppState(transferClient({ getHeadInfo: async () => info }), TEST_REPO_PATH));
     await act(() => result.current.refresh());
@@ -78,7 +78,7 @@ describe("history actions", () => {
   });
 
   it("clears rebase progress when headInfo.rebase is null", async () => {
-    const rebase = { branch: "main", onto: "o1", currentStep: 2, totalSteps: 2, editing: null, health: { kind: "Paused" as const } };
+    const rebase = { branch: "main", onto: "o1", currentStep: 2, totalSteps: 2, editing: null, splitParts: 0, health: { kind: "Paused" as const } };
     let current: typeof rebase | null = rebase;
     const getHeadInfo = async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: current, bisect: null, terminalSequence: null, terminalRebase: null });
     const { result } = renderHook(() => useAppState(transferClient({ getHeadInfo }), TEST_REPO_PATH));
@@ -161,6 +161,67 @@ describe("history actions", () => {
       act(() => result.current.setRebaseEditMessage(null));
       await act(() => result.current.rebaseContinue());
       expect(rebaseContinue).toHaveBeenLastCalledWith(TEST_REPO_PATH);
+    });
+
+    it("Split commit… starts the edit rebase, named for Undo (#884)", async () => {
+      const startRebase = vi.fn(async () => ({ kind: "PausedForEdit" }) as const);
+      const { result } = renderHook(() =>
+        useAppState(transferClient({ commitsSince: async () => span.slice(1), startRebase }), TEST_REPO_PATH),
+      );
+      await act(async () => {
+        await result.current.editHistory("c", "p", { kind: "Split" });
+      });
+      expect(startRebase).toHaveBeenCalledWith(
+        TEST_REPO_PATH,
+        "p",
+        [{ commitId: "c", action: { kind: "Edit" }, combinedMessage: null }, pick("d")],
+        { kind: "Split", commitId: "c" },
+      );
+      expect(result.current.state.splitting).toBe("c");
+    });
+
+    it("commits a part at the edit stop (#884)", async () => {
+      const rebaseCommitPart = vi.fn(async () => "part1");
+      const { result } = renderHook(() => useAppState(transferClient({ rebaseCommitPart }), TEST_REPO_PATH));
+      let ok: unknown;
+      await act(async () => {
+        ok = await result.current.rebaseCommitPart("First part\n");
+      });
+      expect(rebaseCommitPart).toHaveBeenCalledWith(TEST_REPO_PATH, "First part\n");
+      expect(ok).toBe(true);
+    });
+
+    it("asks what to do with an edit stop's rest, then continues with the choice (#884)", async () => {
+      const rebaseContinue = vi.fn(async (_path: string, _message?: string, rest?: string) => {
+        if (rest === undefined) throw new RepoError("RestLeft", "c.txt has changes that aren't staged.");
+        return { kind: "Done" } as const;
+      });
+      const getEditRest = vi.fn(async () => ["c.txt"]);
+      const { result } = renderHook(() =>
+        useAppState(transferClient({ rebaseContinue, getEditRest }), TEST_REPO_PATH),
+      );
+      act(() => result.current.setRebaseEditMessage("Last part\n"));
+      await act(() => result.current.rebaseContinue());
+      expect(result.current.state.editRest).toEqual(["c.txt"]);
+      // Asking is no error.
+      expect(result.current.state.error).toBeNull();
+
+      await act(() => result.current.rebaseContinue("Commit"));
+      expect(rebaseContinue).toHaveBeenLastCalledWith(TEST_REPO_PATH, "Last part\n", "Commit");
+      expect(result.current.state.editRest).toBeNull();
+    });
+
+    it("closes the rest dialog without continuing (#884)", async () => {
+      const rebaseContinue = vi.fn(async () => {
+        throw new RepoError("RestLeft", "c.txt has changes that aren't staged.");
+      });
+      const { result } = renderHook(() =>
+        useAppState(transferClient({ rebaseContinue, getEditRest: async () => ["c.txt"] }), TEST_REPO_PATH),
+      );
+      await act(() => result.current.rebaseContinue());
+      act(() => result.current.closeEditRest());
+      expect(result.current.state.editRest).toBeNull();
+      expect(rebaseContinue).toHaveBeenCalledTimes(1);
     });
 
     it("folds staged changes into a commit, toasting when done (#883)", async () => {

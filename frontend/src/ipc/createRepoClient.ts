@@ -57,6 +57,7 @@ import type {
   PullRequest,
   PullRequestList,
   RebasePlanCommit,
+  EditRest,
   HistoryEditTarget,
   RebasePlanEntry,
   RebaseStepResult,
@@ -443,8 +444,15 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
       call<RebasePlanCommit[]>("commits_since", { repoPath, onto }),
     startRebase: (repoPath: string, onto: string, plan: RebasePlanEntry[], edit?: HistoryEditTarget | null) =>
       call<RebaseStepResult>("start_rebase", { repoPath, onto, plan, edit: edit ?? null }),
-    rebaseContinue: (repoPath: string, message?: string) =>
-      call<RebaseStepResult>("rebase_continue", message === undefined ? { repoPath } : { repoPath, message }),
+    rebaseContinue: (repoPath: string, message?: string, rest?: EditRest) =>
+      call<RebaseStepResult>("rebase_continue", {
+        repoPath,
+        ...(message === undefined ? {} : { message }),
+        ...(rest === undefined ? {} : { rest }),
+      }),
+    rebaseCommitPart: (repoPath: string, message: string) =>
+      call<string>("rebase_commit_part", { repoPath, message }),
+    getEditRest: (repoPath: string) => call<string[]>("get_edit_rest", { repoPath }),
     foldStagedInto: (repoPath: string, commitId: string) =>
       call<RebaseStepResult>("fold_staged_into", { repoPath, commitId }),
     abortRebase: (repoPath: string) => call<RebaseAbort>("abort_rebase", { repoPath }),

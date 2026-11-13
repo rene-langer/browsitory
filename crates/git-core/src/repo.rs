@@ -693,11 +693,21 @@ pub struct RebaseInfo {
     /// Full id of the commit the rebase stopped at to be edited (an `Edit` step, #882);
     /// `None` at a conflict or error stop.
     pub editing: Option<String>,
+    /// Split a commit (#884): parts of the edited commit committed so far; 0 when not editing.
+    pub split_parts: usize,
 }
 
 impl RebaseInfo {
     pub fn new(state: &crate::rebase::RebaseState, health: crate::rebase::RebaseHealth) -> Self {
         let progress = state.progress();
+        let editing = state
+            .plan
+            .get(state.cursor)
+            .filter(|entry| {
+                state.stop == crate::rebase::RebaseStop::Edit
+                    && entry.action == crate::rebase::RebaseAction::Edit
+            })
+            .map(|entry| entry.commit_id.clone());
         Self {
             branch: state
                 .original_branch_ref
@@ -708,14 +718,12 @@ impl RebaseInfo {
             current_step: progress.current_step,
             total_steps: progress.total_steps,
             health,
-            editing: state
-                .plan
-                .get(state.cursor)
-                .filter(|entry| {
-                    state.stop == crate::rebase::RebaseStop::Edit
-                        && entry.action == crate::rebase::RebaseAction::Edit
-                })
-                .map(|entry| entry.commit_id.clone()),
+            split_parts: if editing.is_some() {
+                state.split_parts
+            } else {
+                0
+            },
+            editing,
         }
     }
 }

@@ -92,7 +92,7 @@ describe("rebase status text", () => {
   });
 
   it("rebaseAbortToast for restored, moved, and branch missing", () => {
-    const info = (health: RebaseInfo["health"]): RebaseInfo => ({ branch: "topic", onto: "o", currentStep: 1, totalSteps: 2, editing: null, health });
+    const info = (health: RebaseInfo["health"]): RebaseInfo => ({ branch: "topic", onto: "o", currentStep: 1, totalSteps: 2, editing: null, splitParts: 0, health });
     expect(rebaseAbortToast({ restored: true }, info({ kind: "Paused" }))).toBe("Aborted rebase");
     expect(rebaseAbortToast({ restored: false }, info({ kind: "Diverged", reason: "HeadMoved" }))).toBe(
       "Stopped the rebase. HEAD had moved, so it was left where it is.",

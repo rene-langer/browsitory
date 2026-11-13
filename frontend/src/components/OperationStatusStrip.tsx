@@ -19,6 +19,7 @@ import {
   terminalRebaseText,
   terminalSequenceLabel,
   terminalSequenceText,
+  isSplitting,
 } from "../lib/operationStatus";
 import { ReasonButton } from "./primitives/ReasonButton";
 import styles from "./OperationStatusStrip.module.css";
@@ -63,6 +64,7 @@ export function OperationStatusStrip({
   currentBranch = null,
   onGoToConflict,
   onContinueRebase,
+  splittingCommit = null,
 }: {
   merging: boolean;
   operation: OperationKind | null;
@@ -94,6 +96,8 @@ export function OperationStatusStrip({
   onGoToConflict?: () => void;
   /** Continues a rebase paused here (#665), once its conflicts are resolved. */
   onContinueRebase?: () => void;
+  /** The commit Split commit… stopped at in this session (#884): the stop says "Splitting". */
+  splittingCommit?: string | null;
 }) {
   const reason = conflictReason(conflictCount);
   // Why a strip button can't run while another action is pending (#748): visible, not a title.
@@ -185,9 +189,11 @@ export function OperationStatusStrip({
       : mergeContext(mergeMessage, currentBranch);
   // An Edit step's stop (Edit commit…, #882) says which commit is being edited and what to do.
   const editing = rebaseProgress !== null && rebase !== null ? rebase.editing : null;
+  // Split a commit (#884): parts committed, or the stop Split commit… made.
+  const splitting = editing !== null && isSplitting(rebase ?? null, splittingCommit);
   const label =
     editing !== null
-      ? `Editing ${editing.slice(0, 7)}:`
+      ? `${splitting ? "Splitting" : "Editing"} ${editing.slice(0, 7)}:`
       : rebaseProgress !== null
       ? `Rebasing, step ${rebaseProgress.currentStep} of ${rebaseProgress.totalSteps}`
       : terminalStep
@@ -204,7 +210,9 @@ export function OperationStatusStrip({
       {editing !== null && " "}
       <span>
         {editing !== null
-          ? "change the files, then Continue"
+          ? splitting
+            ? "commit each part, then Continue"
+            : "change the files, then Continue"
           : leftover
             ? leftoverText(operation)
             : (reason ?? "No conflicts remaining")}

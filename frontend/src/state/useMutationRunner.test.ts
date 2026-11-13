@@ -41,6 +41,8 @@ const BASE_STATE: AppState = {
   patchOutcome: null,
   pendingPull: null,
   switchConflict: null,
+  editRest: null,
+  splitting: null,
   stashSwitchOutcome: null,
   identityRequired: null,
   pullOutcome: null,

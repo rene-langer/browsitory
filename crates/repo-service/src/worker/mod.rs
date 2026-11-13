@@ -684,10 +684,24 @@ pub(crate) enum Command {
     RebaseContinue {
         /// Replaces the message of the step Continue lands (#882).
         message: Option<String>,
+        /// What happens to an edit stop's rest (#884); `None` refuses while there is one.
+        rest: Option<git_core::rebase::EditRest>,
         /// As for `StartRebase`.
         operation_id: cancel::OperationId,
         events: Sender<HookEvent>,
         reply: Sender<Result<RebaseStepResult, ErrorDto>>,
+    },
+    /// Split a commit (#884): commit what is staged at the edit stop as a part.
+    RebaseCommitPart {
+        message: String,
+        /// As for `StartRebase`.
+        operation_id: cancel::OperationId,
+        events: Sender<HookEvent>,
+        reply: Sender<Result<String, ErrorDto>>,
+    },
+    /// The paused edit stop's rest (#884).
+    GetEditRest {
+        reply: Sender<Result<Vec<String>, ErrorDto>>,
     },
     /// Fold staged changes into `commit_id` (#883).
     FoldStaged {

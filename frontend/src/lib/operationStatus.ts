@@ -331,3 +331,12 @@ export function stashBlockReason(state: {
   if (state.status.length === 0) return "No changes to stash.";
   return null;
 }
+
+/**
+ * Whether an edit stop is splitting its commit (#884): parts of it are committed, or Split
+ * commit… made the stop in this session (`splittingCommit`).
+ */
+export function isSplitting(rebase: RebaseInfo | null, splittingCommit: string | null): boolean {
+  if (rebase === null || rebase.editing === null) return false;
+  return rebase.splitParts > 0 || splittingCommit === rebase.editing;
+}

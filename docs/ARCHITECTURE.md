@@ -1382,7 +1382,7 @@ certificate.
   `Edit` mean the step at `cursor` is applied to the index; `Error` means it isn't.
   `cursor == plan.len()` after a failed `finish`.
 - **Persistence**: `repo-service`'s `RebaseStore` (`worker/rebase_store.rs`) writes
-  `<gitdir>/browsitory/rebase.json` (per worktree, `version` 1, camelCase, temp file +
+  `<gitdir>/browsitory/rebase.json` (per worktree, `version` 3, camelCase, temp file +
   `sync_all` + rename) when a start or Continue pauses or fails, deletes it on `Done` and after a
   successful Abort, and is read on every use (no cache), so a restarted or respawned worker and
   the other app see the same rebase. On load the plan must be non-empty with `cursor <=
@@ -1409,6 +1409,19 @@ certificate.
   commit as a `Fixup` right after the target. `RebaseState::fold_base` (`foldBase` in
   `rebase.json`, format version 2) is the tip before the fold: Abort and a failed start move the
   branch back there (a soft reset), so the changes are staged again.
+- **Split a commit** (#884): `rebase_commit_part` commits the index at an Edit step's stop as a
+  part (the edited commit's author, no hooks, signed like a step), moves `expected_head` to it
+  and counts it in `RebaseState::split_parts` (`splitParts` in `rebase.json`, format version 3;
+  `RebaseInfo.split_parts` while editing). The pick's `CHERRY_PICK_HEAD` stays, so the stop is
+  still this rebase's own paused pick. Continue then lands what is staged as the last part, or,
+  with nothing staged, ends the step without a commit: after parts, no last part; without
+  any, the commit is dropped (owner decision: nothing of it is left). Refused at a commit
+  that squash/fixup steps fold into (they would fold the parts back together).
+- **An edit stop's rest** (#884, owner decision: no silent carry-over): `edit_rest` lists the
+  unstaged changes to tracked files and the untracked files at paths the edited commit changes.
+  Continue at an edit stop refuses with `RestLeft` (`ErrorKind::RestLeft`; `get_edit_rest`
+  names the files) unless `rebase_continue_with_rest` gets `EditRest::Commit` (`stage_paths`,
+  then land) or `Discard` (`discard_all_unstaged`, as Discard does).
 - **Continue** (`rebase_continue`; `rebase_continue_with_message` passes a message for the step
   it lands from the index, refusing an empty one, which is how Edit commit… recommits under an
   edited message, #882):

@@ -96,6 +96,8 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       patchOutcome: null,
       pendingPull: null,
       switchConflict: null,
+      editRest: null,
+      splitting: null,
       stashSwitchOutcome: null,
       identityRequired: null,
       pullOutcome: null,
@@ -209,6 +211,8 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     foldStaged: vi.fn(),
     rebaseContinue: vi.fn(),
     setRebaseEditMessage: vi.fn(),
+    closeEditRest: vi.fn(),
+    rebaseCommitPart: vi.fn(),
     abortRebase: vi.fn(),
     listPullRequests: vi.fn(),
     saveForgeToken: vi.fn(),
@@ -536,7 +540,7 @@ describe("buildCommands", () => {
   });
 
   it("omits Continue rebase while the rebase is interrupted but keeps Abort", () => {
-    const rebase = { branch: "main", onto: "o", currentStep: 1, totalSteps: 3, editing: null, health: { kind: "Diverged" as const, reason: "HeadMoved" as const } };
+    const rebase = { branch: "main", onto: "o", currentStep: 1, totalSteps: 3, editing: null, splitParts: 0, health: { kind: "Diverged" as const, reason: "HeadMoved" as const } };
     const base = makeAppState().state.headInfo;
     const commands = commandsFor(makeAppState({ rebaseProgress: { currentStep: 1, totalSteps: 3 }, headInfo: { ...base, rebase } }));
     expect(commands.some((c) => c.id === "rebase-continue")).toBe(false);
@@ -1485,6 +1489,14 @@ describe("history commands", () => {
       expect(head.editHistory).toHaveBeenLastCalledWith("c1", "c2", { kind: "Edit" });
       const dirty = commandsFor(makeAppState({ ...editState, status: [{ path: "a", oldPath: null, staged: false, kind: "Modified" }] }));
       expect(dirty.map((c) => c.id)).not.toContain("edit-selected");
+    });
+
+    it("offers Split commit… for a commit, from its parent (#884)", () => {
+      const appState = makeAppState(editState);
+      const split = commandsFor(appState).find((command) => command.id === "split-selected")!;
+      expect(split.label).toBe("Split c2…");
+      split.run();
+      expect(appState.editHistory).toHaveBeenLastCalledWith("c2", "c3", { kind: "Split" });
     });
 
     it("offers folding staged changes into the selected commit (#883)", () => {
