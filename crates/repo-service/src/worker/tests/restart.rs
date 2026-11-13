@@ -4,8 +4,9 @@ fn rebase_file(repo: &Repository) -> std::path::PathBuf {
     repo.path().join("browsitory").join("rebase.json")
 }
 
-/// `base` (onto; f.txt = "base\n") → "a" (a.txt) → "b" (f.txt = "from b\n") on the
-/// checked-out branch. Returns `(onto, plan [Edit a, Pick b], branch ref, branch tip)`.
+/// `base` (onto; f.txt = "base\n") → "a" (a.txt) → "b" (f.txt = "from b\n", g.txt) on the
+/// checked-out branch. An untracked g.txt is in the way of b's pick: Continue at the edit stop
+/// refuses unstaged changes to tracked files (#884), so that is how a test reaches an error stop. Returns `(onto, plan [Edit a, Pick b], branch ref, branch tip)`.
 fn edit_then_pick(
     dir: &Path,
     repo: &Repository,
@@ -22,6 +23,7 @@ fn edit_then_pick(
     commit_all(repo, "a");
     let a = repo.head().unwrap().target().unwrap().to_string();
     write_file(dir, "f.txt", "from b\n");
+    write_file(dir, "g.txt", "g from b\n");
     commit_all(repo, "b");
     let head = repo.head().unwrap();
     let tip = head.target().unwrap();
@@ -211,7 +213,9 @@ fn a_restarted_worker_keeps_a_splits_parts() {
         commit_id: a.clone(),
     };
     assert_eq!(
-        handle.start_rebase(onto.clone(), plan, Some(split)).unwrap(),
+        handle
+            .start_rebase(onto.clone(), plan, Some(split))
+            .unwrap(),
         git_core::rebase::RebaseStepResult::PausedForEdit
     );
     handle.rebase_commit_part("a, part 1".to_string()).unwrap();
@@ -338,13 +342,13 @@ fn a_crashed_worker_keeps_the_paused_rebase() {
 fn a_rebase_error_stop_is_persisted_with_its_cursor() {
     let (dir, repo) = init_repo();
     let (worker, handle, _, _) = paused_for_edit(dir.path(), &repo);
-    // A local edit in the way of b: a lands, b is refused.
-    write_file(dir.path(), "f.txt", "local\n");
+    // A local file in the way of b: a lands, b is refused.
+    write_file(dir.path(), "g.txt", "local\n");
     assert!(handle.rebase_continue().is_err());
     let (_worker, handle) = restart(worker, handle, dir.path());
     assert_eq!(rebase_progress(&handle), Some((2, 2)));
 
-    write_file(dir.path(), "f.txt", "base\n");
+    std::fs::remove_file(dir.path().join("g.txt")).unwrap();
     assert_eq!(
         handle.rebase_continue().unwrap(),
         git_core::rebase::RebaseStepResult::Done
@@ -534,7 +538,7 @@ fn commands_are_refused_while_a_rebase_is_stored() {
 fn commands_are_refused_after_a_rebase_error_stop() {
     let (dir, repo) = init_repo();
     let (_worker, handle, _, _) = paused_for_edit(dir.path(), &repo);
-    write_file(dir.path(), "f.txt", "local\n");
+    write_file(dir.path(), "g.txt", "local\n");
     assert!(handle.rebase_continue().is_err());
     // To git nothing is going on now; only the stored rebase says otherwise.
     assert_eq!(repo.state(), git2::RepositoryState::Clean);
