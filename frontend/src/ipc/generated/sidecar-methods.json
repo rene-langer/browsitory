@@ -39,6 +39,7 @@
   "drop_stash",
   "fetch_all_remotes",
   "fetch_remote",
+  "fold_staged_into",
   "force_push_current_branch",
   "forget_forge_token",
   "forget_https_credential",

@@ -57,6 +57,23 @@ pub async fn rebase_continue(
     ))
 }
 
+/// Folds the staged changes into `commit_id` (#883); the signing program as for
+/// `start_rebase`.
+#[tauri::command]
+pub async fn fold_staged_into(
+    repo_path: String,
+    commit_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<RebaseStepResultDto, ErrorDto> {
+    let events = hook_event_channel(app, &repo_path);
+    Ok(RebaseStepResultDto::from(
+        repo_worker(&state, &repo_path)?
+            .call(move |w| w.fold_staged_reporting(commit_id, events))
+            .await?,
+    ))
+}
+
 #[tauri::command]
 pub async fn abort_rebase(
     repo_path: String,

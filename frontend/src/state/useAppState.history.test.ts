@@ -163,6 +163,21 @@ describe("history actions", () => {
       expect(rebaseContinue).toHaveBeenLastCalledWith(TEST_REPO_PATH);
     });
 
+    it("folds staged changes into a commit, toasting when done (#883)", async () => {
+      const foldStagedInto = vi.fn(async () => ({ kind: "Done" }) as const);
+      const { result } = renderHook(() => useAppState(transferClient({ foldStagedInto }), TEST_REPO_PATH));
+      await act(() => result.current.foldStaged("c1234567890"));
+      expect(foldStagedInto).toHaveBeenCalledWith(TEST_REPO_PATH, "c1234567890");
+      expect(result.current.state.historyEditOutcome).toEqual({ message: "Folded staged changes into c123456" });
+    });
+
+    it("leaves a paused fold to the rebase panel, without a toast (#883)", async () => {
+      const foldStagedInto = vi.fn(async () => ({ kind: "Conflicted" as const, files: ["f"] }));
+      const { result } = renderHook(() => useAppState(transferClient({ foldStagedInto }), TEST_REPO_PATH));
+      await act(() => result.current.foldStaged("c1234567890"));
+      expect(result.current.state.historyEditOutcome).toBeNull();
+    });
+
     it("refuses without starting when the history changed since the menu opened", async () => {
       const startRebase = vi.fn();
       const { result } = renderHook(() =>

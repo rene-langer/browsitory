@@ -8,6 +8,7 @@ pub mod commit_details;
 pub mod commit_stats;
 pub mod diff;
 mod file_folder;
+pub mod fold;
 pub mod forge;
 pub mod graph;
 mod hardlink;

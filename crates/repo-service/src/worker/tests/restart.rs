@@ -197,6 +197,57 @@ fn a_restarted_worker_continues_an_edit_with_a_new_message() {
     assert!(!rebase_file(&repo).exists());
 }
 
+/// #883: a fold paused on a conflict survives a restart, and Abort then puts the branch back
+/// with the changes staged again.
+#[test]
+fn a_restarted_worker_aborts_a_paused_fold_to_the_staged_changes() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "f.txt", "base\n");
+    commit_all(&repo, "base");
+    write_file(dir.path(), "f.txt", "one\n");
+    commit_all(&repo, "one");
+    let one = repo.head().unwrap().target().unwrap().to_string();
+    write_file(dir.path(), "f.txt", "two\n");
+    commit_all(&repo, "two");
+    let head = repo.head().unwrap();
+    let (branch, two) = (head.name().unwrap().to_string(), head.target().unwrap());
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    write_file(dir.path(), "f.txt", "staged\n");
+    handle.stage_file("f.txt".to_string()).unwrap();
+    let result = handle.fold_staged(one).unwrap();
+    assert!(
+        matches!(
+            result,
+            git_core::rebase::RebaseStepResult::Conflicted { .. }
+        ),
+        "{result:?}"
+    );
+
+    let (_worker, handle) = restart(worker, handle, dir.path());
+    assert_eq!(rebase_progress(&handle), Some((2, 3)));
+    handle.abort_rebase().unwrap();
+
+    assert_eq!(branch_target(dir.path(), &branch), two);
+    let reopened = Repository::open(dir.path()).unwrap();
+    assert_eq!(reopened.head().unwrap().name().unwrap(), branch);
+    let statuses: Vec<(String, git2::Status)> = reopened
+        .statuses(None)
+        .unwrap()
+        .iter()
+        .map(|e| (e.path().unwrap().to_string(), e.status()))
+        .collect();
+    assert_eq!(
+        statuses,
+        [("f.txt".to_string(), git2::Status::INDEX_MODIFIED)]
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("f.txt")).unwrap(),
+        "staged\n"
+    );
+    assert!(!rebase_file(&repo).exists());
+}
+
 #[test]
 fn a_restarted_worker_aborts_the_rebase() {
     let (dir, repo) = init_repo();

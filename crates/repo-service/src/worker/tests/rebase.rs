@@ -142,3 +142,64 @@ fn a_history_edit_records_its_own_undo_label() {
         Some(format!("Move {} up", &a[..7]))
     );
 }
+
+/// The index entry of `path`'s content, as text.
+fn staged_content(path: &Path, file: &str) -> String {
+    let repo = Repository::open(path).unwrap();
+    let index = repo.index().unwrap();
+    let entry = index.get_path(Path::new(file), 0).unwrap();
+    let blob = repo.find_blob(entry.id).unwrap();
+    let content = String::from_utf8_lossy(blob.content()).into_owned();
+    content
+}
+
+/// #883: folding staged changes into an older commit is one Undo step, which brings the
+/// changes back staged on the old tip.
+#[test]
+fn folding_staged_changes_into_a_commit_is_one_undo_step() {
+    let (dir, repo) = init_repo();
+    let head = |repo: &Repository| repo.head().unwrap().target().unwrap();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "add a");
+    let a = head(&repo).to_string();
+    write_file(dir.path(), "b.txt", "b\n");
+    commit_all(&repo, "add b");
+    let b = head(&repo);
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    write_file(dir.path(), "a.txt", "a, folded\n");
+    handle.stage_file("a.txt".to_string()).unwrap();
+
+    assert_eq!(
+        handle.fold_staged(a.clone()).unwrap(),
+        git_core::rebase::RebaseStepResult::Done
+    );
+
+    assert_eq!(
+        handle.get_undo_state().unwrap().undo,
+        Some(format!("Fold staged changes into {}", &a[..7]))
+    );
+    let reopened = Repository::open(dir.path()).unwrap();
+    let tip = reopened.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(tip.summary().unwrap(), Some("add b"));
+    let folded = tip.parent(0).unwrap();
+    assert_eq!(folded.summary().unwrap(), Some("add a"));
+    let blob = folded
+        .tree()
+        .unwrap()
+        .get_path(Path::new("a.txt"))
+        .unwrap()
+        .to_object(&reopened)
+        .unwrap()
+        .peel_to_blob()
+        .unwrap();
+    assert_eq!(blob.content(), b"a, folded\n");
+    assert!(handle.get_status().unwrap().is_empty());
+
+    handle.undo().unwrap();
+
+    assert_eq!(head(&Repository::open(dir.path()).unwrap()), b);
+    assert_eq!(staged_content(dir.path(), "a.txt"), "a, folded\n");
+}

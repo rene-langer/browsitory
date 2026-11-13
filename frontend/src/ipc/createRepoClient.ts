@@ -445,6 +445,8 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
       call<RebaseStepResult>("start_rebase", { repoPath, onto, plan, edit: edit ?? null }),
     rebaseContinue: (repoPath: string, message?: string) =>
       call<RebaseStepResult>("rebase_continue", message === undefined ? { repoPath } : { repoPath, message }),
+    foldStagedInto: (repoPath: string, commitId: string) =>
+      call<RebaseStepResult>("fold_staged_into", { repoPath, commitId }),
     abortRebase: (repoPath: string) => call<RebaseAbort>("abort_rebase", { repoPath }),
     detectForgeRepository: (repoPath: string) =>
       call<ForgeRepository[]>("detect_forge_repository", { repoPath }),

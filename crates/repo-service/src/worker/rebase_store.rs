@@ -88,6 +88,7 @@ mod tests {
             group_start_parent: Some(ids[0]),
             expected_head: ids[1],
             stop: RebaseStop::Conflict,
+            fold_base: None,
         }
     }
 
@@ -114,6 +115,7 @@ mod tests {
             cursor: 1,
             group_start_parent: None,
             stop: RebaseStop::Edit,
+            fold_base: None,
             ..state(&ids)
         };
         store.save(&every_action).unwrap();
@@ -148,8 +150,8 @@ mod tests {
         store.save(&state(&ids)).unwrap();
         let valid: serde_json::Value =
             serde_json::from_slice(&fs::read(file(&repo)).unwrap()).unwrap();
-        let mut version_2 = valid.clone();
-        version_2["version"] = 2.into();
+        let mut version_3 = valid.clone();
+        version_3["version"] = 3.into();
         let mut bad_action = valid.clone();
         bad_action["plan"][0]["action"] = serde_json::json!({ "kind": "Rebase" });
         let mut no_kind = valid.clone();
@@ -161,7 +163,7 @@ mod tests {
             String::new(),
             "\u{0}\u{1}binary".to_string(),
             r#"{"version":1}"#.to_string(),
-            version_2.to_string(),
+            version_3.to_string(),
             bad_action.to_string(),
             no_kind.to_string(),
             bad_stop.to_string(),
@@ -255,6 +257,7 @@ mod tests {
         let finishing = RebaseState {
             cursor: 2,
             stop: RebaseStop::Error,
+            fold_base: None,
             ..state(&ids)
         };
         store.save(&finishing).unwrap();
@@ -281,7 +284,7 @@ mod tests {
         assert_eq!(
             json,
             serde_json::json!({
-                "version": 1,
+                "version": 2,
                 "originalBranchRef": "refs/heads/main",
                 "originalTip": ids[2].to_string(),
                 "onto": ids[0].to_string(),

@@ -1590,6 +1590,11 @@ export interface RepoClient {
   ): Promise<RebaseStepResult>;
   /** `message` replaces the message of the step Continue commits (an edit stop's, #882). */
   rebaseContinue(repoPath: string, message?: string): Promise<RebaseStepResult>;
+  /**
+   * Folds the staged changes into `commitId`, a commit of the current branch (#883): the latest
+   * commit is amended, an older one gets them through a rebase that pauses on a conflict.
+   */
+  foldStagedInto(repoPath: string, commitId: string): Promise<RebaseStepResult>;
   abortRebase(repoPath: string): Promise<RebaseAbort>;
   detectForgeRepository(repoPath: string): Promise<ForgeRepository[]>;
   saveForgeToken(repoPath: string, provider: ForgeProvider, account: string, token: string): Promise<void>;

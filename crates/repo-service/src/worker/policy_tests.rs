@@ -738,6 +738,14 @@ pub(super) fn table() -> Vec<((&'static str, Command), &'static str)> {
             "undo(Full, Squash 1a2b3c4 into its parent) lock hold gate",
         ),
         (
+            cmd!(FoldStaged {
+                commit_id: s("1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d"),
+                operation_id: op(),
+                events: channel().0
+            }),
+            "undo(Full, Fold staged changes into 1a2b3c4) lock hold gate",
+        ),
+        (
             cmd!(RebaseContinue {
                 message: None,
                 operation_id: op(),

@@ -25,7 +25,7 @@ import {
   presetPickAll,
   type PresetAction,
 } from "../lib/rebaseSelection";
-import { historyEditChecks, type HistoryEditCheck, type HistoryEditRequest } from "../lib/historyEdits";
+import { foldStagedCheck, historyEditChecks, type HistoryEditCheck, type HistoryEditRequest } from "../lib/historyEdits";
 import { commitActions } from "../lib/actions/commitActions";
 import type { VisitKind } from "../lib/navigationHistory";
 import type { SelectedRow } from "../state/useAppState";
@@ -75,6 +75,7 @@ function CommitGraphContent({
   onEditHeadMessage,
   onEditHistory,
   onRewordCommit,
+  onFoldStaged,
   hasMore = false,
   loadingMore = false,
   onLoadMore,
@@ -147,6 +148,8 @@ function CommitGraphContent({
   onEditHistory?: (commitId: string, onto: string, request: HistoryEditRequest) => void;
   /** Reword… of a commit below HEAD: opens the Reword dialog (a one-step rebase from `onto`). */
   onRewordCommit?: (commitId: string, onto: string) => void;
+  /** "Fold staged changes into this commit" (#883), offered while changes are staged. */
+  onFoldStaged?: (commitId: string) => void;
   // True when older history exists beyond the loaded rows (#685): scrolling near the end, End,
   // or a key past the last row calls `onLoadMore`.
   hasMore?: boolean;
@@ -409,7 +412,25 @@ function CommitGraphContent({
       item("Fixup into parent", checks.Fixup, edit({ kind: "Fixup" })),
       item("Move up", checks.MoveUp, edit({ kind: "MoveUp" })),
       item("Move down", checks.MoveDown, edit({ kind: "MoveDown" })),
+      ...foldItem(commitId),
       { ...item("Drop", checks.Drop, edit({ kind: "Drop" })), destructive: true, group: "drop" },
+    ];
+  }
+
+  // Fold staged changes (#883): only while something is staged.
+  function foldItem(commitId: string): ContextMenuItem[] {
+    if (onFoldStaged === undefined || !status.some((entry) => entry.staged)) return [];
+    const check = foldStagedCheck({ commits, headInfo, currentBranch, status }, commitId);
+    return [
+      {
+        label: "Fold staged changes into this commit",
+        onSelect: () => {
+          if (check.ok) onFoldStaged(commitId);
+        },
+        disabled: operationsBlocked || !check.ok,
+        title: check.ok ? busyTitle : check.reason,
+        group: "edit",
+      },
     ];
   }
 

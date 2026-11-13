@@ -257,6 +257,7 @@ export function WorkspaceMain({
                 onRequestReset={(commitId, returnFocusTo) => openCommitDialog("Reset", commitId, returnFocusTo)}
                 onEditHeadMessage={onEditHeadMessage}
                 onEditHistory={(commitId, onto, request) => void appState.editHistory(commitId, onto, request)}
+                onFoldStaged={(commitId) => void appState.foldStaged(commitId)}
                 onRewordCommit={(commitId, onto) => appState.openDialog({ kind: "reword", commitId, onto })}
                 graphRemoteBranchSelection={appState.state.graphSelection.remote}
                 remotes={appState.state.remotes}

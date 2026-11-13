@@ -632,6 +632,23 @@ where
                 events,
                 reply,
             ),
+            Command::FoldStaged {
+                commit_id,
+                operation_id,
+                events,
+                reply,
+            } => {
+                let result = rebase::fold_staged(
+                    &self.repo,
+                    &commit_id,
+                    self.operations.rebase_slot(),
+                    remote::TransferOp::new(operation_id),
+                    events,
+                );
+                let label = undo::fold_staged_label(&commit_id);
+                undo::relabel_rebase_start(&mut self.undo_recorder, &self.repo, &label, &result);
+                let _ = reply.send(result);
+            }
             Command::AbortRebase { reply } => {
                 rebase::abort(&self.repo, self.operations.rebase_slot(), reply)
             }
