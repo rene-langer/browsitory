@@ -324,6 +324,7 @@ export function __resetKeymapForTests(): void {
   storage = null;
   changed = false;
   overrides = new Map();
+  hostChords = new Map();
   publish();
 }
 

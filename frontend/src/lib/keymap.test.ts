@@ -376,8 +376,10 @@ describe("persistence in config.toml (#898)", () => {
 });
 
 describe("VSCode's keys (#900)", () => {
-  it("shows and matches the keys VSCode runs the shortcuts with", () => {
+  it("shows and matches the keys VSCode runs the shortcuts with", async () => {
     document.documentElement.dataset.host = "vscode";
+    const setKeybindingSettings = vi.fn(async () => {});
+    await connectKeymap({ getKeybindingSettings: async () => ({ overrides: {} }), setKeybindingSettings }, false);
     applyHostKeybindings(
       { refresh: ["f4"], "toggle-sidebar": ["ctrl+alt+b", "ctrl+shift+e"], "go-back": [], "close-tab": ["ctrl+k ctrl+w"] },
       false,
@@ -390,7 +392,7 @@ describe("VSCode's keys (#900)", () => {
     expect(chordsFor("close-tab", false)).toEqual([]);
     // They are VSCode's keys, not the user's overrides here.
     expect(isCustomized("refresh")).toBe(false);
-    expect(localStorage.getItem(KEYMAP_STORAGE_KEY)).toBeNull();
+    expect(setKeybindingSettings).not.toHaveBeenCalled();
   });
 
   it("leaves the shortcuts the webview binds itself, and the range, to their built-in keys", () => {
