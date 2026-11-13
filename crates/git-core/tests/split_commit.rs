@@ -510,3 +510,127 @@ fn committing_the_rest_of_a_plain_edit_commits_the_unstaged_changes() {
         )
     );
 }
+
+#[test]
+fn an_unstaged_deletion_is_part_of_the_rest() {
+    let (dir, repo) = init_repo();
+    let (onto, ids, _) = base_ac_b(dir.path(), &repo);
+    let state = edit_first(&repo, &onto, &ids);
+    std::fs::remove_file(dir.path().join("f.txt")).unwrap();
+
+    assert_eq!(
+        git_core::rebase::edit_rest(&repo, &state).unwrap(),
+        ["f.txt"]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unstaged_type_change_is_part_of_the_rest() {
+    let (dir, repo) = init_repo();
+    let (onto, ids, _) = base_ac_b(dir.path(), &repo);
+    let state = edit_first(&repo, &onto, &ids);
+    std::fs::remove_file(dir.path().join("f.txt")).unwrap();
+    std::os::unix::fs::symlink("a.txt", dir.path().join("f.txt")).unwrap();
+
+    assert_eq!(
+        git_core::rebase::edit_rest(&repo, &state).unwrap(),
+        ["f.txt"]
+    );
+}
+
+#[test]
+fn the_rest_refusal_names_the_first_file_and_counts_the_others() {
+    let left = |paths: &[&str]| {
+        RebaseError::RestLeft {
+            paths: paths.iter().map(|path| path.to_string()).collect(),
+        }
+        .to_string()
+    };
+    assert_eq!(
+        left(&["a.txt"]),
+        "a.txt has changes that aren't staged. Commit or discard them, then continue."
+    );
+    assert_eq!(
+        left(&["a.txt", "b.txt"]),
+        "a.txt and 1 other file have changes that aren't staged. Commit or discard them, then \
+         continue."
+    );
+    assert_eq!(
+        left(&["a.txt", "b.txt", "c.txt"]),
+        "a.txt and 2 other files have changes that aren't staged. Commit or discard them, then \
+         continue."
+    );
+}
+
+#[test]
+fn an_edit_step_stopped_on_a_conflict_is_no_edit_stop() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "f.txt", "base\n");
+    commit_all(&repo, "base");
+    let onto = common::head_id(&repo).to_string();
+    write_file(dir.path(), "f.txt", "one\n");
+    commit_all(&repo, "one");
+    write_file(dir.path(), "f.txt", "two\n");
+    commit_all(&repo, "two");
+    let two = common::head_id(&repo).to_string();
+    // "two" edited straight onto "base": its pick conflicts, so the Edit step stops on that.
+    let (mut state, result) =
+        git_core::rebase::start_rebase(&repo, &onto, vec![entry(&two, RebaseAction::Edit)])
+            .unwrap();
+    assert!(matches!(result, RebaseStepResult::Conflicted { .. }));
+    let before = state.clone();
+
+    assert!(git_core::rebase::edit_rest(&repo, &state)
+        .unwrap()
+        .is_empty());
+    let error = commit_part(&repo, &mut state, "part\n").unwrap_err();
+
+    assert!(matches!(error, RebaseError::NotEditing), "{error:?}");
+    assert_eq!(state, before);
+}
+
+#[test]
+fn rebase_json_names_split_parts_only_for_a_split() {
+    let (dir, repo) = init_repo();
+    let (onto, ids, _) = base_ac_b(dir.path(), &repo);
+    let mut state = edit_first(&repo, &onto, &ids);
+    let json = |state: &RebaseState| -> String {
+        String::from_utf8(git_core::rebase_file::encode(state).unwrap()).unwrap()
+    };
+
+    assert!(!json(&state).contains("splitParts"), "{}", json(&state));
+    unstage(&repo, "c.txt");
+    commit_part(&repo, &mut state, "add a\n").unwrap();
+    assert!(
+        json(&state).contains("\"splitParts\": 1"),
+        "{}",
+        json(&state)
+    );
+}
+
+/// A commit from another history, with no parent, picked with an Edit step: its rest is still
+/// found (the commit's paths are its whole tree).
+#[test]
+fn a_root_commit_at_an_edit_stop_has_its_rest_found() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "f.txt", "base\n");
+    commit_all(&repo, "base");
+    let onto = common::head_id(&repo).to_string();
+    let blob = repo.blob(b"r\n").unwrap();
+    let mut tree = repo.treebuilder(None).unwrap();
+    tree.insert("r.txt", blob, 0o100644).unwrap();
+    let tree = repo.find_tree(tree.write().unwrap()).unwrap();
+    let signature = repo.signature().unwrap();
+    let root = repo
+        .commit(None, &signature, &signature, "root\n", &tree, &[])
+        .unwrap()
+        .to_string();
+    let state = edit_first(&repo, &onto, std::slice::from_ref(&root));
+    unstage(&repo, "r.txt");
+
+    assert_eq!(
+        git_core::rebase::edit_rest(&repo, &state).unwrap(),
+        ["r.txt"]
+    );
+}
