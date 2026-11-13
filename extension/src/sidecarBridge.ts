@@ -145,6 +145,7 @@ type SidecarBridgeState = "idle" | "running" | "reconnecting" | "failed";
 
 const TRANSPORT_ERROR_CODE = -32001;
 const DISPOSED_MESSAGE = "Browsitory sidecar bridge disposed";
+export const SIDECAR_EXIT_GRACE_MS = 5000;
 
 /**
  * Splits a text stream into `\n`-terminated lines. Only each new chunk is scanned for a newline,

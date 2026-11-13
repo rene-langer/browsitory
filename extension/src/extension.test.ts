@@ -4,6 +4,7 @@ import type { ExtensionContext, Uri } from "vscode";
 
 class FakeWritable extends EventEmitter {
   readonly write = vi.fn((_chunk: string) => true);
+  readonly end = vi.fn();
 }
 
 class FakeChild extends EventEmitter {
@@ -263,7 +264,7 @@ describe("extension lifecycle", () => {
     vi.useRealTimers();
   });
 
-  it("deactivate kills the sidecar, rejects pending work, and removes host listeners", async () => {
+  it("deactivate stops the sidecar, rejects pending work, and removes host listeners", async () => {
     vi.useFakeTimers();
     activate(harness.context);
     await harness.openPanel();
@@ -273,7 +274,10 @@ describe("extension lifecycle", () => {
 
     await deactivate();
 
-    expect(harness.child.kill).toHaveBeenCalledOnce();
+    expect(harness.child.stdin.end).toHaveBeenCalledOnce();
+    expect(harness.child.kill).not.toHaveBeenCalled();
+    harness.child.emit("exit", 0, null);
+    expect(harness.child.kill).not.toHaveBeenCalled();
     expect(harness.postMessage.mock.calls.map(([message]) => message)).toEqual([
       {
         jsonrpc: "2.0",
@@ -371,7 +375,8 @@ describe("extension lifecycle", () => {
 
     await harness.disposePanel();
 
-    expect(harness.child.kill).toHaveBeenCalledOnce();
+    expect(harness.child.stdin.end).toHaveBeenCalledOnce();
+    expect(harness.child.kill).not.toHaveBeenCalled();
     expect(harness.postMessage).toHaveBeenCalledWith({
       jsonrpc: "2.0",
       id: 92,
