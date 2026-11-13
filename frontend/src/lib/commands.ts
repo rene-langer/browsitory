@@ -253,6 +253,8 @@ export interface CommitCommands {
 export interface CommandContext {
   appState: UseAppStateResult;
   onShowShortcuts?: () => void;
+  /** Opens the repository's operation log (#889). */
+  onShowOperationLog?: () => void;
   /** Shows the working tree and focuses the commit message (#646). */
   onFocusCommitMessage?: () => void;
   app?: AppCommands;
@@ -433,7 +435,15 @@ function withShortcuts(state: AppState, commands: Command[]): Command[] {
 }
 
 /** App-wide commands: help, dialogs and the commit search. */
-function appCommands({ onShowShortcuts, onFocusCommitMessage, app, search, appState, state }: FamilyContext): Command[] {
+function appCommands({
+  onShowShortcuts,
+  onShowOperationLog,
+  onFocusCommitMessage,
+  app,
+  search,
+  appState,
+  state,
+}: FamilyContext): Command[] {
   const { commands, add } = family("General");
   if (onShowShortcuts !== undefined) {
     add({
@@ -441,6 +451,14 @@ function appCommands({ onShowShortcuts, onFocusCommitMessage, app, search, appSt
       label: "Show keyboard shortcuts",
       keywords: ["keyboard", "shortcuts", "help", "keys"],
       run: onShowShortcuts,
+    });
+  }
+  if (onShowOperationLog !== undefined) {
+    add({
+      id: "show-operation-log",
+      label: "Show operation log",
+      keywords: ["operation", "log", "history", "errors", "output", "hooks"],
+      run: onShowOperationLog,
     });
   }
   if (app?.onCloneRepository !== undefined) {
