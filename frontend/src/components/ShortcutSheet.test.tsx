@@ -1,6 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { removeShortcutChord, resetAllShortcuts, setShortcutChords } from "../lib/keymap";
+import { OpenPreferencesContext } from "../state/openPreferences";
 import { ShortcutSheet } from "./ShortcutSheet";
 
 describe("ShortcutSheet", () => {
@@ -127,5 +128,23 @@ describe("ShortcutSheet", () => {
       expect(screen.getByText("Accept ours (in a conflict block, outside its result)").closest("div")).toHaveTextContent("q");
       expect(screen.queryByText("Push the current branch")).toBeNull();
     });
+  });
+
+  it("opens Preferences on the Keyboard group to change the shortcuts (#899)", () => {
+    const onClose = vi.fn();
+    const openPreferences = vi.fn();
+    render(
+      <OpenPreferencesContext.Provider value={openPreferences}>
+        <ShortcutSheet onClose={onClose} vscode={false} />
+      </OpenPreferencesContext.Provider>,
+    );
+    screen.getByRole("button", { name: "Change shortcuts…" }).click();
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(openPreferences).toHaveBeenCalledWith("keyboard");
+  });
+
+  it("offers no Change shortcuts button without Preferences to open (#899)", () => {
+    render(<ShortcutSheet onClose={vi.fn()} vscode={false} />);
+    expect(screen.queryByRole("button", { name: "Change shortcuts…" })).toBeNull();
   });
 });
