@@ -68,7 +68,16 @@ A conflicted file opens the **Resolve conflict** pane:
   editor and focus that block. In a block's **Result** field the digits are typed as text: press
   **Esc**, **Shift+Tab** or **F7** first to get back to a block. The command palette offers the
   same moves and choices (**Next conflict**, **Accept theirs (current conflict)** and so on) for
-  the conflict last focused (the first one before that).
+  the conflict last focused (the first one before that). A whole file can be resolved without
+  the mouse: **F7** to a block, a digit or **Tab** to its arrows (**Take ours**, then the
+  **Result** field, then **Take theirs**) and **Enter**, type in the result, **Esc** back to the
+  block, **F7** on to the next one, then **Tab** to **Save resolution**.
+- With a screen reader: each block is a region named after it ("Conflict 1 of 3"), and its
+  heading says whether it is chosen. In the three panes a block's sides are groups named after
+  their side ("Ours (main)", "Theirs (feature)", "Base"); each arrow is named **Take ours** or
+  **Take theirs**, and its description names the block and says what it does. The unchanged
+  lines are read once, from the **Result** field, not once per pane. "1 of 3 resolved" is
+  announced as it changes.
 - **Edit whole result** turns the file into one text field, for changes outside the blocks too.
   It starts from your choices; a block without one is written with git's conflict markers
   (`<<<<<<< ours`, `||||||| base`, `=======`, `>>>>>>> theirs`), and **Save resolution** stays
