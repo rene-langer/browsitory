@@ -101,9 +101,11 @@ export function userCommandPaletteCommands(
   commands: UserCommand[],
   selection: UserCommandContext,
   onRun: RunUserCommand,
+  /** Why no command runs here at all (an untrusted VSCode workspace, #896). */
+  blockedReason: string | null = null,
 ): Command[] {
   return commands.map((command) => {
-    const reason = userCommandDisabledReason(command, selection);
+    const reason = blockedReason ?? userCommandDisabledReason(command, selection);
     return {
       id: `user-command:${command.id}`,
       label: `Run: ${command.name}`,

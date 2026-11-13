@@ -14,5 +14,6 @@
   "run_vscode_git_command",
   "save_file_version",
   "save_patch_file",
-  "set_last_seen_version"
+  "set_last_seen_version",
+  "user_commands_blocked"
 ]

@@ -269,7 +269,7 @@ export interface CommandContext {
   commit?: CommitCommands;
   branchSwitch?: BranchSwitchCommands;
   /** The user commands (#895), each offered as "Run: <name>". */
-  userCommands?: { commands: UserCommand[]; run: RunUserCommand };
+  userCommands?: { commands: UserCommand[]; run: RunUserCommand; blockedReason?: string | null };
 }
 
 /** `CommandContext` plus what several families derive from the repository state. */
@@ -422,7 +422,12 @@ function userCommandFamily({ userCommands, state, diff }: FamilyContext): Comman
     refName: null,
     paths,
   };
-  return userCommandPaletteCommands(userCommands.commands, selection, userCommands.run);
+  return userCommandPaletteCommands(
+    userCommands.commands,
+    selection,
+    userCommands.run,
+    userCommands.blockedReason ?? null,
+  );
 }
 
 /**

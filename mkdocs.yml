@@ -113,6 +113,7 @@ nav:
       - signing.md
       - hooks.md
       - external-tools.md
+      - user-commands.md
       - command-palette.md
       - operation-log.md
       - troubleshooting.md

@@ -53,6 +53,7 @@ it. Open several repositories as tabs, and save groups of them as workspaces.
 - [Signing commits](signing.md)
 - [Hooks](hooks.md)
 - [External tools](external-tools.md)
+- [Your own commands](user-commands.md)
 - [Command palette and shortcuts](command-palette.md)
 - [Troubleshooting](troubleshooting.md)
 - [Privacy](privacy.md)

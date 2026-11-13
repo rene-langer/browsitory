@@ -2482,6 +2482,14 @@ User-defined commands (epic #897) are programs the user adds to menus and the pa
   commit). The repository tab menu lives in `App`: it loads the tab's commands when it opens and
   hands a pick to that tab's workspace through `requestUserCommand` (like a history request),
   which runs it with the current branch.
+- VS Code (#896, owner decision): in an untrusted workspace no user command runs. The extension
+  host answers `run_user_command` with an error there before it reaches the sidecar, reading
+  `vscode.workspace.isTrusted` on each request, and answers the native `user_commands_blocked`
+  with the reason (`RepoClient.userCommandsBlocked`; the desktop app answers `null` without a
+  call). The workspace then leaves the commands out of the menus (`UserCommandsContext` is
+  `null`) and the palette lists them as unavailable with that reason. Editing them in
+  Preferences stays possible. (The extension doesn't declare `untrustedWorkspaces` support, so
+  VSCode keeps it disabled in Restricted Mode anyway; this check holds should that change.)
 
 ## Fetch all
 
