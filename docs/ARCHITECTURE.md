@@ -112,7 +112,7 @@ F6, the OS quit/close keys) can't be taken; a shortcut keeps its own reserved bu
 Ctrl/Cmd+1 … 9 stays fixed. A key that types a character never runs a shortcut from a text field.
 
 **VSCode's keys (#900).** In VSCode the keys are rebound in VSCode's own Keyboard Shortcuts
-(owner decision); Preferences > Keyboard links there (`open_vscode_keybindings` runs
+(owner decision); Preferences → Keyboard links there (`open_vscode_keybindings` runs
 `workbench.action.openGlobalKeybindings` filtered to `browsitory.shortcut.`). VSCode has no API
 for resolved keybindings, so `extension/src/keybindingsFile.ts` reads the user's
 `keybindings.json` (JSONC, next to the extension's global storage folder; in a profile, the
