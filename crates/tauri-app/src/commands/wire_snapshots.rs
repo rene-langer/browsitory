@@ -60,6 +60,11 @@ impl WireCases for Snapshots {
                     "HookProgressEvent/all".to_string(),
                     wire(&HOOK_PROGRESS_EVENT),
                 ));
+                // The Tauri event operation log changes are emitted as (#888).
+                self.0.push((
+                    "OperationLogEvent/all".to_string(),
+                    wire(&super::oplog::OPERATION_LOG_EVENT),
+                ));
             }
             Slot::AfterTransferProgress => {
                 // What the desktop app emits is the shared `TransferProgress` DTO.

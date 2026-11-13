@@ -448,6 +448,36 @@ describe("tauriRepoClient transfer progress subscription", () => {
     });
   });
 
+  it("lists the operation log, a page before an id (#888)", async () => {
+    vi.mocked(invoke).mockResolvedValue({ repo: "/r", entries: [], hasMore: false });
+
+    await tauriRepoClient.listOperations("/r", null, 50);
+    expect(invoke).toHaveBeenLastCalledWith("list_operations", { repoPath: "/r", before: null, limit: 50 });
+    await tauriRepoClient.listOperations("/r", 42, 10);
+    expect(invoke).toHaveBeenLastCalledWith("list_operations", { repoPath: "/r", before: 42, limit: 10 });
+  });
+
+  it("forwards operation-log events and unregisters (#888)", async () => {
+    const unlisten = vi.fn();
+    let logListener: ((event: { payload: unknown }) => void) | undefined;
+    vi.mocked(listen).mockImplementation(async (event, listener) => {
+      if (event === "operation-log") logListener = listener as typeof logListener;
+      return unlisten;
+    });
+    const received = vi.fn();
+
+    const unsubscribe = tauriRepoClient.subscribeOperationLog(received);
+    await vi.waitFor(() => expect(logListener).toBeDefined());
+    const payload = { repo: "/r", entryId: 7 };
+    logListener?.({ payload });
+    expect(received).toHaveBeenCalledWith(payload);
+
+    await vi.waitFor(() => {
+      unsubscribe();
+      expect(unlisten).toHaveBeenCalled();
+    });
+  });
+
   it("invokes cancel_transfer without waiting for the transfer listeners", async () => {
     // Unlike fetch/push/pull this starts no transfer, so it must not be gated on the listener
     // handshake — a cancel that waited for listeners that never resolve could never be sent.

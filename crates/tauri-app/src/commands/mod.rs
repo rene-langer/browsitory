@@ -21,6 +21,7 @@ mod forge;
 mod graph;
 mod history;
 mod merge;
+mod oplog;
 mod patch;
 mod rebase;
 mod reflog;
@@ -62,6 +63,7 @@ pub use merge::{
     resolve_add_delete_conflict, resolve_conflict, resolve_whole_file, set_merge_options,
     start_merge,
 };
+pub use oplog::list_operations;
 pub use patch::{
     apply_commit_change, apply_patch, get_patch, open_patch_file, preview_patch, read_patch_file,
     save_patch_file,

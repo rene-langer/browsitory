@@ -1,4 +1,4 @@
-import type { HookProgress, HostRequest, OpenRepoEntry, RepoClient, RepoWatch, TransferProgress } from "./RepoClient";
+import type { HookProgress, HostRequest, OpenRepoEntry, OperationLogChange, RepoClient, RepoWatch, TransferProgress } from "./RepoClient";
 import { createRepoClient } from "./createRepoClient";
 import { RepoError, toRepoError } from "./RepoClient";
 import { __resetHostVisibilityForTests, publishHostVisibility } from "./hostVisibility";
@@ -94,6 +94,7 @@ const transferProgressListeners = new Set<(progress: TransferProgress) => void>(
 const hookProgressListeners = new Set<(event: HookProgress) => void>();
 const hostRequestListeners = new Set<(request: HostRequest) => void>();
 const repoWatchListeners = new Set<(event: RepoWatch) => void>();
+const operationLogListeners = new Set<(change: OperationLogChange) => void>();
 let focusTracked = false;
 
 function handleMessage(event: MessageEvent) {
@@ -124,6 +125,12 @@ function handleMessage(event: MessageEvent) {
     // A repository watcher's report (#756), relayed from the sidecar.
     const watchEvent = message.params as RepoWatch;
     for (const listener of repoWatchListeners) listener(watchEvent);
+    return;
+  }
+  if (message.method === "operationLog") {
+    // An operation log entry added or ended (#888), relayed from the sidecar.
+    const change = message.params as OperationLogChange;
+    for (const listener of operationLogListeners) listener(change);
     return;
   }
   if (message.method === "hostRequest") {
@@ -214,6 +221,7 @@ export function __resetVscodeRepoClientForTests() {
   transferProgressListeners.clear();
   hookProgressListeners.clear();
   repoWatchListeners.clear();
+  operationLogListeners.clear();
   __resetTransportStatusForTests();
   __resetHostVisibilityForTests();
 }
@@ -250,6 +258,13 @@ export const vscodeRepoClient: RepoClient = {
     repoWatchListeners.add(listener);
     return () => {
       repoWatchListeners.delete(listener);
+    };
+  },
+  subscribeOperationLog: (listener: (change: OperationLogChange) => void) => {
+    ensureInitialized();
+    operationLogListeners.add(listener);
+    return () => {
+      operationLogListeners.delete(listener);
     };
   },
   subscribeHostRequests: (listener: (request: HostRequest) => void) => {

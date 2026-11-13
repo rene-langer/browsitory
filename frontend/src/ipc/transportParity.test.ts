@@ -50,6 +50,7 @@ const SUBSCRIPTIONS = [
   "subscribeTransferProgress",
   "subscribeHookProgress",
   "subscribeRepoWatch",
+  "subscribeOperationLog",
   "subscribeFileDrops",
   "subscribeHostRequests",
 ] as const satisfies readonly Method[];

@@ -2189,3 +2189,178 @@ pub fn recent_authors() -> Cases<git_core::commit::SignatureInput> {
         },
     )]
 }
+
+/// A finished log entry with nothing in it but its name, id and outcome.
+fn operation_entry(
+    id: u64,
+    name: &str,
+    outcome: repo_service::oplog::OperationOutcome,
+) -> repo_service::oplog::OperationEntry {
+    repo_service::oplog::OperationEntry {
+        id,
+        name: name.to_string(),
+        target: None,
+        params: Vec::new(),
+        started_at: 1_700_000_000_000,
+        duration_ms: Some(12),
+        outcome,
+        message: None,
+        error_kind: None,
+        transfer_error: None,
+        remote_failures: Vec::new(),
+        runs: Vec::new(),
+        rerun: None,
+    }
+}
+
+/// Operation log pages (#888): every outcome, every `Rerun` and program run status, a running
+/// entry, a Fetch all's remote failures, and an empty last page.
+pub fn operation_log_pages() -> Cases<repo_service::oplog::OperationPage> {
+    use git_core::process::ProgramRunStatus;
+    use git_core::remote::TransferErrorKind;
+    use repo_service::oplog::{
+        OperationOutcome, OperationPage, OperationParam, OperationRun, RemoteFailure, Rerun,
+    };
+    let reruns = vec![
+        Rerun::Fetch {
+            remote_name: "origin".into(),
+            prune: Some(true),
+        },
+        Rerun::FetchAll { prune: None },
+        Rerun::Pull,
+        Rerun::PushCurrentBranch {
+            remote_name: "origin".into(),
+            no_verify: false,
+        },
+        Rerun::PushBranch {
+            remote_name: "origin".into(),
+            local_branch: "main".into(),
+            remote_branch: "topic".into(),
+            set_upstream: true,
+            no_verify: true,
+        },
+        Rerun::PushTags {
+            remote_name: "origin".into(),
+            names: strings(&["v1", "v2"]),
+            no_verify: false,
+        },
+    ];
+    assert_every_variant!(
+        &reruns,
+        Rerun::Fetch { .. },
+        Rerun::FetchAll { .. },
+        Rerun::Pull,
+        Rerun::PushCurrentBranch { .. },
+        Rerun::PushBranch { .. },
+        Rerun::PushTags { .. },
+    );
+    let statuses = every!(ProgramRunStatus {
+        Succeeded,
+        Failed,
+        TimedOut,
+        Cancelled,
+        NotStarted,
+    });
+    let outcomes = every!(OperationOutcome {
+        Running,
+        Succeeded,
+        Stopped,
+        Failed,
+        Cancelled,
+    });
+
+    let mut push = operation_entry(41, "Push", OperationOutcome::Failed);
+    push.target = some("origin");
+    push.params = vec![OperationParam {
+        name: "Skip hooks".into(),
+        value: "no".into(),
+    }];
+    push.message = some("The pre-push hook failed.");
+    push.error_kind = Some(repo_service::wire::ErrorKind::Other);
+    push.transfer_error = Some(TransferErrorKind::HookFailed);
+    push.runs = statuses
+        .into_iter()
+        .map(|status| OperationRun {
+            program: "/repo/.git/hooks/pre-push".into(),
+            args: strings(&["origin", "https://***@example.test/r.git"]),
+            output: format!("{status:?}\n"),
+            status,
+        })
+        .collect();
+    push.rerun = Some(reruns[3].clone());
+
+    let mut fetch_all = operation_entry(40, "Fetch all", OperationOutcome::Succeeded);
+    fetch_all.remote_failures = vec![RemoteFailure {
+        remote_name: "backup".into(),
+        error: TransferErrorKind::TransferFailed,
+        message: "failed to resolve address".into(),
+    }];
+    fetch_all.rerun = Some(reruns[1].clone());
+
+    let mut running = operation_entry(42, "Commit", OperationOutcome::Running);
+    running.target = some("Add a file");
+    running.duration_ms = None;
+
+    let mut by_outcome: Vec<_> = outcomes
+        .into_iter()
+        .enumerate()
+        .map(|(n, outcome)| operation_entry(30 + n as u64, "Merge", outcome))
+        .collect();
+    by_outcome.reverse();
+    let by_rerun = reruns
+        .into_iter()
+        .enumerate()
+        .map(|(n, rerun)| {
+            let mut entry = operation_entry(20 + n as u64, "Fetch", OperationOutcome::Failed);
+            entry.rerun = Some(rerun);
+            entry
+        })
+        .rev()
+        .collect();
+
+    vec![
+        case(
+            "first-page",
+            OperationPage {
+                repo: "/repo".into(),
+                entries: vec![running, push, fetch_all],
+                has_more: true,
+            },
+        ),
+        case(
+            "every-outcome",
+            OperationPage {
+                repo: "/repo".into(),
+                entries: by_outcome,
+                has_more: true,
+            },
+        ),
+        case(
+            "every-rerun",
+            OperationPage {
+                repo: "/repo".into(),
+                entries: by_rerun,
+                has_more: false,
+            },
+        ),
+        case(
+            "empty",
+            OperationPage {
+                repo: "/repo".into(),
+                entries: Vec::new(),
+                has_more: false,
+            },
+        ),
+    ]
+}
+
+/// What an operation log listener is told (#888).
+pub fn operation_log_changes() -> Cases<repo_service::oplog::Change> {
+    vec![case(
+        "entry",
+        repo_service::oplog::Change {
+            repo: "/repo".into(),
+            entry_id: 42,
+        },
+    )]
+}

@@ -15,6 +15,10 @@ use super::transfer_thread::{self, TransferHost, Wait};
 use super::TransferEvent;
 use crate::credentials::{CredentialService, CredentialStore};
 
+/// The operation log's note for a remote a background fetch skipped while it backs off.
+const SKIPPED_WHILE_UNREACHABLE: &str =
+    "Skipped: the remote could not be reached on an earlier try.";
+
 /// Which Fetch all runs.
 #[derive(Debug, Clone, Copy)]
 pub(super) enum Mode {
@@ -64,7 +68,8 @@ pub(super) fn run<S: CredentialStore + Send + Sync + 'static>(
             .collect()
     });
     let mut fetched_any = false;
-    let mut failed: Vec<(String, TransferErrorKind)> = Vec::new();
+    // Each failed remote, its error kind, and what went wrong.
+    let mut failed: Vec<(String, TransferErrorKind, String)> = Vec::new();
     let mut cancelled = false;
     let mut error = None;
     match names {
@@ -77,7 +82,11 @@ pub(super) fn run<S: CredentialStore + Send + Sync + 'static>(
                 }
                 // Skipped quietly, as a failed remote: the tick does not count as a fetch.
                 if matches!(mode, Mode::Background(_)) && !memory.may_try(&name, tick) {
-                    failed.push((name, TransferErrorKind::TransferFailed));
+                    failed.push((
+                        name,
+                        TransferErrorKind::TransferFailed,
+                        SKIPPED_WHILE_UNREACHABLE.to_string(),
+                    ));
                     continue;
                 }
                 match fetch_one(host, credentials, memory, &name, mode, &op, &events) {
@@ -91,7 +100,11 @@ pub(super) fn run<S: CredentialStore + Send + Sync + 'static>(
                     }
                     Err(remote_error) => {
                         remember_failure(memory, mode, &name, &remote_error, tick);
-                        failed.push((name, remote_error.transfer_error_kind()));
+                        failed.push((
+                            name,
+                            remote_error.transfer_error_kind(),
+                            remote_error.to_string(),
+                        ));
                     }
                 }
             }
@@ -100,7 +113,7 @@ pub(super) fn run<S: CredentialStore + Send + Sync + 'static>(
     if cancelled {
         error = Some(TransferErrorKind::Cancelled);
     } else if error.is_none() {
-        for (remote_name, kind) in &failed {
+        for (remote_name, kind, _) in &failed {
             let _ = events.send(TransferEvent::RemoteFailed {
                 operation_id: op.id.clone(),
                 operation,
@@ -109,9 +122,28 @@ pub(super) fn run<S: CredentialStore + Send + Sync + 'static>(
             });
         }
         if !fetched_any {
-            error = failed.first().map(|(_, kind)| *kind);
+            error = failed.first().map(|(_, kind, _)| *kind);
         }
     }
+    super::journal::note_transfer(super::journal::TransferNote {
+        error,
+        message: if fetched_any {
+            None
+        } else {
+            failed.first().map(|(_, _, message)| message.clone())
+        },
+        remote_failures: failed
+            .into_iter()
+            .map(
+                |(remote_name, error, message)| crate::oplog::RemoteFailure {
+                    remote_name,
+                    error,
+                    message,
+                },
+            )
+            .collect(),
+        ..Default::default()
+    });
     let _ = events.send(TransferEvent::Completed {
         operation_id: op.finish(),
         operation,

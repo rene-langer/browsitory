@@ -2514,6 +2514,51 @@ only when the new folder doesn't exist yet. A rename is atomic and deletes nothi
 logged once the log plugin is up, and the app starts with fresh folders. Don't change the
 identifier again without extending this migration.
 
+## Operation log
+
+`repo_service::oplog` keeps what the app ran in each repository (#887): one entry per worker
+command that changes something or talks to a remote, with its name, target, parameters, start,
+duration, outcome (`Running`, `Succeeded`, `Stopped` on conflicts or diverged branches,
+`Failed`, `Cancelled`), error, and the programs it ran. Reads are not logged. The log is memory
+only (an owner decision): a process-wide map from the repository key (`worker::repo_key`) to a
+`Journal` of the last `MAX_ENTRIES` (500) entries, so closing and reopening a tab keeps it and
+quitting the app clears it. Nothing is written to disk.
+
+The worker notes each command in `WorkerLoop::step` (`worker/journal.rs`). `journal::describe`
+names every `Command` variant (no catch-all), like `policy::of`, so a new command must be given a
+log name or be declared a read. A `Tracker` begins the `Running` entry before the state lock is
+taken, so refusals (a busy lock, a paused operation's gate) are logged too, and ends it after the
+undo bookkeeping:
+
+- Most commands reply when they are done. The tracker swaps the reply for a proxy (`policy::Reply::
+  observe`, next to `hold`), reads the answer when the step ends and passes it on. An answer that
+  reports a failure or a stop as an `Ok` value (`CommitOutcome::HookFailed`, a merge or pick that
+  stopped on conflicts, a diverged pull) is recognised by downcasting it (`journal::seen_ok`).
+- A fetch or push replies with its operation id at once and reports its outcome in its last
+  transfer event, so its reply is left alone (proxying it would hold it back until the transfer
+  ends). The code that sends that event (`remote::complete`, `fetch_all`, `pull`) also calls
+  `journal::note_transfer` on the worker's thread, which the tracker reads when the step ends; a
+  push refused before it starts calls `note_refused`. Its `RemoteError` text is kept in the log
+  (redacted) though the transfer event, which the UI shows, keeps only the error kind.
+- The programs git-core runs through `process::run_captured` and `run_captured_split` (hooks and
+  signing programs) are collected with `git_core::process::record_runs`, a thread-local `RunLog`
+  installed around the step. `transfer_thread::run` installs the same log on its helper thread,
+  where `pre-push` runs.
+
+Nothing secret is kept (`oplog::redact`): every target, parameter, message, program argument and
+output loses the user information of each URL (`https://***@host/...`) and the value of each
+`Authorization:` header line, and commands that carry a token (saving an HTTPS credential or a
+forge token) log no token at all. Each entry keeps at most `MAX_RUNS` (32) program runs and the
+last `MAX_RUN_OUTPUT` (16 KiB) of each run's output.
+
+`WorkerHandle::operation_log` reads a page straight from the journal, never through the worker's
+queue, so an open log panel shows a long push while it runs. Both transports expose it as
+`list_operations` (newest first, `before` an entry id), and report each entry added or ended
+(`oplog::subscribe`) as the `operation-log` Tauri event or the sidecar's `operationLog`
+notification, with the repository key the page names (`OperationLogChange.repo`). Both start
+reporting on the first `list_operations`, so a session that never opens the log sends nothing
+(and the sidecar's request/response tests see no extra lines).
+
 ## Error handling
 
 `git-core` functions return typed errors (`thiserror` enums per module: `RepoError`,

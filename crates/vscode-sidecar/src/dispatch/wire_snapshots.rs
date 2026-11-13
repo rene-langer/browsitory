@@ -101,6 +101,7 @@ const DESKTOP_ONLY: &[&str] = &[
     "TransferProgressEvent",
     "HookProgressEvent",
     "RepoWatchEvent",
+    "OperationLogEvent",
     "CloneOutcome",
     "CloneErrorPayload",
     "MergeToolOutcome",

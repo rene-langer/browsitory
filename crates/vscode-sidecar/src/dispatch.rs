@@ -17,6 +17,7 @@ mod forge;
 mod graph;
 mod history;
 mod merge;
+mod oplog;
 mod patch;
 mod rebase;
 mod reflog;
@@ -40,6 +41,7 @@ use forge::*;
 use graph::*;
 use history::*;
 use merge::*;
+use oplog::*;
 use patch::*;
 use rebase::*;
 use reflog::*;
@@ -284,6 +286,7 @@ methods!(|params, repos, stdout| {
     "get_undo_state" => get_undo_state(RepoPathParams, repos),
     "undo_last" => undo_last(RepoPathParams, repos),
     "redo_last" => redo_last(RepoPathParams, repos),
+    "list_operations" => list_operations(ListOperationsParams, repos, stdout),
     "cherry_pick" => cherry_pick(PickParams, repos, stdout),
     "revert_commit" => revert_commit(PickParams, repos, stdout),
     "cherry_pick_many" => cherry_pick_many(CommitIdsParams, repos, stdout),

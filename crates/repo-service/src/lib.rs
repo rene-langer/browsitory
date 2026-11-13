@@ -7,6 +7,7 @@ pub mod base64;
 pub mod clone;
 pub mod credentials;
 pub mod fonts;
+pub mod oplog;
 pub mod pull_requests;
 pub mod watch;
 pub mod wire;

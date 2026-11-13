@@ -38,6 +38,7 @@ mod forge;
 mod gate;
 mod history;
 mod hooks;
+mod journal;
 mod merge;
 mod patch;
 mod policy;
@@ -901,6 +902,7 @@ pub struct Worker {
     cancelled: CancelRegistry,
     search_generation: SearchGeneration,
     workdir: Option<PathBuf>,
+    journal: Arc<crate::oplog::Journal>,
 }
 
 /// Cheap, cloneable handle to a `Worker`'s command channel.
@@ -917,6 +919,8 @@ pub struct WorkerHandle {
     search_generation: SearchGeneration,
     /// The work tree root, captured at spawn (`None` for a bare repository).
     workdir: Option<PathBuf>,
+    /// The repository's operation log (#887), shared with the worker thread.
+    journal: Arc<crate::oplog::Journal>,
 }
 
 /// The part of a `WorkerHandle` that can only send the read lane's commands (#734): the ones the
@@ -1014,6 +1018,8 @@ impl Worker {
         let repo_path = path;
         let repo = git_core::repo::open(&repo_path).map_err(|error| error.to_string())?;
         let workdir = repo.workdir().map(std::path::Path::to_path_buf);
+        let journal = crate::oplog::journal(&registry::key_of(&repo));
+        let worker_journal = Arc::clone(&journal);
         let (tx, rx) = mpsc::channel::<Command>();
         let cancelled = CancelRegistry::default();
         let search_generation: SearchGeneration = Arc::new(AtomicU64::new(0));
@@ -1028,6 +1034,7 @@ impl Worker {
                 credential_store,
                 forge_api,
                 pause,
+                worker_journal,
             )
             .run();
         });
@@ -1037,6 +1044,7 @@ impl Worker {
             cancelled,
             search_generation,
             workdir,
+            journal,
         })
     }
 
@@ -1049,6 +1057,7 @@ impl Worker {
             cancelled: self.cancelled.clone(),
             search_generation: Arc::clone(&self.search_generation),
             workdir: self.workdir.clone(),
+            journal: Arc::clone(&self.journal),
         }
     }
 }
@@ -1231,6 +1240,13 @@ impl WorkerHandle {
     /// the operation has started.
     pub fn cancel_transfer(&self, operation_id: &str) {
         self.cancelled.cancel(operation_id);
+    }
+
+    /// Up to `limit` entries of this repository's operation log older than entry `before` (all
+    /// when `None`), newest first (#887). Read straight from the log, never through the worker's
+    /// queue, so an open log shows a long operation while it runs.
+    pub fn operation_log(&self, before: Option<u64>, limit: usize) -> crate::oplog::OperationPage {
+        self.journal.page(before, limit)
     }
 
     /// Test-only: crashes the worker thread from inside its dispatch loop, the same failure mode

@@ -168,6 +168,16 @@ pub fn shared_wire_cases(s: &mut impl WireCases) {
         repo_service::wire::repo_watch_dto(fixtures::HOOK_REPO_PATH, event)
     });
     s.transport_cases(Slot::AfterRepoWatch);
+    s.add(
+        "OperationLogPage",
+        fixtures::operation_log_pages(),
+        OperationLogPageDto::from,
+    );
+    s.add(
+        "OperationLogChange",
+        fixtures::operation_log_changes(),
+        |change| OperationLogChangeDto::from(&change),
+    );
     s.add("BranchInfo", fixtures::branches(), BranchInfoDto::from);
     s.add("WorktreeInfo", fixtures::worktrees(), WorktreeInfoDto::from);
     s.add(

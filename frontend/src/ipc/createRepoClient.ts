@@ -1,5 +1,6 @@
 import type {
   AmendOptions,
+  OperationLogPage,
   AppearanceSettings,
   FontFamily,
   ChangeStamp,
@@ -126,6 +127,7 @@ export type TransportSpecific =
   | "subscribeTransferProgress"
   | "subscribeHookProgress"
   | "subscribeRepoWatch"
+  | "subscribeOperationLog"
   | "subscribeFileDrops"
   | "readPatchFile"
   | "subscribeHostRequests"
@@ -423,6 +425,8 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
     listFontFamilies: () => call<FontFamily[]>("list_font_families"),
     getUpdateSettings: () => call<UpdateSettings>("get_update_settings"),
     setUpdateSettings: (settings: UpdateSettings) => call<void>("set_update_settings", { settings }),
+    listOperations: (repoPath: string, before: number | null, limit: number) =>
+      call<OperationLogPage>("list_operations", { repoPath, before, limit }),
     getUndoState: (repoPath: string) => call<UndoState>("get_undo_state", { repoPath }),
     undo: (repoPath: string) => call<UndoOutcome>("undo_last", { repoPath }),
     redo: (repoPath: string) => call<UndoOutcome>("redo_last", { repoPath }),

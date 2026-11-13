@@ -457,6 +457,74 @@ export interface RepoWatch {
   repoPath: string;
   kind: RepoWatchKind;
 }
+/**
+ * The operation log (#888): what the app ran in a repository, newest first. Kept in memory by the
+ * backend, the last 500 per repository, until the app quits; never written to disk.
+ */
+export type OperationOutcome = "Running" | "Succeeded" | "Stopped" | "Failed" | "Cancelled";
+export interface OperationParam {
+  name: string;
+  value: string;
+}
+export interface RemoteFailure {
+  remoteName: string;
+  error: TransferErrorKind;
+  message: string;
+}
+export type ProgramRunStatus = "Succeeded" | "Failed" | "TimedOut" | "Cancelled" | "NotStarted";
+/** A program an operation ran (a hook, a signing program), with the end of its output. */
+export interface ProgramRun {
+  program: string;
+  args: string[];
+  output: string;
+  status: ProgramRunStatus;
+}
+/** What Run again repeats (#890): the same command with the same parameters. */
+export type Rerun =
+  | { kind: "Fetch"; remoteName: string; prune: boolean | null }
+  | { kind: "FetchAll"; prune: boolean | null }
+  | { kind: "Pull" }
+  | { kind: "PushCurrentBranch"; remoteName: string; noVerify: boolean }
+  | {
+      kind: "PushBranch";
+      remoteName: string;
+      localBranch: string;
+      remoteBranch: string;
+      setUpstream: boolean;
+      noVerify: boolean;
+    }
+  | { kind: "PushTags"; remoteName: string; names: string[]; noVerify: boolean };
+export interface OperationLogEntry {
+  /** Increasing: a later operation has a larger id. */
+  id: number;
+  name: string;
+  target: string | null;
+  params: OperationParam[];
+  /** Milliseconds since the Unix epoch. */
+  startedAt: number;
+  /** `null` while it runs. */
+  durationMs: number | null;
+  outcome: OperationOutcome;
+  /** Why it failed, stopped or was cancelled. */
+  message: string | null;
+  errorKind: ErrorKind | null;
+  transferError: TransferErrorKind | null;
+  remoteFailures: RemoteFailure[];
+  runs: ProgramRun[];
+  /** `null` when the operation can't be run again. */
+  rerun: Rerun | null;
+}
+export interface OperationLogPage {
+  /** The repository key `OperationLogChange.repo` names. */
+  repo: string;
+  entries: OperationLogEntry[];
+  hasMore: boolean;
+}
+/** An entry of `repo`'s log was added or ended. */
+export interface OperationLogChange {
+  repo: string;
+  entryId: number;
+}
 export type ResetMode = "soft" | "mixed" | "hard";
 
 export type TransferOperation =
@@ -1502,6 +1570,16 @@ export interface RepoClient {
   subscribeHookProgress(listener: (event: HookProgress) => void): () => void;
   /** The repository watchers' reports (#756), for every watched repository. */
   subscribeRepoWatch(listener: (event: RepoWatch) => void): () => void;
+  /**
+   * Up to `limit` entries of the repository's operation log older than entry `before` (from the
+   * newest when `null`), newest first (#888). Answers at once, even while a command runs.
+   */
+  listOperations(repoPath: string, before: number | null, limit: number): Promise<OperationLogPage>;
+  /**
+   * Each entry added to or ended in any repository's operation log (#888), once the log was
+   * listed: the backend starts reporting on the first `listOperations`.
+   */
+  subscribeOperationLog(listener: (change: OperationLogChange) => void): () => void;
   /**
    * File manager drags onto the window (#649), until the returned function is called. Desktop
    * only: in the VSCode extension, VSCode handles drops itself and this never calls `listener`.

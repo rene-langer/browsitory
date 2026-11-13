@@ -86,6 +86,11 @@ LineHistory/complete key-order
 LineHistory/more key-order
 LineHistory/truncated key-order
 MergeOutcome/Conflicted key-order
+OperationLogChange/entry key-order
+OperationLogPage/empty key-order
+OperationLogPage/every-outcome key-order
+OperationLogPage/every-rerun key-order
+OperationLogPage/first-page key-order
 PatchApplyOutcome/HookFailed key-order
 PickOutcome/Committed key-order
 PickOutcome/Conflicted key-order
