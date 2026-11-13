@@ -939,9 +939,7 @@ fn run_user_command_runs_a_stored_command_with_the_selection() {
     );
     let entries = log["result"]["entries"].as_array().expect("entries");
     assert_eq!(entries.len(), 3, "{log}");
-    assert!(entries
-        .iter()
-        .all(|entry| entry["name"] == "Run command"));
+    assert!(entries.iter().all(|entry| entry["name"] == "Run command"));
     assert_eq!(entries[2]["target"], "Show");
     assert_eq!(entries[2]["outcome"], "Succeeded");
     assert_eq!(entries[2]["runs"][0]["output"], ran["result"]["output"]);

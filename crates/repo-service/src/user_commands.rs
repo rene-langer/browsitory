@@ -11,6 +11,9 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 use git_core::process::CommandStyle;
 use git_core::user_command::{self, Context, RunError, OUTPUT_LIMIT, RUN_TIMEOUT};
 
+use git_core::process::{record_runs, RunLog};
+
+use crate::oplog;
 use crate::wire::{ErrorDto, UserCommandRunDto};
 use crate::worker::ReadHandle;
 
@@ -56,6 +59,10 @@ fn find(repo_path: &Path, command_id: &str) -> Result<config::UserCommand, Error
 pub struct Prepared {
     expanded: user_command::Expanded,
     root: std::path::PathBuf,
+    /// The command's name, the target of its operation log entry.
+    name: String,
+    /// The repository's operation log (`worker::repo_key`); `None` when the path can't be read.
+    journal_key: Option<String>,
 }
 
 /// Looks up the stored command `command_id` for `repo_path` and fills its variables from
@@ -79,26 +86,71 @@ pub fn prepare(
     Ok(Prepared {
         expanded,
         root: std::path::PathBuf::from(values.repo),
+        name: command.name,
+        journal_key: crate::worker::repo_key(repo_path).ok(),
     })
 }
 
 /// Runs a prepared command as run `run_id` (which `cancel` stops), on the caller's thread: call
 /// it off the repository's worker and off any async runtime. A failing program is an answer
 /// (`success` false), not an error; a command that can't start is.
+///
+/// Each run is an operation log entry ("Run command", the command's name as its target) with
+/// the program it ran (#894).
 pub fn execute(prepared: &Prepared, run_id: &str) -> Result<UserCommandRunDto, ErrorDto> {
     runs().insert(run_id.to_string(), false);
     let _registered = Registered(run_id.to_string());
     let cancelled = || runs().get(run_id).copied().unwrap_or(false);
-    match user_command::run(
-        &prepared.expanded,
-        &prepared.root,
-        git_core::process::find_program,
-        &cancelled,
-        RUN_TIMEOUT,
-        OUTPUT_LIMIT,
-    ) {
+    let entry = prepared.journal_key.as_deref().map(|key| {
+        let journal = oplog::journal(key);
+        let id = journal.begin(oplog::Start {
+            name: "Run command".to_string(),
+            target: Some(prepared.name.clone()),
+            ..oplog::Start::default()
+        });
+        (journal, id)
+    });
+    let programs = RunLog::new();
+    let result = record_runs(&programs, || {
+        user_command::run(
+            &prepared.expanded,
+            &prepared.root,
+            git_core::process::find_program,
+            &cancelled,
+            RUN_TIMEOUT,
+            OUTPUT_LIMIT,
+        )
+    });
+    if let Some((journal, id)) = entry {
+        let mut finish = log_finish(&result);
+        finish.runs = programs.take();
+        journal.finish(id, finish);
+    }
+    match result {
         Ok(outcome) => Ok(outcome.into()),
         Err(RunError::Cancelled) => Ok(UserCommandRunDto::cancelled()),
         Err(error) => Err(ErrorDto::from_error(error)),
+    }
+}
+
+/// How a run ends in the operation log.
+fn log_finish(result: &Result<user_command::RunOutcome, RunError>) -> oplog::Finish {
+    let failed = |message: String| oplog::Finish {
+        outcome: oplog::OperationOutcome::Failed,
+        message: Some(message),
+        ..oplog::Finish::succeeded()
+    };
+    match result {
+        Ok(outcome) if outcome.success => oplog::Finish::succeeded(),
+        Ok(outcome) if outcome.timed_out => failed("Took too long and was stopped.".to_string()),
+        Ok(outcome) => failed(match outcome.exit_code {
+            Some(code) => format!("Exited with code {code}."),
+            None => "Failed.".to_string(),
+        }),
+        Err(RunError::Cancelled) => oplog::Finish {
+            outcome: oplog::OperationOutcome::Cancelled,
+            ..oplog::Finish::succeeded()
+        },
+        Err(error) => failed(error.to_string()),
     }
 }
