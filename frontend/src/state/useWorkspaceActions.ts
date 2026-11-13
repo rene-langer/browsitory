@@ -102,6 +102,10 @@ export interface WorkspaceActions {
   onRebaseContinue: () => void;
   /** The commit dock's edited message at an edit stop, `null` when unchanged (#882). */
   onRebaseEditMessage?: (message: string | null) => void;
+  /** Commits what is staged at an edit stop as a part (#884); `false` when it failed. */
+  onRebaseCommitPart?: (message: string) => Promise<boolean>;
+  /** The commit Split commit… stopped at in this session (#884), for "Splitting". */
+  splittingCommit?: string | null;
   onRebaseAbort: () => void;
   // Continue/Abort for a stopped cherry-pick/revert sequence (`headInfo.sequence`).
   onSequenceContinue: () => void;

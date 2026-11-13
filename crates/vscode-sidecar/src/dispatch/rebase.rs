@@ -1,6 +1,6 @@
 use repo_service::wire::ErrorDto;
 use repo_service::wire::{
-    HistoryEditTargetDto, RebaseAbortDto, RebasePlanCommitDto, RebasePlanEntryDto,
+    EditRestDto, HistoryEditTargetDto, RebaseAbortDto, RebasePlanCommitDto, RebasePlanEntryDto,
     RebaseStepResultDto,
 };
 use serde::Deserialize;
@@ -60,6 +60,9 @@ pub(super) struct RebaseContinueParams {
     /// Replaces the message of the step Continue lands (#882).
     #[serde(default)]
     message: Option<String>,
+    /// What an edit stop's changes not staged become (#884).
+    #[serde(default)]
+    rest: Option<EditRestDto>,
 }
 
 /// The signing program as for `start_rebase`.
@@ -69,9 +72,37 @@ pub(super) fn rebase_continue<W: std::io::Write + Send + 'static>(
     out: &Arc<Mutex<W>>,
 ) -> Result<Value, ErrorDto> {
     let events = hook_relay(&params.repo_path, out);
-    let result = worker_handle(repos, &params.repo_path)?
-        .rebase_continue_reporting(params.message, events)?;
+    let result = worker_handle(repos, &params.repo_path)?.rebase_continue_with_rest_reporting(
+        params.message,
+        params.rest.map(Into::into),
+        events,
+    )?;
     serde_json::to_value(RebaseStepResultDto::from(result)).map_err(ErrorDto::from_error)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct CommitPartParams {
+    repo_path: String,
+    message: String,
+}
+
+/// Split a commit (#884): commits what is staged at the edit stop as a part; the part's id.
+pub(super) fn rebase_commit_part<W: std::io::Write + Send + 'static>(
+    params: CommitPartParams,
+    repos: &Repos,
+    out: &Arc<Mutex<W>>,
+) -> Result<Value, ErrorDto> {
+    let events = hook_relay(&params.repo_path, out);
+    let part = worker_handle(repos, &params.repo_path)?
+        .rebase_commit_part_reporting(params.message, events)?;
+    Ok(Value::String(part))
+}
+
+/// The edit stop's changes not staged (#884), sorted by path.
+pub(super) fn get_edit_rest(params: RepoPathParams, repos: &Repos) -> Result<Value, ErrorDto> {
+    let rest = worker_handle(repos, &params.repo_path)?.get_edit_rest()?;
+    serde_json::to_value(rest).map_err(ErrorDto::from_error)
 }
 
 #[derive(Deserialize)]

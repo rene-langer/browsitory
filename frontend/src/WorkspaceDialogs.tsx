@@ -4,6 +4,7 @@ import { CommandPalette } from "./components/CommandPalette";
 import { CreateTagDialog } from "./components/CreateTagDialog";
 import { DeleteRemoteBranchDialog } from "./components/DeleteRemoteBranchDialog";
 import { DeleteRemoteTagDialog } from "./components/DeleteRemoteTagDialog";
+import { EditRestDialog } from "./components/EditRestDialog";
 import { HookFailureDialog } from "./components/HookFailureDialog";
 import { MergeDialog } from "./components/MergeDialog";
 import { ParentPickerDialog } from "./components/ParentPickerDialog";
@@ -22,7 +23,7 @@ import type { GraphCommit, RepoClient } from "./ipc/RepoClient";
 import type { PushToast } from "./state/useToasts";
 import type { Command } from "./lib/commands";
 import { retrySuccessLabel } from "./lib/hookFailure";
-import { stashBlockReason, terminalAbortConfirm } from "./lib/operationStatus";
+import { busyReason, stashBlockReason, terminalAbortConfirm } from "./lib/operationStatus";
 import { upstreamPushBranch } from "./lib/pushTarget";
 import type { useAnnounce } from "./state/useAnnounce";
 import type { UseAppStateResult } from "./state/useAppState";
@@ -299,6 +300,19 @@ export function WorkspaceDialogs({
             void appState.stashAndSwitch(appState.state.switchConflict.branchName, reapply);
           }}
           onCancel={appState.closeSwitchConflict}
+        />
+      )}
+      {active && appState.state.editRest !== null && (
+        <EditRestDialog
+          files={appState.state.editRest}
+          operationDisabled={busyReason(appState.state) !== null}
+          operationDisabledReason={busyReason(appState.state)}
+          onChoose={(rest) => {
+            // Allowed during the paused rebase it continues; only an action in flight blocks it.
+            if (busyReason(appState.state) !== null) return;
+            void appState.rebaseContinue(rest);
+          }}
+          onCancel={appState.closeEditRest}
         />
       )}
       {active && appState.state.pendingPull !== null && (

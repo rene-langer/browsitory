@@ -120,7 +120,8 @@ pub(super) fn start_rebase_label(onto: &str, edit: Option<&HistoryEdit>) -> Stri
         HistoryEditKind::MoveUp => format!("Move {id} up"),
         HistoryEditKind::MoveDown => format!("Move {id} down"),
         HistoryEditKind::Drop => format!("Drop {id}"),
-        HistoryEditKind::Edit | HistoryEditKind::Split => format!("Edit {id}"),
+        HistoryEditKind::Edit => format!("Edit {id}"),
+        HistoryEditKind::Split => format!("Split {id}"),
     }
 }
 

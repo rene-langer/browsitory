@@ -354,6 +354,8 @@ export interface RebaseInfo {
   health: RebaseHealth;
   /** Full id of the commit an Edit step stopped at (Edit commit…, #882); `null` at any other stop. */
   editing: string | null;
+  /** Parts of the edited commit committed so far (Split a commit, #884); 0 when not editing. */
+  splitParts: number;
 }
 /** `restored: false`: the rebase no longer owned HEAD, so HEAD was left where it is. */
 export interface RebaseAbort {
@@ -478,7 +480,8 @@ export type ErrorKind =
   | "InvalidSearchQuery"
   | "PermissionDenied"
   | "LocalChanges"
-  | "MissingIdentity";
+  | "MissingIdentity"
+  | "RestLeft";
 
 /** A rejected request as the backend sends it (`repo_service::wire::ErrorDto`). */
 export interface RepoErrorPayload {
@@ -525,6 +528,7 @@ const ERROR_KINDS: ReadonlySet<string> = new Set<ErrorKind>([
   "PermissionDenied",
   "LocalChanges",
   "MissingIdentity",
+  "RestLeft",
 ]);
 
 /**
@@ -1066,7 +1070,10 @@ export interface RebasePlanEntry {
 }
 
 /** A one-click history edit from the commit menu (#442). */
-export type HistoryEditKind = "Reword" | "Squash" | "Fixup" | "MoveUp" | "MoveDown" | "Drop" | "Edit";
+export type HistoryEditKind = "Reword" | "Squash" | "Fixup" | "MoveUp" | "MoveDown" | "Drop" | "Edit" | "Split";
+
+/** What Continue at an edit stop does with the changes not staged (#884). */
+export type EditRest = "Commit" | "Discard";
 
 /**
  * `startRebase`'s `edit`: the one-click history edit the rebase runs, so its Undo entry names it
@@ -1588,8 +1595,19 @@ export interface RepoClient {
     plan: RebasePlanEntry[],
     edit?: HistoryEditTarget | null,
   ): Promise<RebaseStepResult>;
-  /** `message` replaces the message of the step Continue commits (an edit stop's, #882). */
-  rebaseContinue(repoPath: string, message?: string): Promise<RebaseStepResult>;
+  /**
+   * `message` replaces the message of the step Continue commits (an edit stop's, #882). At an
+   * edit stop, changes not staged reject with kind `RestLeft` unless `rest` says what to do with
+   * them (#884; `getEditRest` names them).
+   */
+  rebaseContinue(repoPath: string, message?: string, rest?: EditRest): Promise<RebaseStepResult>;
+  /**
+   * Split a commit (#884): commits what is staged at the edit stop as a part of the edited
+   * commit, keeping its author; the rebase stays paused there. Resolves the part's id.
+   */
+  rebaseCommitPart(repoPath: string, message: string): Promise<string>;
+  /** The edit stop's changes not staged (#884), sorted by path; empty without one. */
+  getEditRest(repoPath: string): Promise<string[]>;
   /**
    * Folds the staged changes into `commitId`, a commit of the current branch (#883): the latest
    * commit is amended, an older one gets them through a rebase that pauses on a conflict.

@@ -85,7 +85,9 @@ export type DiffSettings = { ignoreWhitespace: boolean, contextLines: number, sy
 
 export type DiffSource = { "kind": "Unstaged" } | { "kind": "Staged", oldPath: string | null, } | { "kind": "Commit", commitId: string, oldPath: string | null, } | { "kind": "Range", fromId: string, toId: string | null, oldPath: string | null, };
 
-export type ErrorKind = "Other" | "WorkerStopped" | "CredentialStoreFailure" | "DirtyWorktree" | "PullFailed" | "Cancelled" | "AddDeleteConflict" | "InvalidSearchQuery" | "PermissionDenied" | "LocalChanges" | "MissingIdentity";
+export type EditRest = "Commit" | "Discard";
+
+export type ErrorKind = "Other" | "WorkerStopped" | "CredentialStoreFailure" | "DirtyWorktree" | "PullFailed" | "Cancelled" | "AddDeleteConflict" | "InvalidSearchQuery" | "PermissionDenied" | "LocalChanges" | "MissingIdentity" | "RestLeft";
 
 export type ExternalToolSettings = { editor: string | null, terminal: string | null, };
 
@@ -193,7 +195,7 @@ terminalSequence: TerminalSequence | null,
  */
 terminalRebase: TerminalRebase | null, };
 
-export type HistoryEditKind = "Reword" | "Squash" | "Fixup" | "MoveUp" | "MoveDown" | "Drop" | "Edit";
+export type HistoryEditKind = "Reword" | "Squash" | "Fixup" | "MoveUp" | "MoveDown" | "Drop" | "Edit" | "Split";
 
 export type HistoryEditTarget = { kind: HistoryEditKind, commitId: string, };
 
@@ -290,7 +292,11 @@ export type RebaseInfo = { branch: string, onto: string, currentStep: number, to
 /**
  * Full id of the commit an Edit step stopped at (#882); `null` at any other stop.
  */
-editing: string | null, };
+editing: string | null, 
+/**
+ * Parts of the edited commit committed so far (Split a commit, #884); 0 when not editing.
+ */
+splitParts: number, };
 
 export type RebasePlanCommit = { id: string, shortId: string, summary: string, authorName: string, timestamp: number, };
 

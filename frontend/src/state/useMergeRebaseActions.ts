@@ -1,16 +1,18 @@
 import { useCallback, useRef } from "react";
-import type {
-  RebaseAbort,
-  ConflictSide,
-  FastForwardMode,
-  FileConflictChoice,
-  MarkResolvedOutcome,
-  MergeOptions,
-  MergeOutcome,
-  PullStrategy,
-  RebasePlanEntry,
-  RebaseStepResult,
-  RepoClient,
+import {
+  errorKind,
+  type EditRest,
+  type RebaseAbort,
+  type ConflictSide,
+  type FastForwardMode,
+  type FileConflictChoice,
+  type MarkResolvedOutcome,
+  type MergeOptions,
+  type MergeOutcome,
+  type PullStrategy,
+  type RebasePlanEntry,
+  type RebaseStepResult,
+  type RepoClient,
 } from "../ipc/RepoClient";
 import {
   buildHistoryEditPlan,
@@ -77,9 +79,18 @@ export interface MergeRebaseActions {
   foldStaged(commitId: string): Promise<RebaseStepResult | null>;
   /**
    * Continues the paused rebase. At an edit stop, an edited message (`setRebaseEditMessage`) is
-   * sent along once, as the recommitted commit's message (#882).
+   * sent along once, as the recommitted commit's message (#882). Changes not staged there open
+   * the rest dialog (`state.editRest`) instead; Continue again with `rest` says what to do with
+   * them (#884).
    */
-  rebaseContinue(): Promise<void>;
+  rebaseContinue(rest?: EditRest): Promise<void>;
+  /** Closes the rest dialog without continuing (#884). */
+  closeEditRest(): void;
+  /**
+   * Split a commit (#884): commits what is staged at the edit stop as a part, under `message`.
+   * Resolves `false` when it failed (the error is in `state.error`).
+   */
+  rebaseCommitPart(message: string): Promise<boolean>;
   /**
    * The message the commit dock's edit stop holds for the recommit, or `null` when it is the
    * commit's own (unchanged): what the next Continue sends (#882).
@@ -227,6 +238,9 @@ export function useMergeRebaseActions(
         const plan = buildHistoryEditPlan(edit, commitId, span);
         const step = await client.startRebase(repoPath, onto, plan, { kind: request.kind, commitId });
         result = step;
+        // Split commit… stops like Edit commit…; the stop says "Splitting" (#884).
+        const splitting = request.kind === "Split" && step.kind !== "Done" ? commitId : null;
+        setState((prev) => ({ ...prev, splitting }));
         // A pause shows in the rebase progress panel instead.
         if (step.kind === "Done") {
           const shortId = span.find((commit) => commit.id === commitId)?.shortId ?? commitId.slice(0, 7);
@@ -260,15 +274,38 @@ export function useMergeRebaseActions(
     rebaseEditMessage.current = message;
   }, []);
   const rebaseContinue = useCallback(
-    (): Promise<void> =>
+    (rest?: EditRest): Promise<void> =>
       runMutation(async () => {
         const message = rebaseEditMessage.current;
-        const result: RebaseStepResult =
-          message === null ? await client.rebaseContinue(repoPath) : await client.rebaseContinue(repoPath, message);
+        setState((prev) => ({ ...prev, editRest: null }));
+        try {
+          if (rest !== undefined) await client.rebaseContinue(repoPath, message ?? undefined, rest);
+          else if (message === null) await client.rebaseContinue(repoPath);
+          else await client.rebaseContinue(repoPath, message);
+        } catch (error) {
+          if (errorKind(error) !== "RestLeft") throw error;
+          // Not an error: the dialog asks what to do with the files (#884).
+          const files = await client.getEditRest(repoPath).catch(() => []);
+          setState((prev) => ({ ...prev, editRest: files }));
+          return;
+        }
         // Landed: the message belonged to that stop, not to the next one.
         rebaseEditMessage.current = null;
-        void result;
       }),
+    [client, runMutation, repoPath, setState],
+  );
+  const closeEditRest = useCallback(() => {
+    setState((prev) => ({ ...prev, editRest: null }));
+  }, [setState]);
+  const rebaseCommitPart = useCallback(
+    async (message: string): Promise<boolean> => {
+      let committed = false;
+      await runMutation(async () => {
+        await client.rebaseCommitPart(repoPath, message);
+        committed = true;
+      });
+      return committed;
+    },
     [client, runMutation, repoPath],
   );
   const abortRebase = useCallback(
@@ -301,6 +338,8 @@ export function useMergeRebaseActions(
     editHistory,
     foldStaged,
     rebaseContinue,
+    closeEditRest,
+    rebaseCommitPart,
     setRebaseEditMessage,
     abortRebase,
   };

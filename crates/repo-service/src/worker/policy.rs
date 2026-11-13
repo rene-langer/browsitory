@@ -438,7 +438,9 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
             P::recorded(fold_staged_label(commit_id), Full).gated(Refused)
         }
         Command::RebaseContinue { .. } => P::continuing(),
-        Command::RebaseCommitPart { .. } => P::free(),
+        // A part (#884) belongs to the paused rebase's one Undo step, like Continue.
+        Command::RebaseCommitPart { .. } => P::continuing(),
+        // Reads the stored rebase, which only the main lane has.
         Command::GetEditRest { .. } => P::free(),
         Command::AbortRebase { .. } => P::aborting(),
         Command::CherryPick { commit_id, .. } => {

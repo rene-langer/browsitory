@@ -700,8 +700,10 @@ export function RepoWorkspace({
     onAbortMerge: abortMergeOrSequence,
     onSaveStash: announce("Changes stashed", () => appState.saveStash()),
     onOpenStashDialog: (paths) => openDialog({ kind: "stash", paths }),
-    onRebaseContinue: appState.rebaseContinue,
+    onRebaseContinue: () => void appState.rebaseContinue(),
     onRebaseEditMessage: appState.setRebaseEditMessage,
+    onRebaseCommitPart: appState.rebaseCommitPart,
+    splittingCommit: appState.state.splitting,
     onRebaseAbort: () => void abortRebase(),
     onSequenceContinue: continueSequence,
     onSequenceAbort: abortSequence,
@@ -791,6 +793,7 @@ export function RepoWorkspace({
         operationLeftover={appState.state.headInfo.operationLeftover}
         rebaseProgress={appState.state.rebaseProgress}
         rebase={appState.state.headInfo.rebase}
+        splittingCommit={appState.state.splitting}
         sequence={appState.state.headInfo.sequence}
         bisect={appState.state.headInfo.bisect}
         terminalSequence={terminalSequence}

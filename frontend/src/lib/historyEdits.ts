@@ -8,7 +8,7 @@ export type { HistoryEditKind };
  * through `startRebase`, so conflicts pause it like any rebase and it is one Undo step, named after
  * the edit (`startRebase`'s `edit`, #473).
  */
-export const HISTORY_EDIT_KINDS: readonly HistoryEditKind[] = ["Reword", "Squash", "Fixup", "MoveUp", "MoveDown", "Drop", "Edit"];
+export const HISTORY_EDIT_KINDS: readonly HistoryEditKind[] = ["Reword", "Squash", "Fixup", "MoveUp", "MoveDown", "Drop", "Edit", "Split"];
 
 /** What a one-click edit needs on top of its kind: Reword's new message, Squash's combined one. */
 export type HistoryEdit =
@@ -19,7 +19,9 @@ export type HistoryEdit =
   | { kind: "MoveDown" }
   | { kind: "Drop" }
   /** Edit commit… (#882): stops at the commit with its changes staged, for a recommit. */
-  | { kind: "Edit" };
+  | { kind: "Edit" }
+  /** Split commit… (#884): the same stop, to commit the changes as several parts. */
+  | { kind: "Split" };
 
 /** `onto`: the commit the one-step rebase starts from (passed to `commitsSince`/`startRebase`). */
 export type HistoryEditCheck = { ok: true; onto: string } | { ok: false; reason: string };
@@ -109,6 +111,7 @@ export function historyEditChecks(context: HistoryEditContext, commitId: string)
       MoveDown: refused,
       Drop: refused,
       Edit: refused,
+      Split: refused,
     };
   }
   const parentId = byId.get(commitId)!.parentIds[0];
@@ -131,6 +134,7 @@ export function historyEditChecks(context: HistoryEditContext, commitId: string)
     MoveDown: fromGrandparent,
     Drop: fromParent,
     Edit: fromParent,
+    Split: fromParent,
   };
 }
 
@@ -175,6 +179,7 @@ export function buildHistoryEditPlan(edit: HistoryEdit, commitId: string, span: 
       plan[index] = { ...plan[index], action: { kind: "Drop" } };
       break;
     case "Edit":
+    case "Split":
       plan[index] = { ...plan[index], action: { kind: "Edit" } };
       break;
   }
@@ -209,5 +214,7 @@ export function historyEditDoneMessage(kind: HistoryEditKind, shortId: string): 
       return `Dropped ${shortId}`;
     case "Edit":
       return `Edited ${shortId}`;
+    case "Split":
+      return `Split ${shortId}`;
   }
 }
