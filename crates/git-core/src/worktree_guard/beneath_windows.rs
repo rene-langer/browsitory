@@ -3859,8 +3859,8 @@ mod tests {
     }
 
     /// #228: a symbolic link swapped in under the leaf's name after it was classified is never
-    /// read through: the reopen by file ID finds the classified file, now named `g`, no longer
-    /// the leaf, so the read finds nothing.
+    /// read through: the reopen by file ID finds the classified file, renamed to `g` in the same
+    /// held folder, and the read gives its content, as if the swap came after the read.
     #[test]
     fn read_never_follows_a_link_swapped_in_after_classifying() {
         let (dir, _outside, secret) = tree_and_outside();
@@ -3878,7 +3878,10 @@ mod tests {
             std::os::windows::fs::symlink_file(&secret, d.join("f")).unwrap();
         });
         let read = read(dir.path(), Path::new("d/f"), &mut step).unwrap();
-        assert!(read.is_none(), "{read:?}");
+        assert!(
+            matches!(&read, Some(Leaf::File { bytes, .. }) if bytes == b"inside"),
+            "{read:?}"
+        );
         assert_eq!(std::fs::read_to_string(d.join("g")).unwrap(), "inside");
         assert_eq!(std::fs::read_to_string(&secret).unwrap(), "outside");
     }
