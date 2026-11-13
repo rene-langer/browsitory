@@ -5,12 +5,22 @@ import type {
   OperationOutcome,
   ProgramRun,
   RepoClient,
+  Rerun,
   TransferErrorKind,
 } from "../ipc/RepoClient";
 import { copyText } from "../lib/clipboard";
 import { Overlay } from "./primitives/Overlay";
 import { Panel } from "./primitives/Panel";
 import styles from "./OperationLogDialog.module.css";
+
+/**
+ * Runs a logged operation again (#890), and says why it can't (`null`: it can), for instance when
+ * its remote is gone.
+ */
+export interface RunAgain {
+  run: (rerun: Rerun) => void;
+  blockedReason: (rerun: Rerun) => string | null;
+}
 
 /** How many entries one page asks for. */
 export const OPERATION_LOG_PAGE = 100;
@@ -79,13 +89,14 @@ export function OperationLogDialog({
   client,
   repoPath,
   focus,
+  runAgain,
   onClose,
 }: {
   client: RepoClient;
   repoPath: string;
   focus: "latest" | "latestFailed";
-  /** Run again (#890), stubbed for the tests. */
-  runAgain?: { run: (rerun: import("../ipc/RepoClient").Rerun) => void; blockedReason: (rerun: import("../ipc/RepoClient").Rerun) => string | null };
+  /** Run again (#890): offered on a failed operation that can be run again. */
+  runAgain?: RunAgain;
   onClose: () => void;
 }) {
   const [entries, setEntries] = useState<OperationLogEntry[] | null>(null);
@@ -214,7 +225,7 @@ export function OperationLogDialog({
                 </button>
               )}
             </div>
-            {selected !== null && <OperationDetails entry={selected} />}
+            {selected !== null && <OperationDetails entry={selected} runAgain={runAgain} />}
           </div>
         )}
       </Panel>
@@ -222,10 +233,22 @@ export function OperationLogDialog({
   );
 }
 
-function OperationDetails({ entry }: { entry: OperationLogEntry }) {
+function OperationDetails({ entry, runAgain }: { entry: OperationLogEntry; runAgain: RunAgain | undefined }) {
+  // Only fetches, pulls and pushes carry a `rerun` (owner decision on #890), and only a failure
+  // is offered again.
+  const rerun = entry.outcome === "Failed" ? entry.rerun : null;
+  const blocked = rerun !== null && runAgain !== undefined ? runAgain.blockedReason(rerun) : null;
   return (
     <section className={styles.details} aria-label="Operation details">
       <h3 className={styles.detailsTitle}>{title(entry)}</h3>
+      {rerun !== null && runAgain !== undefined && (
+        <div className={styles.runAgain}>
+          <button type="button" disabled={blocked !== null} onClick={() => runAgain.run(rerun)}>
+            Run again
+          </button>
+          {blocked !== null && <span className={styles.muted}>{blocked}</span>}
+        </div>
+      )}
       <dl className={styles.facts}>
         <dt>Result</dt>
         <dd>{entry.outcome}</dd>
