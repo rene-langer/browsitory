@@ -700,6 +700,14 @@ pub struct RebaseInfo {
 impl RebaseInfo {
     pub fn new(state: &crate::rebase::RebaseState, health: crate::rebase::RebaseHealth) -> Self {
         let progress = state.progress();
+        let editing = state
+            .plan
+            .get(state.cursor)
+            .filter(|entry| {
+                state.stop == crate::rebase::RebaseStop::Edit
+                    && entry.action == crate::rebase::RebaseAction::Edit
+            })
+            .map(|entry| entry.commit_id.clone());
         Self {
             branch: state
                 .original_branch_ref
@@ -710,15 +718,12 @@ impl RebaseInfo {
             current_step: progress.current_step,
             total_steps: progress.total_steps,
             health,
-            editing: state
-                .plan
-                .get(state.cursor)
-                .filter(|entry| {
-                    state.stop == crate::rebase::RebaseStop::Edit
-                        && entry.action == crate::rebase::RebaseAction::Edit
-                })
-                .map(|entry| entry.commit_id.clone()),
-            split_parts: 0,
+            split_parts: if editing.is_some() {
+                state.split_parts
+            } else {
+                0
+            },
+            editing,
         }
     }
 }
