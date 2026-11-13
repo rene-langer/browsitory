@@ -8,6 +8,7 @@
   "open_merge_tool",
   "open_patch_file",
   "open_terminal",
+  "open_vscode_keybindings",
   "pick_repo_folder",
   "reveal_in_file_manager",
   "run_vscode_git_command",

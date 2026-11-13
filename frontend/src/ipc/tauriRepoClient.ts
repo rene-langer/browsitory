@@ -8,6 +8,7 @@ import type {
   FileDropEvent,
   HookProgress,
   OpenRepoEntry,
+  OperationLogChange,
   PatchContent,
   RepoClient,
   RepoWatch,
@@ -107,6 +108,8 @@ export const tauriRepoClient: RepoClient = {
   // The desktop app clones and initializes itself; there is no host with Git commands (#680).
   supportsHostGitCommands: false,
   runHostGitCommand: () => Promise.reject(new Error("Not supported in the desktop app")),
+  // Preferences > Keyboard rebinds the keys here (#899); VSCode's editor is the extension's (#900).
+  openHostKeybindings: () => Promise.reject(new Error("Not supported in the desktop app")),
   // `loggedRawInvoke` logs only the command name and the rejection payload (`{ kind, message }`),
   // never the arguments, so the `request.https.token` is not logged.
   cloneRepo: (operationId: string, request: CloneRequest) =>
@@ -165,6 +168,24 @@ export const tauriRepoClient: RepoClient = {
         else stop = unlisten;
       },
       (error: unknown) => void logFrontendError("Listening for repository changes failed", error),
+    );
+    return () => {
+      if (disposed) return;
+      disposed = true;
+      stop?.();
+    };
+  },
+  // Entries added to or ended in the operation log (#888). Nothing waits for this listener: the
+  // log panel lists the log again whenever it opens.
+  subscribeOperationLog: (listener: (change: OperationLogChange) => void) => {
+    let disposed = false;
+    let stop: (() => void) | null = null;
+    listen<OperationLogChange>("operation-log", ({ payload }) => listener(payload)).then(
+      (unlisten) => {
+        if (disposed) unlisten();
+        else stop = unlisten;
+      },
+      (error: unknown) => void logFrontendError("Listening for the operation log failed", error),
     );
     return () => {
       if (disposed) return;

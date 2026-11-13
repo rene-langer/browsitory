@@ -26,6 +26,7 @@ mod history;
 #[cfg(unix)]
 mod hooks;
 mod merge;
+mod oplog;
 mod patch;
 mod read_lane;
 mod rebase;

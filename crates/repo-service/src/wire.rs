@@ -1491,6 +1491,262 @@ pub fn repo_watch_dto(repo_path: &str, event: crate::watch::WatchEvent) -> RepoW
     }
 }
 
+/// One page of a repository's operation log (#888), newest first: `list_operations`'s answer.
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "OperationLogPage"))]
+#[serde(rename_all = "camelCase")]
+pub struct OperationLogPageDto {
+    /// The repository key: `OperationLogChange.repo` names the same one.
+    pub repo: String,
+    pub entries: Vec<OperationLogEntryDto>,
+    /// Older entries follow; ask for them with `before` = the last entry's id.
+    pub has_more: bool,
+}
+
+impl From<crate::oplog::OperationPage> for OperationLogPageDto {
+    fn from(page: crate::oplog::OperationPage) -> Self {
+        Self {
+            repo: page.repo,
+            entries: page.entries.into_iter().map(Into::into).collect(),
+            has_more: page.has_more,
+        }
+    }
+}
+
+/// One operation of the log; see `repo_service::oplog::OperationEntry`.
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "OperationLogEntry"))]
+#[serde(rename_all = "camelCase")]
+pub struct OperationLogEntryDto {
+    pub id: u64,
+    pub name: String,
+    pub target: Option<String>,
+    pub params: Vec<OperationParamDto>,
+    /// Milliseconds since the Unix epoch.
+    pub started_at: i64,
+    /// `null` while it runs.
+    pub duration_ms: Option<u64>,
+    pub outcome: OperationOutcomeDto,
+    pub message: Option<String>,
+    pub error_kind: Option<ErrorKind>,
+    pub transfer_error: Option<TransferErrorKind>,
+    pub remote_failures: Vec<RemoteFailureDto>,
+    pub runs: Vec<ProgramRunDto>,
+    /// What Run again sends; `null` when the operation can't be run again (#890).
+    pub rerun: Option<RerunDto>,
+}
+
+impl From<crate::oplog::OperationEntry> for OperationLogEntryDto {
+    fn from(entry: crate::oplog::OperationEntry) -> Self {
+        Self {
+            id: entry.id,
+            name: entry.name,
+            target: entry.target,
+            params: entry
+                .params
+                .into_iter()
+                .map(|param| OperationParamDto {
+                    name: param.name,
+                    value: param.value,
+                })
+                .collect(),
+            started_at: entry.started_at,
+            duration_ms: entry.duration_ms,
+            outcome: entry.outcome.into(),
+            message: entry.message,
+            error_kind: entry.error_kind,
+            transfer_error: entry.transfer_error,
+            remote_failures: entry
+                .remote_failures
+                .into_iter()
+                .map(|failure| RemoteFailureDto {
+                    remote_name: failure.remote_name,
+                    error: failure.error,
+                    message: failure.message,
+                })
+                .collect(),
+            runs: entry.runs.into_iter().map(Into::into).collect(),
+            rerun: entry.rerun.map(Into::into),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "OperationParam"))]
+pub struct OperationParamDto {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "OperationOutcome"))]
+pub enum OperationOutcomeDto {
+    Running,
+    Succeeded,
+    Stopped,
+    Failed,
+    Cancelled,
+}
+
+impl From<crate::oplog::OperationOutcome> for OperationOutcomeDto {
+    fn from(outcome: crate::oplog::OperationOutcome) -> Self {
+        use crate::oplog::OperationOutcome;
+        match outcome {
+            OperationOutcome::Running => Self::Running,
+            OperationOutcome::Succeeded => Self::Succeeded,
+            OperationOutcome::Stopped => Self::Stopped,
+            OperationOutcome::Failed => Self::Failed,
+            OperationOutcome::Cancelled => Self::Cancelled,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "RemoteFailure"))]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteFailureDto {
+    pub remote_name: String,
+    pub error: TransferErrorKind,
+    pub message: String,
+}
+
+/// A program an operation ran: a hook or a signing program.
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "ProgramRun"))]
+pub struct ProgramRunDto {
+    pub program: String,
+    pub args: Vec<String>,
+    pub output: String,
+    pub status: ProgramRunStatusDto,
+}
+
+impl From<crate::oplog::OperationRun> for ProgramRunDto {
+    fn from(run: crate::oplog::OperationRun) -> Self {
+        use git_core::process::ProgramRunStatus;
+        Self {
+            program: run.program,
+            args: run.args,
+            output: run.output,
+            status: match run.status {
+                ProgramRunStatus::Succeeded => ProgramRunStatusDto::Succeeded,
+                ProgramRunStatus::Failed => ProgramRunStatusDto::Failed,
+                ProgramRunStatus::TimedOut => ProgramRunStatusDto::TimedOut,
+                ProgramRunStatus::Cancelled => ProgramRunStatusDto::Cancelled,
+                ProgramRunStatus::NotStarted => ProgramRunStatusDto::NotStarted,
+            },
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "ProgramRunStatus"))]
+pub enum ProgramRunStatusDto {
+    Succeeded,
+    Failed,
+    TimedOut,
+    Cancelled,
+    NotStarted,
+}
+
+/// How to run an operation again (#890): the command and the parameters it was given.
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "Rerun"))]
+#[serde(tag = "kind", rename_all_fields = "camelCase")]
+pub enum RerunDto {
+    Fetch {
+        remote_name: String,
+        prune: Option<bool>,
+    },
+    FetchAll {
+        prune: Option<bool>,
+    },
+    Pull,
+    PushCurrentBranch {
+        remote_name: String,
+        no_verify: bool,
+    },
+    PushBranch {
+        remote_name: String,
+        local_branch: String,
+        remote_branch: String,
+        set_upstream: bool,
+        no_verify: bool,
+    },
+    PushTags {
+        remote_name: String,
+        names: Vec<String>,
+        no_verify: bool,
+    },
+}
+
+impl From<crate::oplog::Rerun> for RerunDto {
+    fn from(rerun: crate::oplog::Rerun) -> Self {
+        use crate::oplog::Rerun;
+        match rerun {
+            Rerun::Fetch { remote_name, prune } => Self::Fetch { remote_name, prune },
+            Rerun::FetchAll { prune } => Self::FetchAll { prune },
+            Rerun::Pull => Self::Pull,
+            Rerun::PushCurrentBranch {
+                remote_name,
+                no_verify,
+            } => Self::PushCurrentBranch {
+                remote_name,
+                no_verify,
+            },
+            Rerun::PushBranch {
+                remote_name,
+                local_branch,
+                remote_branch,
+                set_upstream,
+                no_verify,
+            } => Self::PushBranch {
+                remote_name,
+                local_branch,
+                remote_branch,
+                set_upstream,
+                no_verify,
+            },
+            Rerun::PushTags {
+                remote_name,
+                names,
+                no_verify,
+            } => Self::PushTags {
+                remote_name,
+                names,
+                no_verify,
+            },
+        }
+    }
+}
+
+/// The payload of an operation log change (#888): the desktop app's `operation-log` event and the
+/// sidecar's `operationLog` notification. `repo` is the repository key a page's `repo` names.
+#[derive(Clone, Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "OperationLogChange"))]
+#[serde(rename_all = "camelCase")]
+pub struct OperationLogChangeDto {
+    pub repo: String,
+    pub entry_id: u64,
+}
+
+impl From<&crate::oplog::Change> for OperationLogChangeDto {
+    fn from(change: &crate::oplog::Change) -> Self {
+        Self {
+            repo: change.repo.clone(),
+            entry_id: change.entry_id,
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[cfg_attr(any(test, feature = "ts"), ts(rename = "PickOutcome"))]
@@ -3672,6 +3928,15 @@ mod ts_bindings {
             HookProgressPhaseDto,
             crate::watch::WatchEvent,
             RepoWatchDto,
+            OperationLogPageDto,
+            OperationLogEntryDto,
+            OperationParamDto,
+            OperationOutcomeDto,
+            RemoteFailureDto,
+            ProgramRunDto,
+            ProgramRunStatusDto,
+            RerunDto,
+            OperationLogChangeDto,
             PickOutcomeDto,
             UndoStateDto,
             ChangeStampDto,

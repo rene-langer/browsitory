@@ -45,8 +45,8 @@ export function ShortcutSheet({
         </section>
       ))}
       <div className={styles.actions}>
-        {!vscode && openPreferences !== null && (
-          // Preferences > Keyboard (#899).
+        {openPreferences !== null && (
+          // Preferences > Keyboard (#899), which in VSCode links to its Keyboard Shortcuts (#900).
           <button
             type="button"
             onClick={() => {

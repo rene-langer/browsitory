@@ -303,6 +303,9 @@ list_missing_recent_repos/string {"jsonrpc":"2.0","id":7,"result":[]}
 list_open_repos/absent {"jsonrpc":"2.0","id":7,"result":{"activePath":null,"entries":[]}}
 list_open_repos/empty {"jsonrpc":"2.0","id":7,"result":{"activePath":null,"entries":[]}}
 list_open_repos/string {"jsonrpc":"2.0","id":7,"result":{"activePath":null,"entries":[]}}
+list_operations/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct ListOperationsParams","data":{"kind":"Other","message":"invalid type: null, expected struct ListOperationsParams"}}}
+list_operations/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
+list_operations/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct ListOperationsParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct ListOperationsParams"}}}
 list_pinned_repos/absent {"jsonrpc":"2.0","id":7,"result":[]}
 list_pinned_repos/empty {"jsonrpc":"2.0","id":7,"result":[]}
 list_pinned_repos/string {"jsonrpc":"2.0","id":7,"result":[]}

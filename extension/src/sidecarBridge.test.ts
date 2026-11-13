@@ -73,7 +73,7 @@ function createBridge(overrides: {
     async (_sides: { base: string; ours: string; theirs: string; output: string }) =>
       overrides.mergeEditorOpened ?? true,
   );
-  const executeCommand = vi.fn(async (_command: string) => undefined);
+  const executeCommand = vi.fn(async (_command: string, ..._args: unknown[]) => undefined);
   const state = fakeContext();
   const bridge = new SidecarBridge({
     spawn,
@@ -464,6 +464,14 @@ describe("SidecarBridge", () => {
     expect(postToWebview).toHaveBeenCalledWith(
       expect.objectContaining({ id: 4, error: expect.objectContaining({ code: -32602 }) }),
     );
+    expect(child.stdin.write).not.toHaveBeenCalled();
+  });
+
+  it("opens VSCode's Keyboard Shortcuts on Browsitory's shortcut commands (#900)", async () => {
+    const { bridge, child, postToWebview, executeCommand } = createBridge();
+    await bridge.handleWebviewMessage({ jsonrpc: "2.0", id: 1, method: "open_vscode_keybindings", params: {} });
+    expect(executeCommand.mock.calls).toEqual([["workbench.action.openGlobalKeybindings", "browsitory.shortcut."]]);
+    expect(postToWebview).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 1, result: null });
     expect(child.stdin.write).not.toHaveBeenCalled();
   });
 

@@ -509,8 +509,19 @@ function AppContent({
               { id: "diff", label: "Diff", content: <DiffSection /> },
               { id: "commit-message", label: "Commit message", content: <CommitMessageSection /> },
               { id: "fetch", label: "Fetch", content: <FetchSection repoPath={openRepos.activePath} /> },
-              // In VSCode its own Keyboard Shortcuts editor rebinds the keys (#900).
-              ...(toolHost === "vscode" ? [] : [{ id: "keyboard" as const, label: "Keyboard", content: <KeyboardShortcutsSection /> }]),
+              {
+                id: "keyboard",
+                label: "Keyboard",
+                // In VSCode its own Keyboard Shortcuts rebind the keys (#900).
+                content: (
+                  <KeyboardShortcutsSection
+                    vscode={toolHost === "vscode"}
+                    onOpenHostKeybindings={() => {
+                      client.openHostKeybindings().catch(() => {});
+                    }}
+                  />
+                ),
+              },
               {
                 id: "external-tools",
                 label: "External tools",

@@ -35,6 +35,10 @@ function createHarness() {
   /** The folders `workspace.fs.readDirectory` lists, by parent folder. */
   const subfolders = new Map<string, string[]>();
   const settings = new Map<string, unknown>();
+  /** Files `workspace.fs.readFile` reads, by path. */
+  const files = new Map<string, string>();
+  /** The file watchers' change listeners (#900). */
+  const watchers: Array<{ base: string; pattern: string; listeners: Set<() => void> }> = [];
   const configurationListeners = new Set<(event: { affectsConfiguration: (section: string) => boolean }) => void>();
   const statusBarItem = {
     text: "",
@@ -115,7 +119,21 @@ function createHarness() {
           return {};
         }),
         readDirectory: vi.fn(async (uri: Uri) => (subfolders.get(uri.fsPath) ?? []).map((name) => [name, 2])),
+        readFile: vi.fn(async (uri: Uri) => {
+          const text = files.get(uri.fsPath);
+          if (text === undefined) throw new Error("ENOENT");
+          return new TextEncoder().encode(text);
+        }),
       },
+      createFileSystemWatcher: vi.fn((pattern: { base: string; pattern: string }) => {
+        const watcher = { base: pattern.base, pattern: pattern.pattern, listeners: new Set<() => void>() };
+        watchers.push(watcher);
+        const on = (listener: () => void) => {
+          watcher.listeners.add(listener);
+          return { dispose: () => watcher.listeners.delete(listener) };
+        };
+        return { onDidChange: on, onDidCreate: on, onDidDelete: on, dispose: vi.fn() };
+      }),
       getConfiguration: vi.fn((section: string) => ({
         get: (key: string, fallback?: unknown) => settings.get(`${section}.${key}`) ?? fallback,
       })),
@@ -135,6 +153,15 @@ function createHarness() {
       joinPath: (base: Uri, ...parts: string[]) => fakeUri([base.fsPath, ...parts].join("/")),
       parse: (value: string) => fakeUri(value),
       file: (value: string) => fakeUri(value),
+    },
+    RelativePattern: class {
+      readonly base: string;
+      constructor(
+        base: Uri,
+        readonly pattern: string,
+      ) {
+        this.base = base.fsPath;
+      }
     },
     ViewColumn: { One: 1, Active: -1 },
     StatusBarAlignment: { Left: 1, Right: 2 },
@@ -172,6 +199,8 @@ function createHarness() {
     panel,
     existing,
     subfolders,
+    files,
+    watchers,
     statusBarItem,
     commands,
     changeSetting: (key: string, value: unknown) => {
@@ -466,6 +495,33 @@ describe("extension commands and integration points (#677, #678, #679)", () => {
     expect(harness.vscode.commands.executeCommand).toHaveBeenLastCalledWith("setContext", "browsitory.webviewFocused", false);
     // Host notifications never reach the sidecar.
     expect(harness.spawn).not.toHaveBeenCalled();
+  });
+
+  it("tells the webview the keys VSCode runs the shortcuts with, again when keybindings.json changes (#900)", async () => {
+    const user = "/home/u/.config/Code/User";
+    const file = `${user}/keybindings.json`;
+    Object.assign(harness.context, { globalStorageUri: fakeUri(`${user}/globalStorage/rene-langer.browsitory`) });
+    Object.assign(harness.context.extension.packageJSON.contributes, {
+      keybindings: [
+        { command: "browsitory.shortcut.close-tab", key: "ctrl+w", mac: "cmd+w", when: "x" },
+        { command: "browsitory.shortcut.refresh", key: "f5", when: "x" },
+      ],
+    });
+    harness.files.set(file, '// mine\n[{ "key": "ctrl+shift+w", "command": "browsitory.shortcut.close-tab" },]');
+    activate(harness.context);
+    await harness.openPanel();
+    await harness.dispatch({ jsonrpc: "2.0", method: "hostReady" });
+    await vi.waitFor(() =>
+      expect(hostRequests()).toEqual([{ kind: "keybindings", keys: { "close-tab": ["ctrl+w", "ctrl+shift+w"], refresh: ["f5"] } }]),
+    );
+
+    harness.files.set(file, '[{ "key": "f5", "command": "-browsitory.shortcut.refresh" }]');
+    const watcher = harness.watchers.find((candidate) => candidate.pattern === "keybindings.json" && candidate.base === user);
+    expect(watcher).toBeDefined();
+    for (const listener of watcher!.listeners) listener();
+    await vi.waitFor(() =>
+      expect(hostRequests().at(-1)).toEqual({ kind: "keybindings", keys: { "close-tab": ["ctrl+w"], refresh: [] } }),
+    );
   });
 
   it("opens a commit picked in the Timeline view in the graph (#759)", async () => {

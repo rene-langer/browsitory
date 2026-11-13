@@ -42,15 +42,22 @@ struct Discovered {
 fn discover(path: &Path) -> Result<Discovered, String> {
     let repo = git_core::repo::open(path).map_err(|e| e.to_string())?;
     let root = repo.workdir().unwrap_or_else(|| repo.path()).to_path_buf();
-    let key = match std::fs::canonicalize(&root) {
-        Ok(canonical) => canonical,
-        Err(_) => trim_trailing_separators(&root),
-    };
     Ok(Discovered {
-        key: key.to_string_lossy().into_owned(),
+        key: key_of(&repo),
         git_dir: repo.path().to_path_buf(),
         root,
     })
+}
+
+/// `repo_key` of an opened repository.
+pub(super) fn key_of(repo: &git2::Repository) -> String {
+    let root = repo.workdir().unwrap_or_else(|| repo.path());
+    match std::fs::canonicalize(root) {
+        Ok(canonical) => canonical,
+        Err(_) => trim_trailing_separators(root),
+    }
+    .to_string_lossy()
+    .into_owned()
 }
 
 /// The path to spawn `found`'s worker from. The worker reopens its repository from that path

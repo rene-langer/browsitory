@@ -93,26 +93,31 @@ where
         let prompt = wait.prompt;
         let phase = phase.clone();
         let user_cancel = wait.op.cancel_check();
+        // The step's program log (the operation log, #887): `pre-push` runs on the helper.
+        let runs = git_core::process::current_run_log().unwrap_or_default();
         std::thread::Builder::new()
             .name("transfer".to_string())
             .spawn(move || {
-                let cancel = || helper_cancelled(&phase, &user_cancel);
-                let mut reporter = HelperReporter {
-                    messages: tx.clone(),
-                    phase: phase.clone(),
-                };
-                let result = git2::Repository::open(&path)
-                    .map_err(RemoteError::from)
-                    .and_then(|repo| {
-                        let profile = git_core::remote::remote_auth_profile(&repo, &remote_name)?;
-                        let mut provider = if prompt {
-                            RemoteCredentialProvider::new(&credentials, profile)
-                        } else {
-                            RemoteCredentialProvider::without_prompt(&credentials, profile)
-                        };
-                        transfer(&repo, &mut provider, &mut reporter, &cancel)
-                    });
-                let _ = tx.send(HelperMessage::Done(result));
+                git_core::process::record_runs(&runs, || {
+                    let cancel = || helper_cancelled(&phase, &user_cancel);
+                    let mut reporter = HelperReporter {
+                        messages: tx.clone(),
+                        phase: phase.clone(),
+                    };
+                    let result = git2::Repository::open(&path)
+                        .map_err(RemoteError::from)
+                        .and_then(|repo| {
+                            let profile =
+                                git_core::remote::remote_auth_profile(&repo, &remote_name)?;
+                            let mut provider = if prompt {
+                                RemoteCredentialProvider::new(&credentials, profile)
+                            } else {
+                                RemoteCredentialProvider::without_prompt(&credentials, profile)
+                            };
+                            transfer(&repo, &mut provider, &mut reporter, &cancel)
+                        });
+                    let _ = tx.send(HelperMessage::Done(result));
+                })
             })
     };
     if spawned.is_err() {

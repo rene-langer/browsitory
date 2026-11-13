@@ -104,6 +104,7 @@
   "list_font_families",
   "list_missing_recent_repos",
   "list_open_repos",
+  "list_operations",
   "list_pinned_repos",
   "list_pull_requests",
   "list_recent_authors",
