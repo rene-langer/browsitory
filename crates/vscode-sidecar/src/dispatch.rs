@@ -31,6 +31,7 @@ mod tag;
 mod tools;
 mod tree;
 mod undo;
+mod user_commands;
 mod watch;
 mod worktree;
 
@@ -54,6 +55,7 @@ use tag::*;
 use tools::*;
 use tree::*;
 use undo::*;
+use user_commands::*;
 use watch::*;
 use worktree::*;
 
@@ -187,6 +189,9 @@ methods!(|params, repos, stdout| {
     "set_diff_settings" => set_diff_settings(SetDiffSettingsParams),
     "get_external_tool_settings" => get_external_tool_settings(),
     "set_external_tool_settings" => set_external_tool_settings(SetExternalToolSettingsParams),
+    "list_user_commands" => list_user_commands(ListUserCommandsParams),
+    "set_user_commands" => set_user_commands(SetUserCommandsParams),
+    "check_user_command" => check_user_command(CheckUserCommandParams),
     "get_git_tools" => get_git_tools(RepoPathParams, repos),
     "get_file_sides" => get_file_sides(FileSidesParams, repos),
     "get_commit_tree" => get_commit_tree(GetCommitTreeParams, repos),

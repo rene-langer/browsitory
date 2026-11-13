@@ -23,6 +23,10 @@ import type {
   Trailer,
   DiffSource,
   ExternalToolSettings,
+  UserCommand,
+  UserCommandCheck,
+  UserCommandInput,
+  UserCommands,
   GitTools,
   MarkResolvedOutcome,
   MergeToolOutcome,
@@ -486,5 +490,10 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
     getExternalToolSettings: () => call<ExternalToolSettings>("get_external_tool_settings"),
     setExternalToolSettings: (settings: ExternalToolSettings) =>
       call<void>("set_external_tool_settings", { settings }),
-    getGitTools: (repoPath: string) => call<GitTools>("get_git_tools", { repoPath }),  };
+    getGitTools: (repoPath: string) => call<GitTools>("get_git_tools", { repoPath }),
+    listUserCommands: (repoPath: string | null) => call<UserCommands>("list_user_commands", { repoPath }),
+    setUserCommands: (repoPath: string | null, commands: UserCommandInput[]) =>
+      call<UserCommand[]>("set_user_commands", { repoPath, commands }),
+    checkUserCommand: (commandLine: string, workingDirectory: string | null) =>
+      call<UserCommandCheck>("check_user_command", { commandLine, workingDirectory }),  };
 }

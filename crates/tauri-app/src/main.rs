@@ -49,6 +49,8 @@ use commands::{
 };
 // Several paths as one undo step (#528).
 use commands::{ignore_paths, stage_paths, unstage_paths};
+// User-defined commands (#893).
+use commands::{check_user_command, list_user_commands, set_user_commands};
 // The repository tab names (#625).
 use commands::{list_repo_aliases, set_repo_alias};
 // The picker's recent repositories: remove one, and which folders are gone (#690).
@@ -259,6 +261,9 @@ commands![
     resolve_whole_file,
     get_external_tool_settings,
     set_external_tool_settings,
+    list_user_commands,
+    set_user_commands,
+    check_user_command,
     get_git_tools,
     get_file_sides,
     get_commit_tree,
