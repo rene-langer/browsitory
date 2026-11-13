@@ -129,6 +129,7 @@ export type TransportSpecific =
   | "supportsHostGitCommands"
   | "runHostGitCommand"
   | "openHostKeybindings"
+  | "userCommandsBlocked"
   | "listOpenRepos"
   | "subscribeTransferProgress"
   | "subscribeHookProgress"

@@ -88,6 +88,7 @@ describe.skipIf(sidecarMissing)("SidecarBridge with the real vscode-sidecar", ()
       openDiff: async () => undefined,
       openMergeEditor: async () => true,
       executeCommand: async () => undefined,
+      isWorkspaceTrusted: () => true,
     });
 
     async function request(id: number, method: string, params: Record<string, unknown>) {

@@ -153,6 +153,7 @@ describe("vscodeRepoClient", () => {
       [() => vscodeRepoClient.setUserCommands("/r", []), "set_user_commands", { repoPath: "/r", commands: [] }, []],
       [() => vscodeRepoClient.runUserCommand("/r", "id-1", "run-1", { commitId: null, branch: "main", refName: null, paths: [] }), "run_user_command", { repoPath: "/r", commandId: "id-1", runId: "run-1", context: { commitId: null, branch: "main", refName: null, paths: [] } }, { exitCode: 0, success: true, timedOut: false, cancelled: false, output: "" }],
       [() => vscodeRepoClient.cancelUserCommand("run-1"), "cancel_user_command", { runId: "run-1" }, null],
+      [() => vscodeRepoClient.userCommandsBlocked(), "user_commands_blocked", {}, "Not here."],
       [() => vscodeRepoClient.checkUserCommand("make", "sub"), "check_user_command", { commandLine: "make", workingDirectory: "sub" }, { words: ["make"], program: "make", programPath: null, variables: [] }],
       [() => vscodeRepoClient.getWorkingDiff("/repo", "f.txt", false, { ignoreWhitespace: true, contextLines: 5, algorithm: "Patience" }), "get_working_diff", { repoPath: "/repo", path: "f.txt", staged: false, opts: { ignoreWhitespace: true, contextLines: 5, algorithm: "Patience" }, oldPath: null }, []],
       [() => vscodeRepoClient.getWorkingDiff("/repo", "new.txt", true, { ignoreWhitespace: true, contextLines: 5, algorithm: "Patience" }, "old.txt"), "get_working_diff", { repoPath: "/repo", path: "new.txt", staged: true, opts: { ignoreWhitespace: true, contextLines: 5, algorithm: "Patience" }, oldPath: "old.txt" }, []],

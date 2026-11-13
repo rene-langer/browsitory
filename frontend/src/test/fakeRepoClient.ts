@@ -115,6 +115,7 @@ export const EMPTY_RESULTS: Partial<RepoClient> = {
   setExternalToolSettings: async () => {},
   getGitTools: async () => ({ diffTool: null, mergeTool: null }),
   listUserCommands: async () => ({ global: [], repository: [] }),
+  userCommandsBlocked: async () => null,
   getFileSides: async () => ({ old: { kind: "Missing" as const }, new: { kind: "Missing" as const } }),
   getCommitTree: async () => ({ entries: [], truncated: false }),
   getFileAtCommit: async () => ({ kind: "Binary" as const, size: 0 }),

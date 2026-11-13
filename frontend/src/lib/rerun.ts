@@ -52,7 +52,13 @@ export function runRerun(rerun: Rerun, actions: RerunActions): void {
  */
 export function rerunBlockedReason(
   rerun: Rerun,
-  state: { remotes: string[]; branches: string[]; userCommands?: string[] },
+  state: {
+    remotes: string[];
+    branches: string[];
+    userCommands?: string[];
+    /** Why no user command runs here (an untrusted VSCode workspace, #896). */
+    userCommandsBlocked?: string | null;
+  },
 ): string | null {
   if (rerun.kind === "FetchAll") {
     return state.remotes.length === 0 ? "The repository has no remotes any more." : null;
@@ -60,6 +66,7 @@ export function rerunBlockedReason(
   if (rerun.kind === "Pull") return null;
   // A user command runs again only while it is still defined (#894); it needs no remote.
   if (rerun.kind === "UserCommand") {
+    if (state.userCommandsBlocked != null) return state.userCommandsBlocked;
     return state.userCommands?.includes(rerun.commandId) === true ? null : "The command no longer exists.";
   }
   if (!state.remotes.includes(rerun.remoteName)) return `The remote ${rerun.remoteName} no longer exists.`;

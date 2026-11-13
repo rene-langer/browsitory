@@ -88,4 +88,11 @@ describe("user command reruns (#890, #894)", () => {
       "The command no longer exists.",
     );
   });
+
+  it("in an untrusted VSCode workspace says why it can't run (#896)", () => {
+    const reason = "Your commands don't run in an untrusted workspace. Trust this workspace to run them.";
+    expect(
+      rerunBlockedReason(rerun, { remotes: [], branches: [], userCommands: [], userCommandsBlocked: reason }),
+    ).toBe(reason);
+  });
 });

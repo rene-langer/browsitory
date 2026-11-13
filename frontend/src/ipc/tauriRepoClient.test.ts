@@ -900,6 +900,10 @@ describe("tauriRepoClient external tools", () => {
     expect(invoke).toHaveBeenLastCalledWith("run_user_command", { repoPath: "/repo", commandId: "id-1", runId: "run-1", context });
     await tauriRepoClient.cancelUserCommand("run-1");
     expect(invoke).toHaveBeenLastCalledWith("cancel_user_command", { runId: "run-1" });
+    // The desktop app has no workspace trust: user commands always run (#896).
+    const calls = vi.mocked(invoke).mock.calls.length;
+    await expect(tauriRepoClient.userCommandsBlocked()).resolves.toBeNull();
+    expect(vi.mocked(invoke).mock.calls.length).toBe(calls);
   });
 });
 

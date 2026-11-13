@@ -188,12 +188,31 @@ export function RepoWorkspace({
   const storedUserCommands = useUserCommands(client, repoPath).commands;
   const userCommandRunner = useUserCommandRunner({ client, repoPath, refresh: appState.refresh, pushToast });
   const runUserCommand = userCommandRunner.run;
+  // In an untrusted VSCode workspace no user command runs (#896): the menus leave them out and
+  // the palette lists them as unavailable, saying why.
+  const [userCommandsBlocked, setUserCommandsBlocked] = useState<string | null>(null);
+  useEffect(() => {
+    let ignore = false;
+    client.userCommandsBlocked().then(
+      (reason) => {
+        if (!ignore) setUserCommandsBlocked(reason);
+      },
+      () => {},
+    );
+    return () => {
+      ignore = true;
+    };
+  }, [client]);
+  const allUserCommands = useMemo(
+    () => (storedUserCommands === null ? [] : [...storedUserCommands.global, ...storedUserCommands.repository]),
+    [storedUserCommands],
+  );
   const userCommandsApi = useMemo<UserCommandsApi | null>(
     () =>
-      storedUserCommands === null
+      storedUserCommands === null || userCommandsBlocked !== null
         ? null
-        : { commands: [...storedUserCommands.global, ...storedUserCommands.repository], run: runUserCommand },
-    [storedUserCommands, runUserCommand],
+        : { commands: allUserCommands, run: runUserCommand },
+    [storedUserCommands, userCommandsBlocked, allUserCommands, runUserCommand],
   );
   // A repository tab menu's command (#895): run on the repository, with its current branch.
   const userCommandBranch = appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null;
@@ -583,7 +602,7 @@ export function RepoWorkspace({
         },
         toggle: { shown: sidebarState !== "collapsed", run: () => toggleSidebar() },
       },
-      userCommands: userCommandsApi ?? undefined,
+      userCommands: { commands: allUserCommands, run: runUserCommand, blockedReason: userCommandsBlocked },
       branchSwitch: {
         recentBranches: readRecentBranches(repoPath),
         onSwitchBranch: (name) => {
@@ -923,6 +942,7 @@ export function RepoWorkspace({
                     remotes: appState.state.remotes.map((remote) => remote.name),
                     branches: appState.state.branches.map((branch) => branch.name),
                     userCommands: userCommandsApi?.commands.map((command) => command.id) ?? [],
+                    userCommandsBlocked,
                   }),
           }}
           onClose={() => setOperationLog(null)}

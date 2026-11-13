@@ -1363,6 +1363,12 @@ export interface RepoClient {
    */
   openHostKeybindings(): Promise<void>;
   /**
+   * Why user commands can't run here (#896): in VSCode, an untrusted workspace (the extension
+   * host refuses `run_user_command` there too); `null` when they can. Always `null` in the
+   * desktop app, without calling the backend.
+   */
+  userCommandsBlocked(): Promise<string | null>;
+  /**
    * Clones and resolves when done. `operationId` is chosen by the caller so it can
    * `cancelClone` before this resolves; progress arrives on `subscribeTransferProgress` with
    * `operation: "Clone"` (Progress phases only, no Starting/Completed). Rejects with `CloneError`.

@@ -46,6 +46,7 @@ function bridgeWithoutSidecar() {
     appendLine: () => {},
     openFile: async () => undefined,
     revealInOS: async () => undefined,
+    isWorkspaceTrusted: () => true,
     createTerminal: () => {},
     openDiff: async () => undefined,
     openMergeEditor: async () => true,

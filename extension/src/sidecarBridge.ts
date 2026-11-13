@@ -35,7 +35,13 @@ export const NATIVE_METHODS: ReadonlySet<string> = new Set([
   "run_vscode_git_command",
   // Preferences > Keyboard (#900): VSCode's Keyboard Shortcuts, on Browsitory's shortcuts.
   "open_vscode_keybindings",
+  // User commands (#896): why they can't run here (an untrusted workspace), or `null`.
+  "user_commands_blocked",
 ]);
+
+/** Why user commands don't run in an untrusted workspace (#896, owner decision). */
+export const UNTRUSTED_USER_COMMANDS =
+  "Your commands don't run in an untrusted workspace. Trust this workspace to run them.";
 
 /** The VSCode Git commands the webview may run (#680), by the name it sends. */
 const VSCODE_GIT_COMMANDS: Readonly<Record<string, string>> = {
@@ -137,6 +143,8 @@ export interface SidecarBridgeDependencies {
   }) => PromiseLike<boolean>;
   /** Runs a VSCode command (`vscode.commands.executeCommand`). */
   readonly executeCommand: (command: string, ...args: unknown[]) => PromiseLike<unknown>;
+  /** `vscode.workspace.isTrusted`, read on each request: trust can be granted while open. */
+  readonly isWorkspaceTrusted: () => boolean;
 }
 
 class InvalidParamsError extends Error {}
@@ -209,6 +217,17 @@ export class SidecarBridge {
           code: METHOD_NOT_FOUND,
           message: `${message.method} is not available to the webview`,
         },
+      });
+      return;
+    }
+
+    // In an untrusted workspace no user command runs (#896): the request never reaches the
+    // sidecar, whatever the webview sends.
+    if (message.method === "run_user_command" && !this.dependencies.isWorkspaceTrusted()) {
+      this.dependencies.postToWebview({
+        jsonrpc: "2.0",
+        id: message.id,
+        error: { code: -32000, message: UNTRUSTED_USER_COMMANDS },
       });
       return;
     }
@@ -741,6 +760,9 @@ export class SidecarBridge {
           result = null;
           break;
         }
+        case "user_commands_blocked":
+          result = this.dependencies.isWorkspaceTrusted() ? null : UNTRUSTED_USER_COMMANDS;
+          break;
         case "open_vscode_keybindings":
           // Filtered to the commands the shortcut keybindings run (#900).
           await this.dependencies.executeCommand("workbench.action.openGlobalKeybindings", "browsitory.shortcut.");

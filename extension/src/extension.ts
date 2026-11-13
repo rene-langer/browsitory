@@ -178,6 +178,7 @@ export function activate(context: vscode.ExtensionContext): void {
       revealInOS: (target) => vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(target)),
       createTerminal: (cwd, name) => vscode.window.createTerminal({ cwd, name }).show(),
       executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),
+      isWorkspaceTrusted: () => vscode.workspace.isTrusted,
       openDiff: (left, right, title) =>
         vscode.commands.executeCommand(
           "vscode.diff",
