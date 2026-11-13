@@ -124,6 +124,12 @@ pub enum Rerun {
         names: Vec<String>,
         no_verify: bool,
     },
+    /// A user command (#894), by id, on the selection it ran on: only a command still defined
+    /// runs again, with its variables filled from that selection anew.
+    UserCommand {
+        command_id: String,
+        context: git_core::user_command::Context,
+    },
 }
 
 /// What a new entry starts with.

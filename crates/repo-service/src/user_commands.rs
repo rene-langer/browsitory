@@ -71,6 +71,9 @@ pub struct Prepared {
     name: String,
     /// The repository's operation log (`worker::repo_key`); `None` when the path can't be read.
     journal_key: Option<String>,
+    /// The command's id and the selection it runs on, for Run again.
+    command_id: String,
+    context: Context,
 }
 
 /// Looks up the stored command `command_id` for `repo_path` and fills its variables from
@@ -89,13 +92,15 @@ pub fn prepare(
         CommandStyle::native(),
     )
     .map_err(ErrorDto::from_error)?;
-    let values = handle.user_command_values(context)?;
+    let values = handle.user_command_values(context.clone())?;
     let expanded = template.expand(&values).map_err(ErrorDto::from_error)?;
     Ok(Prepared {
         expanded,
         root: std::path::PathBuf::from(values.repo),
         name: command.name,
         journal_key: crate::worker::repo_key(repo_path).ok(),
+        command_id: command.id,
+        context,
     })
 }
 
@@ -242,6 +247,12 @@ mod tests {
             root: root.to_path_buf(),
             name: "Unit".to_string(),
             journal_key: Some(key.to_string()),
+            command_id: "unit-command".to_string(),
+            context: Context {
+                commit: Some("abc".to_string()),
+                paths: vec!["a.txt".to_string()],
+                ..Context::default()
+            },
         }
     }
 
@@ -261,6 +272,18 @@ mod tests {
         assert_eq!(entry.outcome, oplog::OperationOutcome::Succeeded);
         assert_eq!(entry.runs.len(), 1);
         assert_eq!(entry.runs[0].output, "hi\n");
+        // Run again (#890) repeats the command by id, on the same selection.
+        assert_eq!(
+            entry.rerun,
+            Some(oplog::Rerun::UserCommand {
+                command_id: "unit-command".to_string(),
+                context: Context {
+                    commit: Some("abc".to_string()),
+                    paths: vec!["a.txt".to_string()],
+                    ..Context::default()
+                },
+            })
+        );
     }
 
     #[cfg(unix)]
