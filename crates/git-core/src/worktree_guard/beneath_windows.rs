@@ -193,7 +193,53 @@ extern "system" {
     ) -> i32;
 }
 
+/// The attributes and reparse tag of `file`. FAT32 and exFAT have no `FileAttributeTagInfo`
+/// (`ERROR_INVALID_PARAMETER`, #228) and no reparse points: there the attributes come from
+/// `FileBasicInfo` and the tag is 0 (an error should one say it is a reparse point after all).
 fn attribute_tag(file: &File) -> io::Result<AttributeTagInfo> {
+    match attribute_tag_info(file) {
+        Err(error) if no_such_class(&error) => {
+            let mut basic = BasicInfo::default();
+            get_information(file, FILE_BASIC_INFO_CLASS, &mut basic)?;
+            if basic.file_attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                return Err(error);
+            }
+            Ok(AttributeTagInfo {
+                file_attributes: basic.file_attributes,
+                reparse_tag: 0,
+            })
+        }
+        other => other,
+    }
+}
+
+/// Whether `error` says the file system doesn't know an information class.
+fn no_such_class(error: &io::Error) -> bool {
+    matches!(
+        error.raw_os_error(),
+        Some(ERROR_INVALID_PARAMETER | ERROR_NOT_SUPPORTED | ERROR_INVALID_FUNCTION)
+    )
+}
+
+/// `GetFileInformationByHandleEx` with `info` as the `class` structure.
+fn get_information<T>(file: &File, class: i32, info: &mut T) -> io::Result<()> {
+    // SAFETY: the handle belongs to `file`, which outlives the call; `info` is a writable,
+    // `repr(C)` structure of exactly the size passed, and each caller pairs it with its class.
+    let ok = unsafe {
+        GetFileInformationByHandleEx(
+            file.as_raw_handle(),
+            class,
+            (info as *mut T).cast(),
+            std::mem::size_of::<T>() as u32,
+        )
+    };
+    if ok == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+fn attribute_tag_info(file: &File) -> io::Result<AttributeTagInfo> {
     let mut info = AttributeTagInfo::default();
     // SAFETY: the handle belongs to `file`, which outlives the call; `info` is a writable
     // `FILE_ATTRIBUTE_TAG_INFO` (two u32s, `repr(C)`) of exactly the size passed.
@@ -227,6 +273,29 @@ fn file_id(file: &File) -> io::Result<FileIdInfo> {
         return Err(io::Error::last_os_error());
     }
     Ok(info)
+}
+
+/// What identifies a file on its volume: its `FILE_ID_INFO`, or where the file system has none
+/// (FAT32/exFAT, #228) the volume serial number and file index `GetFileInformationByHandle`
+/// gives, which only serve to compare two handles, not to open by.
+#[derive(PartialEq, Eq)]
+enum Identity {
+    Id(FileIdInfo),
+    Index { volume: u32, index: u64 },
+}
+
+fn identity(file: &File) -> io::Result<Identity> {
+    match file_id(file) {
+        Ok(id) => Ok(Identity::Id(id)),
+        Err(error) if no_such_class(&error) => {
+            let info = handle_information(file)?;
+            Ok(Identity::Index {
+                volume: info.volume_serial_number,
+                index: info.file_index(),
+            })
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn handle_information(file: &File) -> io::Result<ByHandleFileInformation> {
@@ -364,10 +433,12 @@ fn delete_classic_with(file: &File, delete: impl Fn(&File) -> io::Result<()>) ->
 }
 
 /// The attributes `FileBasicInfo` can set: read-only, hidden, system, archive, temporary,
-/// offline, not content indexed, and OneDrive's pinned/unpinned (kept so a write doesn't clear
-/// them). The rest (directory, reparse point, compressed, …) are the file system's.
+/// offline, not content indexed, ReFS's no-scrub-data (#228), and OneDrive's pinned/unpinned
+/// (kept so a write doesn't clear them; `FileBasicInfo` clears a settable one it isn't given).
+/// The rest (directory, reparse point, compressed, integrity stream, …) are the file system's:
+/// left as they are, and a new file gets them from its folder.
 const SETTABLE_ATTRIBUTES: u32 =
-    0x1 | 0x2 | 0x4 | 0x20 | 0x100 | 0x1000 | 0x2000 | 0x8_0000 | 0x10_0000;
+    0x1 | 0x2 | 0x4 | 0x20 | 0x100 | 0x1000 | 0x2000 | 0x2_0000 | 0x8_0000 | 0x10_0000;
 
 /// Sets `file`'s settable attributes (`FILE_ATTRIBUTE_NORMAL` for none), leaving its times alone.
 fn set_attributes(file: &File, attributes: u32) -> io::Result<()> {
@@ -879,8 +950,13 @@ fn reopen_same(at: &Beneath, first: &File, reopen: bool, access: u32) -> io::Res
     if !reopen {
         options |= FILE_OPEN_REPARSE_POINT;
     }
-    let id = file_id(first)?;
-    let opened = match open_by_id(at.parent_file(), &id.file_id, access, options) {
+    let id = identity(first)?;
+    let by_id = match &id {
+        Identity::Id(id) => open_by_id(at.parent_file(), &id.file_id, access, options),
+        // No file IDs here: by name, as where opens by ID are refused.
+        Identity::Index { .. } => Err(io::Error::from_raw_os_error(ERROR_NOT_SUPPORTED)),
+    };
+    let opened = match by_id {
         Err(error)
             if matches!(
                 error.raw_os_error(),
@@ -912,7 +988,7 @@ fn reopen_same(at: &Beneath, first: &File, reopen: bool, access: u32) -> io::Res
     // Opened by identity, it may have been renamed out of the held parent meanwhile (delete is
     // shared): then not this leaf any more, and the caller tries again. (Opened by its ID, a
     // file with hard links may report any of its names as its final path, see `name_in_parent`.)
-    if file_id(&second)? != id
+    if identity(&second)? != id
         || name_in_parent(&second, at.parent_file(), at.leaf_name())?.is_none()
     {
         return Ok(None);

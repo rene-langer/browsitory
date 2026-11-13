@@ -1791,7 +1791,8 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   name is the existing entry's own spelling (a `readdir` of the held parent: the exact name,
   else the single entry equal ignoring case, `fold_name`). Windows: the leaf is classified as
   before; an existing file must reopen for reading and writing by its file ID (read-only →
-  #209), its settable attributes (`FileBasicInfo`) are copied to the temporary file, and its
+  #209), its settable attributes (`FileBasicInfo`; ReFS's no-scrub-data among them, #228,
+  while an integrity stream comes from the folder) are copied to the temporary file, and its
   on-disk name comes from `GetFinalPathNameByHandleW` when that equals the leaf ignoring case
   (else the leaf as given: a short 8.3 name, or another name of a hardlinked file in the same
   folder), or for a hardlinked file whose final path is in another folder from its name entry
