@@ -81,7 +81,56 @@ export function vscodeShortcutKeybindings(): VscodeKeybinding[] {
   });
 }
 
-// Stub for the test-first commit (#900); the implementation commit replaces it.
-export function chordFromVscodeKey(_key: string, _apple: boolean): KeyChord | null {
-  return null;
+const FROM_VSCODE: Record<string, string> = {
+  left: "ArrowLeft",
+  right: "ArrowRight",
+  up: "ArrowUp",
+  down: "ArrowDown",
+  tab: "Tab",
+  enter: "Enter",
+  escape: "Escape",
+  space: " ",
+  backspace: "Backspace",
+  delete: "Delete",
+  insert: "Insert",
+  home: "Home",
+  end: "End",
+  pageup: "PageUp",
+  pagedown: "PageDown",
+};
+
+/**
+ * A key in VSCode's keybinding syntax as a chord (#900), the inverse of `vscodeKey`; `null` for
+ * what a chord can't be: a two-step key ("ctrl+k ctrl+s"), a scan code ("[BracketLeft]"), or the
+ * Windows/Super key.
+ */
+export function chordFromVscodeKey(key: string, apple: boolean): KeyChord | null {
+  const text = key.trim().toLowerCase();
+  if (text === "" || /\s/.test(text)) return null;
+  const parts = text.split("+");
+  // "ctrl++" is Ctrl and the plus key.
+  const name = parts.length > 1 && parts[parts.length - 1] === "" ? "+" : parts[parts.length - 1];
+  const modifiers = parts.slice(0, name === "+" && parts.length > 1 ? -2 : -1);
+  const chord: KeyChord = { key: "" };
+  for (const modifier of modifiers) {
+    if (modifier === "shift") chord.shift = true;
+    else if (modifier === "alt") chord.alt = true;
+    else if (modifier === "ctrl") {
+      if (apple) chord.ctrl = true;
+      else chord.mod = true;
+    } else if ((modifier === "cmd" || modifier === "meta") && apple) chord.mod = true;
+    else return null;
+  }
+  if (/^f([1-9]|1[0-9]|2[0-4])$/.test(name)) chord.key = name.toUpperCase();
+  else if (FROM_VSCODE[name] !== undefined) chord.key = FROM_VSCODE[name];
+  else if (name.length === 1) chord.key = name;
+  else return null;
+  // Only the modifiers it has, as the keymap writes chords.
+  return {
+    ...(chord.mod ? { mod: true } : {}),
+    ...(chord.ctrl ? { ctrl: true } : {}),
+    ...(chord.alt ? { alt: true } : {}),
+    ...(chord.shift ? { shift: true } : {}),
+    key: chord.key,
+  };
 }

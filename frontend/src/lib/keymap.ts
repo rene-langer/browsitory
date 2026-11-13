@@ -13,6 +13,7 @@ import {
 import type { KeybindingSettings, RepoClient } from "../ipc/RepoClient";
 import { logFailure } from "./logger";
 import { isApplePlatform, isVscodeHost } from "./platform";
+import { chordFromVscodeKey } from "./vscodeKeybindings";
 
 /**
  * The user's keys on top of the built-in keymap (#898): a shortcut gets other keys, a second
@@ -51,6 +52,8 @@ export type KeymapChange =
 type Overrides = Map<BindableId, KeyChord[]>;
 
 let overrides: Overrides = new Map();
+// In VSCode (#900): the keys VSCode runs the shortcuts with, which replace the built-in ones.
+let hostChords: Overrides = new Map();
 
 const REBINDABLE: readonly RebindableShortcut[] = [
   ...GLOBAL_SHORTCUTS.filter((shortcut) => shortcut.range !== true).map(
@@ -161,7 +164,7 @@ function sameList(a: readonly KeyChord[], b: readonly KeyChord[], apple: boolean
 }
 
 function publish(): void {
-  setUserChords(new Map(overrides));
+  setUserChords(new Map([...hostChords, ...overrides]));
 }
 
 /** Where the keys are kept; `null` until `connectKeymap` (and in tests that don't connect). */
@@ -375,5 +378,24 @@ export function useKeymap(): number {
   return useSyncExternalStore(subscribeKeymap, getKeymapVersion);
 }
 
-// Stub for the test-first commit (#900); the implementation commit replaces it.
-export function applyHostKeybindings(_keys: Record<string, string[]>, _apple: boolean = isApplePlatform()): void {}
+/**
+ * The keys VSCode runs the shortcuts it binds with (#900), from the extension: shown and matched
+ * instead of the built-in ones. Only those shortcuts (`vscodeKeybinding`) and not the range; a
+ * key a chord can't hold (a two-step key) is left out, though VSCode still runs it. They are not
+ * the user's overrides here, and nothing is saved.
+ */
+export function applyHostKeybindings(keys: Record<string, string[]>, apple: boolean = isApplePlatform()): void {
+  hostChords = new Map();
+  for (const shortcut of GLOBAL_SHORTCUTS) {
+    if (shortcut.vscodeKeybinding !== true || shortcut.range === true) continue;
+    const own = keys[shortcut.id];
+    if (!Array.isArray(own)) continue;
+    const chords: KeyChord[] = [];
+    for (const key of own) {
+      const chord = typeof key === "string" ? chordFromVscodeKey(key, apple) : null;
+      if (chord !== null) chords.push(chord);
+    }
+    hostChords.set(shortcut.id, chords);
+  }
+  publish();
+}

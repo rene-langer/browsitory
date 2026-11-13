@@ -107,6 +107,8 @@ export const tauriRepoClient: RepoClient = {
   // The desktop app clones and initializes itself; there is no host with Git commands (#680).
   supportsHostGitCommands: false,
   runHostGitCommand: () => Promise.reject(new Error("Not supported in the desktop app")),
+  // Preferences > Keyboard rebinds the keys here (#899); VSCode's editor is the extension's (#900).
+  openHostKeybindings: () => Promise.reject(new Error("Not supported in the desktop app")),
   // `loggedRawInvoke` logs only the command name and the rejection payload (`{ kind, message }`),
   // never the arguments, so the `request.https.token` is not logged.
   cloneRepo: (operationId: string, request: CloneRequest) =>

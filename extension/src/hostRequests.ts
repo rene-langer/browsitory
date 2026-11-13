@@ -16,7 +16,12 @@ export type HostRequest =
   /** Opens `repoPath`'s tab and selects commit `commitId` in the graph, as Go to does (#759). */
   | { kind: "showCommit"; repoPath: string; commitId: string }
   /** A global shortcut VSCode would otherwise take, pressed in the Browsitory panel. */
-  | { kind: "shortcut"; id: string; index?: number };
+  | { kind: "shortcut"; id: string; index?: number }
+  /**
+   * The keys VSCode runs each contributed shortcut with (#900), in VSCode's syntax for this
+   * platform: the contributed keybindings with the user's `keybindings.json` on top.
+   */
+  | { kind: "keybindings"; keys: Record<string, string[]> };
 
 /** Whether a path exists; `.git` is a folder in a repository and a file in a worktree or submodule. */
 export type PathExists = (target: string) => Promise<boolean>;

@@ -1,11 +1,12 @@
 import { useEffect, useRef } from "react";
 import type { HostRequest, RepoClient } from "../ipc/RepoClient";
+import { applyHostKeybindings } from "../lib/keymap";
 import { requestCommit, requestHistory, requestWorkspace } from "../lib/workspaceRequests";
 
 /**
  * Carries out the VSCode extension host's requests (#677, #678, #679, #759): opening repositories
- * as tabs, a file's or lines' history or a commit in a repository's tab, and global shortcuts
- * VSCode took first.
+ * as tabs, a file's or lines' history or a commit in a repository's tab, global shortcuts
+ * VSCode took first, and the keys VSCode runs them with (#900).
  * Subscribes once `ready` (the restored tabs are open), so a request's tab isn't replaced by the
  * restore; the host holds its requests until then.
  */
@@ -36,6 +37,9 @@ export function useHostRequests(client: RepoClient, ready: boolean, openRepoTab:
           return;
         case "shortcut":
           requestWorkspace({ kind: "shortcut", id: request.id, index: request.index });
+          return;
+        case "keybindings":
+          applyHostKeybindings(request.keys);
           return;
       }
     };
