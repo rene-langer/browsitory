@@ -286,8 +286,17 @@ fn spawn_suspended_in_job(command: &mut Command) -> std::io::Result<(Child, Opti
 /// left suspended until the time limit.
 #[cfg(windows)]
 fn spawn_in_job(command: &mut Command) -> Result<(Child, Option<Job>), RunError> {
+    spawn_in_job_with(command, &job_windows::resume)
+}
+
+/// `spawn_in_job` with `resume` in place of [`job_windows::resume`] (a test seam, #195).
+#[cfg(windows)]
+fn spawn_in_job_with(
+    command: &mut Command,
+    resume: &dyn Fn(&Child) -> std::io::Result<()>,
+) -> Result<(Child, Option<Job>), RunError> {
     let (mut child, job) = spawn_suspended_in_job(command).map_err(RunError::Spawn)?;
-    if let Err(error) = job_windows::resume(&child) {
+    if let Err(error) = resume(&child) {
         let _ = kill_and_reap(&mut child, job.as_ref());
         return Err(RunError::Spawn(error));
     }
@@ -1965,6 +1974,58 @@ mod tests {
             job: *mut std::ffi::c_void,
             result: *mut i32,
         ) -> i32;
+        fn OpenProcess(access: u32, inherit: i32, process_id: u32) -> *mut std::ffi::c_void;
+        fn WaitForSingleObject(handle: *mut std::ffi::c_void, milliseconds: u32) -> u32;
+        fn GetExitCodeProcess(process: *mut std::ffi::c_void, exit_code: *mut u32) -> i32;
+    }
+
+    /// #195: a hook whose threads can't be resumed is killed at once (with its job) and the
+    /// spawn fails with the resume's error, rather than the hook sitting suspended until its
+    /// time limit. The resume failure is injected; `cmd /C exit 0` would exit with 0 had it run.
+    #[cfg(windows)]
+    #[test]
+    fn a_hook_that_cannot_be_resumed_is_killed() {
+        use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+        const SYNCHRONIZE: u32 = 0x0010_0000;
+        const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+        let mut command = Command::new("cmd");
+        command
+            .args(["/C", "exit", "0"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        detach(&mut command);
+        let process = std::cell::RefCell::new(None);
+        let result = spawn_in_job_with(&mut command, &|child| {
+            let access = SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION;
+            // SAFETY: plain call; the result is checked before use.
+            let handle = unsafe { OpenProcess(access, 0, child.id()) };
+            assert!(!handle.is_null(), "{}", std::io::Error::last_os_error());
+            // SAFETY: a new, valid handle nothing else owns; closed exactly once, on drop.
+            *process.borrow_mut() = Some(unsafe { OwnedHandle::from_raw_handle(handle) });
+            Err(std::io::Error::other("resume refused"))
+        });
+        let error = match result {
+            Err(RunError::Spawn(error)) => error,
+            Err(other) => panic!("not a spawn error: {other:?}"),
+            Ok((child, _job)) => {
+                drop(job_windows::KillOnDrop(child));
+                panic!("the hook was started although it couldn't be resumed");
+            }
+        };
+        assert_eq!(error.to_string(), "resume refused");
+        let process = process.into_inner().expect("resume was never called");
+        // SAFETY: the handle is open and has SYNCHRONIZE access.
+        let waited = unsafe { WaitForSingleObject(process.as_raw_handle(), 0) };
+        assert_eq!(
+            waited, 0,
+            "the hook is still there (WAIT_OBJECT_0 expected)"
+        );
+        let mut exit_code = 0;
+        // SAFETY: the handle is open with query access; `exit_code` is a writable DWORD.
+        let ok = unsafe { GetExitCodeProcess(process.as_raw_handle(), &mut exit_code) };
+        assert_ne!(ok, 0, "{}", std::io::Error::last_os_error());
+        assert_eq!(exit_code, 1, "the hook ran instead of being killed");
     }
 
     /// #180: the hook is in its job before it has run a single instruction, so nothing it starts
