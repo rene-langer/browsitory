@@ -728,6 +728,32 @@ describe("SidecarBridge", () => {
     }
   });
 
+  it("never kills a disposed sidecar that exits within the grace period (#961)", async () => {
+    vi.useFakeTimers();
+    try {
+      const { bridge, child } = createBridge();
+      await bridge.handleWebviewMessage({
+        jsonrpc: "2.0",
+        id: 32,
+        method: "stage_file",
+        params: { repoPath: "/repo", path: "a.txt" },
+      });
+
+      await bridge.dispose();
+      vi.advanceTimersByTime(SIDECAR_EXIT_GRACE_MS - 1);
+      child.emit("exit", 0, null);
+      vi.advanceTimersByTime(SIDECAR_EXIT_GRACE_MS);
+
+      expect(child.stdin.end).toHaveBeenCalledOnce();
+      expect(child.kill).not.toHaveBeenCalled();
+      expect(child.listenerCount("exit")).toBe(0);
+      expect(child.stdin.listenerCount("error")).toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("restores persisted repositories before forwarding the first request after exit", async () => {
     const first = new FakeSidecar();
     const replacement = new FakeSidecar();
