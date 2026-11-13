@@ -1726,7 +1726,11 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   written through a second, normal handle (so the file system filter sees it), opened by its
   file ID (`FILE_OPEN_BY_FILE_ID`, so a link swapped in under the name isn't followed; by name
   only where the file system has no opens by ID: FAT/exFAT, which have no links, and SMB
-  shares) and accepted only with the same file ID. Leaves are opened for reading with no more
+  shares) and accepted only with the same file ID. Known limit (#228): that by-name open of a
+  file reopened through the filter follows a symbolic link swapped in under the name
+  meanwhile; the file ID check refuses the handle, so nothing is read or written through it,
+  but the link's target, possibly remote (local-to-remote links are allowed by default), has
+  been opened. Leaves are opened for reading with no more
   access than attributes, so a file whose ACL denies writing still reads; acts that may delete
   ask for `DELETE` and, where the ACL allows it, `FILE_WRITE_ATTRIBUTES`. A write classifies
   the leaf for reading and probes it for writing, but its rename replaces the old file, which
@@ -1769,8 +1773,11 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   still fails (not possible when the ACL denies `FILE_WRITE_ATTRIBUTES`). Tests turn a held
   folder into a junction in place (`FSCTL_SET_REPARSE_POINT`) during a write, a read and a
   folder creation (#164, #193), and use a work tree through the admin share
-  `\\localhost\C$\…` (SMB). Hand-declared `kernel32` and `ntdll` imports, no new dependency. A
-  `Step` seam in both walkers makes the races deterministic in tests.
+  `\\localhost\C$\…` (SMB). On CI the windows-latest job also mounts FAT32, exFAT and ReFS
+  VHDs (`scripts/ci-windows-test-volumes.ps1`, #228) for the by-name and classic fallbacks
+  and ReFS's attribute bits. Hand-declared `kernel32` and `ntdll` imports, no new dependency. A
+  `Step` seam in both walkers makes the races deterministic in tests; on Windows it also marks
+  the moment between classifying a leaf and reopening it (`Step::Classified`, #228).
 - `write_beneath` replaces the file whole and never truncates it first (#239). It writes a new
   temporary file `.{name}.browsitory-{pid}-{n}.tmp` (at most 64 bytes or UTF-16 units of the
   name) in the held parent, flushes it (`sync_all`) and renames it over the name in that same
@@ -1784,7 +1791,8 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   name is the existing entry's own spelling (a `readdir` of the held parent: the exact name,
   else the single entry equal ignoring case, `fold_name`). Windows: the leaf is classified as
   before; an existing file must reopen for reading and writing by its file ID (read-only →
-  #209), its settable attributes (`FileBasicInfo`) are copied to the temporary file, and its
+  #209), its settable attributes (`FileBasicInfo`; ReFS's no-scrub-data among them, #228,
+  while an integrity stream comes from the folder) are copied to the temporary file, and its
   on-disk name comes from `GetFinalPathNameByHandleW` when that equals the leaf ignoring case
   (else the leaf as given: a short 8.3 name, or another name of a hardlinked file in the same
   folder), or for a hardlinked file whose final path is in another folder from its name entry

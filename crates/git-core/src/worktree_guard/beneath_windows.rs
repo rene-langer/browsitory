@@ -34,7 +34,10 @@
 //! write), which must have the same file ID. That second open is by the file ID
 //! (`FILE_OPEN_BY_FILE_ID`), so a link swapped in under the name meanwhile isn't followed; only
 //! where the file system has no opens by ID (FAT/exFAT, which have no links, and SMB shares) is
-//! it by name.
+//! it by name. Known limit (#228): that by-name open of a file reopened through the filter
+//! follows a symbolic link swapped in under the name meanwhile. The file ID check then refuses
+//! the handle, so nothing is read or written through it, but the link's target has been opened,
+//! and it may be remote (Windows allows local-to-remote links by default).
 //!
 //! Leaves are opened for reading with no more access than attributes, so a file whose ACL
 //! denies writing still reads; only acts that may delete ask for `DELETE` (and
@@ -54,11 +57,10 @@ use std::path::{Path, PathBuf};
 use super::reparse::{
     self, leaf_action, LeafAction, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
 };
+use super::walk_types::Step;
 use super::walk_types::{
     next_temp_number, temp_name_units, Child, Held, HeldDir, ATTEMPTS, TEMP_PREFIX_LEN,
 };
-#[cfg(test)]
-use super::Step;
 use super::{Content, HeldFolder, Kind, Leaf, OnLink, OnMissing, Opened, Probe, StepFn, Walk};
 
 const FILE_LIST_DIRECTORY: u32 = 0x0001;
@@ -191,7 +193,53 @@ extern "system" {
     ) -> i32;
 }
 
+/// The attributes and reparse tag of `file`. FAT32 and exFAT have no `FileAttributeTagInfo`
+/// (`ERROR_INVALID_PARAMETER`, #228) and no reparse points: there the attributes come from
+/// `FileBasicInfo` and the tag is 0 (an error should one say it is a reparse point after all).
 fn attribute_tag(file: &File) -> io::Result<AttributeTagInfo> {
+    match attribute_tag_info(file) {
+        Err(error) if no_such_class(&error) => {
+            let mut basic = BasicInfo::default();
+            get_information(file, FILE_BASIC_INFO_CLASS, &mut basic)?;
+            if basic.file_attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                return Err(error);
+            }
+            Ok(AttributeTagInfo {
+                file_attributes: basic.file_attributes,
+                reparse_tag: 0,
+            })
+        }
+        other => other,
+    }
+}
+
+/// Whether `error` says the file system doesn't know an information class.
+fn no_such_class(error: &io::Error) -> bool {
+    matches!(
+        error.raw_os_error(),
+        Some(ERROR_INVALID_PARAMETER | ERROR_NOT_SUPPORTED | ERROR_INVALID_FUNCTION)
+    )
+}
+
+/// `GetFileInformationByHandleEx` with `info` as the `class` structure.
+fn get_information<T>(file: &File, class: i32, info: &mut T) -> io::Result<()> {
+    // SAFETY: the handle belongs to `file`, which outlives the call; `info` is a writable,
+    // `repr(C)` structure of exactly the size passed, and each caller pairs it with its class.
+    let ok = unsafe {
+        GetFileInformationByHandleEx(
+            file.as_raw_handle(),
+            class,
+            (info as *mut T).cast(),
+            std::mem::size_of::<T>() as u32,
+        )
+    };
+    if ok == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+fn attribute_tag_info(file: &File) -> io::Result<AttributeTagInfo> {
     let mut info = AttributeTagInfo::default();
     // SAFETY: the handle belongs to `file`, which outlives the call; `info` is a writable
     // `FILE_ATTRIBUTE_TAG_INFO` (two u32s, `repr(C)`) of exactly the size passed.
@@ -225,6 +273,29 @@ fn file_id(file: &File) -> io::Result<FileIdInfo> {
         return Err(io::Error::last_os_error());
     }
     Ok(info)
+}
+
+/// What identifies a file on its volume: its `FILE_ID_INFO`, or where the file system has none
+/// (FAT32/exFAT, #228) the volume serial number and file index `GetFileInformationByHandle`
+/// gives, which only serve to compare two handles, not to open by.
+#[derive(PartialEq, Eq)]
+enum Identity {
+    Id(FileIdInfo),
+    Index { volume: u32, index: u64 },
+}
+
+fn identity(file: &File) -> io::Result<Identity> {
+    match file_id(file) {
+        Ok(id) => Ok(Identity::Id(id)),
+        Err(error) if no_such_class(&error) => {
+            let info = handle_information(file)?;
+            Ok(Identity::Index {
+                volume: info.volume_serial_number,
+                index: info.file_index(),
+            })
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn handle_information(file: &File) -> io::Result<ByHandleFileInformation> {
@@ -374,10 +445,12 @@ fn delete_classic_with(file: &File, delete: impl Fn(&File) -> io::Result<()>) ->
 }
 
 /// The attributes `FileBasicInfo` can set: read-only, hidden, system, archive, temporary,
-/// offline, not content indexed, and OneDrive's pinned/unpinned (kept so a write doesn't clear
-/// them). The rest (directory, reparse point, compressed, …) are the file system's.
+/// offline, not content indexed, ReFS's no-scrub-data (#228), and OneDrive's pinned/unpinned
+/// (kept so a write doesn't clear them; `FileBasicInfo` clears a settable one it isn't given).
+/// The rest (directory, reparse point, compressed, integrity stream, …) are the file system's:
+/// left as they are, and a new file gets them from its folder.
 const SETTABLE_ATTRIBUTES: u32 =
-    0x1 | 0x2 | 0x4 | 0x20 | 0x100 | 0x1000 | 0x2000 | 0x8_0000 | 0x10_0000;
+    0x1 | 0x2 | 0x4 | 0x20 | 0x100 | 0x1000 | 0x2000 | 0x2_0000 | 0x8_0000 | 0x10_0000;
 
 /// Sets `file`'s settable attributes (`FILE_ATTRIBUTE_NORMAL` for none), leaving its times alone.
 fn set_attributes(file: &File, attributes: u32) -> io::Result<()> {
@@ -881,15 +954,21 @@ fn open_leaf(at: &Beneath, purpose: Purpose) -> io::Result<Option<(File, Found)>
 /// a OneDrive file) or as itself, by its file ID (see [`open_by_id`]), so a link swapped in under
 /// its name meanwhile is never followed. Where the file system has no opens by ID (FAT/exFAT,
 /// which have no links either, and SMB shares) it is opened by its name in the held parent
-/// instead. Either way the second handle must have `first`'s file ID and still be directly in
+/// instead; with `reopen` that open follows a link swapped in meanwhile (see the module docs'
+/// known limit). Either way the second handle must have `first`'s file ID and still be directly in
 /// the held parent; `None` when it isn't or the file is gone.
 fn reopen_same(at: &Beneath, first: &File, reopen: bool, access: u32) -> io::Result<Option<File>> {
     let mut options = FILE_NON_DIRECTORY_FILE;
     if !reopen {
         options |= FILE_OPEN_REPARSE_POINT;
     }
-    let id = file_id(first)?;
-    let opened = match open_by_id(at.parent_file(), &id.file_id, access, options) {
+    let id = identity(first)?;
+    let by_id = match &id {
+        Identity::Id(id) => open_by_id(at.parent_file(), &id.file_id, access, options),
+        // No file IDs here: by name, as where opens by ID are refused.
+        Identity::Index { .. } => Err(io::Error::from_raw_os_error(ERROR_NOT_SUPPORTED)),
+    };
+    let opened = match by_id {
         Err(error)
             if matches!(
                 error.raw_os_error(),
@@ -921,7 +1000,7 @@ fn reopen_same(at: &Beneath, first: &File, reopen: bool, access: u32) -> io::Res
     // Opened by identity, it may have been renamed out of the held parent meanwhile (delete is
     // shared): then not this leaf any more, and the caller tries again. (Opened by its ID, a
     // file with hard links may report any of its names as its final path, see `name_in_parent`.)
-    if file_id(&second)? != id
+    if identity(&second)? != id
         || name_in_parent(&second, at.parent_file(), at.leaf_name())?.is_none()
     {
         return Ok(None);
@@ -1022,8 +1101,8 @@ fn unreadable(error: &io::Error) -> bool {
 /// Opens the regular file at `at`'s leaf for reading: as itself, or (a non-surrogate reparse
 /// point, such as an online-only OneDrive file) reopened normally so it hydrates. Either way the
 /// read handle must be the file classified in the held parent. `None` for a link, a folder or
-/// anything missing.
-fn open_leaf_for_reading(at: &Beneath) -> io::Result<Option<File>> {
+/// anything missing. `step` sees [`Step::Classified`] between the two opens.
+fn open_leaf_for_reading(at: &Beneath, step: StepFn<'_>) -> io::Result<Option<File>> {
     let (first, found) = match open_leaf(at, Purpose::Read) {
         Ok(Some(leaf)) => leaf,
         Ok(None) => return Ok(None),
@@ -1033,6 +1112,7 @@ fn open_leaf_for_reading(at: &Beneath) -> io::Result<Option<File>> {
     let Found::File { reopen } = found else {
         return Ok(None);
     };
+    step(Step::Classified(at.leaf_name()));
     match reopen_same(at, &first, reopen, GENERIC_READ) {
         Ok(file) => Ok(file),
         Err(error) if unreadable(&error) => Ok(None),
@@ -1042,8 +1122,8 @@ fn open_leaf_for_reading(at: &Beneath) -> io::Result<Option<File>> {
 
 /// See `worktree_guard::open_beneath`.
 pub(super) fn open_file(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<Option<File>> {
-    match walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, step) {
-        Ok(Walk::Found(at)) => open_leaf_for_reading(&at),
+    match walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, &mut *step) {
+        Ok(Walk::Found(at)) => open_leaf_for_reading(&at, step),
         Ok(_) => Ok(None),
         Err(error) if unreadable(&error) => Ok(None),
         Err(error) => Err(error),
@@ -1075,12 +1155,12 @@ fn write_with(
     fill: &mut dyn FnMut(&mut File) -> io::Result<()>,
     on_wait: &mut dyn FnMut(),
 ) -> io::Result<bool> {
-    let at = match walk(workdir, rel, OnLink::Refuse, OnMissing::Create, step)? {
+    let at = match walk(workdir, rel, OnLink::Refuse, OnMissing::Create, &mut *step)? {
         Walk::Found(at) => at,
         Walk::Link | Walk::NotDir | Walk::Missing => return Ok(false),
     };
     let in_use = || file_in_use(rel);
-    let (attributes, target) = classify_for_writing(&at, &in_use, on_wait)?;
+    let (attributes, target) = classify_for_writing(&at, &in_use, on_wait, step)?;
     swap_in(
         &at,
         &mut || Ok(target.clone()),
@@ -1195,10 +1275,12 @@ fn file_in_use(rel: &Path) -> io::Error {
 /// as such (#209) and a file another program holds without sharing writing as in use (after
 /// `IN_USE_TRIES`). The rename that follows also needs to delete the old file, so a file whose
 /// ACL lets the user write but not delete it fails there with the system's access denied.
+/// `step` sees [`Step::Classified`] before each reopen.
 fn classify_for_writing(
     at: &Beneath,
     in_use: &dyn Fn() -> io::Error,
     on_wait: &mut dyn FnMut(),
+    step: StepFn<'_>,
 ) -> io::Result<(u32, OsString)> {
     let mut busy = 0;
     for _ in 0..ATTEMPTS + IN_USE_TRIES {
@@ -1218,6 +1300,7 @@ fn classify_for_writing(
                 ))
             }
             Some((first, Found::File { reopen })) => {
+                step(Step::Classified(at.leaf_name()));
                 match reopen_same(at, &first, reopen, GENERIC_READ | GENERIC_WRITE) {
                     Ok(Some(_writable)) => {
                         let attributes = attribute_tag(&first)?.file_attributes;
@@ -1630,14 +1713,18 @@ pub(super) fn link_count(full: &Path) -> io::Result<u64> {
 /// See `worktree_guard::read_beneath`.
 pub(super) fn read(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<Option<Leaf>> {
     read_walked(
-        walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, step),
+        walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, &mut *step),
         u64::MAX,
+        step,
     )
 }
 
 /// See `worktree_guard::open_leaf_beneath`.
 pub(super) fn open(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<Option<Opened>> {
-    open_walked(walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, step))
+    open_walked(
+        walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, &mut *step),
+        step,
+    )
 }
 
 /// A folder held open by its handle (see `worktree_guard::HeldFolder`), without sharing delete,
@@ -1679,8 +1766,9 @@ impl Folder {
     ) -> io::Result<Option<Leaf>> {
         let root = self.0.try_clone()?;
         read_walked(
-            walk_from(root, rel, OnLink::Refuse, OnMissing::Stop, step),
+            walk_from(root, rel, OnLink::Refuse, OnMissing::Stop, &mut *step),
             limit,
+            step,
         )
     }
 
@@ -1765,14 +1853,18 @@ fn open_dir_in(parent: &File, name: &OsStr) -> io::Result<File> {
 }
 
 /// [`read`] after the walk; a file over `limit` bytes is `worktree_guard::TooLarge`.
-fn read_walked(walked: io::Result<Walk<Beneath>>, limit: u64) -> io::Result<Option<Leaf>> {
-    open_walked(walked)?
+fn read_walked(
+    walked: io::Result<Walk<Beneath>>,
+    limit: u64,
+    step: StepFn<'_>,
+) -> io::Result<Option<Leaf>> {
+    open_walked(walked, step)?
         .map(|opened| opened.read(limit))
         .transpose()
 }
 
 /// [`open`] after the walk: a link's target, or the file opened for reading.
-fn open_walked(walked: io::Result<Walk<Beneath>>) -> io::Result<Option<Opened>> {
+fn open_walked(walked: io::Result<Walk<Beneath>>, step: StepFn<'_>) -> io::Result<Option<Opened>> {
     let at = match walked {
         Ok(Walk::Found(at)) => at,
         Ok(_) => return Ok(None),
@@ -1794,7 +1886,7 @@ fn open_walked(walked: io::Result<Walk<Beneath>>) -> io::Result<Option<Opened>> 
         })),
         Found::File { .. } => {
             drop(leaf);
-            let Some(file) = open_leaf_for_reading(&at)? else {
+            let Some(file) = open_leaf_for_reading(&at, step)? else {
                 return Ok(None);
             };
             let stat = super::FileStat::of(&file.metadata()?);
@@ -3857,5 +3949,252 @@ mod tests {
         assert!(dir.path().join("new").is_dir());
         let again = create_dir_in(&held, OsStr::new("NEW")).unwrap_err();
         assert_eq!(again.raw_os_error(), Some(ERROR_ALREADY_EXISTS));
+    }
+
+    /// A step that runs `change` once, the first time the leaf `name` is classified as a file
+    /// (between `open_leaf` and `reopen_same`, #228).
+    fn once_classified<'a>(
+        name: &'a str,
+        mut change: impl FnMut() + 'a,
+    ) -> impl FnMut(Step<'_>) + 'a {
+        let mut done = false;
+        move |step| {
+            if step == Step::Classified(OsStr::new(name)) && !done {
+                done = true;
+                change();
+            }
+        }
+    }
+
+    /// `d/f` ("inside") in a new work tree, and a file `secret` ("outside") in another folder.
+    fn tree_and_outside() -> (TempDir, TempDir, PathBuf) {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        std::fs::write(dir.path().join("d").join("f"), "inside").unwrap();
+        let outside = TempDir::new().unwrap();
+        let secret = outside.path().join("secret");
+        std::fs::write(&secret, "outside").unwrap();
+        (dir, outside, secret)
+    }
+
+    /// #228: a symbolic link swapped in under the leaf's name after it was classified is never
+    /// read through: the reopen by file ID finds the classified file, renamed to `g` in the same
+    /// held folder, and the read gives its content, as if the swap came after the read.
+    #[test]
+    fn read_never_follows_a_link_swapped_in_after_classifying() {
+        let (dir, _outside, secret) = tree_and_outside();
+        if !symlink_privilege(dir.path()) {
+            assert!(
+                std::env::var_os("CI").is_none(),
+                "no symlink privilege on CI"
+            );
+            eprintln!("SKIP: no privilege to create symbolic links");
+            return;
+        }
+        let d = dir.path().join("d");
+        let mut step = once_classified("f", || {
+            std::fs::rename(d.join("f"), d.join("g")).unwrap();
+            std::os::windows::fs::symlink_file(&secret, d.join("f")).unwrap();
+        });
+        let read = read(dir.path(), Path::new("d/f"), &mut step).unwrap();
+        assert!(
+            matches!(&read, Some(Leaf::File { bytes, .. }) if bytes == b"inside"),
+            "{read:?}"
+        );
+        assert_eq!(std::fs::read_to_string(d.join("g")).unwrap(), "inside");
+        assert_eq!(std::fs::read_to_string(&secret).unwrap(), "outside");
+    }
+
+    /// #228: a file renamed out of the held folder after it was classified isn't read under the
+    /// leaf's name.
+    #[test]
+    fn read_finds_nothing_when_the_file_is_renamed_out_after_classifying() {
+        let (dir, _outside, _secret) = tree_and_outside();
+        let root = dir.path().to_path_buf();
+        let mut step = once_classified("f", || {
+            std::fs::rename(root.join("d").join("f"), root.join("moved")).unwrap();
+        });
+        let read = read(dir.path(), Path::new("d/f"), &mut step).unwrap();
+        assert!(read.is_none(), "{read:?}");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("moved")).unwrap(),
+            "inside"
+        );
+    }
+
+    /// #228: a write whose leaf becomes a symbolic link after it was classified replaces the
+    /// link itself (classified again, the link is deleted) and never writes through it.
+    #[test]
+    fn write_replaces_a_link_swapped_in_after_classifying_without_following_it() {
+        let (dir, _outside, secret) = tree_and_outside();
+        if !symlink_privilege(dir.path()) {
+            assert!(
+                std::env::var_os("CI").is_none(),
+                "no symlink privilege on CI"
+            );
+            eprintln!("SKIP: no privilege to create symbolic links");
+            return;
+        }
+        let d = dir.path().join("d");
+        let mut step = once_classified("f", || {
+            std::fs::rename(d.join("f"), d.join("g")).unwrap();
+            std::os::windows::fs::symlink_file(&secret, d.join("f")).unwrap();
+        });
+        assert!(write(dir.path(), Path::new("d/f"), b"new", &mut step).unwrap());
+        assert!(!std::fs::symlink_metadata(d.join("f"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(std::fs::read_to_string(d.join("f")).unwrap(), "new");
+        assert_eq!(std::fs::read_to_string(d.join("g")).unwrap(), "inside");
+        assert_eq!(std::fs::read_to_string(&secret).unwrap(), "outside");
+    }
+
+    /// #228: a write whose file is renamed out of the held folder after it was classified
+    /// writes a new file under the leaf's name and leaves the moved file alone.
+    #[test]
+    fn write_creates_the_leaf_when_the_file_is_renamed_out_after_classifying() {
+        let (dir, _outside, _secret) = tree_and_outside();
+        let root = dir.path().to_path_buf();
+        let mut step = once_classified("f", || {
+            std::fs::rename(root.join("d").join("f"), root.join("moved")).unwrap();
+        });
+        assert!(write(dir.path(), Path::new("d/f"), b"new", &mut step).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("d").join("f")).unwrap(),
+            "new"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("moved")).unwrap(),
+            "inside"
+        );
+    }
+
+    /// A new folder on the test volume CI mounts and names in `variable` (a FAT32, exFAT or ReFS
+    /// VHD, see `scripts/ci-windows-test-volumes.ps1`, #228). `None` (the test skips) when
+    /// it isn't set, which CI never allows.
+    fn test_volume(variable: &str) -> Option<TempDir> {
+        let Some(root) = std::env::var_os(variable) else {
+            assert!(
+                std::env::var_os("CI").is_none(),
+                "{variable} is not set on CI: the windows-latest job mounts the test volumes"
+            );
+            eprintln!("SKIP: {variable} is not set");
+            return None;
+        };
+        Some(TempDir::new_in(root).unwrap())
+    }
+
+    /// FAT32 and exFAT have no opens by file ID, no POSIX deletes or renames and no hard links:
+    /// a write (new, then over the existing file), a read and a remove still work through the
+    /// by-name and classic fallbacks (#228, #195).
+    fn the_fallbacks_work_on(variable: &str) {
+        let Some(dir) = test_volume(variable) else {
+            return;
+        };
+        assert!(write(dir.path(), Path::new("d/f"), b"one", &mut no_step).unwrap());
+        assert!(write(dir.path(), Path::new("d/f"), b"two", &mut no_step).unwrap());
+        let read = read(dir.path(), Path::new("d/f"), &mut no_step).unwrap();
+        assert!(
+            matches!(&read, Some(Leaf::File { bytes, .. }) if bytes == b"two"),
+            "{read:?}"
+        );
+        assert_eq!(
+            std::fs::read(dir.path().join("d").join("f")).unwrap(),
+            b"two"
+        );
+        // A read-only file is deleted too (the classic disposition clears the attribute).
+        make_read_only(&dir.path().join("d").join("f"));
+        assert!(remove(dir.path(), Path::new("d/f"), &mut no_step).unwrap());
+        assert!(std::fs::symlink_metadata(dir.path().join("d").join("f")).is_err());
+        // No temporary file left behind.
+        let left: Vec<_> = std::fs::read_dir(dir.path().join("d"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert!(left.is_empty(), "{left:?}");
+    }
+
+    #[test]
+    fn the_fallbacks_work_on_fat32() {
+        the_fallbacks_work_on("BROWSITORY_TEST_FAT32_DIR");
+    }
+
+    #[test]
+    fn the_fallbacks_work_on_exfat() {
+        the_fallbacks_work_on("BROWSITORY_TEST_EXFAT_DIR");
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn SetFileAttributesW(name: *const u16, attributes: u32) -> i32;
+    }
+
+    /// `FILE_ATTRIBUTE_INTEGRITY_STREAM` and `FILE_ATTRIBUTE_NO_SCRUB_DATA` (ReFS, Dev Drive).
+    const INTEGRITY_STREAM: u32 = 0x8000;
+    const NO_SCRUB_DATA: u32 = 0x2_0000;
+
+    fn wide(path: &Path) -> Vec<u16> {
+        use std::os::windows::ffi::OsStrExt;
+        path.as_os_str().encode_wide().chain([0]).collect()
+    }
+
+    /// A file `f` on the ReFS test volume, which CI formats with integrity streams on, so the
+    /// file has `INTEGRITY_STREAM`, and with `NO_SCRUB_DATA` set on it.
+    fn refs_file_with_integrity_and_no_scrub() -> Option<(TempDir, PathBuf)> {
+        let dir = test_volume("BROWSITORY_TEST_REFS_DIR")?;
+        let path = dir.path().join("f");
+        std::fs::write(&path, "old").unwrap();
+        let attributes = attributes_of(&path);
+        // SAFETY: a NUL-terminated wide string that outlives the call.
+        let ok = unsafe { SetFileAttributesW(wide(&path).as_ptr(), attributes | NO_SCRUB_DATA) };
+        assert_ne!(ok, 0, "{}", io::Error::last_os_error());
+        let attributes = attributes_of(&path);
+        assert_eq!(
+            attributes & (INTEGRITY_STREAM | NO_SCRUB_DATA),
+            INTEGRITY_STREAM | NO_SCRUB_DATA,
+            "setup: {attributes:#x}"
+        );
+        Some((dir, path))
+    }
+
+    /// #228: setting the settable attributes through a handle (as the classic delete does to
+    /// clear read-only) keeps ReFS's integrity and no-scrub bits.
+    #[test]
+    fn set_attributes_keeps_integrity_and_no_scrub_on_refs() {
+        let Some((_dir, path)) = refs_file_with_integrity_and_no_scrub() else {
+            return;
+        };
+        let file = OpenOptions::new()
+            .access_mode(FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE)
+            .open(&path)
+            .unwrap();
+        let attributes = attribute_tag(&file).unwrap().file_attributes;
+        set_attributes(&file, attributes | FILE_ATTRIBUTE_READONLY).unwrap();
+        set_attributes(&file, attributes & !FILE_ATTRIBUTE_READONLY).unwrap();
+        drop(file);
+        let after = attributes_of(&path);
+        assert_eq!(
+            after & (INTEGRITY_STREAM | NO_SCRUB_DATA | FILE_ATTRIBUTE_READONLY),
+            INTEGRITY_STREAM | NO_SCRUB_DATA,
+            "{after:#x}"
+        );
+    }
+
+    /// #228: a write replaces the file with a new one; that keeps ReFS's integrity and no-scrub
+    /// bits as it keeps the other settable attributes.
+    #[test]
+    fn write_keeps_integrity_and_no_scrub_on_refs() {
+        let Some((dir, path)) = refs_file_with_integrity_and_no_scrub() else {
+            return;
+        };
+        assert!(write(dir.path(), Path::new("f"), b"new", &mut no_step).unwrap());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+        let after = attributes_of(&path);
+        assert_eq!(
+            after & (INTEGRITY_STREAM | NO_SCRUB_DATA),
+            INTEGRITY_STREAM | NO_SCRUB_DATA,
+            "{after:#x}"
+        );
     }
 }
