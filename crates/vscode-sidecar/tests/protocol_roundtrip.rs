@@ -929,6 +929,36 @@ fn run_user_command_runs_a_stored_command_with_the_selection() {
         outside["error"]["message"],
         "The path ../x isn't a path in the work tree."
     );
+
+    // Each run that started is an operation log entry (#894), with the program it ran; those
+    // refused before they start (a value missing, gone, a path outside) are not.
+    let log = sidecar.call(
+        8,
+        "list_operations",
+        serde_json::json!({"repoPath": repo_path, "before": null, "limit": 10}),
+    );
+    let entries = log["result"]["entries"].as_array().expect("entries");
+    assert_eq!(entries.len(), 3, "{log}");
+    assert!(entries
+        .iter()
+        .all(|entry| entry["name"] == "Run command"));
+    assert_eq!(entries[2]["target"], "Show");
+    assert_eq!(entries[2]["outcome"], "Succeeded");
+    assert_eq!(entries[2]["runs"][0]["output"], ran["result"]["output"]);
+    assert!(entries[2]["runs"][0]["program"]
+        .as_str()
+        .unwrap()
+        .ends_with("sh"));
+    assert_eq!(entries[1]["target"], "Fail");
+    assert_eq!(entries[1]["outcome"], "Failed");
+    assert_eq!(entries[1]["message"], "Exited with code 3.");
+    assert_eq!(entries[1]["runs"][0]["output"], "nope\n");
+    assert_eq!(entries[0]["target"], "Missing");
+    assert_eq!(entries[0]["outcome"], "Failed");
+    assert!(entries[0]["message"]
+        .as_str()
+        .unwrap()
+        .starts_with("Couldn't find the program"));
 }
 
 #[cfg(unix)]
@@ -982,6 +1012,20 @@ fn cancel_user_command_stops_a_running_command() {
         serde_json::json!({"runId": "slow-run"}),
     );
     assert_eq!(late["result"], serde_json::Value::Null);
+
+    // The stopped run is logged as cancelled (#894).
+    let log = sidecar.call(
+        6,
+        "list_operations",
+        serde_json::json!({"repoPath": repo_path, "before": null, "limit": 10}),
+    );
+    let entries = log["result"]["entries"].as_array().expect("entries");
+    let run = entries
+        .iter()
+        .find(|entry| entry["name"] == "Run command")
+        .unwrap_or_else(|| panic!("{log}"));
+    assert_eq!(run["target"], "Slow");
+    assert_eq!(run["outcome"], "Cancelled");
 }
 
 #[test]
