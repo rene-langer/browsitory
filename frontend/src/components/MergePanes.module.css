@@ -1,4 +1,4 @@
-/* The three-pane merge editor (#875). Every row uses the same columns, one per pane, so the
+/* The three-pane merge editor (#875), four with the base (#877). Every row uses the same columns, one per pane, so the
    panes line up from row to row; `--merge-panes` is their number, `--merge-gutter` the width of
    the line numbers. */
 .panes {
@@ -109,12 +109,6 @@
 }
 
 .block .cell {
-  background: var(--color-surface);
-}
-
-.base {
-  border-left: 3px solid transparent;
-  margin-bottom: var(--space-2);
   background: var(--color-surface);
 }
 

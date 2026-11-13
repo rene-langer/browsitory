@@ -275,9 +275,9 @@ describe("ConflictResolutionPane three-pane view (#875)", () => {
   it("shows a block's base behind Show base and edits the whole result", async () => {
     renderPane(unequal);
     const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
-    expect(within(first).queryByText("Base")).not.toBeInTheDocument();
+    expect(first.querySelector('[data-pane="base"]')).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Show base" }));
-    expect(within(first).getByText("Base")).toBeInTheDocument();
+    expect(cellOf(first, "base")).toBeInTheDocument();
     expect(within(first).getByText("x")).toBeInTheDocument();
     fireEvent.click(within(first).getByRole("button", { name: "Accept base" }));
     expect(within(first).getByLabelText("Result")).toHaveValue("x\n");
@@ -509,5 +509,117 @@ describe("ConflictResolutionPane take-side arrows (#876)", () => {
     await screen.findByRole("region", { name: "Conflict 1 of 2" });
     expect(screen.queryByRole("button", { name: "Take ours" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Take theirs" })).not.toBeInTheDocument();
+  });
+});
+
+// #877: Show base adds the common ancestor as a fourth pane, aligned with the others (owner
+// decision: a pane, not an overlay), in place of the block's base strip.
+describe("ConflictResolutionPane base pane (#877)", () => {
+  const headers = () =>
+    [...document.querySelectorAll("[data-pane-header]")].map((header) => header.getAttribute("data-pane-header"));
+
+  it("adds the base as a fourth pane with Show base, and takes it away again", async () => {
+    renderPane(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    const toggle = screen.getByRole("button", { name: "Show base" });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(headers()).toEqual(["ours", "result", "theirs"]);
+    expect(document.querySelector('[data-pane="base"]')).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(headers()).toEqual(["base", "ours", "result", "theirs"]);
+    expect(document.querySelector('[data-pane-header="base"]')).toHaveTextContent("Base");
+    expect(cellOf(first, "base")).toHaveTextContent("x");
+    // No separate base strip above the block's panes any more: its base is in the row.
+    expect(cellOf(first, "base").parentElement).toBe(cellOf(first, "ours").parentElement);
+    expect(screen.getAllByText("x")).toHaveLength(1);
+
+    fireEvent.click(toggle);
+    expect(headers()).toEqual(["ours", "result", "theirs"]);
+    expect(document.querySelector('[data-pane="base"]')).toBeNull();
+  });
+
+  it("aligns the base pane with the others and numbers the base's own lines", async () => {
+    renderPane(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    const second = screen.getByRole("region", { name: "Conflict 2 of 2" });
+    fireEvent.click(screen.getByRole("button", { name: "Show base" }));
+
+    expect(linesOf("a")).toEqual([
+      ["base", 1],
+      ["ours", 1],
+      ["result", 1],
+      ["theirs", 1],
+    ]);
+    expect(numbersIn(cellOf(first, "base"))).toEqual([3]);
+    expect(linesOf("c")).toEqual([
+      ["base", 4],
+      ["ours", 6],
+      ["result", 3],
+      ["theirs", 4],
+    ]);
+    expect(new Set(screen.getAllByText("c").map((text) => placeOf(text).row)).size).toBe(1);
+    expect(numbersIn(cellOf(second, "base"))).toEqual([5]);
+    expect(linesOf("d")).toEqual([
+      ["base", 6],
+      ["ours", 7],
+      ["result", 4],
+      ["theirs", 7],
+    ]);
+  });
+
+  it("collapses a long unchanged run across all four panes", async () => {
+    const lines = Array.from({ length: 12 }, (_, i) => `same ${i + 1}\n`).join("");
+    renderPane([
+      { kind: "Conflict", ours: "a\n", base: "", theirs: "b\n" },
+      { kind: "Clean", content: lines },
+      { kind: "Conflict", ours: "c\n", base: "z\n", theirs: "d\n" },
+    ]);
+    fireEvent.click(await screen.findByRole("button", { name: "Show base" }));
+    expect(screen.getAllByRole("button", { name: /unchanged lines/ })).toHaveLength(1);
+    expect(linesOf("same 10")).toEqual([
+      ["base", 10],
+      ["ours", 11],
+      ["result", 10],
+      ["theirs", 11],
+    ]);
+  });
+
+  it("says a block without a base has no common lines (add/add)", async () => {
+    renderPane([{ kind: "Conflict", ours: "x1\nx2\n", base: "", theirs: "y1\n" }]);
+    const block = await screen.findByRole("region", { name: "Conflict 1 of 1" });
+    fireEvent.click(screen.getByRole("button", { name: "Show base" }));
+    expect(cellOf(block, "base")).toHaveTextContent("Empty: no common lines");
+    expect(numbersIn(cellOf(block, "base"))).toEqual([]);
+    expect(numbersIn(cellOf(block, "ours"))).toEqual([1, 2]);
+  });
+
+  it("keeps Accept base working and marks the base pane as taken", async () => {
+    const { onResolve } = renderPane(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    const second = screen.getByRole("region", { name: "Conflict 2 of 2" });
+    fireEvent.click(screen.getByRole("button", { name: "Show base" }));
+    expect(cellOf(first, "base")).not.toHaveAttribute("data-chosen");
+
+    fireEvent.click(within(first).getByRole("button", { name: "Accept base" }));
+    expect(within(first).getByLabelText("Result")).toHaveValue("x\n");
+    expect(cellOf(first, "base")).toHaveAttribute("data-chosen", "true");
+    expect(cellOf(first, "ours")).not.toHaveAttribute("data-chosen");
+    act(() => second.focus());
+    fireEvent.keyDown(second, { key: "5", code: "Digit5" });
+    expect(within(second).getByLabelText("Result")).toHaveValue("y\n");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save resolution" }));
+    expect(onResolve).toHaveBeenCalledWith("shared.txt", "a\nb\nx\nc\ny\nd\n");
+  });
+
+  it("keeps the base strip in the block view", async () => {
+    localStorage.setItem("mergeEditor.view", "blocks");
+    renderPane(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    fireEvent.click(screen.getByRole("button", { name: "Show base" }));
+    expect(within(first).getByText("Base")).toBeInTheDocument();
+    expect(document.querySelector("[data-pane]")).toBeNull();
   });
 });

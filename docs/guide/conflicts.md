@@ -27,8 +27,10 @@ A conflicted file opens the **Resolve conflict** pane:
   Over the base or a result you typed, an arrow replaces it with that side. An arrow is
   disabled while its side is in the result; **Reset** undoes it. **Blocks** shows each conflicting block on its own, our lines and
   their lines side by side above its result. When the pane is too narrow for three panes (the
-  VS Code side panel, for example), the merge editor shows the blocks. **Show base** adds the common ancestor's lines ("Empty: no common lines" when there
-  are none, for example when both sides added the file). For each block choose **Accept ours**,
+  VS Code side panel, for example), the merge editor shows the blocks. **Show base** adds the
+  common ancestor's lines ("Empty: no common lines" when there are none, for example when both
+  sides added the file): in the three panes as a fourth pane, **Base**, on the left, level with
+  the others and numbering the base's own lines; in the blocks above each block's sides. For each block choose **Accept ours**,
   **Accept theirs**, **Ours then theirs**, **Theirs then ours** or **Accept base**, or type the
   block's **Result** yourself: the result field is editable, and typing in it marks the block
   "Edited". **Reset** clears a block's choice and edits. Every block starts unresolved: the
