@@ -220,13 +220,18 @@ describe("Documentation screenshots", () => {
     await openPreferencesGroup("Commands");
     await $("legend=Commands").waitForDisplayed();
     // Two commands for every repository and one for the demo only, added as a user would (#893).
-    // The lists only: the editor's checkboxes stack above their labels for now (#970).
     await addUserCommand("all repositories", "All repositories", "Show commit stats", "git show --stat ${commit}", ["Commit"]);
     await addUserCommand("all repositories", "All repositories", "Compare with main", "git diff --stat main...${branch}", [
       "Branch",
     ]);
     await addUserCommand("trailmap", "Only in trailmap", "Lint the files", "npx eslint ${paths}", ["File"]);
+    // The first one open in its editor: its fields, menus and options.
+    const editor = 'form[aria-label="Edit Show commit stats"]';
+    await click('button[aria-label="Edit Show commit stats"]');
+    await $(editor).waitForDisplayed();
     await shoot("preferences-commands");
+    await clickInPage(`${editor} button`, "Cancel");
+    await $(editor).waitForExist({ reverse: true });
     await closePreferences();
   });
 
