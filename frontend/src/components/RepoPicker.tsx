@@ -145,7 +145,7 @@ export function RepoPicker({
 
   const openButtons = (
     <>
-      <button onClick={handleOpenFolder}>Open folder</button>
+      <button onClick={handleOpenFolder}>Open repository…</button>
       {onCloneRepository !== undefined && <button onClick={onCloneRepository}>Clone…</button>}
       {onNewRepository !== undefined && <button onClick={onNewRepository}>New repository…</button>}
     </>
