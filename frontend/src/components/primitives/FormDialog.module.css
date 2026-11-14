@@ -20,7 +20,9 @@
   gap: var(--space-3);
 }
 
-.dialog label {
+/* A field's name above its input. `:where()` keeps this rule as specific as `label` alone, so
+   a dialog's own class for a label (a checkbox or radio beside its text) wins over it (#972). */
+:where(.dialog) label {
   display: flex;
   flex-direction: column;
   gap: 2px;
