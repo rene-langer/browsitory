@@ -66,7 +66,7 @@ describe("RepoPicker", () => {
     expect(await screen.findByText("No recent repositories")).toBeInTheDocument();
   });
 
-  it("Open folder button opens the picked path", async () => {
+  it("Open repository… button opens the picked path", async () => {
     const client = fakeClient({
       listRecentRepos: async () => [],
       pickRepoFolder: async () => "/picked/repo",
@@ -75,14 +75,14 @@ describe("RepoPicker", () => {
 
     render(<RepoPicker client={client} onOpenRepo={onOpenRepo} {...workspaceProps()} />);
 
-    fireEvent.click(screen.getByText("Open folder"));
+    fireEvent.click(screen.getByText("Open repository…"));
 
     await waitFor(() => {
       expect(onOpenRepo).toHaveBeenCalledWith("/picked/repo");
     });
   });
 
-  it("Open folder button does nothing when the dialog is cancelled", async () => {
+  it("Open repository… button does nothing when the dialog is cancelled", async () => {
     const client = fakeClient({
       listRecentRepos: async () => [],
       pickRepoFolder: async () => null,
@@ -91,7 +91,7 @@ describe("RepoPicker", () => {
 
     render(<RepoPicker client={client} onOpenRepo={onOpenRepo} {...workspaceProps()} />);
 
-    fireEvent.click(screen.getByText("Open folder"));
+    fireEvent.click(screen.getByText("Open repository…"));
 
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -332,7 +332,7 @@ describe("RepoPicker welcome (#688)", () => {
     );
     const welcome = screen.getByRole("region", { name: "Welcome to Browsitory" });
     // The start actions sit in the welcome, not twice on the page.
-    expect(screen.getAllByRole("button", { name: "Open folder" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Open repository…" })).toHaveLength(1);
     fireEvent.click(within(welcome).getByRole("button", { name: "Clone…" }));
     expect(onCloneRepository).toHaveBeenCalledOnce();
     expect(within(welcome).getByText(/to search every command/)).toBeInTheDocument();
