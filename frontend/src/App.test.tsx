@@ -3722,7 +3722,7 @@ describe("App release notes on a new version", () => {
       );
       const welcome = await screen.findByRole("region", { name: "Welcome to Browsitory" });
       expect(screen.queryByRole("dialog", { name: "What’s new" })).toBeNull();
-      expect(within(welcome).getByRole("button", { name: "Open folder" })).toBeInTheDocument();
+      expect(within(welcome).getByRole("button", { name: "Open repository…" })).toBeInTheDocument();
       fireEvent.click(within(welcome).getByRole("button", { name: "User guide" }));
       expect(openExternalUrl).toHaveBeenCalledOnce();
       expect(setLastSeenVersion).not.toHaveBeenCalled();
@@ -3730,7 +3730,7 @@ describe("App release notes on a new version", () => {
       fireEvent.click(within(welcome).getByRole("button", { name: "Dismiss" }));
       expect(screen.queryByRole("region", { name: "Welcome to Browsitory" })).toBeNull();
       await waitFor(() => expect(setLastSeenVersion).toHaveBeenCalledWith("0.5.0"));
-      expect(screen.getByRole("button", { name: "Open folder" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Open repository…" })).toBeInTheDocument();
     });
   });
 

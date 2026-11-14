@@ -447,7 +447,7 @@ export const config: WebdriverIO.Config = {
     }
 
     // Seed a BROWSITORY_CONFIG_DIR the app will read/write for the whole suite run, so the
-    // second repo is already in RepoPicker's recent-repos list (its "Open Folder" button drives
+    // second repo is already in RepoPicker's recent-repos list (its "Open repository…" button drives
     // a native OS dialog WebDriver can't operate). Deliberately seeds only `recent_repos` here,
     // never `open_repos`/`active_repo` — App.tsx's E2E auto-open effect is written to force a
     // deterministic single starting repo regardless of what's persisted (see its comment), but

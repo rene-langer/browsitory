@@ -1,6 +1,6 @@
 # Content guidelines
 
-- Sentence case for buttons, menu items, headings and palette entries ("Continue rebase", "Open folder").
+- Sentence case for buttons, menu items, headings and palette entries ("Continue rebase", "Open repository…").
 - One noun per concept: "Stash", "Uncommitted changes" (everything not committed yet, in two
   groups: "Changes", not staged, and "Staged"), "Workspace" (a saved group of repositories).
 - One verb per action: "Switch to" a branch, or "Switch to (detached)" for a commit or tag; labels

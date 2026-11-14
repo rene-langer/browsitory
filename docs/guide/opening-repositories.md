@@ -1,6 +1,6 @@
 # Open, clone and create repositories
 
-When no repository is open, Browsitory shows the repository picker. **Open folder** opens a
+When no repository is open, Browsitory shows the repository picker. **Open repository…** opens a
 repository from your disk, and the list below it reopens one you used recently. The picker also
 has **Clone…**, **New repository…** and your [workspaces](workspaces.md).
 

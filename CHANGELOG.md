@@ -108,6 +108,11 @@ VS Code panel no longer leaves a stale `.git/index.lock` behind.
   in that repository failed until the file was removed by hand. The app now lets running
   operations finish (up to 5 seconds) before it exits, and starts no new one (#965).
 
+### Start page
+
+- Changed: the start page's "Open folder" button is now "Open repository…", since only a
+  repository can be opened there (#976).
+
 ### Internal
 
 - Internal: the backend keeps a log of the operations it ran in each repository: name, target,
