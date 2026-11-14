@@ -6,6 +6,7 @@ import { UserCommandsSection } from "./UserCommandsSection";
 import styles from "./UserCommandsSection.module.css";
 import userCommandsCss from "./UserCommandsSection.module.css?raw";
 import formDialogCss from "./primitives/FormDialog.module.css?raw";
+import { cascadedValue, rulesOf, subjectOf } from "../test/cssCascade";
 
 function stored(name: string, overrides: Partial<UserCommand> = {}): UserCommand {
   return {
@@ -328,30 +329,6 @@ describe("UserCommandsSection (#893)", () => {
   });
 });
 
-// The rules of a stylesheet: each selector of a rule (split at commas) with its declarations.
-function rulesOf(css: string): { selector: string; body: string }[] {
-  const plain = css.replace(/\/\*[\s\S]*?\*\//g, "");
-  return [...plain.matchAll(/([^{}]+)\{([^{}]*)\}/g)].flatMap(([, selectors, body]) =>
-    selectors.split(",").map((selector) => ({ selector: selector.trim(), body })),
-  );
-}
-
-// [ids, classes/attributes/pseudo-classes, elements] of one selector.
-function specificity(selector: string): [number, number, number] {
-  const ids = (selector.match(/#[\w-]+/g) ?? []).length;
-  const classes = (selector.match(/\.[\w-]+|\[[^\]]*\]|:(?!:)[\w-]+/g) ?? []).length;
-  const elements = (selector.replace(/[.#:][\w-]+|\[[^\]]*\]/g, "").match(/[a-z][\w-]*/gi) ?? []).length;
-  return [ids, classes, elements];
-}
-
-function beats(a: [number, number, number], b: [number, number, number]): boolean {
-  for (let i = 0; i < 3; i += 1) if (a[i] !== b[i]) return a[i] > b[i];
-  return false;
-}
-
-// The last compound selector: the element the rule styles.
-const subjectOf = (selector: string) => selector.split(/[\s>+~]+/).filter(Boolean).at(-1) ?? "";
-
 describe("UserCommandsSection's editor layout (#970)", () => {
   // jsdom lays nothing out and Vitest stubs module CSS, so the cascade is checked on the rules:
   // FormDialog stacks every `label` in a dialog (Preferences is one) as a column; a checkbox's
@@ -367,12 +344,10 @@ describe("UserCommandsSection's editor layout (#970)", () => {
     }
 
     const column = rulesOf(formDialogCss).filter(
-      ({ selector, body }) => /^label\b/.test(subjectOf(selector)) && /flex-direction\s*:\s*column/.test(body),
+      ({ selector, body }) => subjectOf(selector) === "label" && /flex-direction\s*:\s*column/.test(body),
     );
-    expect(column.map(({ selector }) => selector)).toEqual([".dialog label"]);
-    const row = rulesOf(userCommandsCss).filter(
-      ({ selector, body }) => /\.checkbox\b/.test(subjectOf(selector)) && /flex-direction\s*:\s*row/.test(body),
-    );
-    expect(row.map(({ selector }) => beats(specificity(selector), specificity(column[0].selector)))).toContain(true);
+    expect(column.length).toBeGreaterThan(0);
+    const checkbox = rulesOf(userCommandsCss).filter(({ selector }) => subjectOf(selector) === ".checkbox");
+    expect(cascadedValue([...column, ...checkbox], "flex-direction")).toBe("row");
   });
 });
