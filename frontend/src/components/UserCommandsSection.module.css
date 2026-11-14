@@ -99,8 +99,10 @@
   width: 100%;
 }
 
-.checkbox {
+/* Two classes, so it wins over FormDialog's `.dialog label` column (#970). */
+.editor .checkbox {
   display: flex;
+  flex-direction: row;
   gap: var(--space-1);
   align-items: center;
 }

@@ -62,6 +62,8 @@ VS Code panel no longer leaves a stale `.git/index.lock` behind.
   they are left out of the menus and the palette lists them as unavailable, saying why; the
   extension never passes a run to the backend there. A new guide page, "Your own commands",
   explains the variables with examples.
+- Fixed: in the command editor in Preferences → Commands, each checkbox sat above its label,
+  centred; it now sits next to it (#970).
 
 ### Keyboard shortcuts
 
