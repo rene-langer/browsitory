@@ -13,7 +13,7 @@
 }
 
 .check {
-  flex-direction: row !important;
+  flex-direction: row;
   align-items: center;
 }
 

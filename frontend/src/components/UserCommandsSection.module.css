@@ -99,7 +99,7 @@
   width: 100%;
 }
 
-/* Two classes, so it wins over FormDialog's `.dialog label` column (#970). */
+/* Wins over FormDialog's column for labels, `:where(.dialog) label` (#970, #972). */
 .editor .checkbox {
   display: flex;
   flex-direction: row;

@@ -64,6 +64,10 @@ VS Code panel no longer leaves a stale `.git/index.lock` behind.
   explains the variables with examples.
 - Fixed: in the command editor in Preferences → Commands, each checkbox sat above its label,
   centred; it now sits next to it (#970).
+- Fixed: the same in other dialogs: the checkboxes and radio buttons of Merge, Reset, Stash, Push,
+  Create tag, Delete tag from remote, the identity prompt, the parent picker, a diverged pull, a
+  switch blocked by local changes, and Preferences sat above their labels. They now sit next to
+  them (#972).
 
 ### Keyboard shortcuts
 
