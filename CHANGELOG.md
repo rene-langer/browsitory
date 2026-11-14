@@ -6,6 +6,122 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-14
+
+0.14.0 brings the operation log (#892): what the app ran in a repository, with its hooks'
+output and errors, and Run again for a failed fetch, pull or push. It adds your own commands
+(#897): programs with variables for the selected commit, branch or files, in the menus and the
+palette, also in VS Code (trusted workspaces only). And the keyboard shortcuts can be changed
+(#902): in Preferences → Keyboard in the desktop app, in VS Code's Keyboard Shortcuts editor in
+the extension. Besides: co-author chips for a squash message, and closing the window or the
+VS Code panel no longer leaves a stale `.git/index.lock` behind.
+
+### Operation log
+
+- Added: an operation log panel lists what the app ran in the repository, newest first: name,
+  target, time, duration and result. Selecting an operation shows its parameters, its error and
+  the output of the hooks and signing programs it ran, which can be copied. Filters show failed
+  operations only or hide automatic fetches; the panel follows the log while open. Open it from
+  the palette ("Show operation log"), the Help menu ("Operation log") or an error's "Show
+  details", which selects the newest failed operation. Works in the VS Code extension too (#889).
+- Added: Run again on a failed fetch, pull or push in the operation log repeats it with the same
+  parameters, as a new entry. It is refused, saying why, when the remote or branch it named is
+  gone. Local operations (commit, checkout, merge, rebase and the rest) are not offered (#890).
+- Added: the user guide's [Operation log](https://rene-langer.github.io/browsitory/operation-log/)
+  page, and the privacy page lists the log: memory only, the last 500 operations per repository,
+  without credentials, gone when you quit (#891).
+- Fixed: the operation log could still show a finished command as running to a client that listed
+  it right after the command answered; the entry now ends before the answer is sent (#958).
+
+### User-defined commands
+
+- Added: a "Commands" group in Preferences to add, edit, reorder, test and delete your own
+  commands, for every repository or only the active one (#893). A command is a program with
+  arguments and `${repo}`, `${commit}`, `${shortCommit}`, `${branch}`, `${ref}`, `${path}` and
+  `${paths}` variables; it never runs through a shell, and each value stays one argument
+  whatever spaces or quotes it holds. Commands are kept in Browsitory's own settings, never in
+  a file inside the repository, so a cloned repository can't add one. Unknown variables are
+  refused when you save, and "Test" shows how the command splits into arguments and where its
+  program was found.
+- Added: the backend runs your commands (#894): without a shell, in the repository's root or the
+  command's working directory, with the selected commit, branch, ref and files filled in and
+  checked against the repository first. Output is kept (its last 256 KiB), a command can be
+  stopped, and one that runs longer than 30 minutes is stopped. Only commands you defined can
+  run, and only programs on your `PATH` or given by an absolute path.
+  Each run is an entry in the operation log, with its output.
+- Added: "Run again" in the operation log works for your commands too (#890, #894): it runs the
+  same command on the same selection, asking first and showing its output as the command is set
+  up. It is unavailable once the command was deleted.
+- Added: your commands appear in the commit, branch, tag, file and repository tab menus they are
+  set for, last in a group of their own, and in the command palette as "Run: <name>" (#895). A
+  command whose variables can't be filled where it is offered (`${commit}` with no commit
+  selected, say) is greyed out with the reason. It asks first when it is set to, shows its output
+  in a window with Stop while it runs (or a toast with Show output when it fails), and refreshes
+  the repository afterwards when set to.
+- Added: in VS Code, your commands run only in a trusted workspace (#896). In Restricted Mode
+  they are left out of the menus and the palette lists them as unavailable, saying why; the
+  extension never passes a run to the backend there. A new guide page, "Your own commands",
+  explains the variables with examples.
+- Fixed: in the command editor in Preferences → Commands, each checkbox sat above its label,
+  centred; it now sits next to it (#970).
+
+### Keyboard shortcuts
+
+- Added: Preferences → Keyboard lists the shortcuts by group with their keys. Add key records new
+  keys by pressing them; a key another command has is named, with Replace. Keys can be removed,
+  and one shortcut or all of them reset. The shortcut sheet's "Change shortcuts…" opens it. Desktop
+  app only (#899).
+- Added: in VSCode, Preferences → Keyboard opens VSCode's Keyboard Shortcuts on Browsitory's
+  commands, and the shortcut sheet and tooltips show the keys you gave them there, read from
+  your `keybindings.json` (#900).
+- Changed: the user guide's "Change the shortcuts" explains how to change the keys, in the desktop
+  app and in VSCode; an E2E flow rebinds Refresh, uses the new key and resets it (#901).
+
+### Co-authors
+
+- Changed: a pre-filled squash message now offers co-author chips, so a squash merge's commit can
+  name its co-authors. A merge's and a paused cherry-pick's or revert's message still don't
+  (#142).
+
+### Configuration file
+
+- Fixed: an entry added by hand to `config.toml` as a `[[user_commands]]` section (or any other
+  list kept as sections, such as `[[repo_user_commands]]`) made the whole file unreadable with
+  "duplicate key", because the app had written the empty list as `user_commands = []`. Empty
+  lists are no longer written (#967).
+
+### VSCode extension: closing the panel
+
+- Fixed: closing the Browsitory panel while an operation was still writing to the repository
+  could stop it halfway and leave `.git/index.lock` behind, so every later git command in that
+  repository failed until the file was removed by hand. The panel now lets running operations
+  finish (up to 5 seconds) before it stops the background process (#961).
+
+### Desktop app: closing the window
+
+- Fixed: closing the window or quitting the app while an operation was still writing to the
+  repository could stop it halfway and leave `.git/index.lock` behind, so every later git command
+  in that repository failed until the file was removed by hand. The app now lets running
+  operations finish (up to 5 seconds) before it exits, and starts no new one (#965).
+
+### Internal
+
+- Internal: the backend keeps a log of the operations it ran in each repository: name, target,
+  start, duration, outcome, error, and the hooks and signing programs each ran with their
+  output. Memory only, the last 500 per repository, until the app quits; URLs lose their user
+  information and `Authorization` headers their value (#887).
+- Internal: `list_operations` and the `operation-log` event (`operationLog` in VS Code) expose it
+  to the frontend, in both apps (#888).
+- Internal: one E2E flow per app opens the log from a failed operation's "Show details" (#891).
+- Internal: your keyboard shortcuts are kept in `config.toml`'s `[keybindings]` section with the
+  other Preferences settings, through new `get_keybinding_settings`/`set_keybinding_settings`
+  commands, instead of the app's web storage (#898).
+- Internal: a keymap layer keeps the user's keys on top of the built-in shortcuts and the merge
+  editor's keys, with reserved keys and conflict checks; everything that shows or binds a
+  shortcut reads the effective keys (#898).
+- Internal: the VSCode E2E suite removes a git lock file a spec left behind, so the specs after it
+  still run, and fails the run naming that spec (#961).
+
 ## [0.13.0] - 2026-11-13
 
 0.13.0 brings the three-way merge editor (#881): the whole conflicted file in three panes,

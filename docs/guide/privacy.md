@@ -84,8 +84,8 @@ pull request's link open in your web browser. Your browser then connects to that
 ### Programs you set up
 
 Browsitory runs some programs that you choose or that the repository asks for: Git hooks, your
-editor, terminal, diff and merge tools, and GPG or SSH to sign commits. What those programs do
-on the network is up to them.
+editor, terminal, diff and merge tools, GPG or SSH to sign commits, and
+[your own commands](user-commands.md). What those programs do on the network is up to them.
 
 ## Data kept on your computer
 
@@ -93,13 +93,13 @@ None of this leaves your computer, and we can't see it.
 
 | What | Where |
 |---|---|
-| Settings: recent, pinned and open repositories, workspaces, branch filters, merge choices, diff, commit message, tool, fetch, update and keyboard shortcut preferences, the last version whose release notes you saw | `config.toml` in Browsitory's config folder (see below) |
+| Settings: recent, pinned and open repositories, workspaces, branch filters, merge choices, diff, commit message, tool, fetch, update and keyboard shortcut preferences, your own commands, the last version whose release notes you saw | `config.toml` in Browsitory's config folder (see below) |
 | Display choices: theme, panel sizes, open and closed sections, recent commands, recent searches, recent commit messages, the per-repository **Fetch automatically** and **Prune** choices | The app's web storage (`localStorage`) |
 | HTTPS tokens for Git remotes and pull request tokens | Your system's credential store: Keychain on macOS, Credential Manager on Windows, the Secret Service (for example GNOME Keyring or KWallet) on Linux, under the names `com.browsitory.git` and `com.browsitory.forge` |
 | Undo and redo history, a paused rebase, cherry-pick or revert | Inside each repository: the folder `.git/browsitory/` (in a linked worktree, `browsitory/` in that worktree's own Git folder, `.git/worktrees/<name>/`) and Git references under `refs/browsitory/`, shared by all worktrees |
 | How you sign in to each remote: HTTPS token or SSH agent, and the HTTPS user name (not the token) | The repository's Git config (`.git/config`), under `browsitory.remote.<remote name>` |
 | A log file of errors, with up to 5 older copies (desktop app) | `browsitory.log` in the app's log folder, see [Troubleshooting](troubleshooting.md) |
-| The [operation log](operation-log.md): the last 500 operations in each repository, with their parameters, errors and hook and signing program output (16 KB each), without credentials | Memory only, while the app runs; never written to disk, cleared when you quit |
+| The [operation log](operation-log.md): the last 500 operations in each repository, with their parameters, errors and the output of hooks, signing programs and your own commands (16 KB each), without credentials | Memory only, while the app runs; never written to disk, cleared when you quit |
 
 The log file holds errors, warnings and a few notes, for example the folders the app moved
 when its identifier changed. A message can contain a file path, a branch name or a remote's

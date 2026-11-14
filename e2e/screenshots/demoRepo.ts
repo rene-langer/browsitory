@@ -314,3 +314,31 @@ export function cleanForEdit(): void {
   git(["merge", "--abort"]);
   git(["stash", "push", "-q", "--include-untracked", "-m", "Before editing a commit"], "alex", nextDate());
 }
+
+/** A local bare repository the `operation-log` shot pushes to; its push fails on a hook. */
+const BACKUP_REMOTE_PATH = path.join(SCREENSHOT_ROOT, "backup.git");
+
+/** What the demo's pre-push hook prints before it refuses the push. */
+export const PRE_PUSH_OUTPUT = "pre-push: 2 of 48 tests failed in search.test.js";
+
+/**
+ * Adds a remote `backup` (a local bare repository, so nothing goes over the network) and a
+ * pre-push hook that prints a test failure and refuses the push, for the operation log shot.
+ */
+export function addFailingPushRemote(): void {
+  fs.rmSync(BACKUP_REMOTE_PATH, { recursive: true, force: true });
+  execFileSync("git", ["init", "-q", "--bare", BACKUP_REMOTE_PATH], { stdio: "ignore" });
+  git(["remote", "add", "backup", BACKUP_REMOTE_PATH]);
+  const hook = path.join(DEMO_REPO_PATH, ".git", "hooks", "pre-push");
+  fs.mkdirSync(path.dirname(hook), { recursive: true });
+  fs.writeFileSync(hook, `#!/bin/sh\necho "Running the tests before the push"\necho "${PRE_PUSH_OUTPUT}" >&2\nexit 1\n`, {
+    mode: 0o755,
+  });
+}
+
+/** Undoes `addFailingPushRemote`, so the later shots show the demo's sidebar as before. */
+export function removeFailingPushRemote(): void {
+  fs.rmSync(path.join(DEMO_REPO_PATH, ".git", "hooks", "pre-push"), { force: true });
+  git(["remote", "remove", "backup"]);
+  fs.rmSync(BACKUP_REMOTE_PATH, { recursive: true, force: true });
+}

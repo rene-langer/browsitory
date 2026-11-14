@@ -53,6 +53,9 @@ Then look at every changed image before you commit it.
 | `tags.png` | The Tags section |
 | `preferences.png` | Preferences, open on the Appearance group |
 | `command-palette.png` | The command palette, filtered to "branch" |
+| `preferences-keyboard.png` | Preferences, open on the Keyboard group |
+| `preferences-commands.png` | Preferences, open on the Commands group: three commands added (two for every repository, one for the demo), the first open in its editor |
+| `operation-log.png` | The operation log on a push its pre-push hook refused, with the hook's output (a local `backup` remote, removed again afterwards) |
 | `conflict.png` | A merge stopped on a conflict, with the resolve controls |
 | `dark-theme.png` | The same conflict in the dark theme |
 | `merge-editor.png` | The merge editor on that conflict in its three panes, in a 1600×1000 window |

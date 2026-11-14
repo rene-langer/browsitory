@@ -4,7 +4,14 @@ import { fileURLToPath } from "node:url";
 import { clickInPage, waitUntilInPage } from "../support/dom";
 import { expandSidebarSection, sidebarBranchRow, sidebarRemoteFolder, sidebarSectionToggle } from "../support/sidebar";
 import { SLOW_UI_TIMEOUT } from "../support/timeouts";
-import { cleanForEdit, DEMO_REPO_PATH, startConflict } from "./demoRepo";
+import {
+  addFailingPushRemote,
+  cleanForEdit,
+  DEMO_REPO_PATH,
+  PRE_PUSH_OUTPUT,
+  removeFailingPushRemote,
+  startConflict,
+} from "./demoRepo";
 
 // Captures the documentation screenshots into docs/guide/assets/ (see ./README.md). Run it with
 // `pnpm screenshots`, never as part of the E2E suite: it asserts nothing beyond "the screen it
@@ -47,6 +54,51 @@ async function setTheme(theme: "light" | "dark"): Promise<void> {
     timeout: 5000,
     timeoutMsg: `the app did not switch to the ${theme} theme`,
   });
+}
+
+/** Opens Preferences on `group`. */
+async function openPreferencesGroup(group: string): Promise<void> {
+  await click('button[aria-label="Preferences"]');
+  await $('input[aria-label="Filter settings"]').waitForDisplayed();
+  await click(`//div[@aria-label="Preference groups"]/button[normalize-space()="${group}"]`);
+}
+
+async function closePreferences(): Promise<void> {
+  await browser.keys(["Escape"]);
+  await $('input[aria-label="Filter settings"]').waitForDisplayed({ reverse: true });
+}
+
+/** Adds a command in Preferences → Commands, as a user types it (#893). */
+async function addUserCommand(
+  scope: string,
+  list: string,
+  name: string,
+  commandLine: string,
+  targets: string[],
+): Promise<void> {
+  await click(`button[aria-label="Add a command for ${scope}"]`);
+  const form = 'form[aria-label="New command"]';
+  await $(form).waitForDisplayed();
+  const [nameField, commandField] = await $$(`${form} input[type="text"]`);
+  await nameField.setValue(name);
+  await commandField.setValue(commandLine);
+  for (const target of targets) {
+    await click(`//form[@aria-label="New command"]//label[normalize-space()="${target}"]/input`);
+  }
+  await clickInPage(`${form} button`, "Save");
+  await $(form).waitForExist({ reverse: true });
+  await waitUntilInPage(`ul[aria-label="${list}"] li`, name, { contains: true });
+}
+
+/** Runs a command from the palette by its name. */
+async function runFromPalette(label: string): Promise<void> {
+  await browser.keys(["Control", "k"]);
+  const input = await $('input[aria-label="Command palette"]');
+  await input.waitForDisplayed();
+  await input.setValue(label);
+  await waitUntilInPage("li", label, { contains: true });
+  await browser.keys(["Enter"]);
+  await input.waitForDisplayed({ reverse: true });
 }
 
 describe("Documentation screenshots", () => {
@@ -155,6 +207,80 @@ describe("Documentation screenshots", () => {
     await browser.saveScreenshot(path.join(ASSETS, "command-palette.png"));
     await browser.keys(["Escape"]);
     await input.waitForDisplayed({ reverse: true });
+  });
+
+  it("preferences-keyboard", async () => {
+    await openPreferencesGroup("Keyboard");
+    await $("legend=Keyboard shortcuts").waitForDisplayed();
+    await shoot("preferences-keyboard");
+    await closePreferences();
+  });
+
+  it("preferences-commands", async () => {
+    await openPreferencesGroup("Commands");
+    await $("legend=Commands").waitForDisplayed();
+    // Two commands for every repository and one for the demo only, added as a user would (#893).
+    await addUserCommand("all repositories", "All repositories", "Show commit stats", "git show --stat ${commit}", ["Commit"]);
+    await addUserCommand("all repositories", "All repositories", "Compare with main", "git diff --stat main...${branch}", [
+      "Branch",
+    ]);
+    await addUserCommand("trailmap", "Only in trailmap", "Lint the files", "npx eslint ${paths}", ["File"]);
+    // The first one open in its editor: its fields, menus and options.
+    const editor = 'form[aria-label="Edit Show commit stats"]';
+    await click('button[aria-label="Edit Show commit stats"]');
+    await $(editor).waitForDisplayed();
+    await shoot("preferences-commands");
+    await clickInPage(`${editor} button`, "Cancel");
+    await $(editor).waitForExist({ reverse: true });
+    await closePreferences();
+  });
+
+  it("operation-log", async () => {
+    // A command of your own on the selected commit, then a push that its pre-push hook refuses.
+    await click("li*=Limit the tile cache to 200 entries");
+    await runFromPalette("Run: Show commit stats");
+    const output = 'dialog[aria-label="Show commit stats"]';
+    await waitUntilInPage(`${output} pre`, "map.js", { contains: true, timeout: SLOW_UI_TIMEOUT });
+    await clickInPage(`${output} button`, "Close");
+
+    addFailingPushRemote();
+    await runFromPalette("Refresh");
+    const remote = await $(sidebarRemoteFolder("backup"));
+    await remote.waitForExist({ timeout: SLOW_UI_TIMEOUT });
+    await browser.execute((el) => {
+      el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }));
+    }, remote);
+    await clickInPage("[role='menu'] button", "Push current branch here");
+    // Push may first ask where to: confirm the suggestion.
+    const pushDialog = 'dialog[aria-label="Push main"]';
+    await browser.waitUntil(
+      () =>
+        browser.execute(
+          (dialogSelector: string) =>
+            document.querySelector(dialogSelector) !== null ||
+            Array.from(document.querySelectorAll("[role='alert']")).some((el) =>
+              (el.textContent ?? "").includes("The pre-push hook failed."),
+            ),
+          pushDialog,
+        ),
+      { timeout: SLOW_UI_TIMEOUT, timeoutMsg: "expected the push to ask where to, or to fail" },
+    );
+    if (await (await $(pushDialog)).isExisting()) await clickInPage(`${pushDialog} button`, "Push");
+    await waitUntilInPage("[role='alert']", "The pre-push hook failed.", { contains: true, timeout: SLOW_UI_TIMEOUT });
+    await clickInPage("button", "Show details");
+    await waitUntilInPage("pre[aria-label='Output of pre-push']", PRE_PUSH_OUTPUT, {
+      contains: true,
+      timeout: SLOW_UI_TIMEOUT,
+    });
+    await shoot("operation-log");
+    await clickInPage("dialog[aria-label='Operation log'] button", "Close");
+    // Dismiss the push's error and take the remote away again, so the later shots don't show them.
+    await browser.execute(() => {
+      document.querySelectorAll<HTMLButtonElement>("[role='alert'] button[aria-label='Dismiss error']").forEach((b) => b.click());
+    });
+    removeFailingPushRemote();
+    await runFromPalette("Refresh");
+    await $(sidebarRemoteFolder("backup")).waitForExist({ reverse: true, timeout: SLOW_UI_TIMEOUT });
   });
 
   it("conflict", async () => {

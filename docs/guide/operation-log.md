@@ -1,9 +1,9 @@
 # Operation log
 
 The operation log lists what Browsitory ran in the repository, newest first: every commit,
-checkout, merge, rebase, stash, fetch, pull, push and the rest, with the time it started, how long
-it took and how it ended. Reading the repository (opening a commit, a diff, the history) is not
-listed.
+checkout, merge, rebase, stash, fetch, pull, push and the rest, and each run of
+[your own commands](user-commands.md), with the time it started, how long it took and how it
+ended. Reading the repository (opening a commit, a diff, the history) is not listed.
 
 Open it from:
 
@@ -28,6 +28,8 @@ skipped), the error, for a fetch, pull or push what the transfer reported, for a
 remotes it couldn't fetch, and every hook and signing program it ran, with its command line and
 the end of its output. **Copy** copies a program's output, for example for a bug report.
 
+![The operation log on a push that its pre-push hook refused, with the hook's output](assets/operation-log.png)
+
 **Failed only** lists only the failed operations. **Hide automatic fetches** leaves out the
 fetches **Fetch automatically** runs in the background (see
 [Branches and remotes](branches-and-remotes.md)). The log follows along while it is open: a long
@@ -44,6 +46,11 @@ Run again is not offered for local operations such as a commit, checkout, merge,
 cherry-pick: run them again yourself once you have looked at what went wrong. It is greyed out,
 with the reason, while another operation runs or when the remote or branch the operation named
 is gone. A force push is not offered again either.
+
+A failed run of [your own commands](user-commands.md) shows **Run again** too: it runs the same
+command on the same commit, branch or files, asking first and showing its output as the command
+is set up now. It is greyed out once you have deleted the command, and in VS Code in a workspace
+you don't trust.
 
 ??? note "Details"
     The log is kept in memory only, per repository, for as long as the app runs: up to the last
