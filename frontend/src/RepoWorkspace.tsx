@@ -590,11 +590,18 @@ export function RepoWorkspace({
   }, [pushCurrentBranch, pushToast]);
   useOutcomeToasts(appState.state, pushToast, undoToastAction, pullFromToast, pushFromToast);
   // No banner while a dialog handles the same error (#996): the identity dialog, the hook
-  // failure's output, the force push confirm. Closing the last two brings it back.
+  // failure's output, the force push confirm. Closing the last two brings it back. A dialog that
+  // shows its own failure (Rename branch, Connect, New pull request) keeps it, Cancel too.
+  const { error, errorSource } = appState.state;
+  const errorFrom = (source: "dialog" | "read") =>
+    error !== null && errorSource?.source === source && errorSource.error === error;
   const errorInDialog =
     appState.state.identityRequired !== null ||
     appState.state.hookFailure?.dialogOpen === true ||
-    appState.state.dialog?.kind === "forcePush";
+    appState.state.dialog?.kind === "forcePush" ||
+    errorFrom("dialog");
+  // A failed read has no operation log entry for Details to open (#984): Copy details instead.
+  const errorFromRead = errorFrom("read");
   // The banner's next steps, in its row (#984): a rejected push offers Pull first.
   const { forcePushOffer, hookFailure } = appState.state;
   const errorActions: InlineErrorAction[] = [
@@ -961,7 +968,8 @@ export function RepoWorkspace({
             hint={appState.state.errorHint ?? undefined}
             earlier={earlierErrors.earlier}
             actions={errorActions}
-            onDetails={() => setOperationLog("latestFailed")}
+            copyDetails={errorFromRead}
+            onDetails={errorFromRead ? undefined : () => setOperationLog("latestFailed")}
             onDismiss={earlierErrors.dismiss}
           />
         </div>

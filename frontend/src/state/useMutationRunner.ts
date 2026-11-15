@@ -10,7 +10,18 @@ import type { AppState } from "./useAppState";
 // `operation`: what the banner names when the mutation fails (#1032, `failureError`).
 export type RunMutation = (mutate: () => Promise<void>, operation?: FailedOperation) => Promise<void>;
 export type RunMutationWithOutcome = (mutate: () => Promise<void>, operation?: FailedOperation) => Promise<boolean>;
-export type RunMutationWithMessage = (mutate: () => Promise<void>, operation?: FailedOperation) => Promise<string | null>;
+/**
+ * `inDialog`: the caller's dialog shows the failure it resolves to, so the banner leaves it out
+ * (#996, `AppState.errorSource`).
+ */
+export interface WithMessageOptions {
+  inDialog?: boolean;
+}
+export type RunMutationWithMessage = (
+  mutate: () => Promise<void>,
+  operation?: FailedOperation,
+  options?: WithMessageOptions,
+) => Promise<string | null>;
 export type OptimisticUpdate = (prev: AppState) => AppState;
 export type RunOptimisticMutation = (
   optimisticUpdate: OptimisticUpdate,
@@ -21,6 +32,7 @@ export type RunOptimisticMutationWithMessage = (
   optimisticUpdate: OptimisticUpdate,
   mutate: () => Promise<void>,
   operation?: FailedOperation,
+  options?: WithMessageOptions,
 ) => Promise<string | null>;
 export type RunOptimisticMutationWithOutcome = (
   optimisticUpdate: OptimisticUpdate,
@@ -93,6 +105,22 @@ export function withoutStaleErrorHint(prev: AppState, next: AppState): AppState 
   return reworded ? next : { ...next, errorHint: null };
 }
 
+/**
+ * Drops `errorSource` when an update changes `error` without saying where the new one comes
+ * from, so a dialog's or a read's mark never sits on another error. `useAppState` runs every
+ * update through this.
+ */
+export function withoutStaleErrorSource(prev: AppState, next: AppState): AppState {
+  if (next.error === prev.error || (next.errorSource ?? null) === null || next.errorSource !== prev.errorSource) {
+    return next;
+  }
+  return { ...next, errorSource: null };
+}
+
+/** `errorSource` for a failure the caller's dialog shows itself (#996), else nothing. */
+const inDialogSource = (error: string, options: WithMessageOptions | undefined): Pick<AppState, "errorSource"> =>
+  options?.inDialog === true ? { errorSource: { error, source: "dialog" } } : {};
+
 // Builds the `runMutation*` variants that every domain action hook composed inside
 // `useAppState` uses to wrap its mutations. All share the same pending/refresh/error bookkeeping
 // against the top-level `AppState`; they differ only in what they resolve to (see each type
@@ -138,7 +166,7 @@ export function useMutationRunner(
   // `UseAppStateResult` for why: a create-form has one obvious trigger point to show its own
   // failure next to, per issue #30/UX-002).
   const runMutationWithMessage = useCallback<RunMutationWithMessage>(
-    async (mutate, operation) => {
+    async (mutate, operation, options) => {
       try {
         setState((prev) => ({ ...prev, pending: true, error: null }));
         await mutate();
@@ -147,7 +175,7 @@ export function useMutationRunner(
         return null;
       } catch (err) {
         const failure = failureError(err, operation);
-        setState((prev) => ({ ...prev, ...failure, pending: false }));
+        setState((prev) => ({ ...prev, ...failure, ...inDialogSource(failure.error, options), pending: false }));
         return failure.error;
       }
     },
@@ -180,7 +208,7 @@ export function useMutationRunner(
   );
 
   const runOptimisticMutationWithMessage = useCallback<RunOptimisticMutationWithMessage>(
-    async (optimisticUpdate, mutate, operation) => {
+    async (optimisticUpdate, mutate, operation, options) => {
       let snapshot: AppState | null = null;
       setState((prev) => {
         snapshot = prev;
@@ -193,7 +221,7 @@ export function useMutationRunner(
         return null;
       } catch (err) {
         const failure = failureError(err, operation);
-        setState(() => ({ ...(snapshot as AppState), ...failure, pending: false }));
+        setState(() => ({ ...(snapshot as AppState), ...failure, ...inDialogSource(failure.error, options), pending: false }));
         return failure.error;
       }
     },
