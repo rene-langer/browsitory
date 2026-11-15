@@ -68,6 +68,18 @@ import { useHostRequests } from "./state/useHostRequests";
 import { allReleaseNotes, useReleaseNotes } from "./state/useReleaseNotes";
 import { useTheme } from "./state/useTheme";
 
+/**
+ * Numbers requests: each call starts one and returns whether it is still the latest. (A closure,
+ * not a ref: the React compiler's ref check would flag every command built on the caller.)
+ */
+function latestRequests(): () => () => boolean {
+  let latest = 0;
+  return () => {
+    const request = ++latest;
+    return () => request === latest;
+  };
+}
+
 export default function App(props: {
   client: RepoClient;
   /**
@@ -179,17 +191,24 @@ function AppContent({
     [],
   );
   const { openRepo } = openRepos;
+  // Only the latest open sets the banner: a failure described after a later open (its checks
+  // take a while) is dropped.
+  const [startOpenRequest] = useState(latestRequests);
   const openRepoTab = useCallback(
     // Both branches settle asynchronously on purpose: the E2E auto-open effect (`useE2eAutoOpen`)
     // calls this directly, and a synchronous `setOpenError` in the body would be a setState-in-effect.
     (path: string) => {
+      const isLatest = startOpenRequest();
+      const settle = (failure: OpenFailure | null) => {
+        if (isLatest()) setOpenError(failure);
+      };
       return openRepo(path).then(
-        () => setOpenError(null),
+        () => settle(null),
         // Why it failed decides what the banner offers (#973, #998).
-        (error: unknown) => describeOpenFailure(client, path, error).then(setOpenError),
+        (error: unknown) => describeOpenFailure(client, path, error).then(settle),
       );
     },
-    [client, openRepo],
+    [client, openRepo, startOpenRequest],
   );
 
   // "Browsitory: Open", its menus and the contributed shortcut keys in VSCode (#677).
