@@ -311,7 +311,7 @@ export function RepoPicker({
         </section>
         {deleteConfirmation !== null && (
           <ConfirmDialog
-            ariaLabel={`Delete workspace ${deleteConfirmation.name}`}
+            title={`Delete workspace ${deleteConfirmation.name}`}
             message={
               <p>
                 Delete workspace {deleteConfirmation.name}? Its member repos stay open if currently open; only the

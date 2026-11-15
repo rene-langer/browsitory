@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { DialogActions } from "./primitives/DialogActions";
 import { FormDialog } from "./primitives/FormDialog";
 import styles from "./SwitchConflictDialog.module.css";
 import { describedBy } from "../lib/ariaDescribedBy";
@@ -35,7 +36,7 @@ export function SwitchConflictDialog({
   const shown = files.slice(0, SHOWN_FILES);
   const more = files.length - shown.length;
   return (
-    <FormDialog ariaLabel="Local changes are in the way" onCancel={onCancel}>
+    <FormDialog title="Local changes are in the way" onCancel={onCancel}>
       <div className={styles.body}>
         <p className={styles.message}>
           {files.length === 1
@@ -67,9 +68,10 @@ export function SwitchConflictDialog({
             {busyReason}
           </p>
         )}
-        <div className={styles.actions}>
+        <DialogActions>
           <button
             type="button"
+            data-tone="primary"
             disabled={operationDisabled}
             title={busyReason ?? undefined}
             aria-describedby={describedBy(reasonId, busyReason)}
@@ -80,7 +82,7 @@ export function SwitchConflictDialog({
           <button type="button" data-autofocus onClick={onCancel}>
             Cancel
           </button>
-        </div>
+        </DialogActions>
       </div>
     </FormDialog>
   );

@@ -211,9 +211,10 @@ export function StashPanel({
       )}
       {dropStash !== undefined && (
         <ConfirmDialog
-          ariaLabel={`Drop stash ${stashTitle(dropStash)}`}
+          title={`Drop stash ${stashTitle(dropStash)}`}
           message={<p>Drop "{stashTitle(dropStash)}"? This cannot be undone.</p>}
           confirmLabel="Drop stash"
+          tone="danger"
           // #521: the repository can become busy while the confirmation is open.
           confirmReason={dropDisabledReason}
           onConfirm={() => {

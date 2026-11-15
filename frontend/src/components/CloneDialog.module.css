@@ -1,5 +1,7 @@
+/* The dialog's own width, less its padding, is the room the fields have: no minimum width of
+   its own, which overflowed the dialog (#974). */
 .form {
-  min-width: min(480px, 90vw);
+  width: 100%;
 }
 
 .row {
@@ -8,8 +10,14 @@
   align-items: flex-end;
 }
 
+/* Shrinks beside Browse… instead of pushing it past the dialog's edge (#974). */
 .grow {
   flex: 1;
+  min-width: 0;
+}
+
+.grow input {
+  min-width: 0;
 }
 
 .check {

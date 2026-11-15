@@ -47,6 +47,7 @@ import { tagMenuItems } from "./tagMenuItems";
 import type { UserCommand } from "../ipc/RepoClient";
 import { NO_SELECTION, userCommandMenuItems, type RunUserCommand } from "../lib/userCommands";
 import { useUserCommandsContext } from "../state/userCommandsContext";
+import { DeleteTagMessage } from "./DeleteTagMessage";
 import styles from "./CommitGraph.module.css";
 
 const PAGE_SIZE = 10;
@@ -355,7 +356,8 @@ function CommitGraphContent({
           "apply",
         ),
         menuItem(actions.checkout, () => onCheckoutCommit(commitId), "head"),
-        menuItem(actions.reset, () => onRequestReset(commitId, listElement), "head"),
+        // Reset can discard work (Hard), so it is marked like Drop (#988).
+        { ...menuItem(actions.reset, () => onRequestReset(commitId, listElement), "head"), destructive: true },
       );
     }
     items.push(...editItems(commitId, isHead));
@@ -1037,12 +1039,8 @@ function CommitGraphContent({
     )}
     {tagToDelete !== null && (
       <ConfirmDialog
-        ariaLabel={`Delete local tag ${tagToDelete}`}
-        message={
-          <>
-            <p>Delete local tag {tagToDelete}?</p>
-          </>
-        }
+        title={`Delete local tag ${tagToDelete}`}
+        message={<DeleteTagMessage name={tagToDelete} />}
         confirmLabel="Delete tag"
         confirmDisabled={operationsBlocked}
         // #521: the repository can become busy while the confirmation is open.

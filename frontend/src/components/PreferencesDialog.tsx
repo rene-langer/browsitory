@@ -38,6 +38,7 @@ import { THEME_PREFERENCES, type ThemePreference } from "../lib/theme";
 import styles from "./PreferencesDialog.module.css";
 import { Field } from "./primitives/Field";
 import { CodeFontField } from "./CodeFontField";
+import { DialogActions } from "./primitives/DialogActions";
 import { FormDialog } from "./primitives/FormDialog";
 
 export type { PreferencesGroupId } from "../lib/preferencesGroup";
@@ -136,8 +137,7 @@ export function PreferencesDialog({
   };
 
   return (
-    <FormDialog ariaLabel="Preferences" onCancel={onClose} className={styles.dialog}>
-      <h2 className={styles.title}>Preferences</h2>
+    <FormDialog title="Preferences" onCancel={onClose} className={styles.dialog}>
       <div className={styles.body}>
         <div className={styles.nav}>
           <input
@@ -205,11 +205,11 @@ export function PreferencesDialog({
           ))}
         </div>
       </div>
-      <div className={styles.footer}>
+      <DialogActions>
         <button type="button" onClick={onClose}>
           Close
         </button>
-      </div>
+      </DialogActions>
     </FormDialog>
   );
 }

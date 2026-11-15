@@ -35,10 +35,6 @@
   outline-offset: 1px;
 }
 
-.dialog form > button {
-  align-self: flex-start;
-}
-
 /* Why the dialog's action is disabled (`operationBlockers`' reason, #514). */
 .blocked {
   margin: 0;

@@ -4,6 +4,67 @@
   padding: 0;
 }
 
+/* One grid for the column headers and every row (#1015): the drag handle, the commit (the
+   room left, cut with an ellipsis), the two move buttons and the action. */
+.columns,
+.list .planRow {
+  display: grid;
+  grid-template-columns: 1.25rem minmax(0, 1fr) 1.75rem 1.75rem 7rem;
+  align-items: center;
+  column-gap: var(--space-1);
+  row-gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+}
+
+.columns {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+/* "Move" spans both move-button columns. */
+.moveHeader {
+  grid-column: span 2;
+  text-align: center;
+}
+
+.subject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.moveButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-1);
+}
+
+/* A reword or combined message, and the notes under it, take the row's whole width. */
+.fullRow,
+.planRow .message,
+.planRow .caption {
+  grid-column: 1 / -1;
+}
+
+.fullRow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+}
+
+.summary {
+  margin: 0 0 var(--space-1);
+}
+
+.footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+}
+
 .actionSelect {
   font-family: var(--font-mono);
   font-size: var(--text-sm);

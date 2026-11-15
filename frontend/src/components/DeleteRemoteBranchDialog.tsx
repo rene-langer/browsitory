@@ -1,9 +1,10 @@
 import { useEffect, useState, useId } from "react";
 import type { RemoteInfo } from "../ipc/RepoClient";
 import { Field } from "./primitives/Field";
+import { describedBy } from "../lib/ariaDescribedBy";
+import { BlockedReason } from "./primitives/BlockedReason";
+import { DialogActions } from "./primitives/DialogActions";
 import { FormDialog } from "./primitives/FormDialog";
-import confirmStyles from "./primitives/ConfirmDialog.module.css";
-import formStyles from "./primitives/FormDialog.module.css";
 import styles from "./PushBranchDialog.module.css";
 
 /**
@@ -38,6 +39,9 @@ export function DeleteRemoteBranchDialog({
   const [branchName, setBranchName] = useState(initialBranch ?? "");
   const [options, setOptions] = useState<string[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Why Delete is off, in view (#1014).
+  const reason =
+    blockedReason ?? (remoteName === "" ? "Choose a remote." : branchName === "" ? "Choose a branch to delete." : null);
 
   useEffect(() => {
     if (preset || remoteName === "") return;
@@ -62,7 +66,7 @@ export function DeleteRemoteBranchDialog({
   }, [preset, remoteName, onListRemoteBranches]);
 
   return (
-    <FormDialog ariaLabel="Delete remote branch" onCancel={onCancel}>
+    <FormDialog title="Delete remote branch" onCancel={onCancel}>
       <div className={styles.form}>
         {!preset && (
           <>
@@ -116,14 +120,14 @@ export function DeleteRemoteBranchDialog({
             Delete {remoteName}/{branchName} on the remote? This can&apos;t be undone.
           </p>
         )}
-        {blockedReason !== null && <p id={reasonId} className={formStyles.blocked}>{blockedReason}</p>}
-        <div className={styles.actions}>
+        <BlockedReason id={reasonId} reason={reason} />
+        <DialogActions>
           <button
             type="button"
-            className={confirmStyles.confirmButton}
+            data-tone="danger"
             disabled={branchName === "" || remoteName === "" || blockedReason !== null}
-            title={blockedReason ?? undefined}
-            aria-describedby={blockedReason !== null ? reasonId : undefined}
+            title={reason ?? undefined}
+            aria-describedby={describedBy(reasonId, reason)}
             onClick={() => {
               if (blockedReason === null) onDelete(remoteName, branchName);
             }}
@@ -133,7 +137,7 @@ export function DeleteRemoteBranchDialog({
           <button type="button" data-autofocus={preset ? true : undefined} onClick={onCancel}>
             Cancel
           </button>
-        </div>
+        </DialogActions>
       </div>
     </FormDialog>
   );

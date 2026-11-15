@@ -474,7 +474,7 @@ export function CommitFileView({
       <div ref={contentRef}>{body}</div>
       {confirmRestore && onRestoreFileVersion !== undefined && (
         <ConfirmDialog
-          ariaLabel="Confirm restore"
+          title={`Restore ${path}`}
           message={
             <>
               <p>

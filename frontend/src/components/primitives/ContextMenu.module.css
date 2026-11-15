@@ -38,8 +38,11 @@
   cursor: not-allowed;
 }
 
+/* An item that loses data (#988): red and bold, like a danger button (`index.css`), so it shows
+   by more than colour. */
 .item[data-destructive="true"] {
   color: var(--color-danger-text);
+  font-weight: 600;
 }
 
 /* Checkbox items: the mark keeps its slot when unchecked so labels stay aligned. */

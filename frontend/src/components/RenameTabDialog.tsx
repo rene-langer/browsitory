@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { repoNameOf } from "../lib/repoName";
 import { Field } from "./primitives/Field";
+import { DialogActions } from "./primitives/DialogActions";
 import { FormDialog } from "./primitives/FormDialog";
 import { InlineError } from "./primitives/InlineError";
 import styles from "./PushBranchDialog.module.css";
@@ -31,7 +32,7 @@ export function RenameTabDialog({
   const folderName = repoNameOf(path);
 
   return (
-    <FormDialog ariaLabel="Rename tab" onCancel={onCancel}>
+    <FormDialog title="Rename tab" description={<span title={path}>{path}</span>} onCancel={onCancel}>
       <form
         className={styles.form}
         onSubmit={(event) => {
@@ -44,9 +45,6 @@ export function RenameTabDialog({
           });
         }}
       >
-        <p className={styles.message} title={path}>
-          {path}
-        </p>
         <Field label="Tab name" hint={`Leave empty to show the folder name, ${folderName}.`}>
           {(props) => (
             <input
@@ -66,14 +64,14 @@ export function RenameTabDialog({
           )}
         </Field>
         {error !== null && <InlineError message={error} onDismiss={() => setError(null)} />}
-        <div className={styles.actions}>
-          <button type="submit" disabled={saving}>
+        <DialogActions>
+          <button type="submit" data-tone="primary" disabled={saving}>
             Rename
           </button>
           <button type="button" onClick={onCancel}>
             Cancel
           </button>
-        </div>
+        </DialogActions>
       </form>
     </FormDialog>
   );

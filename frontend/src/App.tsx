@@ -652,7 +652,7 @@ function AppContent({
         )}
         {existingRepoPrompt !== null && (
           <ConfirmDialog
-            ariaLabel="Repository already exists"
+            title="Repository already exists"
             message={<p>{existingRepoPrompt} is already a repository. Open it?</p>}
             confirmLabel="Open"
             onConfirm={() => {

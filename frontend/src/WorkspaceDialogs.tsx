@@ -14,6 +14,7 @@ import { PendingPullPrompt } from "./components/PendingPullPrompt";
 import { SwitchConflictDialog } from "./components/SwitchConflictDialog";
 import { PushBranchDialog } from "./components/PushBranchDialog";
 import { RebasePlanner } from "./components/RebasePlanner";
+import { rebasePlannerTitle } from "./lib/rebasePlannerTitle";
 import { RemoteDialogs } from "./components/RemoteDialogs";
 import { ResetDialog } from "./components/ResetDialog";
 import { RewordDialog } from "./components/RewordDialog";
@@ -25,6 +26,8 @@ import type { Command } from "./lib/commands";
 import { retrySuccessLabel } from "./lib/hookFailure";
 import { busyReason, stashBlockReason, terminalAbortConfirm } from "./lib/operationStatus";
 import { upstreamPushBranch } from "./lib/pushTarget";
+import { repoNameOf } from "./lib/repoName";
+import { shortRefName } from "./lib/shortRefName";
 import type { useAnnounce } from "./state/useAnnounce";
 import type { UseAppStateResult } from "./state/useAppState";
 import type { useCommitDraftActions } from "./state/useCommitDraftActions";
@@ -113,6 +116,23 @@ export function WorkspaceDialogs({
     (appState.state.upstream?.remoteName === remoteName ? upstreamPushBranch(appState.state.upstream) : null) ??
     currentBranchName;
   const forcePushConfirm = dialogOf(dialog, "forcePush");
+  // What a force push to `remoteName` removes there (#989): the upstream's commits the branch
+  // doesn't have, when the push goes to the upstream and the counts are known.
+  const forcePushLostCount = (remoteName: string): number | null => {
+    const upstream = appState.state.upstream;
+    if (upstream === null || upstream.remoteName !== remoteName) return null;
+    if (upstreamPushBranch(upstream) !== upstream.remoteBranch) return null;
+    return upstream.behind ?? null;
+  };
+  // A diverged pull's commit counts (#1019), when the pull is the upstream's.
+  const pendingPullUpstream = appState.state.upstream;
+  const pendingPullCounts =
+    appState.state.pendingPull !== null &&
+    pendingPullUpstream !== null &&
+    shortRefName(appState.state.pendingPull.upstreamRef) ===
+      `${pendingPullUpstream.remoteName}/${pendingPullUpstream.remoteBranch}`
+      ? { ahead: pendingPullUpstream.ahead ?? null, behind: pendingPullUpstream.behind ?? null }
+      : null;
   const pushDialogBranch = dialogOf(dialog, "push")?.localBranch ?? null;
   const createTagDialog = dialogOf(dialog, "createTag");
   const createTagCommit =
@@ -160,16 +180,16 @@ export function WorkspaceDialogs({
       )}
       {active && forcePushConfirm !== null && (
         <ConfirmDialog
-          ariaLabel="Confirm force push"
+          title={`Force push to ${forcePushConfirm.remoteName}/${forcePushTargetBranch(forcePushConfirm.remoteName)}`}
           message={
-            <>
-              <p>
-                Overwrites {forcePushConfirm.remoteName}/{forcePushTargetBranch(forcePushConfirm.remoteName)} with
-                your local branch.
-              </p>
-            </>
+            <ForcePushMessage
+              target={`${forcePushConfirm.remoteName}/${forcePushTargetBranch(forcePushConfirm.remoteName)}`}
+              branch={currentLocalBranch}
+              lost={forcePushLostCount(forcePushConfirm.remoteName)}
+            />
           }
           confirmLabel="Force push"
+          tone="danger"
           confirmDisabled={repositoryOperationDisabled}
           // #514: the repository can become busy while the confirmation is open.
           confirmReason={operationDisabledReason}
@@ -182,16 +202,10 @@ export function WorkspaceDialogs({
       )}
       {active && terminalAbortRequest !== null && (
         <ConfirmDialog
-          ariaLabel={terminalAbortConfirm(terminalAbortRequest.sequence).title}
-          message={
-            <>
-              <p>
-                <strong>{terminalAbortConfirm(terminalAbortRequest.sequence).title}</strong>
-              </p>
-              <p>{terminalAbortConfirm(terminalAbortRequest.sequence).body}</p>
-            </>
-          }
+          title={terminalAbortConfirm(terminalAbortRequest.sequence).title}
+          message={<p>{terminalAbortConfirm(terminalAbortRequest.sequence).body}</p>}
           confirmLabel={terminalAbortConfirm(terminalAbortRequest.sequence).confirmLabel}
+          tone="danger"
           onConfirm={() => {
             const request = terminalAbortRequest;
             setTerminalAbortRequest(null);
@@ -321,6 +335,9 @@ export function WorkspaceDialogs({
           upstreamRef={appState.state.pendingPull.upstreamRef}
           noFastForward={appState.state.pendingPull.noFastForward === true}
           branchName={appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null}
+          repoName={repoNameOf(repoPath)}
+          ahead={pendingPullCounts?.ahead ?? null}
+          behind={pendingPullCounts?.behind ?? null}
           operationDisabled={repositoryOperationDisabled}
           operationDisabledReason={operationDisabledReason}
           getPullStrategy={appState.getPullStrategy}
@@ -445,11 +462,12 @@ export function WorkspaceDialogs({
         </Overlay>
       )}
       {active && appState.state.rebaseOnto !== null && (
-        <Overlay onClose={appState.closeRebasePlanner} ariaLabel="Rebase plan">
+        <Overlay onClose={appState.closeRebasePlanner} ariaLabel={rebasePlannerTitle(appState.state.rebaseOnto, currentLocalBranch)}>
           <RebasePlanner
             repoPath={repoPath}
             client={client}
             onto={appState.state.rebaseOnto}
+            branchName={currentLocalBranch}
             onStartRebase={(onto, plan) => {
               // Re-checked: the repository can become busy while the planner is open (#521).
               if (repositoryOperationDisabled) return;
@@ -461,6 +479,32 @@ export function WorkspaceDialogs({
           />
         </Overlay>
       )}
+    </>
+  );
+}
+
+/**
+ * What a force push does (#989): what it replaces, that `--force-with-lease` refuses it when the
+ * remote branch moved since the last fetch, which remote commits it removes, and that Undo can't
+ * take a push back.
+ */
+function ForcePushMessage({ target, branch, lost }: { target: string; branch: string | null; lost: number | null }) {
+  return (
+    <>
+      <p>
+        Replaces {target} with your local {branch ?? "branch"}. It uses <code>--force-with-lease</code>: if {target}{" "}
+        changed since your last fetch, the push is refused.
+      </p>
+      <p>
+        {lost === null
+          ? `Commits on ${target} that your branch doesn't have are removed from it.`
+          : lost === 0
+            ? `${target} has no commits your branch doesn't have.`
+            : lost === 1
+              ? `The 1 commit on ${target} that your branch doesn't have is removed from it.`
+              : `The ${lost} commits on ${target} that your branch doesn't have are removed from it.`}
+      </p>
+      <p>Undo can&apos;t take back a push.</p>
     </>
   );
 }

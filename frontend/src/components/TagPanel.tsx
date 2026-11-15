@@ -13,6 +13,7 @@ import styles from "./TagPanel.module.css";
 import type { UserCommand } from "../ipc/RepoClient";
 import { NO_SELECTION, userCommandMenuItems, type RunUserCommand } from "../lib/userCommands";
 import { useUserCommandsContext } from "../state/userCommandsContext";
+import { DeleteTagMessage } from "./DeleteTagMessage";
 
 // `returnFocusTo`: the row's "…" for a pointer (WebKit focuses neither the row nor the button);
 // `undefined` for a key, so `ContextMenu` returns focus to what had it (as StashPanel).
@@ -310,12 +311,8 @@ export function TagPanel({
 
       {deleteConfirmation !== null && (
         <ConfirmDialog
-          ariaLabel={`Delete local tag ${deleteConfirmation}`}
-          message={
-            <>
-              <p>Delete local tag {deleteConfirmation}?</p>
-            </>
-          }
+          title={`Delete local tag ${deleteConfirmation}`}
+          message={<DeleteTagMessage name={deleteConfirmation} />}
           confirmLabel="Delete tag"
           confirmDisabled={pushDisabled}
           // #521: the repository can become busy while the confirmation is open.
