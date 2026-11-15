@@ -1428,6 +1428,126 @@ describe("DiffPane", () => {
         expect(await screen.findByRole("group", { name: "Diff view options" })).toBeInTheDocument();
         expect(screen.queryByRole("button", { name: "Show all changes" })).toBeNull();
       });
+
+      const conflictClient = () => fakeClient({ getConflictHunks: async () => [], getWorkingDiff: async () => [] });
+
+      it("tells the workspace while a conflicted file is open, and when another file is selected", async () => {
+        const onConflictFileOpenChange = vi.fn();
+        renderUncommitted(conflictClient(), mixed, { mergeMessage: "Merge branch 'feature'\n", onConflictFileOpenChange });
+        await screen.findByText("Save resolution");
+        expect(onConflictFileOpenChange).toHaveBeenLastCalledWith(true);
+
+        fireEvent.click(rowLabel("README.md (Modified)"));
+        await waitFor(() => expect(onConflictFileOpenChange).toHaveBeenLastCalledWith(false));
+      });
+
+      it("tells the workspace when the conflict is resolved and when the pane goes", async () => {
+        const onConflictFileOpenChange = vi.fn();
+        const client = conflictClient();
+        const props = { mergeMessage: "Merge branch 'feature'\n", onConflictFileOpenChange };
+        const { rerender, unmount } = renderUncommitted(client, mixed, props);
+        await screen.findByText("Save resolution");
+        expect(onConflictFileOpenChange).toHaveBeenLastCalledWith(true);
+
+        // Resolved: the file is a plain change now.
+        const resolved: StatusEntry[] = [
+          { path: "shared.txt", oldPath: null, staged: true, kind: "Modified" },
+          ...mixed.slice(1),
+        ];
+        rerender(
+          <DiffPane
+            repoPath={TEST_REPO_PATH}
+            client={client}
+            selectedRow="uncommitted"
+            status={resolved}
+            rebaseProgress={null}
+            {...noopHandlers}
+            {...props}
+          />,
+        );
+        await waitFor(() => expect(onConflictFileOpenChange).toHaveBeenLastCalledWith(false));
+
+        // Open again, then the pane unmounts (a commit selected, the operation over).
+        rerender(
+          <DiffPane
+            repoPath={TEST_REPO_PATH}
+            client={client}
+            selectedRow="uncommitted"
+            status={mixed}
+            rebaseProgress={null}
+            {...noopHandlers}
+            {...props}
+          />,
+        );
+        fireEvent.click(rowLabel("shared.txt (Conflicted)"));
+        await waitFor(() => expect(onConflictFileOpenChange).toHaveBeenLastCalledWith(true));
+        unmount();
+        expect(onConflictFileOpenChange).toHaveBeenLastCalledWith(false);
+      });
+
+      describe("the collapsed list starts at the top, the current row in view", () => {
+        const original = Element.prototype.scrollIntoView;
+        afterEach(() => {
+          Element.prototype.scrollIntoView = original;
+        });
+
+        // Records each scrollIntoView: its element, options and the list's scrollTop at the time.
+        function spyScrolls(list: () => Element | null) {
+          const calls: { element: Element; options: unknown; listTop: number | undefined }[] = [];
+          Element.prototype.scrollIntoView = function (this: Element, options?: unknown) {
+            calls.push({ element: this, options, listTop: list()?.scrollTop });
+          } as Element["scrollIntoView"];
+          return calls;
+        }
+
+        it("when the list collapses", async () => {
+          renderUncommitted(conflictClient(), mixed, { mergeMessage: "Merge branch 'feature'\n" });
+          await screen.findByText("Save resolution");
+          fireEvent.click(screen.getByRole("button", { name: "Show all changes" }));
+          const groups = rowLabel("shared.txt (Conflicted)").closest("[data-collapsed]") as HTMLElement;
+          expect(groups).toHaveAttribute("data-collapsed", "false");
+          groups.scrollTop = 90;
+          const calls = spyScrolls(() => groups);
+
+          fireEvent.click(screen.getByRole("button", { name: "Show all changes" }));
+          expect(groups).toHaveAttribute("data-collapsed", "true");
+          expect(groups.scrollTop).toBe(0);
+          const row = rowLabel("shared.txt (Conflicted)").closest("li");
+          expect(calls.filter((call) => call.element === row).at(-1)).toEqual({
+            element: row,
+            options: { block: "nearest" },
+            listTop: 0,
+          });
+        });
+
+        it("when another conflicted file becomes current", async () => {
+          const twoConflicts: StatusEntry[] = [
+            { path: "one.txt", oldPath: null, staged: false, kind: "Conflicted" },
+            { path: "two.txt", oldPath: null, staged: false, kind: "Conflicted" },
+            { path: "README.md", oldPath: null, staged: false, kind: "Modified" },
+          ];
+          renderUncommitted(conflictClient(), twoConflicts, { mergeMessage: "Merge branch 'feature'\n" });
+          await screen.findByText("Save resolution");
+          const groups = rowLabel("one.txt (Conflicted)").closest("[data-collapsed]") as HTMLElement;
+          expect(groups).toHaveAttribute("data-collapsed", "true");
+          groups.scrollTop = 90;
+          const calls = spyScrolls(() => groups);
+
+          fireEvent.click(rowLabel("two.txt (Conflicted)"));
+          await waitFor(() => expect(groups.scrollTop).toBe(0));
+          const row = rowLabel("two.txt (Conflicted)").closest("li");
+          expect(calls.filter((call) => call.element === row).at(-1)).toEqual({
+            element: row,
+            options: { block: "nearest" },
+            listTop: 0,
+          });
+        });
+
+        it("and the browser doesn't move it by itself (no scroll anchoring)", () => {
+          const collapsed = rulesOf(diffPaneCss).filter(({ selector }) => selector === '.fileGroups[data-collapsed="true"]');
+          expect(cascadedValue(collapsed, "overflow-anchor")).toBe("none");
+        });
+      });
     });
 
     it("shows neither the commit box nor the rebase's step while a rebase is in progress: the strip has it (#995)", () => {
