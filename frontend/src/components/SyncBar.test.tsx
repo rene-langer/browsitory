@@ -51,7 +51,7 @@ describe("SyncBar", () => {
     expect(pull).toHaveTextContent(/^Pull$/);
     expect(screen.queryByText("↓0")).toBeNull();
     // Said in words for assistive tech, as before.
-    expect(screen.getByRole("status", { name: "2 ahead, 0 behind origin/main" })).toBeInTheDocument();
+    expect(screen.getByText("2 ahead, 0 behind origin/main").closest('[role="status"]')).not.toBeNull();
   });
 
   it("says ahead and behind in words as the status's text, which a live region announces (#1006)", () => {
