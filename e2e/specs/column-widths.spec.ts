@@ -43,8 +43,8 @@ async function resizeWindowTo(width: number): Promise<void> {
 describe("Browsitory column widths", () => {
   it("keeps the sidebar and history widths when the window resizes; only the diff changes", async () => {
     await waitForAppReady();
-    // The history column's default: 40% of the window it first showed in (1200px wide by
-    // tauri.conf.json), kept from then on.
+    // The history column's default: 40% of the window it first showed in (1280px wide by
+    // tauri.conf.json, #980), kept from then on.
     const opened = await browser.execute(() => window.innerWidth);
     const history = Math.round(opened * 0.4);
 
@@ -55,7 +55,9 @@ describe("Browsitory column widths", () => {
     const wide = await columnWidths();
     expect(wide.history).toBe(history);
 
-    await resizeWindowTo(1080);
+    // Narrower, but still room for 260 + the history + the diff's 320px minimum (and a margin
+    // for window decorations), so the sidebar stays.
+    await resizeWindowTo(260 + history + 320 + 40);
     await browser.waitUntil(async () => (await columnWidths()).diff < wide.diff, {
       timeoutMsg: "expected the diff column to shrink with the window",
     });
