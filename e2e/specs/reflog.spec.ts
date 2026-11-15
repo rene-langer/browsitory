@@ -66,7 +66,9 @@ describe("Browsitory reflog recovery", () => {
     const restoreButtons = await $$(`button=Restore ${branchName}`);
     await restoreButtons[1].click();
 
-    const dialog = await $(`aria/Restore ${branchName}`);
+    // The dialog itself: its title and confirm button carry the same name (#987), so
+    // `aria/Restore …` matches three elements.
+    const dialog = await $(`dialog[aria-label="Restore ${branchName}"]`);
     await dialog.waitForExist();
     await expect(dialog).toHaveText(expect.stringContaining(firstCommitId));
     // In the page (`clickInPage`): the button sits at the window's bottom edge, where
