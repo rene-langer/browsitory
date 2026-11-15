@@ -14,6 +14,7 @@ import diffPaneCss from "./DiffPane.module.css?raw";
 import { cascadedValue, rulesOf, subjectOf } from "../test/cssCascade";
 import { fakeRepoClient } from "../test/fakeRepoClient";
 import { describedByText } from "../test/describedBy";
+import { chooseCommitMenuItem, commitMenuItems } from "../test/commitMenu";
 
 const TEST_REPO_PATH = "/repo";
 
@@ -906,7 +907,7 @@ describe("DiffPane", () => {
         mergeMessage: null,
         headInfo: { ...headInfo, squashMessage: "Squashed commit of the following:\n" },
       });
-      expect(screen.getByRole("button", { name: "Add co-author" })).toBeInTheDocument();
+      expect(commitMenuItems()).toContain("Add co-author…");
       squash.unmount();
 
       for (const operation of [null, "CherryPick", "Revert"] as const) {
@@ -915,13 +916,13 @@ describe("DiffPane", () => {
           headInfo: { ...headInfo, operation },
         });
         expect(screen.getByPlaceholderText("Commit message")).toHaveValue("git's message\n");
-        expect(screen.queryByRole("button", { name: "Add co-author" }), String(operation)).toBeNull();
+        expect(commitMenuItems(), String(operation)).not.toContain("Add co-author…");
         paused.unmount();
       }
 
       // Without anything pre-filled the user's own commit offers them too.
       renderUncommitted(fakeClient({}), status, { mergeMessage: null, headInfo });
-      expect(screen.getByRole("button", { name: "Add co-author" })).toBeInTheDocument();
+      expect(commitMenuItems()).toContain("Add co-author…");
     });
 
     it("says Nothing to commit on a clean tree and Stage changes only with unstaged changes (#1005)", () => {
@@ -943,13 +944,13 @@ describe("DiffPane", () => {
       const { unmount } = renderUncommitted(fakeClient({}), status, { mergeMessage: "picked message\n", headInfo });
 
       expect(screen.getByPlaceholderText("Commit message")).toHaveValue("");
-      expect(screen.getByLabelText("Amend last commit")).toBeInTheDocument();
+      expect(commitMenuItems()).toContain("Amend last commit");
       unmount();
 
       // A cherry-pick still in progress keeps its message and blocks amend.
       renderUncommitted(fakeClient({}), status, { mergeMessage: "picked message\n", headInfo: { ...headInfo, operationLeftover: false } });
       expect(screen.getByPlaceholderText("Commit message")).toHaveValue("picked message\n");
-      expect(screen.queryByLabelText("Amend last commit")).toBeNull();
+      expect(commitMenuItems()).not.toContain("Amend last commit");
     });
 
     it("offers no Abort merge or amend during a rebase started in a terminal (#263)", () => {
@@ -2779,6 +2780,7 @@ describe("DiffPane commit message settings", () => {
         />
       </CommitMessageSettingsContext.Provider>,
     );
+    fireEvent.focus(screen.getByLabelText("Commit message"));
     expect(screen.getByLabelText("Summary length")).toHaveTextContent("Summary 0/60");
     expect(screen.getByRole("textbox", { name: "Commit message" }).style.getPropertyValue("--ruler-column")).toBe("80");
   });
@@ -2843,7 +2845,7 @@ describe("DiffPane co-authors and amend author", () => {
       onCommit,
     });
     fireEvent.change(screen.getByLabelText("Commit message"), { target: { value: "Fix" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add co-author" }));
+    chooseCommitMenuItem("Add co-author…");
     fireEvent.click(await screen.findByRole("option", { name: "Ada <ada@x.org>" }));
     fireEvent.click(screen.getByRole("button", { name: "Commit 1 file" }));
     expect(listRecentAuthors).toHaveBeenCalledWith(TEST_REPO_PATH);
