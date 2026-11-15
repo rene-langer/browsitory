@@ -57,6 +57,8 @@ export function ConfirmDialog({
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const reasonId = useId();
+  const titleId = useId();
+  const messageId = useId();
   useRestoreFocus();
 
   useEffect(() => {
@@ -75,13 +77,15 @@ export function ConfirmDialog({
       ref={dialogRef}
       className={styles.dialog}
       aria-label={title}
+      aria-labelledby={titleId}
+      aria-describedby={messageId}
       onCancel={(event) => {
         event.preventDefault();
         onCancel();
       }}
     >
-      <DialogHeader title={title} />
-      <div className={styles.message}>
+      <DialogHeader title={title} id={titleId} />
+      <div id={messageId} className={styles.message}>
         {message}
         <BlockedReason id={reasonId} reason={confirmReason} />
       </div>

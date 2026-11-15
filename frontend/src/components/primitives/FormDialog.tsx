@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { DialogHeader } from "./DialogHeader";
 import { useRestoreFocus } from "./useRestoreFocus";
 import styles from "./FormDialog.module.css";
@@ -11,9 +11,10 @@ import styles from "./FormDialog.module.css";
  * the first form field, else the first button. Callers render it conditionally — mounting is
  * opening, unmounting is closing (same model as `ConfirmDialog`).
  *
- * `title` is the dialog's visible heading (`DialogHeader`, #987) and its accessible name: the
- * `aria-label` on the `<dialog>` is the same text, so tests and E2E specs can address it as
- * `dialog[aria-label=...]`. Put the buttons in `DialogActions`.
+ * `title` is the dialog's visible heading (`DialogHeader`, #987) and its accessible name
+ * (`aria-labelledby`); the `aria-label` on the `<dialog>` is the same text, so tests and E2E specs
+ * can address it as `dialog[aria-label=...]`. `description` describes it (`aria-describedby`).
+ * Put the buttons in `DialogActions`.
  */
 /**
  * Where a dialog's focus starts (#1029): a `data-autofocus` element, else its first enabled form
@@ -53,6 +54,9 @@ export function FormDialog({
   children: ReactNode;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  const descriptionId = useId();
+  const described = description !== undefined && description !== null;
   useRestoreFocus(returnFocusTo);
 
   useEffect(() => {
@@ -71,12 +75,14 @@ export function FormDialog({
       ref={dialogRef}
       className={className === undefined ? styles.dialog : `${styles.dialog} ${className}`}
       aria-label={title}
+      aria-labelledby={titleId}
+      aria-describedby={described ? descriptionId : undefined}
       onCancel={(event) => {
         event.preventDefault();
         onCancel();
       }}
     >
-      <DialogHeader title={title} description={description} />
+      <DialogHeader title={title} description={description} id={titleId} descriptionId={descriptionId} />
       {children}
     </dialog>
   );
