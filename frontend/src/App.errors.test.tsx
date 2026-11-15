@@ -212,6 +212,32 @@ describe("opening a folder that isn't a repository (#973)", () => {
   });
 });
 
+describe("a failed open's description that arrives late (A7)", () => {
+  it("doesn't show it once a later open succeeded", async () => {
+    const openRepo = vi.fn(async (path: string) => {
+      if (path === "/work") {
+        throw new RepoError("Other", "failed to open repository: could not find repository at '/work'");
+      }
+    });
+    let finishScan: (repos: string[]) => void = () => {};
+    const scanReposInRoot = vi.fn(() => new Promise<string[]>((resolve) => (finishScan = resolve)));
+    const picks = ["/work", "/repos/a"];
+    const pickRepoFolder = vi.fn(async () => picks.shift() ?? null);
+    render(<App client={startPageClient("/work", { openRepo, scanReposInRoot, pickRepoFolder })} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open repository…" }));
+    await waitFor(() => expect(scanReposInRoot).toHaveBeenCalledWith("/work"));
+    fireEvent.click(screen.getByRole("button", { name: "Open repository…" }));
+    await waitFor(() => expect(openRepo).toHaveBeenCalledWith("/repos/a"));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => finishScan(["/work/api"]));
+    expect(banners().filter((banner) => banner.textContent?.includes("isn't a Git repository"))).toEqual([]);
+  });
+});
+
 describe("opening a recent repository whose folder is gone (#998)", () => {
   it("offers to remove it from the recent repositories, and no Retry", async () => {
     const openRepo = vi.fn(async () => {
