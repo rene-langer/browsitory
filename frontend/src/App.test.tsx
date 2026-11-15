@@ -1624,6 +1624,43 @@ describe("App", () => {
     localStorage.clear();
   });
 
+  it("says above the graph that it shows one branch, labels HEAD's changes, and Show all branches undoes it (#985)", async () => {
+    localStorage.clear();
+    let local: string[] | null = ["topic"];
+    const clearGraphBranchSelection = vi.fn(async () => {
+      local = null;
+    });
+    const clearGraphRemoteBranchSelection = vi.fn(async () => {});
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }],
+      getCommitGraph: async () => graphPage([]),
+      listBranches: async () => [
+        { name: "main", isCurrent: true },
+        { name: "topic", isCurrent: false },
+      ],
+      listStashes: async () => [],
+      getGraphBranchSelection: async () => local,
+      clearGraphBranchSelection,
+      clearGraphRemoteBranchSelection,
+    });
+    render(<App client={client} />);
+
+    const strip = await screen.findByRole("status", { name: "Graph filter" });
+    expect(strip).toHaveTextContent("Showing topic only");
+    const history = screen.getByRole("listbox", { name: "Commit history" });
+    expect(within(history).getByText("Uncommitted changes on main (1)")).toBeInTheDocument();
+
+    fireEvent.click(within(strip.parentElement!).getByRole("button", { name: "Show all branches" }));
+    await waitFor(() => expect(clearGraphBranchSelection).toHaveBeenCalledWith("/repos/a"));
+    expect(clearGraphRemoteBranchSelection).toHaveBeenCalledWith("/repos/a");
+    await waitFor(() => expect(screen.queryByRole("status", { name: "Graph filter" })).toBeNull());
+    expect(within(screen.getByRole("listbox", { name: "Commit history" })).getByText("Uncommitted changes (1)")).toBeInTheDocument();
+    localStorage.clear();
+  });
+
   it("refuses Create tag with a taken name inline, without listing the tag twice (#413)", async () => {
     localStorage.clear();
     const createTag = vi.fn(async () => {});

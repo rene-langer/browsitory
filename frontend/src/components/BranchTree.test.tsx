@@ -312,6 +312,24 @@ describe("BranchTree — local branches", () => {
     expect(props.onSetGraphBranchSelection).not.toHaveBeenCalled();
   });
 
+  it("offers Show all branches in every branch menu, enabled only while the graph is filtered (#985)", async () => {
+    const remotes = [{ name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null }];
+    const onListRemoteBranches = vi.fn().mockResolvedValue(["topic"]);
+    const { props, rerender } = renderTree({ remotes, onListRemoteBranches });
+    fireEvent.click(screen.getByRole("button", { name: "Actions for main" }));
+    expect(screen.getByRole("menuitem", { name: "Show all branches" })).toBeDisabled();
+
+    rerender(<BranchTreeWithDialogs {...props} graphBranchSelection={["feat/foo"]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Actions for feat/foo" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Show all branches" }));
+    expect(props.onShowAllGraphBranches).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Actions for origin/topic" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Show all branches" }));
+    expect(props.onShowAllGraphBranches).toHaveBeenCalledTimes(2);
+  });
+
   it("Show all branches is enabled when only a remote selection is saved", () => {
     const { props } = renderTree({ graphRemoteBranchSelection: [] });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
