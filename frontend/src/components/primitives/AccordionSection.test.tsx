@@ -2,6 +2,40 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { GitBranch } from "lucide-react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AccordionSection } from "./AccordionSection";
+import styles from "./AccordionSection.module.css";
+import accordionCss from "./AccordionSection.module.css?raw";
+import { cascadedValue, rulesOf } from "../../test/cssCascade";
+
+/**
+ * What `property` cascades to on `element` from the stylesheet's plain class rules (one compound
+ * of classes, no pseudo-classes): enough for the header's own text style.
+ */
+function classValue(element: HTMLElement, property: string): string | null {
+  const has = (name: string) => element.classList.contains((styles as Record<string, string>)[name]);
+  const rules = rulesOf(accordionCss).filter(
+    ({ selector }) => /^(\.[\w-]+)+$/.test(selector) && selector.split(".").filter(Boolean).every(has),
+  );
+  return cascadedValue(rules, property);
+}
+
+// #1012: a nested section's title is a name ("GitHub: acme/widget (origin)"), so it keeps its
+// case; the top-level sections keep their small uppercase labels.
+describe("AccordionSection's nested heading", () => {
+  it("keeps a level-3 title's case, while a level-2 title is uppercased", () => {
+    render(
+      <>
+        <AccordionSection title="Pull requests" storageKey="test-outer">
+          <div />
+        </AccordionSection>
+        <AccordionSection title="GitHub: acme/widget (origin)" storageKey="test-inner" headingLevel={3}>
+          <div />
+        </AccordionSection>
+      </>,
+    );
+    expect(classValue(screen.getByRole("button", { name: "Pull requests" }), "text-transform")).toBe("uppercase");
+    expect(classValue(screen.getByRole("button", { name: "GitHub: acme/widget (origin)" }), "text-transform")).toBe("none");
+  });
+});
 
 describe("AccordionSection", () => {
   beforeEach(() => {
