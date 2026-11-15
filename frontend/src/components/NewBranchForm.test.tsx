@@ -80,6 +80,22 @@ describe("NewBranchForm (in BranchTree)", () => {
     expect(props.onCloseCreateBranchDraft).toHaveBeenCalled();
   });
 
+  it("Escape anywhere in the form closes it and returns focus to what opened it (#1001)", () => {
+    const opener = document.createElement("button");
+    document.body.appendChild(opener);
+    opener.focus();
+    const { props } = renderTree({ createBranchDraft: { startPoint: "HEAD" } });
+    expect(screen.getByPlaceholderText("New branch name")).toHaveFocus();
+
+    const checkbox = screen.getByRole("checkbox", { name: "Switch to it after creating" });
+    checkbox.focus();
+    fireEvent.keyDown(checkbox, { key: "Escape" });
+
+    expect(props.onCloseCreateBranchDraft).toHaveBeenCalledOnce();
+    expect(opener).toHaveFocus();
+    opener.remove();
+  });
+
   it("shows the base branch for HEAD and a short id for a commit", () => {
     const { unmount } = renderTree({ createBranchDraft: { startPoint: "HEAD" } });
     expect(screen.getByText(/New branch from/)).toHaveTextContent("New branch from main");

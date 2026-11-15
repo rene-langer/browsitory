@@ -120,6 +120,45 @@ describe("PreferencesDialog", () => {
     expect(await screen.findAllByText("Not configured")).toHaveLength(2);
   });
 
+  it("saves the editor and terminal commands on blur, like every other setting, with no Save button (#1017)", async () => {
+    const setExternalToolSettings = vi.fn(async () => {});
+    renderTools({
+      getExternalToolSettings: async () => ({ editor: "code", terminal: null }),
+      setExternalToolSettings,
+      getGitTools: noTools,
+    });
+    const editor = await screen.findByLabelText("Editor command");
+    await waitFor(() => expect(editor).toHaveValue("code"));
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+
+    fireEvent.change(editor, { target: { value: " subl {file}:{line} " } });
+    expect(setExternalToolSettings).not.toHaveBeenCalled();
+    fireEvent.blur(editor);
+    await waitFor(() =>
+      expect(setExternalToolSettings).toHaveBeenCalledWith({ editor: "subl {file}:{line}", terminal: null }),
+    );
+
+    const terminal = screen.getByLabelText("Terminal command");
+    fireEvent.change(terminal, { target: { value: "kitty" } });
+    fireEvent.keyDown(terminal, { key: "Enter" });
+    await waitFor(() =>
+      expect(setExternalToolSettings).toHaveBeenLastCalledWith({ editor: "subl {file}:{line}", terminal: "kitty" }),
+    );
+  });
+
+  it("tells how to set up a git tool that isn't configured, with a link to the guide (#1017)", async () => {
+    const openExternalUrl = vi.fn(async () => {});
+    renderTools({
+      getExternalToolSettings: async () => ({ editor: null, terminal: null }),
+      getGitTools: noTools,
+      openExternalUrl,
+    });
+    expect(await screen.findByText(/Set diff\.tool in your git config/)).toBeInTheDocument();
+    expect(screen.getByText(/Set merge\.tool in your git config/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Diff and merge tools in the user guide" }));
+    expect(openExternalUrl).toHaveBeenCalledWith(expect.stringMatching(/external-tools\/#diff-and-merge-tools$/));
+  });
+
   it("skips git tools without an open repository", async () => {
     const getGitTools = vi.fn(noTools);
     renderTools({ getExternalToolSettings: async () => ({ editor: null, terminal: null }), getGitTools }, "desktop", null);
@@ -395,6 +434,11 @@ describe("Fetch preferences", () => {
     fireEvent.change(repo, { target: { value: "app" } });
     expect(readAutoFetchOverride("/work/app")).toBeNull();
     expect(setFetchSettings).not.toHaveBeenCalled();
+  });
+
+  it("names the repository override For this repository (#1017)", async () => {
+    renderFetch({ getFetchSettings: async () => ({ autoFetchMinutes: 0 }), setFetchSettings: async () => {} });
+    expect(await screen.findByRole("combobox", { name: "For this repository (app)" })).toHaveValue("app");
   });
 
   it("offers no repository override without an open repository", async () => {
@@ -770,6 +814,29 @@ describe("AppearanceSection (#615)", () => {
 
     expect(onChange).toHaveBeenCalledWith("dark");
   });
+
+  it("puts each setting's help under its own field (#1017)", () => {
+    render(
+      <AppearanceSettingsProvider client={fakeRepoClient({ getAppearanceSettings: async () => defaults })}>
+        <PreferencesDialog
+          onClose={() => {}}
+          groups={[{ id: "appearance", label: "Appearance", content: <AppearanceSection theme={{ preference: "system", onChange: vi.fn() }} /> }]}
+        />
+      </AppearanceSettingsProvider>,
+    );
+    const group = screen.getByRole("group", { name: "Appearance" });
+    expect(within(group).getByRole("combobox", { name: "Theme" })).toHaveAccessibleDescription(
+      /follows your operating system's light or dark setting/,
+    );
+    expect(within(group).getByRole("combobox", { name: "Code font" })).toHaveAccessibleDescription(/installed fonts/);
+    expect(within(group).getByRole("spinbutton", { name: "Code font size (px)" })).toHaveAccessibleDescription(
+      /empty for the default/,
+    );
+    expect(within(group).getByRole("combobox", { name: "Date format" })).toHaveAccessibleDescription(
+      /operating system's date and time format/,
+    );
+    expect(within(group).getByRole("spinbutton", { name: "Tab size" })).toHaveAccessibleDescription(/columns/);
+  });
 });
 
 describe("Updates preferences (#630)", () => {
@@ -1006,6 +1073,21 @@ describe("Preference groups (#784)", () => {
     expect(screen.queryByRole("tabpanel")).toBeNull();
     expect(screen.getByRole("status")).toHaveTextContent("No settings match “zzz”");
     expect(screen.getByText("No settings match “zzz”")).toBeVisible();
+  });
+
+  it("highlights the settings that match the filter (#1017)", () => {
+    renderGroups();
+    const filter = screen.getByRole("searchbox", { name: "Filter settings" });
+    fireEvent.change(filter, { target: { value: "wrap" } });
+    expect(screen.getByText("Word wrap")).toHaveAttribute("data-filter-match", "true");
+    expect(screen.getByText("Diff algorithm")).not.toHaveAttribute("data-filter-match");
+
+    fireEvent.change(filter, { target: { value: "algo" } });
+    expect(screen.getByText("Word wrap")).not.toHaveAttribute("data-filter-match");
+    expect(screen.getByText("Diff algorithm")).toHaveAttribute("data-filter-match", "true");
+
+    fireEvent.change(filter, { target: { value: "" } });
+    expect(screen.getByText("Diff algorithm")).not.toHaveAttribute("data-filter-match");
   });
 
   it("Escape in the filter clears it before it closes the dialog", () => {
