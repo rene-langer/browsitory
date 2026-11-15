@@ -2429,7 +2429,8 @@ describe("App", () => {
         fireEvent.contextMenu((await screen.findByText(/c1 one/)).closest("li")!);
         fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick" }));
         await waitFor(() => expect(cherryPick).toHaveBeenCalled());
-        expect(await screen.findByText(refusal)).toBeInTheDocument();
+        // The banner names the cherry-pick and its commit first (#997).
+        expect(await screen.findByText(`Cherry-pick of c1 didn't start: ${refusal}`)).toBeInTheDocument();
       });
     });
 
