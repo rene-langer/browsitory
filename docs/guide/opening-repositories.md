@@ -19,7 +19,8 @@ A repository whose folder is gone (moved, deleted, or on a drive that isn't conn
 new place, which replaces the entry (pinned again if it was) and opens; **×** removes it. If such
 a repository is opened another way, the error asks whether to remove it from the list. Type in
 **Filter repositories and workspaces** to show only the recent repositories and workspaces whose
-name or path contains the text.
+name or path contains the text. The keyboard focus starts in that field, so you can type right
+away; with nothing to filter it starts on **Open repository…**.
 
 **A folder that isn't a repository.** Opening a folder that holds no repository itself says
 "This folder isn't a Git repository" and lists the repositories in its direct subfolders, each

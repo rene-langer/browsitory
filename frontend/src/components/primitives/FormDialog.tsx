@@ -15,6 +15,25 @@ import styles from "./FormDialog.module.css";
  * `aria-label` on the `<dialog>` is the same text, so tests and E2E specs can address it as
  * `dialog[aria-label=...]`. Put the buttons in `DialogActions`.
  */
+/**
+ * Where a dialog's focus starts (#1029): a `data-autofocus` element, else its first enabled form
+ * field (a radio group's checked radio, where Tab would enter the group), else its first enabled
+ * button. Never the frame itself.
+ */
+export function initialFocusTarget(dialog: HTMLElement): HTMLElement | null {
+  const marked = dialog.querySelector<HTMLElement>("[data-autofocus]");
+  if (marked !== null) return marked;
+  const enabled = (selector: string) =>
+    [...dialog.querySelectorAll<HTMLInputElement>(selector)].filter((field) => !field.disabled && field.type !== "hidden");
+  const field = enabled("input, select, textarea")[0];
+  if (field !== undefined) {
+    if (field.type !== "radio" || field.name === "") return field;
+    const group = enabled(`input[type="radio"][name="${CSS.escape(field.name)}"]`);
+    return group.find((radio) => radio.checked) ?? field;
+  }
+  return enabled("button")[0] ?? null;
+}
+
 export function FormDialog({
   title,
   description,
@@ -44,11 +63,7 @@ export function FormDialog({
     } else if (!dialog.open) {
       dialog.setAttribute("open", "");
     }
-    const target =
-      dialog.querySelector<HTMLElement>("[data-autofocus]") ??
-      dialog.querySelector<HTMLElement>("input, select, textarea") ??
-      dialog.querySelector<HTMLElement>("button");
-    target?.focus();
+    initialFocusTarget(dialog)?.focus();
   }, []);
 
   return (

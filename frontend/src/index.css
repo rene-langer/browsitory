@@ -106,9 +106,17 @@ button[data-tone][data-tone="danger"]:hover:not(:disabled):not([aria-disabled="t
   background: var(--color-danger-bg);
 }
 
+/* The focus ring (#1029): its own colour (`--color-focus-ring`, not the accent) and a gap, so a
+   focused button never reads as a pressed toggle, whose outline is the accent drawn inside it. */
 button:focus-visible {
   outline: 2px solid var(--color-focus-ring);
-  outline-offset: 1px;
+  outline-offset: 2px;
+}
+
+/* A dialog's frame is not a control: when the browser focuses it (nothing else to focus yet), it
+   draws no ring. `FormDialog` starts focus on the first control (#1029). */
+dialog:focus {
+  outline: none;
 }
 
 /* `aria-disabled` (#664): a control that stays focusable so its visible reason can be read. */

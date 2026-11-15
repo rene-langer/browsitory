@@ -51,9 +51,11 @@
   --color-accent-fg: #93470a;
   --color-accent-tint: color-mix(in srgb, var(--color-accent) 14%, transparent);
 
-  /* Focus and selection. The selected row's tint alone is too faint to read as a state, so a
-     selected row also carries `--color-selected-marker` (an inset bar). */
-  --color-focus-ring: var(--color-accent);
+  /* Focus and selection. The focus ring is blue, not the accent, so a focused control doesn't
+     look like a pressed toggle or the accent-filled Commit button (#1029). The selected row's tint
+     alone is too faint to read as a state, so a selected row also carries
+     `--color-selected-marker` (an inset bar). */
+  --color-focus-ring: #1f5fbf;
   --color-selected-bg: #e4e6ea;
   --color-selected-text: var(--color-text);
   --color-selected-marker: var(--color-accent);
@@ -194,6 +196,7 @@
     --color-accent-text: #1b1d22;
     --color-accent-fg: #f2a23c;
     --color-accent-tint: color-mix(in srgb, var(--color-accent) 16%, transparent);
+    --color-focus-ring: #6cb0ff;
     --color-selected-bg: #353a45;
     --color-diff-add-bg: #233325;
     --color-diff-add-text: #9fd38a;
@@ -245,6 +248,7 @@
   --color-accent-text: #1b1d22;
   --color-accent-fg: #f2a23c;
   --color-accent-tint: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  --color-focus-ring: #6cb0ff;
   --color-selected-bg: #353a45;
   --color-diff-add-bg: #233325;
   --color-diff-add-text: #9fd38a;
