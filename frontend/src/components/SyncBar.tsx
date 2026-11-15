@@ -199,11 +199,10 @@ export function SyncBar({
       </Toolbar>
       {detached && <span>HEAD detached at {detachedAt}</span>}
       {showCounts && (
-        <span
-          className={styles.srOnly}
-          role="status"
-          aria-label={`${upstream.ahead} ahead, ${upstream.behind} behind ${upstream.remoteName}/${upstream.remoteBranch}`}
-        />
+        // Text, not an aria-label: a live region announces its content when it changes.
+        <span className={styles.srOnly} role="status">
+          {`${upstream.ahead} ahead, ${upstream.behind} behind ${upstream.remoteName}/${upstream.remoteBranch}`}
+        </span>
       )}
       {activity}
       {stash !== undefined && (

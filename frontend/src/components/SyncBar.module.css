@@ -57,3 +57,11 @@
   color: var(--color-text-muted);
   white-space: nowrap;
 }
+
+/* Where the bar is short of room (a 900 px window, a narrow VS Code panel), the slot is only as
+   wide as its text: the sync group may move once when the text first shows. */
+@media (max-width: 60rem) {
+  .lastFetch {
+    min-width: 0;
+  }
+}
