@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import type { CommitChangeRequest, GraphCommit, PatchApply, PatchApplyOutcome, PatchContent, PatchPreview, PatchSource, RepoClient } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
+import { failedOperation, hookNextStep } from "../lib/operationErrors";
 import { failureError, type RunMutationWithOutcome } from "./useMutationRunner";
 import { withoutDialog } from "./workspaceDialog";
 
@@ -79,7 +80,10 @@ export function usePatchActions(
   const applyCommitChange = useCallback(
     async (change: CommitChangeRequest) => {
       setState((prev) => ({ ...prev, patchOutcome: null }));
-      const ok = await runMutationWithOutcome(() => client.applyCommitChange(repoPath, change));
+      const ok = await runMutationWithOutcome(
+        () => client.applyCommitChange(repoPath, change),
+        failedOperation.commitChange(change),
+      );
       if (ok) setState((prev) => ({ ...prev, patchOutcome: { message: commitChangeMessage(change), undoable: true } }));
     },
     [client, repoPath, runMutationWithOutcome, setState],
@@ -94,7 +98,7 @@ export function usePatchActions(
         const saved = await client.savePatchFile(suggestedName, content);
         if (saved !== null) setState((prev) => ({ ...prev, patchOutcome: { message: `Saved patch to ${saved}`, undoable: false } }));
       } catch (err) {
-        setState((prev) => ({ ...prev, ...failureError(err) }));
+        setState((prev) => ({ ...prev, ...failureError(err, failedOperation.savePatch()) }));
       }
     },
     [client, repoPath, setState],
@@ -106,7 +110,7 @@ export function usePatchActions(
     try {
       content = await client.openPatchFile();
     } catch (err) {
-      setState((prev) => ({ ...prev, ...failureError(err) }));
+      setState((prev) => ({ ...prev, ...failureError(err, failedOperation.readPatch(null)) }));
       return;
     }
     if (content === null) return;
@@ -115,7 +119,7 @@ export function usePatchActions(
       const preview = await client.previewPatch(repoPath, content);
       setState((prev) => ({ ...prev, dialog: { kind: "applyPatch", content, preview } }));
     } catch (err) {
-      setState((prev) => ({ ...prev, ...failureError(err) }));
+      setState((prev) => ({ ...prev, ...failureError(err, failedOperation.readPatch(null)) }));
     }
   }, [client, repoPath, setState]);
 
@@ -125,13 +129,14 @@ export function usePatchActions(
       let outcome: PatchApplyOutcome | null = null;
       const ok = await runMutationWithOutcome(async () => {
         outcome = await client.applyPatch(repoPath, content, how);
-      });
+      }, failedOperation.applyPatch(null));
       const settled = outcome as PatchApplyOutcome | null;
       if (settled?.kind === "HookFailed") {
         const { hook, output, subject } = settled;
         setState((prev) => ({
           ...prev,
           error: `The ${hook} hook failed on “${subject}”. Nothing was applied.`,
+          errorHint: hookNextStep("apply the patch again"),
           hookFailure: { hook, output, retry: { kind: "applyPatch" }, dialogOpen: true },
         }));
         return;
@@ -149,13 +154,15 @@ export function usePatchActions(
         try {
           content = await client.readPatchFile(path);
         } catch (err) {
-          setState((prev) => ({ ...prev, ...failureError(err) }));
+          // The backend's message names the file already ("Couldn't read /tmp/a.patch: …").
+          const { error, errorHint } = failureError(err);
+          setState((prev) => ({ ...prev, error, errorHint: errorHint ?? failedOperation.readPatch(path).next }));
           return;
         }
         // Applied to the working tree only, so no hook runs.
         const ok = await runMutationWithOutcome(async () => {
           await client.applyPatch(repoPath, content, "WorkTree");
-        });
+        }, failedOperation.applyPatch(path));
         if (!ok) return;
         const message = `Applied ${fileName(path)} to the working tree`;
         setState((prev) => ({ ...prev, patchOutcome: { message, undoable: true } }));
