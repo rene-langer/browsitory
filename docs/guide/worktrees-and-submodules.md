@@ -25,7 +25,8 @@ revert is in progress, or another action or a transfer runs, opening, removing a
 disabled with the reason and left out of the palette; an open Remove confirmation says why.
 
 **Submodules** lists the repository's submodules. Initialize or update one from its row. Tick
-**Update recursively** to also update the submodules inside it.
+**Update recursively** to also update the submodules inside it; it shows once the repository
+has a submodule.
 
 To work in a submodule, open it in its own tab: choose **Open in new tab** in its menu (the
 **…** button, right-click, or the Menu key or Shift+F10 on the row's buttons), or run **Open

@@ -145,7 +145,7 @@ export function StashPanel({
           }}
           className={styles.empty}
         >
-          No stashes. Set changes aside from the commit box to see them here.
+          No stashes. Use Stash in the repository toolbar to set your changes aside.
         </p>
       ) : (
         <>

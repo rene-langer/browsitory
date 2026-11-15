@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { formatAbsoluteDate, formatShortDate } from "../lib/formatDate";
 import { shortRefName } from "../lib/shortRefName";
 import { useDateFormat } from "../state/useDateFormat";
@@ -37,6 +37,13 @@ export function ReflogPanel({
   const selectableReferences = references.filter(
     (reference) => reference === "HEAD" || reference.startsWith("refs/heads/"),
   );
+  // HEAD's reflog shows without a pick first (#1026); the selection then stays across refreshes.
+  const headAvailable = references.includes("HEAD");
+  useEffect(() => {
+    if (selectedReference === null && headAvailable) void onSelectReference("HEAD");
+    // Only a missing selection (a first open, a reference that went away) picks HEAD again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedReference, headAvailable]);
 
   return (
     <AccordionSection
@@ -46,7 +53,7 @@ export function ReflogPanel({
       icon={History}
       count={selectedReference === null ? undefined : entries.length}
     >
-      <label>
+      <label className={styles.reference}>
         Reflog reference
         <select
           value={selectedReference ?? ""}
