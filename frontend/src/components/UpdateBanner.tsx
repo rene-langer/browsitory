@@ -98,7 +98,8 @@ export function UpdateBanner() {
   if (readyUpdate === null) return null;
 
   return (
-    <div className={styles.banner} role="status">
+    // No role of its own: it sits in the toast region, which is the live region (#1000).
+    <div className={styles.banner}>
       <span>Update v{readyUpdate.version} ready</span>
       <button
         className={styles.restartButton}
