@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, type KeyboardEvent, type RefObject } from "react";
+import { scrollBehavior } from "./scrollBehavior";
 
 /**
  * The one Escape rule for transient UI that isn't a dialog (#1001): the compare pane, the commit
@@ -9,17 +10,21 @@ import { useLayoutEffect, useRef, type KeyboardEvent, type RefObject } from "rea
  * Spread `onKeyDown` on the container and put `containerRef` on it. An Escape a control inside
  * already handled (`preventDefault`, e.g. a menu, a suggestion list or a nested form) is left
  * alone, so the innermost UI closes first. `initialFocus` takes the focus when it opens, after
- * the opener is recorded (in place of `autoFocus`, which would move it first).
+ * the opener is recorded (in place of `autoFocus`, which would move it first). `reveal` scrolls the
+ * whole container into view when it opens (#1010), so a form in a scrolled sidebar section shows
+ * its buttons too, not just the field that took the focus.
  */
 export function useEscapeToClose<T extends HTMLElement>({
   open = true,
   onClose,
   initialFocus,
+  reveal = false,
 }: {
   /** Whether the UI is shown; a component that stays mounted while closed passes it. */
   open?: boolean;
   onClose: () => void;
   initialFocus?: RefObject<HTMLElement | null>;
+  reveal?: boolean;
 }) {
   const containerRef = useRef<T>(null);
   const opener = useRef<HTMLElement | null>(null);
@@ -29,13 +34,14 @@ export function useEscapeToClose<T extends HTMLElement>({
     const outside = (element: EventTarget | null): element is HTMLElement =>
       element instanceof HTMLElement && element !== document.body && !(containerRef.current?.contains(element) ?? false);
     opener.current = outside(document.activeElement) ? document.activeElement : null;
-    initialFocus?.current?.focus();
+    initialFocus?.current?.focus({ preventScroll: reveal });
+    if (reveal) containerRef.current?.scrollIntoView?.({ behavior: scrollBehavior(), block: "nearest" });
     const onFocusIn = (event: FocusEvent) => {
       if (outside(event.target)) opener.current = event.target;
     };
     document.addEventListener("focusin", onFocusIn);
     return () => document.removeEventListener("focusin", onFocusIn);
-  }, [open, initialFocus]);
+  }, [open, initialFocus, reveal]);
 
   /** Closes, then focuses what opened the UI (if it is still on the page). */
   const close = () => {

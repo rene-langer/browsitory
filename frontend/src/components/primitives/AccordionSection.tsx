@@ -1,5 +1,5 @@
 import { ChevronRight, type LucideIcon } from "lucide-react";
-import { createElement, useEffect, useRef, useState, type ReactNode } from "react";
+import { createElement, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { loadPersistedOpen, persistOpen } from "../../lib/persistedOpenState";
 import { scrollBehavior } from "../../lib/scrollBehavior";
 import { useAccordionGroup } from "./AccordionGroup";
@@ -34,6 +34,37 @@ export function AccordionSection({
   const [open, setOpen] = useState(() => loadPersistedOpen(storageKey, defaultOpen));
   const headerRef = useRef<HTMLButtonElement>(null);
   const sectionRef = useRef<HTMLElement>(null);
+  const headerRowRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  // Room for the content (#1010): an open section's minimum height is its header plus its
+  // content, up to a cap (`--section-cap` in the CSS), so an open neighbour can't squeeze it to a
+  // sliver; past the cap the body scrolls, and `data-fade` shades the edge it cuts. Written to the
+  // DOM directly, not to state: the content changes size without this component rendering again.
+  useLayoutEffect(() => {
+    const section = sectionRef.current;
+    const body = bodyRef.current;
+    const content = contentRef.current;
+    if (!open || section === null || body === null || content === null) return;
+    const fade = () => {
+      body.dataset.fade = String(body.scrollHeight - body.scrollTop - body.clientHeight > 1);
+    };
+    const measure = () => {
+      section.style.setProperty("--section-header", `${headerRowRef.current?.offsetHeight ?? 0}px`);
+      section.style.setProperty("--section-content", `${content.offsetHeight}px`);
+      fade();
+    };
+    measure();
+    body.addEventListener("scroll", fade, { passive: true });
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
+    observer?.observe(content);
+    observer?.observe(body);
+    return () => {
+      body.removeEventListener("scroll", fade);
+      observer?.disconnect();
+    };
+  }, [open]);
 
   // Opened during render (not in an effect, which `react-hooks/set-state-in-effect` forbids), so
   // the body is there when an owner reveals something inside it in the same commit.
@@ -77,7 +108,7 @@ export function AccordionSection({
           `AccordionGroup`. Open state itself is independent per section by design (not mutual
           exclusion) — each section persists its own open/closed state under its own
           `storageKey`, so opening one is not meant to close its siblings. */}
-      <div className={styles.headerRow}>
+      <div ref={headerRowRef} className={styles.headerRow} data-part="header">
         {createElement(
           `h${headingLevel}`,
           { className: styles.heading },
@@ -109,7 +140,13 @@ export function AccordionSection({
         )}
         {actions !== undefined && <div className={styles.actions}>{actions}</div>}
       </div>
-      {open && <div className={styles.body}>{children}</div>}
+      {open && (
+        <div ref={bodyRef} className={styles.body} data-part="body">
+          <div ref={contentRef} className={styles.content} data-part="content">
+            {children}
+          </div>
+        </div>
+      )}
     </section>
   );
 }
