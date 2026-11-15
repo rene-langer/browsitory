@@ -233,8 +233,9 @@ describe("Browsitory remote transfer", () => {
     await upstreamBranch.setValue("main");
     await (await upstreamDialog.$("button=Set upstream")).click();
 
-    // The repository toolbar's Pull (#637): the sidebar no longer has one of its own.
-    const pullButton = await $("div[aria-label='Repository']").$("button=Pull");
+    // The repository toolbar's Pull (#637): the sidebar no longer has one of its own. Its text may
+    // end in the commits to pull, "Pull↓1" (#1006).
+    const pullButton = await $("div[aria-label='Repository']").$("button*=Pull");
     // A busy Pull is `aria-disabled` with its reason (#664), not `disabled`.
     await browser.waitUntil(async () => (await pullButton.getAttribute("aria-disabled")) !== "true", {
       timeoutMsg: "expected Pull to become available",
@@ -294,7 +295,7 @@ describe("Browsitory remote transfer", () => {
     const localHead = git(E2E_REPO_PATH, "rev-parse", "HEAD");
     expect(localHead).not.toBe(remoteHeadBeforePush);
 
-    await clickRemoteContextItem("transfer-origin", "Push current branch here");
+    await clickRemoteContextItem("transfer-origin", "Push current branch to transfer-origin");
     if (needsChoice) {
       const dialog = await $(`dialog[aria-label="Push ${currentBranch}"]`);
       await dialog.waitForExist();
@@ -396,7 +397,7 @@ describe("Browsitory remote transfer", () => {
     // Idempotent re-expand — see the first test's comment.
     await expandSidebarSection("Branches");
 
-    await clickRemoteContextItem("transfer-origin", "Manage credentials");
+    await clickRemoteContextItem("transfer-origin", "Manage credentials…");
     // The `aria-label` naming this dialog now lives on the `<dialog>` itself, not a nested
     // `<form>` (the form carries no attributes of its own).
     const credentialsForm = await $("dialog[aria-label='Credentials for transfer-origin']");

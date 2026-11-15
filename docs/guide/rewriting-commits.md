@@ -2,37 +2,42 @@
 
 Right-click a commit in the graph:
 
-- **Cherry-pick** applies that commit on top of your current branch (not available on the
-  current HEAD commit). If it conflicts, the status strip shows **Cherry-picking**, conflicts
-  resolve exactly like a merge, and **Commit** finishes it. **Abort cherry-pick** undoes it and
-  keeps unrelated unstaged edits.
-- **Revert** commits the inverse of that commit, with the same conflict flow (**Reverting**,
-  **Abort revert**).
+- **Cherry-pick onto ⟨branch⟩** applies that commit on top of your current branch (not
+  available on the current HEAD commit). If it conflicts, the status strip shows **Cherry-picking**,
+  conflicts resolve exactly like a merge, and **Commit** finishes it. **Abort cherry-pick** undoes
+  it and keeps unrelated unstaged edits.
+- **Revert (new commit on ⟨branch⟩)** commits the inverse of that commit on your current
+  branch, with the same conflict flow (**Reverting**, **Abort revert**).
 - **Switch to (detached)** checks the commit out without a branch. The toolbar shows **HEAD
   detached at …** and push and pull are disabled until you check out a branch. The commit's row
   in the graph has a **HEAD** badge.
-- **Reset ⟨branch⟩ to here…** moves your branch to that commit. **Soft** keeps your changes
-  staged, **Mixed** (the default) keeps them unstaged, **Hard** discards changes to tracked
-  files; untracked files are kept. Hard asks for a second confirmation (**Reset hard**). Not
-  available on a detached HEAD.
-- **Reword…** on the latest commit opens the amend box with that commit's message filled in and
-  the cursor in the message field. On an older commit it opens a dialog with the full message
-  (see [Editing older commits](#editing-older-commits) below).
+- **Reset ⟨branch⟩ to here…** moves your branch to that commit. Under **What happens to your
+  changes**, **Soft** keeps your changes staged, **Mixed** (the default) keeps them unstaged,
+  **Hard** discards changes to tracked files; untracked files are kept. The button names the
+  mode (**Reset mixed**); **Reset hard** is marked as a danger and asks for a second
+  confirmation. Not available on a detached HEAD.
+- **Reword…** opens a dialog with the commit's full message. On the latest commit it changes
+  only the message: staged changes stay staged and out of the commit (to fold them in, use
+  [Amend last commit](#amending-the-last-commit)). It is one **Undo** step, and the toast says
+  **Reworded 1a2b3c4**. On an older commit see [Editing older commits](#editing-older-commits)
+  below.
 
 The command palette also has commands to cherry-pick, revert, check out and reset to the
-selected commit, to reword, edit, split, squash, fixup, move or drop it (**Reword 1a2b3c4…**,
-**Drop 1a2b3c4** and so on), to fold staged changes into it (**Fold staged changes into
-1a2b3c4**), and to amend the last commit (where the commit menu offers them), plus
-**Continue cherry-pick** / **Abort cherry-pick** (or revert) while a sequence is paused.
+selected commit (**Cherry-pick 1a2b3c4 onto main**, **Reset main to 1a2b3c4…**), to reword, edit,
+split, squash, fixup, move or drop it (**Reword 1a2b3c4…**, **Drop 1a2b3c4** and so on), to fold
+staged changes into it (**Fold staged changes into 1a2b3c4**), and to amend the last commit (where
+the commit menu offers them), plus **Continue cherry-pick** / **Abort cherry-pick** (or revert)
+while a sequence is paused. On screen, a paused cherry-pick or revert has the same **Continue
+cherry-pick** and **Abort cherry-pick** (or revert) in the status strip.
 
 ??? note "Details"
     A pick is refused if it would overwrite unstaged edits or if changes are staged. Picking a
     commit whose changes are already on the branch reports "Nothing to apply — those changes are
-    already on this branch." On a merge commit the item reads **Cherry-pick…** and asks which
-    parent to apply it against: parent 1 is usually the branch that was merged into, so picking
-    against it applies what the merge brought in. On a merge commit, **Revert…** asks for the
-    parent to keep (parent 1 undoes what the merge brought in), and the message names it like
-    `git revert -m` does.
+    already on this branch." On a merge commit the item reads **Cherry-pick onto ⟨branch⟩…** and
+    asks which parent to apply it against: parent 1 is usually the branch that was merged into, so
+    picking against it applies what the merge brought in. On a merge commit, **Revert (new commit on
+    ⟨branch⟩)…** asks for the parent to keep (parent 1 undoes what the merge brought in), and the
+    message names it like `git revert -m` does.
 
     Cherry-pick, revert, check out, reset and **Create tag at…** also work for a commit selected
     in the search results or a file history that is older than the history loaded in the graph;
@@ -41,16 +46,18 @@ selected commit, to reword, edit, split, squash, fixup, move or drop it (**Rewor
 
 ## Amending the last commit
 
-Tick **Amend last commit** under the commit message. The message fills with the last commit's,
-and the **Commit** button becomes **Amend** (the commit button's arrow has **Amend last commit**
-too): anything staged is folded into that commit (or just reword it). If that commit is already
-on the upstream, a warning reads "Already pushed — you'll need to force push." Whatever you had
-half-typed is kept and comes back when you untick amend or after a successful amend.
+Choose **Amend last commit** from the arrow next to **Commit**. The message fills with the last
+commit's, and the **Commit** button becomes **Amend**: anything staged is folded into that commit
+(or just reword it). If that commit is already on the upstream, a warning reads "Already pushed —
+you'll need to force push." **Cancel amend** next to **Amend** goes back to a normal commit.
+Whatever you had half-typed is kept and comes back when you cancel amend or after a successful
+amend.
 
 An **Author** field shows the commit's author as `Name <email>`. Leave it as it is (or empty) to
 keep the author, or change it to give the commit a different author; the original author date is
-kept and you stay the committer. It must have the form `Name <email>`. Co-authors work here too;
-amend starts without the chips you added for your next commit and gives them back afterwards.
+kept and you stay the committer. It must have the form `Name <email>`. Co-authors work here too
+(**Add co-author…** in the arrow next to **Amend**); amend starts without the chips you added for
+your next commit and gives them back afterwards.
 
 ## Editing older commits
 
@@ -58,33 +65,40 @@ The commit menu has eight one-click edits for commits of the current branch:
 
 - **Reword…** changes the commit's message.
 - **Edit commit…** stops at the commit with its changes staged on its parent. The status strip
-  says "Editing 1a2b3c4: change the files, then Continue". Change, stage or unstage files, edit
-  the message in the commit area if you like, then **Continue**: the staged result is committed
-  with that message (and the commit's author), and the commits after it are replayed.
-  **Abort rebase** puts the branch back as it was.
-- **Split commit…** stops the same way, to commit the changes as several commits. Unstage what
-  belongs in a later commit, write the first commit's message in the commit area (it offers the
+  says "Editing 1a2b3c4: change the files, then Finish editing". Change, stage or unstage files,
+  edit the message in the commit area if you like, then **Finish editing** in the strip: the
+  staged result is committed with that message (and the commit's author), the commits after it
+  are replayed, and a toast says **Edited 1a2b3c4**. **Cancel edit** puts the branch back as it
+  was ("Cancelled the edit of 1a2b3c4"); when you changed files or the message, it asks first.
+- **Split commit…** stops the same way, to commit the changes as several commits. The commit
+  area says what to do: "Unstage what belongs in a later part, write its message, then Commit
+  part. Finish split commits the rest." Write the first part's message (the box offers the
   original one) and click **Commit part**; the box is then empty for the next part. Stage the
-  next part, write its message, and so on. **Continue** commits what is still staged as the
-  last part, or nothing more when every change went into a part, then replays the commits after
-  it. Every part keeps the original commit's author. The status strip says "Splitting 1a2b3c4:
-  commit each part, then Continue". Edit commit… has **Commit part** too.
+  next part, write its message, and so on. **Finish split** in the status strip commits what is
+  still staged as the last part, or nothing more when every change went into a part, then
+  replays the commits after it ("Split 1a2b3c4"). Every part keeps the original commit's author.
+  The status strip says "Splitting 1a2b3c4: commit each part, then Finish split"; **Cancel
+  split** asks first once a part is committed. Edit commit… has **Commit part** too: a part
+  turns the edit into a split.
 - **Squash with parent** combines the commit with the one below it. The result keeps the
   parent's author and has both messages, the parent's first.
 - **Fixup into parent** combines them too, but keeps only the parent's message.
 - **Move up** and **Move down** swap the commit with the newer or the older neighbour.
 - **Drop** removes the commit and its changes from the branch.
 
-![Edit commit… stopped at a commit: the status strip, the staged change and the commit area with Commit part](assets/edit-commit.png)
+![Edit commit… stopped at a commit: the status strip, the staged change and the commit area with
+Commit part](assets/edit-commit.png)
 
 Each one is a small interactive rebase (see [Rebase](rebase.md)): the commits after the edited
-one are rewritten, so they get new ids. A conflict pauses it like any rebase: the progress panel
-shows **Continue rebase** and **Abort rebase**, the paused rebase survives a restart, and Abort
-puts the branch back as it was. A finished edit is one **Undo** step named after the edit
+one are rewritten, so they get new ids. A conflict pauses it like any rebase: the status strip
+shows **Continue rebase** and **Abort rebase**, the paused rebase survives a restart, and Abort puts the
+branch back as it was. While it is paused the toolbar names the rebase ("Rebasing main") instead
+of the detached HEAD. A finished edit is one **Undo** step named after the edit
 ("Drop 1a2b3c4", "Squash 1a2b3c4 into its parent", "Move 1a2b3c4 up", "Edit 1a2b3c4",
 "Split 1a2b3c4").
 
-**Changes left over when you continue.** At an edit stop, **Continue** commits only what is
+**Changes left over when you continue.** At an edit stop, **Finish editing** (**Continue rebase**
+at a rebase's Edit step) commits only what is
 staged. When a tracked file still has changes that aren't staged, or a file the commit added is
 no longer staged, Continue asks what to do with them: **Commit the rest** stages them and
 commits them with the commit (the last part of a split), **Discard the rest** throws them away
@@ -106,8 +120,9 @@ files have to be staged or stashed first (untracked files are fine). It runs no 
     An edit is disabled, with the reason as its tooltip, when:
 
     - the commit isn't on the current branch (or HEAD is detached);
-    - it is a merge commit, or a merge commit comes after it (use **Rebase onto here…**
-      instead);
+    - it is a merge commit, or a merge commit comes after it ("Can't edit: a merge commit comes
+      after this one."): the edits replay the branch's first-parent history, which can't
+      replay a merge;
     - it is the first commit of the history; Squash, Fixup and Move down also need a parent
       that isn't the first commit or a merge commit;
     - Move up is on the latest commit;
@@ -118,10 +133,11 @@ files have to be staged or stashed first (untracked files are fine). It runs no 
 
 ## Force push
 
-When a push is rejected because the remote has commits you don't, the error offers **Force push
-(with lease)…**. The command palette has it too, as **Force push current branch…** in the
+When a push is rejected because the remote has commits you don't, the error offers **Pull** first,
+then **Force push…** (with lease). The command palette has it too, as **Force push current branch…** in the
 Remotes group; it is hidden on a detached HEAD or when the branch has no upstream. It always
-asks for confirmation.
+asks for confirmation, which says how many commits the remote branch loses (when the counts are
+known) and that Undo can't take back a push.
 
 ??? note "Details"
     The push is refused if the remote branch changed since your last fetch ("⟨remote⟩/⟨branch⟩
@@ -142,9 +158,9 @@ sidebar's Branches section to cherry-pick it there. On release a small menu offe
 drags the whole selection (**Cherry-pick N commits onto ⟨branch⟩**, oldest first). The commit
 menu and the bar under the graph offer the same actions without dragging.
 
-A conflict pauses the sequence: the status strip shows "Cherry-picking 2/5" and the commit area
-shows **Continue cherry-pick** / **Abort cherry-pick** instead of the message box. Resolve the
-conflicts (see [Resolving conflicts](conflicts.md)), then **Continue**; it commits the resolved
+A conflict pauses the sequence: the status strip shows "Cherry-picking 2/5" with **Continue
+cherry-pick** and **Abort cherry-pick**. Resolve the
+conflicts (see [Resolving conflicts](conflicts.md)), then **Continue cherry-pick**; it commits the resolved
 step and goes on. **Abort** puts the branch back where it was before the first commit was
 applied, keeping unrelated uncommitted edits. A whole sequence is one **Undo** step; an aborted
 one leaves nothing to undo.
@@ -166,7 +182,8 @@ one leaves nothing to undo.
 ??? note "Details: a paused sequence"
     If you resolve a step so that nothing is left to commit (for example **Use ours (whole
     file)** on its only change), that step is skipped. A sequence that stops for another reason
-    (say an untracked file is in the way) also shows **Continue**, which retries the step. The
+    (say an untracked file is in the way) also shows **Continue cherry-pick** (or **Continue
+    revert**), which retries the step. The
     paused sequence is kept on disk, so it is still there after you close and reopen the app.
     While it is paused, other cherry-picks, merges, rebases, commits, amend, reset, checkout,
     branch switching, pull and stash apply/pop are unavailable, and so are saving a stash and
@@ -177,7 +194,7 @@ one leaves nothing to undo.
     sequence keeps its branch under the name it started with.
 
     If you finish a conflicted step yourself in a terminal (`git commit` after resolving),
-    **Continue** recognises it when it is exactly that step: one commit on top of where the
+    Continue recognises it when it is exactly that step: one commit on top of where the
     sequence stopped, with the picked commit's author, message and changes (for a cherry-pick)
     or git's "This reverts commit …" message (for a revert). Any other commit, or any commit
     after a stop that wasn't a conflict, means HEAD moved, and Continue refuses.
@@ -187,7 +204,7 @@ one leaves nothing to undo.
     so. If HEAD is on another commit than where the sequence stopped, Continue refuses too.
     Renaming the branch in a terminal (`git branch -m`) doesn't count as moving HEAD: Continue
     carries on on the renamed branch, and, as with `git cherry-pick --abort`, Abort puts the
-    renamed branch back. The step **Continue** commits runs the commit hooks (see
+    renamed branch back. The step Continue commits runs the commit hooks (see
     [Hooks](hooks.md)); the steps applied by themselves run none, like a single cherry-pick.
 
 ## Started in a terminal

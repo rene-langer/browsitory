@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { ApplyPatchDialog } from "./components/ApplyPatchDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { CreateTagDialog } from "./components/CreateTagDialog";
+import { DeleteTagMessage } from "./components/DeleteTagMessage";
 import { DeleteRemoteBranchDialog } from "./components/DeleteRemoteBranchDialog";
 import { DeleteRemoteTagDialog } from "./components/DeleteRemoteTagDialog";
 import { EditRestDialog } from "./components/EditRestDialog";
@@ -9,11 +10,13 @@ import { HookFailureDialog } from "./components/HookFailureDialog";
 import { MergeDialog } from "./components/MergeDialog";
 import { ParentPickerDialog } from "./components/ParentPickerDialog";
 import { ConfirmDialog } from "./components/primitives/ConfirmDialog";
+import { DropStashMessage } from "./components/DropStashMessage";
 import { Overlay } from "./components/primitives/Overlay";
 import { PendingPullPrompt } from "./components/PendingPullPrompt";
 import { SwitchConflictDialog } from "./components/SwitchConflictDialog";
 import { PushBranchDialog } from "./components/PushBranchDialog";
 import { RebasePlanner } from "./components/RebasePlanner";
+import { rebasePlannerTitle } from "./lib/rebasePlannerTitle";
 import { RemoteDialogs } from "./components/RemoteDialogs";
 import { ResetDialog } from "./components/ResetDialog";
 import { RewordDialog } from "./components/RewordDialog";
@@ -25,6 +28,9 @@ import type { Command } from "./lib/commands";
 import { retrySuccessLabel } from "./lib/hookFailure";
 import { busyReason, stashBlockReason, terminalAbortConfirm } from "./lib/operationStatus";
 import { upstreamPushBranch } from "./lib/pushTarget";
+import { repoNameOf } from "./lib/repoName";
+import { shortRefName } from "./lib/shortRefName";
+import { stashTitle } from "./lib/actions/stashActions";
 import type { useAnnounce } from "./state/useAnnounce";
 import type { UseAppStateResult } from "./state/useAppState";
 import type { useCommitDraftActions } from "./state/useCommitDraftActions";
@@ -60,6 +66,9 @@ export function WorkspaceDialogs({
   terminalAbortRequest,
   onTerminalAbortRequestChange: setTerminalAbortRequest,
   runTerminalAbort,
+  abortRequest,
+  onAbortRequestChange: setAbortRequest,
+  onRebaseContinue,
   commitDialog,
   onCommitDialogChange: setCommitDialog,
   onCherryPick: cherryPickCommit,
@@ -87,6 +96,11 @@ export function WorkspaceDialogs({
   terminalAbortRequest: SequenceActions["terminalAbortRequest"];
   onTerminalAbortRequestChange: SequenceActions["setTerminalAbortRequest"];
   runTerminalAbort: SequenceActions["runTerminalAbort"];
+  // An Abort that would lose work, waiting for its confirmation (#979).
+  abortRequest: SequenceActions["abortRequest"];
+  onAbortRequestChange: SequenceActions["setAbortRequest"];
+  // Continue rebase with its toast for a finished edit stop (#994).
+  onRebaseContinue: SequenceActions["continueRebase"];
   commitDialog: CommitDialogRequest | null;
   onCommitDialogChange: (request: CommitDialogRequest | null) => void;
   onCherryPick: (commitId: string, mainline: number | null) => void;
@@ -113,6 +127,23 @@ export function WorkspaceDialogs({
     (appState.state.upstream?.remoteName === remoteName ? upstreamPushBranch(appState.state.upstream) : null) ??
     currentBranchName;
   const forcePushConfirm = dialogOf(dialog, "forcePush");
+  // What a force push to `remoteName` removes there (#989): the upstream's commits the branch
+  // doesn't have, when the push goes to the upstream and the counts are known.
+  const forcePushLostCount = (remoteName: string): number | null => {
+    const upstream = appState.state.upstream;
+    if (upstream === null || upstream.remoteName !== remoteName) return null;
+    if (upstreamPushBranch(upstream) !== upstream.remoteBranch) return null;
+    return upstream.behind ?? null;
+  };
+  // A diverged pull's commit counts (#1019), when the pull is the upstream's.
+  const pendingPullUpstream = appState.state.upstream;
+  const pendingPullCounts =
+    appState.state.pendingPull !== null &&
+    pendingPullUpstream !== null &&
+    shortRefName(appState.state.pendingPull.upstreamRef) ===
+      `${pendingPullUpstream.remoteName}/${pendingPullUpstream.remoteBranch}`
+      ? { ahead: pendingPullUpstream.ahead ?? null, behind: pendingPullUpstream.behind ?? null }
+      : null;
   const pushDialogBranch = dialogOf(dialog, "push")?.localBranch ?? null;
   const createTagDialog = dialogOf(dialog, "createTag");
   const createTagCommit =
@@ -122,8 +153,23 @@ export function WorkspaceDialogs({
   const applyPatchDialog = dialogOf(dialog, "applyPatch");
   const deleteRemoteBranchDialog = dialogOf(dialog, "deleteRemoteBranch");
   const deleteRemoteTagDialog = dialogOf(dialog, "deleteRemoteTag");
+  const deleteTagDialog = dialogOf(dialog, "deleteTag");
+  const dropStashDialog = dialogOf(dialog, "dropStash");
+  // Found by commit, as the indexes shift when another stash is pushed or dropped meanwhile.
+  const dropStashEntry =
+    dropStashDialog === null ? undefined : appState.state.stashes.find((stash) => stash.commitId === dropStashDialog.commitId);
+  const removeWorktreeDialog = dialogOf(dialog, "removeWorktree");
+  const removeWorktreeEntry =
+    removeWorktreeDialog === null
+      ? undefined
+      : appState.state.worktrees.find((worktree) => worktree.name === removeWorktreeDialog.name);
   const remoteDialog = dialogOf(dialog, "remote");
   const rewordDialog = dialogOf(dialog, "reword");
+  const rewordShortId =
+    rewordDialog === null
+      ? ""
+      : (appState.state.commits.find((commit) => commit.id === rewordDialog.commitId)?.shortId ??
+        rewordDialog.commitId.slice(0, 7));
   // Read from `dialog` itself, not `rewordDialog`: the React Compiler cannot keep the memoization
   // below on a value a helper call returned.
   const rewordCommitId = dialog?.kind === "reword" ? dialog.commitId : null;
@@ -160,16 +206,16 @@ export function WorkspaceDialogs({
       )}
       {active && forcePushConfirm !== null && (
         <ConfirmDialog
-          ariaLabel="Confirm force push"
+          title={`Force push to ${forcePushConfirm.remoteName}/${forcePushTargetBranch(forcePushConfirm.remoteName)}`}
           message={
-            <>
-              <p>
-                Overwrites {forcePushConfirm.remoteName}/{forcePushTargetBranch(forcePushConfirm.remoteName)} with
-                your local branch.
-              </p>
-            </>
+            <ForcePushMessage
+              target={`${forcePushConfirm.remoteName}/${forcePushTargetBranch(forcePushConfirm.remoteName)}`}
+              branch={currentLocalBranch}
+              lost={forcePushLostCount(forcePushConfirm.remoteName)}
+            />
           }
           confirmLabel="Force push"
+          tone="danger"
           confirmDisabled={repositoryOperationDisabled}
           // #514: the repository can become busy while the confirmation is open.
           confirmReason={operationDisabledReason}
@@ -182,22 +228,32 @@ export function WorkspaceDialogs({
       )}
       {active && terminalAbortRequest !== null && (
         <ConfirmDialog
-          ariaLabel={terminalAbortConfirm(terminalAbortRequest.sequence).title}
-          message={
-            <>
-              <p>
-                <strong>{terminalAbortConfirm(terminalAbortRequest.sequence).title}</strong>
-              </p>
-              <p>{terminalAbortConfirm(terminalAbortRequest.sequence).body}</p>
-            </>
-          }
+          title={terminalAbortConfirm(terminalAbortRequest.sequence).title}
+          message={<p>{terminalAbortConfirm(terminalAbortRequest.sequence).body}</p>}
           confirmLabel={terminalAbortConfirm(terminalAbortRequest.sequence).confirmLabel}
+          tone="danger"
           onConfirm={() => {
             const request = terminalAbortRequest;
             setTerminalAbortRequest(null);
             runTerminalAbort(request.sequence, request.headId);
           }}
           onCancel={() => setTerminalAbortRequest(null)}
+        />
+      )}
+      {active && abortRequest !== null && (
+        // Abort that would lose work Undo can't bring back (#979); Cancel has the focus.
+        <ConfirmDialog
+          title={abortRequest.confirm.title}
+          message={<p>{abortRequest.confirm.body}</p>}
+          confirmLabel={abortRequest.confirm.confirmLabel}
+          cancelLabel={abortRequest.confirm.cancelLabel}
+          tone="danger"
+          onConfirm={() => {
+            const request = abortRequest;
+            setAbortRequest(null);
+            request.run();
+          }}
+          onCancel={() => setAbortRequest(null)}
         />
       )}
       {active && mergeDialogBranch !== null && (
@@ -310,7 +366,7 @@ export function WorkspaceDialogs({
           onChoose={(rest) => {
             // Allowed during the paused rebase it continues; only an action in flight blocks it.
             if (busyReason(appState.state) !== null) return;
-            void appState.rebaseContinue(rest);
+            void onRebaseContinue(rest);
           }}
           onCancel={appState.closeEditRest}
         />
@@ -321,6 +377,9 @@ export function WorkspaceDialogs({
           upstreamRef={appState.state.pendingPull.upstreamRef}
           noFastForward={appState.state.pendingPull.noFastForward === true}
           branchName={appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null}
+          repoName={repoNameOf(repoPath)}
+          ahead={pendingPullCounts?.ahead ?? null}
+          behind={pendingPullCounts?.behind ?? null}
           operationDisabled={repositoryOperationDisabled}
           operationDisabledReason={operationDisabledReason}
           getPullStrategy={appState.getPullStrategy}
@@ -391,19 +450,70 @@ export function WorkspaceDialogs({
       {active && rewordDialog !== null && (
         <RewordDialog
           key={rewordDialog.commitId}
-          shortId={
-            appState.state.commits.find((commit) => commit.id === rewordDialog.commitId)?.shortId ??
-            rewordDialog.commitId.slice(0, 7)
-          }
+          shortId={rewordShortId}
+          head={rewordDialog.onto === null}
           loadMessage={loadRewordMessage}
           disabled={repositoryOperationDisabled}
           disabledReason={operationDisabledReason}
           onReword={(message) => {
             const { commitId, onto } = rewordDialog;
             closeDialog("reword");
-            void appState.editHistory(commitId, onto, { kind: "Reword", message });
+            if (onto !== null) {
+              void appState.editHistory(commitId, onto, { kind: "Reword", message });
+              return;
+            }
+            // HEAD (#981): its message only, staged changes stay staged; one undo step.
+            void announce(`Reworded ${rewordShortId}`, appState.rewordHead, { undoable: true })(commitId, message);
           }}
           onCancel={() => closeDialog("reword")}
+        />
+      )}
+      {active && deleteTagDialog !== null && (
+        // The palette's "Delete tag …" (#993): TagPanel's confirmation.
+        <ConfirmDialog
+          title={`Delete local tag ${deleteTagDialog.tagName}`}
+          message={<DeleteTagMessage name={deleteTagDialog.tagName} />}
+          confirmLabel="Delete tag"
+          confirmDisabled={repositoryOperationDisabled}
+          // The repository can become busy while the confirmation is open (#521).
+          confirmReason={operationDisabledReason}
+          onConfirm={() => {
+            if (repositoryOperationDisabled) return;
+            void appState.deleteTag(deleteTagDialog.tagName).then(() => closeDialog("deleteTag"));
+          }}
+          onCancel={() => closeDialog("deleteTag")}
+        />
+      )}
+      {active && dropStashDialog !== null && dropStashEntry !== undefined && (
+        // The palette's "Drop stash: …" (#990): the Stashes panel's confirmation. Only an action in
+        // flight or a transfer blocks a drop (#521).
+        <ConfirmDialog
+          title={`Drop stash ${stashTitle(dropStashEntry)}`}
+          message={<DropStashMessage />}
+          confirmLabel="Drop stash"
+          tone="danger"
+          confirmReason={busyReason(appState.state)}
+          onConfirm={() => {
+            if (busyReason(appState.state) !== null) return;
+            closeDialog("dropStash");
+            void appState.dropStash(dropStashEntry.index);
+          }}
+          onCancel={() => closeDialog("dropStash")}
+        />
+      )}
+      {active && removeWorktreeDialog !== null && removeWorktreeEntry !== undefined && (
+        // The palette's "Remove worktree …" (#990): the Worktrees panel's confirmation.
+        <ConfirmDialog
+          title={`Remove worktree ${removeWorktreeEntry.path}`}
+          message={<p>Remove worktree at {removeWorktreeEntry.path}?</p>}
+          confirmLabel="Remove worktree"
+          confirmDisabled={repositoryOperationDisabled}
+          confirmReason={operationDisabledReason}
+          onConfirm={() => {
+            if (repositoryOperationDisabled) return;
+            void appState.removeWorktree(removeWorktreeEntry.name).then(() => closeDialog("removeWorktree"));
+          }}
+          onCancel={() => closeDialog("removeWorktree")}
         />
       )}
       {active && deleteRemoteTagDialog !== null && (
@@ -445,11 +555,12 @@ export function WorkspaceDialogs({
         </Overlay>
       )}
       {active && appState.state.rebaseOnto !== null && (
-        <Overlay onClose={appState.closeRebasePlanner} ariaLabel="Rebase plan">
+        <Overlay onClose={appState.closeRebasePlanner} ariaLabel={rebasePlannerTitle(appState.state.rebaseOnto, currentLocalBranch)}>
           <RebasePlanner
             repoPath={repoPath}
             client={client}
             onto={appState.state.rebaseOnto}
+            branchName={currentLocalBranch}
             onStartRebase={(onto, plan) => {
               // Re-checked: the repository can become busy while the planner is open (#521).
               if (repositoryOperationDisabled) return;
@@ -461,6 +572,32 @@ export function WorkspaceDialogs({
           />
         </Overlay>
       )}
+    </>
+  );
+}
+
+/**
+ * What a force push does (#989): what it replaces, that `--force-with-lease` refuses it when the
+ * remote branch moved since the last fetch, which remote commits it removes, and that Undo can't
+ * take a push back.
+ */
+function ForcePushMessage({ target, branch, lost }: { target: string; branch: string | null; lost: number | null }) {
+  return (
+    <>
+      <p>
+        Replaces {target} with your local {branch ?? "branch"}. It uses <code>--force-with-lease</code>: if {target}{" "}
+        changed since your last fetch, the push is refused.
+      </p>
+      <p>
+        {lost === null
+          ? `Commits on ${target} that your branch doesn't have are removed from it.`
+          : lost === 0
+            ? `${target} has no commits your branch doesn't have.`
+            : lost === 1
+              ? `The 1 commit on ${target} that your branch doesn't have is removed from it.`
+              : `The ${lost} commits on ${target} that your branch doesn't have are removed from it.`}
+      </p>
+      <p>Undo can&apos;t take back a push.</p>
     </>
   );
 }

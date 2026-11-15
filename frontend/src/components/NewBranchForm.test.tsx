@@ -2,11 +2,27 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BranchTree } from "./BranchTree";
 import { renderTree, treeProps } from "../test/branchTreeProps";
+import { BranchTreeWithDialogs } from "../test/BranchTreeWithDialogs";
 import { describedByText } from "../test/describedBy";
 
 describe("NewBranchForm (in BranchTree)", () => {
   beforeEach(() => {
     localStorage.clear();
+  });
+
+  it("scrolls the whole form into view when it opens (#1010)", () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView as unknown as Element["scrollIntoView"];
+    try {
+      const { props, rerender } = renderTree();
+      expect(scrollIntoView.mock.contexts.some((element) => (element as Element).tagName === "FORM")).toBe(false);
+      rerender(<BranchTreeWithDialogs {...props} createBranchDraft={{ startPoint: "HEAD" }} />);
+      const form = screen.getByRole("form", { name: "New branch" });
+      expect(scrollIntoView.mock.contexts).toContain(form);
+      expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ block: "nearest" }));
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+    }
   });
 
   it("a non-null createBranchDraft shows the create form; submitting calls onCreateBranch with its startPoint", async () => {
@@ -78,6 +94,22 @@ describe("NewBranchForm (in BranchTree)", () => {
     expect(input).toHaveFocus();
     fireEvent.keyDown(input, { key: "Escape" });
     expect(props.onCloseCreateBranchDraft).toHaveBeenCalled();
+  });
+
+  it("Escape anywhere in the form closes it and returns focus to what opened it (#1001)", () => {
+    const opener = document.createElement("button");
+    document.body.appendChild(opener);
+    opener.focus();
+    const { props } = renderTree({ createBranchDraft: { startPoint: "HEAD" } });
+    expect(screen.getByPlaceholderText("New branch name")).toHaveFocus();
+
+    const checkbox = screen.getByRole("checkbox", { name: "Switch to it after creating" });
+    checkbox.focus();
+    fireEvent.keyDown(checkbox, { key: "Escape" });
+
+    expect(props.onCloseCreateBranchDraft).toHaveBeenCalledOnce();
+    expect(opener).toHaveFocus();
+    opener.remove();
   });
 
   it("shows the base branch for HEAD and a short id for a commit", () => {

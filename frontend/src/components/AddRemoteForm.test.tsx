@@ -10,6 +10,18 @@ describe("AddRemoteForm (in BranchTree)", () => {
     localStorage.clear();
   });
 
+  it("scrolls the whole form into view when it opens, its buttons included (#1010)", () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView as unknown as Element["scrollIntoView"];
+    try {
+      renderTree({ addRemoteDraftOpen: true });
+      expect(scrollIntoView.mock.contexts).toContain(screen.getByRole("form", { name: "Add remote" }));
+      expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ block: "nearest" }));
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+    }
+  });
+
   it("Add remote shows a remote-name problem inline and keeps Add remote disabled", () => {
     const onAddRemote = vi.fn().mockResolvedValue(null);
     renderTree({ addRemoteDraftOpen: true, onAddRemote });
@@ -164,5 +176,21 @@ describe("AddRemoteForm (in BranchTree)", () => {
     expect(input).toHaveFocus();
     fireEvent.keyDown(input, { key: "Escape" });
     expect(props.onCloseAddRemoteDraft).toHaveBeenCalled();
+  });
+
+  it("Escape anywhere in the form closes it and returns focus to what opened it (#1001)", () => {
+    const opener = document.createElement("button");
+    document.body.appendChild(opener);
+    opener.focus();
+    const { props } = renderTree({ addRemoteDraftOpen: true });
+    expect(screen.getByPlaceholderText("origin")).toHaveFocus();
+
+    const fetchUrl = screen.getByTestId("add-remote-fetch-url");
+    fetchUrl.focus();
+    fireEvent.keyDown(fetchUrl, { key: "Escape" });
+
+    expect(props.onCloseAddRemoteDraft).toHaveBeenCalledOnce();
+    expect(opener).toHaveFocus();
+    opener.remove();
   });
 });

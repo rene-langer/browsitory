@@ -54,6 +54,29 @@ describe("transferToast", () => {
     );
   });
 
+  it("says a fetch left the branch diverged, not only behind, and still offers Pull (#999)", () => {
+    expect(transferToast({ kind: "fetch", remoteName: "origin" }, upstream(1, 1))).toEqual({
+      message: "Fetched from origin. main and origin/main have diverged: 1 commit ahead, 1 behind.",
+      tone: "success",
+      offerPull: true,
+    });
+    expect(transferToast({ kind: "fetchAll", remoteCount: 2 }, upstream(3, 2))?.message).toBe(
+      "Fetched from 2 remotes. main and origin/main have diverged: 2 commits ahead, 3 behind.",
+    );
+  });
+
+  it("says a fetch left the branch only ahead, and offers Push instead of Pull (#999)", () => {
+    expect(transferToast({ kind: "fetch", remoteName: "origin" }, upstream(0, 2))).toEqual({
+      message: "Fetched from origin. main is 2 commits ahead of origin/main.",
+      tone: "success",
+      offerPull: false,
+      offerPush: true,
+    });
+    expect(transferToast({ kind: "fetch", remoteName: "origin" }, upstream(0, 1))?.message).toBe(
+      "Fetched from origin. main is 1 commit ahead of origin/main.",
+    );
+  });
+
   it("says a fetch left the branch up to date, without Pull", () => {
     expect(transferToast({ kind: "fetch", remoteName: "origin" }, upstream(0))).toEqual({
       message: "Fetched from origin. main is up to date with origin/main.",

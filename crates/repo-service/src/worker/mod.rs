@@ -382,6 +382,12 @@ pub(crate) enum Command {
         name: String,
         reply: Sender<Result<Vec<String>, ErrorDto>>,
     },
+    /// How many commits of local branch `name` no other branch has: what deleting it would leave
+    /// on no branch (#996).
+    CountCommitsOnlyOnBranch {
+        name: String,
+        reply: Sender<Result<usize, ErrorDto>>,
+    },
     /// Stashes the local changes, switches to `name` and, with `reapply`, pops them there (#653).
     /// `operation_id` and `events` as for `SwitchBranch`.
     StashAndSwitch {
@@ -743,6 +749,8 @@ pub(crate) enum Command {
         /// Replaces the author's name and email (the author time is kept).
         author: Option<git_core::commit::SignatureInput>,
         trailers: Vec<git_core::commit::Trailer>,
+        /// Reword… on HEAD (#981): HEAD's tree stays, only the message changes.
+        message_only: bool,
         operation_id: cancel::OperationId,
         events: Sender<HookEvent>,
         reply: Sender<Result<git_core::commit::CommitOutcome, ErrorDto>>,

@@ -61,7 +61,9 @@ describe("useAppState merge and stash options", () => {
 
     expect(result.current.state.mergeOutcome).toBeNull();
     expect(result.current.state.dialog).toBeNull();
-    expect(result.current.state.error).toBe("Can't fast-forward: 'feature' has diverged from the current branch.");
+    expect(result.current.state.error).toBe(
+      "Couldn't merge feature: Can't fast-forward: 'feature' has diverged from the current branch.",
+    );
   });
 
   it("closeDialog closes the merge dialog and getMergeOptions reads the client", async () => {

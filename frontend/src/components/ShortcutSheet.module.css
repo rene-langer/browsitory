@@ -1,31 +1,41 @@
-.sheet {
-  min-width: min(28rem, 80vw);
-  max-height: 70vh;
-  overflow-y: auto;
-}
-
-.sheet h3 {
-  margin: var(--space-3) 0 var(--space-1);
-  font-size: 0.85rem;
-  color: var(--color-text-muted);
-}
-
 .list {
   margin: 0;
+  /* The key column is as wide as its longest keys (#1016), so "Ctrl+Shift+Z / Ctrl+Y" stays on
+     one line; each row's cells join the list's grid. */
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: var(--space-3);
+  row-gap: var(--space-1);
+  align-items: baseline;
 }
 
 .row {
-  display: flex;
-  gap: var(--space-3);
-  padding: 2px 0;
+  display: contents;
 }
 
 .row dt {
-  flex: 0 0 12rem;
+  white-space: nowrap;
 }
 
 .row dd {
   margin: 0;
+}
+
+.group > h3 {
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+/* A key chip (#1016). */
+.keys {
+  display: inline-block;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--color-border);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  line-height: 1.6;
 }
 
 .note {
@@ -33,7 +43,11 @@
   color: var(--color-text-muted);
 }
 
+/* Change shortcuts… and Close at the right end of the footer, like a dialog's buttons. */
 .actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: var(--space-2);
+  width: 100%;
 }

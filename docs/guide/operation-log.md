@@ -9,11 +9,11 @@ Open it from:
 
 - the command palette: **Show operation log**;
 - the **Help** menu (the question mark at the top right): **Operation log**;
-- an error at the top of the window: **Show details** opens the log on the newest failed
+- an error at the top of the window: **Details** opens the log on the newest failed
   operation.
 
-Each row shows the operation's name and what it ran on (a branch, a remote, a file or a commit
-message), the time, the duration and an icon for the result:
+Each row shows the operation's name and what it ran on (a branch, a remote such as "Fetch from
+origin" or "Push to origin", a file or a commit message), the time, the duration and an icon for the result:
 
 | Icon | Result |
 |---|---|

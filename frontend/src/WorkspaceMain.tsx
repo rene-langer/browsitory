@@ -2,9 +2,10 @@ import { SearchMatchBar } from "./components/SearchMatchBar";
 import { useSearchView, writeSearchView } from "./lib/searchViewPreference";
 import { useSearchMatches } from "./state/useSearchMatches";
 import type { CommitGraphLayout } from "./lib/useCommitGraphLayout";
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { CommitDraft } from "./components/CommitBox";
 import { CommitGraph } from "./components/CommitGraph";
+import { GraphFilterStrip } from "./components/GraphFilterStrip";
 import { CommitSearchBar } from "./components/CommitSearchBar";
 import { CommitSearchResults } from "./components/CommitSearchResults";
 import { CompareDiffPane } from "./components/CompareDiffPane";
@@ -107,6 +108,8 @@ export function WorkspaceMain({
   graphLayout: CommitGraphLayout;
 }) {
   const searchResultsRef = useRef<HTMLUListElement>(null);
+  // A conflicted file is open in the merge editor (#980): the history column narrows meanwhile.
+  const [conflictFileOpen, setConflictFileOpen] = useState(false);
   // #620: the commit list's lines-changed badges, counted as rows come into view.
   const showLineStats = useShowLineStats();
   const lineStats = useCommitLineStats(client, repoPath);
@@ -151,15 +154,17 @@ export function WorkspaceMain({
     () => issueForgeRepository(appState.state.forgeRepositories, upstreamRemote),
     [appState.state.forgeRepositories, upstreamRemote],
   );
+  const currentBranch = appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null;
   // #448: "Save as patch…" for commits (oldest first).
   const savePatchOfCommits = (commitIds: string[]) =>
     void appState.savePatch({ kind: "Commits", commitIds }, commitsPatchName(commitIds, appState.state.commits));
   return (
     <SplitView
       storageKey="history-diff-width"
-      defaultWidth={420}
-      minWidth={280}
-      maxWidth={800}
+      defaultWidth={defaultHistoryWidth()}
+      minWidth={HISTORY_MIN_WIDTH}
+      maxWidth={HISTORY_MAX_WIDTH}
+      overrideWidth={conflictFileOpen ? MERGE_EDITOR_HISTORY_WIDTH : null}
       label="History and diff width"
       leftRegion="History"
       rightRegion="Diff"
@@ -200,6 +205,10 @@ export function WorkspaceMain({
                 onToggleList={() => writeSearchView(searchView === "list" ? "graph" : "list")}
               />
             )}
+            <GraphFilterStrip
+              selection={appState.state.graphSelection}
+              onShowAll={() => void appState.showAllGraphBranches()}
+            />
             {commitSearch.results !== null && !searchInGraph ? (
               <CommitSearchResults
                 results={commitSearch.results}
@@ -235,7 +244,12 @@ export function WorkspaceMain({
                 onRebaseFromCommit={appState.openRebasePlanner}
                 onRebaseSelection={appState.openRebaseSelection}
                 headInfo={appState.state.headInfo}
-                currentBranch={appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null}
+                currentBranch={currentBranch}
+                currentBranchShown={
+                  currentBranch === null ||
+                  appState.state.graphSelection.local === null ||
+                  appState.state.graphSelection.local.includes(currentBranch)
+                }
                 onCherryPick={cherryPickCommit}
                 onRevert={revertCommit}
                 onCherryPickMany={(ids) =>
@@ -321,15 +335,32 @@ export function WorkspaceMain({
             discardBlockedReason={discardDropBlockedReason}
             selectionBusyReason={appState.state.pending ? "Another action is in progress." : null}
             mergeMessage={appState.state.mergeMessage}
-            sequencePending={appState.state.pending}
             amendMode={appState.state.amendMode}
             headInfo={appState.state.headInfo}
             focusCommitMessage={focusCommitMessage}
             clearCommitMessage={appState.state.clearCommitMessage}
             rebaseProgress={appState.state.rebaseProgress}
+            onConflictFileOpenChange={setConflictFileOpen}
           />
         )
       }
     />
   );
+}
+
+const HISTORY_MIN_WIDTH = 280;
+const HISTORY_MAX_WIDTH = 1200;
+/**
+ * The history column's width while a conflicted file is open (#980), not saved: at 1280×800 with
+ * the sidebar at its default, it leaves the merge editor about 696 px, room for its three panes
+ * (680). Below the 280 px a drag can reach; a drag or arrow key during it ends it.
+ */
+const MERGE_EDITOR_HISTORY_WIDTH = 240;
+
+/**
+ * The history column's width until the user drags it (#1004): about 40% of the window it opens
+ * in, so a wide window shows longer subjects instead of an empty diff pane.
+ */
+function defaultHistoryWidth(): number {
+  return Math.min(HISTORY_MAX_WIDTH, Math.max(HISTORY_MIN_WIDTH, Math.round(window.innerWidth * 0.4)));
 }

@@ -38,6 +38,11 @@
   border-left: 3px solid transparent;
 }
 
+/* Two panes (#980): the result and the base go across both sides, under them. */
+.cell[data-wide] {
+  grid-column: 1 / -1;
+}
+
 /* Room for a block's take-side arrow (#876) on the edge next to the result, in every row so the
    lines stay level. */
 .cell[data-pane="ours"] {

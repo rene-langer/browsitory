@@ -6,7 +6,6 @@ import type { SelectedRow } from "../state/useAppState";
 import type { ExternalToolsApi } from "../state/useExternalTools";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
 import { useWholeFile } from "../state/useWholeFile";
-import { FolderHistoryButton } from "./FolderHistoryButton";
 import { LineHistoryButton } from "./LineHistoryButton";
 import { BlameView } from "./BlameView";
 import { CollapseToggle } from "./CollapseToggle";
@@ -14,6 +13,7 @@ import styles from "./DiffPane.module.css";
 import { DiffView, type HunkHeaderAction } from "./DiffView";
 import { ImageDiff, ImageTextToggle } from "./ImageDiff";
 import { imageMimeType, isSvgPath } from "../lib/imageTypes";
+import { folderOf } from "../lib/folderHistory";
 import { commitFileMenuItems, type FileAction } from "./FileActionsMenu";
 import { ContextMenu } from "./primitives/ContextMenu";
 import { NO_SELECTION, userCommandMenuItems } from "../lib/userCommands";
@@ -88,7 +88,7 @@ export function ReadOnlyFileSection({
    *  are the new side's, which is `blameAt`'s version of the file. Leave it out when the new side
    *  is not a commit. */
   onOpenLineHistory?: (path: string, revision: string, startLine: number, endLine: number) => void;
-  /** "Folder history" (#447) of the file's folder. */
+  /** "History of folder …" (#447) of the file's folder, in the file menu (#1023). */
   onOpenFolderHistory?: (folder: string) => void;
   externalTools?: ExternalToolsApi;
   /** The two versions "Open in diff tool" compares. */
@@ -121,8 +121,14 @@ export function ReadOnlyFileSection({
           },
           userCommands.run,
         );
-  const hasMenu = tools !== null || patch !== undefined || userCommandItems.length > 0;
+  // "History of folder …" is in the menu (#1023); nothing for a file at the repository root.
+  const folder = onOpenFolderHistory === undefined ? null : folderOf(path);
+  const hasMenu = tools !== null || patch !== undefined || folder !== null || userCommandItems.length > 0;
   const onPickFileAction = (action: FileAction) => {
+    if (action.kind === "folderHistory") {
+      if (folder !== null) onOpenFolderHistory?.(folder);
+      return;
+    }
     if (patch !== undefined) {
       if (action.kind === "revertCommitFile") return patch.onRevertFile(action.stage);
       if (action.kind === "applyCommitFile") return patch.onApplyFile(action.stage);
@@ -159,9 +165,10 @@ export function ReadOnlyFileSection({
           };
           const reason = settings.ignoreWhitespace ? IGNORE_WHITESPACE_REASON : patch.blockedReason;
           const blocked = { disabled: reason !== null, title: reason ?? HUNK_STAGE_HINT };
+          // They name the working tree, as the file menu does (#1008).
           return [
-            { label: "Revert hunk", run: (event) => patch.onRevertHunk(ref, event.shiftKey), ...blocked },
-            { label: "Apply hunk", run: (event) => patch.onApplyHunk(ref, event.shiftKey), ...blocked },
+            { label: "Revert hunk in working tree", run: (event) => patch.onRevertHunk(ref, event.shiftKey), ...blocked },
+            { label: "Apply hunk to working tree", run: (event) => patch.onApplyHunk(ref, event.shiftKey), ...blocked },
           ];
         };
   const loadDiff = () => {
@@ -253,9 +260,16 @@ export function ReadOnlyFileSection({
             <LineStatsBadge insertions={lineStats.insertions} deletions={lineStats.deletions} />
           ))}
         <div className={styles.rowActions}>
-          <button type="button" onClick={() => setMode("blame")}>
-            Blame
-          </button>
+          {/* While blame shows, the header's way back replaces Blame (#986). */}
+          {mode === "blame" ? (
+            <button type="button" onClick={() => setMode("diff")}>
+              Back to diff
+            </button>
+          ) : (
+            <button type="button" onClick={() => setMode("blame")}>
+              Blame
+            </button>
+          )}
           {onOpenFileHistory !== undefined && (
             <button type="button" aria-label={`History of ${path}`} onClick={() => onOpenFileHistory(path)}>
               History
@@ -270,7 +284,6 @@ export function ReadOnlyFileSection({
               onOpen={onOpenLineHistory}
             />
           )}
-          {onOpenFolderHistory !== undefined && <FolderHistoryButton path={path} onOpen={onOpenFolderHistory} />}
           {hasMenu && (
             <button
               type="button"
@@ -301,19 +314,16 @@ export function ReadOnlyFileSection({
       {!collapsed && (
         <div className={styles.fileSectionBody} ref={bodyRef}>
           {mode === "blame" ? (
-            <>
-              {error !== null ? (
-                <InlineError
-                  message={error.message}
-                  hint={error.hint}
-                  onDismiss={() => setError(null)}
-                  onRetry={loadBlame}
-                />
-              ) : (
-                <BlameView lines={blameLines} onSelectRow={onSelectRow} />
-              )}
-              <button onClick={() => setMode("diff")}>Back to diff</button>
-            </>
+            error !== null ? (
+              <InlineError
+                message={error.message}
+                hint={error.hint}
+                onDismiss={() => setError(null)}
+                onRetry={loadBlame}
+              />
+            ) : (
+              <BlameView lines={blameLines} path={path} onSelectRow={onSelectRow} />
+            )
           ) : showImage && previewSource !== undefined ? (
             <>
               {isSvgPath(path) && <ImageTextToggle asText={false} onToggle={() => setImageAsText(true)} />}
@@ -342,6 +352,7 @@ export function ReadOnlyFileSection({
           items={commitFileMenuItems(onPickFileAction, {
             tools: tools !== null,
             patch: patch === undefined ? null : { blockedReason: patch.blockedReason },
+            folder,
           }).concat(userCommandItems)}
           onClose={() => setMenu(null)}
         />

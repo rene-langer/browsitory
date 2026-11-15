@@ -131,10 +131,10 @@ describe("FileActionsMenu", () => {
       const onPick = vi.fn();
       const items = commitFileMenuItems(onPick, { tools: false, patch: { blockedReason: "A merge is in progress." } });
       expect(items.map((i) => i.label)).toEqual([
-        "Revert this file",
-        "Revert this file and stage",
-        "Apply this file to the working tree",
-        "Apply this file and stage",
+        "Revert file in working tree",
+        "Revert file in working tree and stage",
+        "Apply file to working tree",
+        "Apply file to working tree and stage",
         "Save file as patch…",
       ]);
       expect(items.map((i) => i.disabled ?? false)).toEqual([true, true, true, true, false]);

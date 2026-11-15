@@ -20,6 +20,7 @@ import {
   terminalSequenceLabel,
   terminalSequenceText,
   isSplitting,
+  editStopKind,
 } from "../lib/operationStatus";
 import { ReasonButton } from "./primitives/ReasonButton";
 import styles from "./OperationStatusStrip.module.css";
@@ -65,6 +66,9 @@ export function OperationStatusStrip({
   onGoToConflict,
   onContinueRebase,
   splittingCommit = null,
+  editingCommit = null,
+  rebaseOnto = null,
+  continueBlockedReason = null,
 }: {
   merging: boolean;
   operation: OperationKind | null;
@@ -98,6 +102,12 @@ export function OperationStatusStrip({
   onContinueRebase?: () => void;
   /** The commit Split commit… stopped at in this session (#884): the stop says "Splitting". */
   splittingCommit?: string | null;
+  /** The commit Edit commit… stopped at in this session (#994): its controls say "editing". */
+  editingCommit?: string | null;
+  /** What the stored rebase is rebased onto, by name (#995); its short id when not given. */
+  rebaseOnto?: string | null;
+  /** Why a rebase's Continue can't run besides conflicts: an edit stop's empty message (#995). */
+  continueBlockedReason?: string | null;
 }) {
   const reason = conflictReason(conflictCount);
   // Why a strip button can't run while another action is pending (#748): visible, not a title.
@@ -116,7 +126,7 @@ export function OperationStatusStrip({
         <span className={styles.spacer} />
         {goToConflict}
         <ReasonButton reason={pendingReason ?? reason ?? null} onClick={onContinueSequence}>
-          Continue
+          Continue {sequenceNoun(sequence.kind)}
         </ReasonButton>
         <ReasonButton reason={pendingReason} onClick={onAbortSequence}>
           Abort {sequenceNoun(sequence.kind)}
@@ -131,7 +141,12 @@ export function OperationStatusStrip({
         <strong>Rebase of {rebase.branch} interrupted</strong>
         <span>{interruption}</span>
         <span className={styles.spacer} />
-        <ReasonButton reason={pendingReason} title="Stops the rebase. HEAD stays where it is." onClick={onAbortRebase}>
+        <ReasonButton
+          reason={pendingReason}
+          data-tone="danger"
+          title="Stops the rebase. HEAD stays where it is."
+          onClick={onAbortRebase}
+        >
           Abort rebase
         </ReasonButton>
       </div>
@@ -191,11 +206,25 @@ export function OperationStatusStrip({
   const editing = rebaseProgress !== null && rebase !== null ? rebase.editing : null;
   // Split a commit (#884): parts committed, or the stop Split commit… made.
   const splitting = editing !== null && isSplitting(rebase ?? null, splittingCommit);
+  // Edit commit… and Split commit… name their controls after the edit (#994); a planner's Edit
+  // step stays a rebase.
+  const editKind = rebaseProgress === null ? null : editStopKind(rebase, splittingCommit, editingCommit);
+  // "Rebasing main onto feature/x, step 1 of 2" (#995); a single step has none to count (#994).
+  const rebaseLabel =
+    rebaseProgress === null
+      ? ""
+      : [
+          "Rebasing",
+          rebase === null ? "" : ` ${rebase.branch} onto ${rebaseOnto ?? rebase.onto.slice(0, 7)}`,
+          rebaseProgress.totalSteps > 1 || rebase === null
+            ? `, step ${rebaseProgress.currentStep} of ${rebaseProgress.totalSteps}`
+            : "",
+        ].join("");
   const label =
     editing !== null
       ? `${splitting ? "Splitting" : "Editing"} ${editing.slice(0, 7)}:`
       : rebaseProgress !== null
-      ? `Rebasing, step ${rebaseProgress.currentStep} of ${rebaseProgress.totalSteps}`
+      ? rebaseLabel
       : terminalStep
         ? terminalSequenceLabel({ ...terminalSequence, pausedOnConflict: true })
         : leftover
@@ -211,8 +240,8 @@ export function OperationStatusStrip({
       <span>
         {editing !== null
           ? splitting
-            ? "commit each part, then Continue"
-            : "change the files, then Continue"
+            ? `commit each part, then ${editKind === "Split" ? "Finish split" : "Continue rebase"}`
+            : `change the files, then ${editKind === "Edit" ? "Finish editing" : "Continue rebase"}`
           : leftover
             ? leftoverText(operation)
             : (reason ?? "No conflicts remaining")}
@@ -220,20 +249,27 @@ export function OperationStatusStrip({
       <span className={styles.spacer} />
       {!leftover && goToConflict}
       {rebaseProgress !== null && onContinueRebase !== undefined && (
-        // Continue next to Abort (#665), as the sequence's and the rebase panel's "Continue
-        // rebase": once no conflict is left.
+        // Continue next to Abort (#665), once no conflict is left: "Continue rebase", the
+        // palette's name for it (#990).
         <ReasonButton
-          reason={pendingReason ?? reason ?? null}
+          reason={pendingReason ?? reason ?? continueBlockedReason ?? null}
           onClick={onContinueRebase}
         >
-          Continue
+          {editKind === "Edit" ? "Finish editing" : editKind === "Split" ? "Finish split" : "Continue rebase"}
         </ReasonButton>
       )}
       <button
         type="button"
+        data-tone="danger"
         onClick={rebaseProgress !== null ? onAbortRebase : terminalStep ? onAbortTerminalSequence : onAbortMerge}
       >
-        {rebaseProgress !== null ? "Abort rebase" : abortLabel}
+        {editKind === "Edit"
+          ? "Cancel edit"
+          : editKind === "Split"
+            ? "Cancel split"
+            : rebaseProgress !== null
+              ? "Abort rebase"
+              : abortLabel}
       </button>
     </div>
   );

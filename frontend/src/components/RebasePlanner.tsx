@@ -1,4 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { ArrowDown, ArrowUp } from "lucide-react";
 import type {
   RebaseAction,
   RebasePlanCommit,
@@ -7,24 +8,16 @@ import type {
 } from "../ipc/RepoClient";
 import { ListRow } from "./primitives/ListRow";
 import { Panel } from "./primitives/Panel";
-import { Toolbar } from "./primitives/Toolbar";
+import { DialogActions } from "./primitives/DialogActions";
 import type { PresetAction } from "../lib/rebaseSelection";
 import styles from "./RebasePlanner.module.css";
 import { BlockedReason } from "./primitives/BlockedReason";
 import { describedBy } from "../lib/ariaDescribedBy";
-import { shortRefName } from "../lib/shortRefName";
+import { rebasePlannerTitle } from "../lib/rebasePlannerTitle";
 import { scrollParent, usePointerDrag, type PointerDragOver } from "../state/usePointerDrag";
 
 /** The drop-target scope of the planner's rows (#744). */
 const PLAN_ROW = "rebase-plan-row";
-
-/**
- * The planner's title: "Rebase onto <branch>" when `onto` is a branch's full ref name (a branch
- * menu or the palette, #619), else "Rebase plan" (a commit from the graph).
- */
-function plannerTitle(onto: string): string {
-  return /^refs\/(heads|remotes)\//.test(onto) ? `Rebase onto ${shortRefName(onto)}` : "Rebase plan";
-}
 
 type ActionKind = RebaseAction["kind"];
 
@@ -173,10 +166,13 @@ export function RebasePlanner({
   onCancel,
   blockedReason = null,
   presetActions,
+  branchName = null,
 }: {
   repoPath: string;
   client: RepoClient;
   onto: string;
+  /** The branch being rebased, for the title and the summary (#1015); `null` when unknown. */
+  branchName?: string | null;
   onStartRebase: (onto: string, plan: RebasePlanEntry[]) => void;
   onCancel: () => void;
   /** Why repository operations are blocked now (`operationBlockers`), or `null` (#521). */
@@ -360,8 +356,16 @@ export function RebasePlanner({
   // The combined message each group leader starts with: typed, or the default.
   const combinedMessageAt = (index: number): string | null =>
     isLeader(rows, index) ? (rows[index].combinedMessage ?? defaultCombinedMessage(rows, index, messages)) : null;
+  // The plan replays first parents only, so a merge commit in it can't be replayed (#982):
+  // Start is unavailable, and says so, as the multi-select menu does.
+  const mergeRow = rows.find((row) => row.commit.merge);
+  const mergeReason =
+    mergeRow === undefined
+      ? null
+      : `${mergeRow.commit.shortId} is a merge commit, which a rebase can't replay. Rebase onto it or a newer commit instead.`;
+  const startReason = blockedReason ?? mergeReason;
   const startDisabled =
-    blockedReason !== null || presetMissing || load.kind !== "ready" || rows.length === 0 || messageLoading;
+    startReason !== null || presetMissing || load.kind !== "ready" || rows.length === 0 || messageLoading;
 
   const start = () => {
     if (startDisabled) return;
@@ -389,7 +393,29 @@ export function RebasePlanner({
   };
 
   return (
-    <Panel title={plannerTitle(onto)}>
+    <Panel
+      title={rebasePlannerTitle(onto, branchName)}
+      footer={
+        <div className={styles.footer}>
+          <BlockedReason id={reasonId} reason={startReason} />
+          <DialogActions>
+            <button
+              type="button"
+              data-tone="primary"
+              onClick={start}
+              disabled={startDisabled}
+              title={startReason ?? undefined}
+              aria-describedby={describedBy(reasonId, startReason)}
+            >
+              Start rebase
+            </button>
+            <button type="button" onClick={onCancel}>
+              Cancel
+            </button>
+          </DialogActions>
+        </div>
+      }
+    >
       {load.kind === "loading" && <p className={styles.caption}>Loading commits…</p>}
       {load.kind === "error" && (
         <div role="alert">
@@ -401,10 +427,23 @@ export function RebasePlanner({
         <p>No commits to rebase: the current branch has nothing above this base.</p>
       )}
       {rows.length > 0 && (
-        <p className={styles.caption}>
-          Oldest commit first: the rebase replays them from top to bottom. Drag a row by its handle,
-          or press Alt+Up and Alt+Down to move the row you are in.
-        </p>
+        <>
+          <p className={styles.summary}>
+            Rewrites {rows.length} {rows.length === 1 ? "commit" : "commits"} on {branchName ?? "the current branch"}.
+            Undo restores the branch.
+          </p>
+          <p className={styles.caption}>
+            Oldest commit first: the rebase replays them from top to bottom. Drag a row by its handle,
+            or press Alt+Up and Alt+Down to move the row you are in.
+          </p>
+          {/* The column headers, once (#1015); each select is named "Action for <commit>". */}
+          <div className={styles.columns} aria-hidden="true">
+            <span />
+            <span>Commit</span>
+            <span className={styles.moveHeader}>Move</span>
+            <span>Action</span>
+          </div>
+        </>
       )}
       <p role="status" className={styles.srOnly}>
         {announcement}
@@ -420,6 +459,7 @@ export function RebasePlanner({
           return (
             <ListRow
               key={row.commit.id}
+              className={styles.planRow}
               dropTarget={{ scope: PLAN_ROW, key: row.commit.id, position }}
               dragging={dragged}
             >
@@ -432,25 +472,34 @@ export function RebasePlanner({
                   title="Drag to move"
                   onPointerDown={(event) => startDrag(event, row.commit.id)}
                 />
-                <span>{name}</span>
+                <span className={styles.subject} title={name}>
+                  {name}
+                </span>
                 <button
+                  type="button"
+                  className={styles.moveButton}
                   aria-label={`Move up: ${name}`}
+                  title="Move up (Alt+Up)"
                   aria-keyshortcuts="Alt+ArrowUp"
                   onClick={(event) => moveRow(index, -1, event.currentTarget)}
                   disabled={index === 0}
                 >
-                  Move up
+                  <ArrowUp size={14} aria-hidden="true" />
                 </button>
                 <button
+                  type="button"
+                  className={styles.moveButton}
                   aria-label={`Move down: ${name}`}
+                  title="Move down (Alt+Down)"
                   aria-keyshortcuts="Alt+ArrowDown"
                   onClick={(event) => moveRow(index, 1, event.currentTarget)}
                   disabled={index === rows.length - 1}
                 >
-                  Move down
+                  <ArrowDown size={14} aria-hidden="true" />
                 </button>
-                <label>
-                  Action
+                {row.commit.merge ? (
+                  <span className={styles.caption}>Merge commit: can&apos;t be replayed</span>
+                ) : (
                   <select
                     aria-label={`Action for ${name}`}
                     className={styles.actionSelect}
@@ -468,7 +517,7 @@ export function RebasePlanner({
                     </option>
                     <option value="Drop">Drop</option>
                   </select>
-                </label>
+                )}
                 {row.actionKind === "Reword" && (
                   <RewordField
                     row={row}
@@ -478,7 +527,7 @@ export function RebasePlanner({
                 )}
                 {combined !== null && (
                   <>
-                    <label>
+                    <label className={styles.fullRow}>
                       Combined message
                       <textarea
                         aria-label="Combined message"
@@ -504,18 +553,6 @@ export function RebasePlanner({
           they can&apos;t be part of this rebase.
         </p>
       )}
-      <BlockedReason id={reasonId} reason={blockedReason} />
-      <Toolbar>
-        <button
-          onClick={start}
-          disabled={startDisabled}
-          title={blockedReason ?? undefined}
-          aria-describedby={describedBy(reasonId, blockedReason)}
-        >
-          Start rebase
-        </button>
-        <button onClick={onCancel}>Cancel</button>
-      </Toolbar>
       {drag !== null && (
         <div className={styles.dragLabel} style={{ left: drag.x + 12, top: drag.y + 12 }} aria-hidden="true">
           {rows.find((row) => row.commit.id === drag.payload)?.commit.shortId}
@@ -549,7 +586,7 @@ function RewordField({
         onChange={(event) => onChange(event.target.value)}
       />
       {message?.kind === "failed" && (
-        <p role="alert">
+        <p role="alert" className={styles.fullRow}>
           Couldn&apos;t read the full message of {row.commit.shortId} ({message.error}). Only the
           summary is filled in; add the body back if it had one.
         </p>
@@ -569,7 +606,7 @@ function GroupMessageNotes({ commits, messages }: { commits: RebasePlanCommit[];
     <>
       {loading && <p className={styles.caption}>Loading the full messages…</p>}
       {failed.map(({ commit, error }) => (
-        <p role="alert" key={commit.id}>
+        <p role="alert" key={commit.id} className={styles.fullRow}>
           Couldn&apos;t read the full message of {commit.shortId} ({error}). Only its summary is in
           the combined message; add the body back if it had one.
         </p>

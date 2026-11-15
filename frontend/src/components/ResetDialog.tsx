@@ -1,9 +1,10 @@
 import { useState, useId } from "react";
 import type { ResetMode } from "../ipc/RepoClient";
+import { describedBy } from "../lib/ariaDescribedBy";
+import { BlockedReason } from "./primitives/BlockedReason";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
+import { DialogActions } from "./primitives/DialogActions";
 import { FormDialog } from "./primitives/FormDialog";
-import { Toolbar } from "./primitives/Toolbar";
-import formStyles from "./primitives/FormDialog.module.css";
 import styles from "./ResetDialog.module.css";
 
 const MODES: Array<{ mode: ResetMode; label: string; detail: string }> = [
@@ -13,7 +14,8 @@ const MODES: Array<{ mode: ResetMode; label: string; detail: string }> = [
 ];
 
 /**
- * Reset the current branch to a commit: soft, mixed or hard (hard asks again). `blockedReason`
+ * Reset the current branch to a commit: soft, mixed or hard (hard asks again). The button names
+ * the mode ("Reset hard"), and a hard reset is a danger (#988). `blockedReason`
  * (`operationBlockers`) disables Reset while it applies: the repository can become busy after
  * the dialog opened, e.g. a rebase started in a terminal and picked up by a refresh (#514).
  */
@@ -42,13 +44,10 @@ export function ResetDialog({
   if (confirmingHard) {
     return (
       <ConfirmDialog
-        ariaLabel="Confirm hard reset"
-        message={
-          <>
-            <p>Discards all uncommitted changes. Undo can bring them back.</p>
-          </>
-        }
+        title={`Reset hard to ${shortId}`}
+        message={<p>Discards all uncommitted changes. Undo can bring them back.</p>}
         confirmLabel="Reset hard"
+        tone="danger"
         confirmReason={blockedReason}
         onConfirm={() => {
           if (blockedReason === null) onReset("hard");
@@ -58,8 +57,9 @@ export function ResetDialog({
     );
   }
 
+  const label = MODES.find((option) => option.mode === mode)?.label.toLowerCase() ?? mode;
   return (
-    <FormDialog ariaLabel="Reset branch" onCancel={onCancel} returnFocusTo={returnFocusTo}>
+    <FormDialog title={`Reset ${branch} to ${shortId}`} onCancel={onCancel} returnFocusTo={returnFocusTo}>
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -69,11 +69,8 @@ export function ResetDialog({
           else onReset(mode);
         }}
       >
-        <p>
-          Reset {branch} to {shortId}
-        </p>
         <fieldset className={styles.modes}>
-          <legend>Mode</legend>
+          <legend>What happens to your changes</legend>
           {MODES.map((option) => (
             <label key={option.mode} className={styles.mode}>
               <input
@@ -83,21 +80,28 @@ export function ResetDialog({
                 checked={mode === option.mode}
                 onChange={() => setMode(option.mode)}
               />
-              <span>
-                <strong>{option.label}</strong> — {option.detail}
+              <span className={styles.text}>
+                <strong>{option.label}</strong>
+                <span className={styles.detail}>{option.detail}</span>
               </span>
             </label>
           ))}
         </fieldset>
-        {blockedReason !== null && <p id={reasonId} className={formStyles.blocked}>{blockedReason}</p>}
-        <Toolbar>
-          <button type="submit" disabled={blockedReason !== null} title={blockedReason ?? undefined} aria-describedby={blockedReason !== null ? reasonId : undefined}>
-            Reset
+        <BlockedReason id={reasonId} reason={blockedReason} />
+        <DialogActions>
+          <button
+            type="submit"
+            data-tone={mode === "hard" ? "danger" : "primary"}
+            disabled={blockedReason !== null}
+            title={blockedReason ?? undefined}
+            aria-describedby={describedBy(reasonId, blockedReason)}
+          >
+            {`Reset ${label}`}
           </button>
           <button type="button" onClick={onCancel}>
             Cancel
           </button>
-        </Toolbar>
+        </DialogActions>
       </form>
     </FormDialog>
   );

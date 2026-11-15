@@ -56,7 +56,7 @@ export type ShortcutId =
 
 export interface GlobalShortcut {
   id: ShortcutId;
-  /** For the shortcut sheet, in sentence case. */
+  /** For the shortcut sheet, in sentence case: the label of the palette command it runs (#990). */
   description: string;
   /** The keys, any of which runs it. */
   chords: KeyChord[];
@@ -86,12 +86,12 @@ const DIGITS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 export const GLOBAL_SHORTCUTS: readonly GlobalShortcut[] = [
   { id: "palette", vscodeKeybinding: true, description: "Open the command palette", chords: [{ mod: true, key: "k" }], inTextFields: true },
   { id: "show-shortcuts", description: "Show keyboard shortcuts", chords: [{ key: "?" }] },
-  { id: "refresh", vscodeKeybinding: true, description: "Refresh the repository", chords: [{ key: "F5" }], inTextFields: true },
+  { id: "refresh", vscodeKeybinding: true, description: "Refresh", chords: [{ key: "F5" }], inTextFields: true },
   { id: "fetch", vscodeKeybinding: true, description: "Fetch", chords: [{ shift: true, key: "F5" }], inTextFields: true },
-  { id: "pull", description: "Pull the current branch", chords: [{ mod: true, shift: true, key: "l" }], inTextFields: true },
-  { id: "push", description: "Push the current branch", chords: [{ mod: true, shift: true, key: "k" }], inTextFields: true },
+  { id: "pull", description: "Pull", chords: [{ mod: true, shift: true, key: "l" }], inTextFields: true },
+  { id: "push", description: "Push current branch", chords: [{ mod: true, shift: true, key: "k" }], inTextFields: true },
   { id: "stage-all", description: "Stage all changes", chords: [{ mod: true, shift: true, key: "a" }] },
-  { id: "focus-commit-message", description: "Write the commit message (shows the working tree)", chords: [{ alt: true, key: "c" }] },
+  { id: "focus-commit-message", description: "Go to commit message", chords: [{ alt: true, key: "c" }] },
   { id: "undo", description: "Undo the last Git operation", chords: [{ mod: true, key: "z" }] },
   {
     id: "redo",
@@ -130,11 +130,11 @@ export const GLOBAL_SHORTCUTS: readonly GlobalShortcut[] = [
     hostMayClaim: true,
     range: true,
   },
-  { id: "close-tab", vscodeKeybinding: true, description: "Close the active tab", chords: [{ mod: true, key: "w" }], inTextFields: true, hostMayClaim: true },
+  { id: "close-tab", vscodeKeybinding: true, description: "Close tab", chords: [{ mod: true, key: "w" }], inTextFields: true, hostMayClaim: true },
   {
     id: "reopen-closed-tab",
     vscodeKeybinding: true,
-    description: "Reopen the last closed tab",
+    description: "Reopen closed tab",
     chords: [{ mod: true, shift: true, key: "t" }],
     inTextFields: true,
     hostMayClaim: true,
@@ -142,7 +142,7 @@ export const GLOBAL_SHORTCUTS: readonly GlobalShortcut[] = [
   {
     id: "go-back",
     vscodeKeybinding: true,
-    description: "Back through the selected commits",
+    description: "Back to previous commit",
     chords: [{ alt: true, key: "ArrowLeft" }],
     appleChords: [{ mod: true, key: "[" }],
     hostMayClaim: true,
@@ -150,7 +150,7 @@ export const GLOBAL_SHORTCUTS: readonly GlobalShortcut[] = [
   {
     id: "go-forward",
     vscodeKeybinding: true,
-    description: "Forward through the selected commits",
+    description: "Forward to next commit",
     chords: [{ alt: true, key: "ArrowRight" }],
     appleChords: [{ mod: true, key: "]" }],
     hostMayClaim: true,

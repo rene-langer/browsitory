@@ -1,25 +1,32 @@
 import { useEffect, useId, useRef, type ReactNode } from "react";
 import { BlockedReason } from "./BlockedReason";
+import { DialogActions } from "./DialogActions";
+import { DialogHeader } from "./DialogHeader";
 import { describedBy } from "../../lib/ariaDescribedBy";
 import { useRestoreFocus } from "./useRestoreFocus";
 import styles from "./ConfirmDialog.module.css";
 
 /**
- * Shared confirmation UI for destructive actions (remove worktree, remove remote, force-delete
- * branch, …). Owns the `<dialog>` mechanics every call site used to reimplement slightly
- * differently: `showModal()`/`open`-attribute wiring, Escape-key (`cancel` event) handling that
- * routes back through `onCancel` instead of letting the browser close the element out from under
- * React state, and autofocusing the safe/cancel action so a stray Enter never confirms.
+ * Shared confirmation UI (remove worktree, remove remote, force-delete branch, …). Owns the
+ * `<dialog>` mechanics every call site used to reimplement slightly differently:
+ * `showModal()`/`open`-attribute wiring, Escape-key (`cancel` event) handling that routes back
+ * through `onCancel` instead of letting the browser close the element out from under React state,
+ * and autofocusing the safe/cancel action so a stray Enter never confirms.
  *
  * Callers render this conditionally (`X !== null && <ConfirmDialog ... />`) rather than passing
  * an `open` prop — mounting *is* opening, unmounting *is* closing, matching how every existing
  * call site already models its confirmation state.
+ *
+ * `title` is the visible heading and the dialog's name (#987); `message` says what happens and
+ * whether Undo brings it back (#989). The confirm button is the primary action; `tone="danger"`
+ * marks it as one that loses data (#988), and only then.
  */
 export function ConfirmDialog({
-  ariaLabel,
+  title,
   message,
   confirmLabel,
   cancelLabel = "Cancel",
+  tone = "default",
   onConfirm,
   onCancel,
   confirmDisabled = false,
@@ -27,12 +34,14 @@ export function ConfirmDialog({
   confirmReason = null,
   hideConfirm = false,
 }: {
-  /** Accessible name for the dialog (`aria-label`). */
-  ariaLabel: string;
+  /** The visible title and accessible name (`aria-label`). */
+  title: string;
   /** Body content — a plain string or richer markup (e.g. a `<p>` naming the affected branches). */
   message: ReactNode;
   confirmLabel: string;
   cancelLabel?: string;
+  /** `"danger"` where confirming loses data (#988); else the confirm button is a plain primary. */
+  tone?: "default" | "danger";
   onConfirm: () => void;
   onCancel: () => void;
   confirmDisabled?: boolean;
@@ -48,6 +57,8 @@ export function ConfirmDialog({
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const reasonId = useId();
+  const titleId = useId();
+  const messageId = useId();
   useRestoreFocus();
 
   useEffect(() => {
@@ -65,21 +76,24 @@ export function ConfirmDialog({
     <dialog
       ref={dialogRef}
       className={styles.dialog}
-      aria-label={ariaLabel}
+      aria-label={title}
+      aria-labelledby={titleId}
+      aria-describedby={messageId}
       onCancel={(event) => {
         event.preventDefault();
         onCancel();
       }}
     >
-      <div className={styles.message}>
+      <DialogHeader title={title} id={titleId} />
+      <div id={messageId} className={styles.message}>
         {message}
         <BlockedReason id={reasonId} reason={confirmReason} />
       </div>
-      <div className={styles.actions}>
+      <DialogActions>
         {!hideConfirm && (
           <button
             type="button"
-            className={styles.confirmButton}
+            data-tone={tone === "danger" ? "danger" : "primary"}
             disabled={confirmDisabled || confirmReason !== null}
             title={confirmTitle ?? confirmReason ?? undefined}
             aria-describedby={describedBy(reasonId, confirmReason)}
@@ -91,7 +105,7 @@ export function ConfirmDialog({
         <button type="button" data-autofocus onClick={onCancel}>
           {cancelLabel}
         </button>
-      </div>
+      </DialogActions>
     </dialog>
   );
 }

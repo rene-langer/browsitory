@@ -3,9 +3,12 @@ import { Copy } from "lucide-react";
 import type { RemoteInfo } from "../ipc/RepoClient";
 import { remoteNameProblem } from "../lib/refName";
 import { useCopyToClipboard } from "../state/useCopyToClipboard";
+import { describedBy } from "../lib/ariaDescribedBy";
+import { BlockedReason } from "./primitives/BlockedReason";
+import { DialogActions } from "./primitives/DialogActions";
 import { FormDialog } from "./primitives/FormDialog";
-import formStyles from "./primitives/FormDialog.module.css";
 import styles from "./BranchTree.module.css";
+import ownStyles from "./EditRemoteDialog.module.css";
 
 /**
  * Rename a remote and change its URLs. Opened from a remote folder's menu in `BranchTree` or the
@@ -38,7 +41,7 @@ export function EditRemoteDialog({
   const nameProblem = remoteNameProblem(name.trim());
 
   return (
-    <FormDialog ariaLabel={`Edit ${remote.name}`} onCancel={onClose}>
+    <FormDialog title={`Edit ${remote.name}`} onCancel={onClose}>
       <form
         onSubmit={async (event) => {
           event.preventDefault();
@@ -70,43 +73,64 @@ export function EditRemoteDialog({
             {nameProblem}
           </p>
         )}
-        <label className={styles.label}>
-          Fetch URL
-          <input value={fetchUrl} onChange={(event) => setFetchUrl(event.target.value)} />
-        </label>
-        <button
-          type="button"
-          className={styles.iconButton}
-          aria-label={`Copy fetch URL for ${remote.name}`}
-          onClick={() => {
-            copyToClipboard(remote.fetchUrl, "fetch URL");
-          }}
-        >
-          <Copy size={12} aria-hidden="true" />
-        </button>
-        <label className={styles.label}>
-          Push URL
-          <input value={pushUrl} onChange={(event) => setPushUrl(event.target.value)} />
-        </label>
-        {remote.pushUrl !== null && (
+        {/* Each URL with a labelled button that copies the saved URL to the clipboard (#1014). */}
+        <div className={ownStyles.urlRow}>
+          <label className={styles.label}>
+            Fetch URL
+            <input value={fetchUrl} onChange={(event) => setFetchUrl(event.target.value)} />
+          </label>
           <button
             type="button"
-            className={styles.iconButton}
-            aria-label={`Copy push URL for ${remote.name}`}
+            className={ownStyles.copy}
+            aria-label={`Copy fetch URL for ${remote.name}`}
+            title="Copy the saved fetch URL"
             onClick={() => {
-              copyToClipboard(remote.pushUrl!, "push URL");
+              copyToClipboard(remote.fetchUrl, "fetch URL");
             }}
           >
             <Copy size={12} aria-hidden="true" />
+            Copy
           </button>
-        )}
-        {blockedReason !== null && <p id={reasonId} className={formStyles.blocked}>{blockedReason}</p>}
-        <button type="submit" disabled={nameProblem !== null || blockedReason !== null} title={blockedReason ?? undefined} aria-describedby={blockedReason !== null ? reasonId : undefined}>
-          Save remote
-        </button>
-        <button type="button" onClick={onClose}>
-          Cancel
-        </button>
+        </div>
+        <div className={ownStyles.urlRow}>
+          <label className={styles.label}>
+            Push URL
+            <input
+              value={pushUrl}
+              placeholder="Same as fetch URL"
+              onChange={(event) => setPushUrl(event.target.value)}
+            />
+          </label>
+          {remote.pushUrl !== null && (
+            <button
+              type="button"
+              className={ownStyles.copy}
+              aria-label={`Copy push URL for ${remote.name}`}
+              title="Copy the saved push URL"
+              onClick={() => {
+                copyToClipboard(remote.pushUrl!, "push URL");
+              }}
+            >
+              <Copy size={12} aria-hidden="true" />
+              Copy
+            </button>
+          )}
+        </div>
+        <BlockedReason id={reasonId} reason={blockedReason} />
+        <DialogActions>
+          <button
+            type="submit"
+            data-tone="primary"
+            disabled={nameProblem !== null || blockedReason !== null}
+            title={blockedReason ?? undefined}
+            aria-describedby={describedBy(reasonId, blockedReason)}
+          >
+            Save remote
+          </button>
+          <button type="button" onClick={onClose}>
+            Cancel
+          </button>
+        </DialogActions>
       </form>
     </FormDialog>
   );

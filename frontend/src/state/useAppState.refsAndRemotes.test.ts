@@ -206,7 +206,9 @@ describe("useAppState — refs and remotes (4b)", () => {
     expect(result.current.state.error).toBe("Delete cancelled.");
     errorKind = "TransferFailed";
     await act(() => result.current.deleteRemoteBranch("origin", "topic"));
-    expect(result.current.state.error).toBe("Deleting the remote branch failed");
+    expect(result.current.state.error).toBe(
+      "Couldn't delete origin/topic. Check the remote and your connection, then try again.",
+    );
   });
 
   it("passes the prune preference to every fetch once it is set, and null before", async () => {

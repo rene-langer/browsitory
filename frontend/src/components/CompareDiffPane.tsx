@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import type { ChangedFile, DiffOptions, GraphCommit, RepoClient } from "../ipc/RepoClient";
 import { describeError, type DescribedError } from "../lib/errorMessages";
+import { useEscapeToClose } from "../lib/escapeToClose";
 import type { SelectedRow } from "../state/useAppState";
 import type { CompareState } from "../state/useCompare";
 import type { ExternalToolsApi } from "../state/useExternalTools";
@@ -57,6 +58,8 @@ export function CompareDiffPane({
   const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(new Set());
   const [retryToken, setRetryToken] = useState(0);
   const collapseInitializedFor = useRef<string | null>(null);
+  // Escape anywhere in the pane closes it, focus back where it came from (#1001).
+  const { containerRef: escapeRef, onKeyDown: onEscapeKeyDown, close: closeAndRefocus } = useEscapeToClose<HTMLDivElement>({ onClose });
 
   // A new range (swap, a moved branch) drops the old list in the same render, so no section
   // diffs an old path against the new ends. Adjusted during render, not in an effect:
@@ -169,7 +172,7 @@ export function CompareDiffPane({
 
   return (
     <DiffViewOptionsProvider>
-    <div>
+    <div ref={escapeRef} onKeyDown={onEscapeKeyDown}>
       <section className={styles.header} aria-label="Comparison">
         <div className={styles.titleRow}>
           <h2 className={styles.title}>{heading}</h2>
@@ -178,7 +181,7 @@ export function CompareDiffPane({
               Swap
             </button>
           )}
-          <button type="button" aria-label="Close compare" onClick={onClose}>
+          <button type="button" aria-label="Close compare" title="Close (Escape)" onClick={closeAndRefocus}>
             <X size={14} aria-hidden="true" />
           </button>
         </div>

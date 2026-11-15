@@ -16,7 +16,7 @@ export function HookFailureDialog({
   const label = retryLabel(failure);
   return (
     <ConfirmDialog
-      ariaLabel={`${failure.hook} hook failed`}
+      title={`${failure.hook} hook failed`}
       message={
         <>
           <p>{hookFailedMessage(failure.hook)}</p>

@@ -45,6 +45,8 @@ use commands::{
     unstage_file, unstage_hunk, unstage_lines, update_remote_urls, update_submodule,
     update_workspace, AppState, CloneState,
 };
+// Delete branch counts the commits it would leave on no branch (#996).
+use commands::count_commits_only_on_branch;
 // Git defaults: pull strategy, stash and switch, identity (#652, #653, #689).
 use commands::{
     get_pull_strategy, get_switch_conflicts, set_identity, set_pull_strategy, stash_and_switch,
@@ -176,6 +178,7 @@ commands![
     switch_branch,
     get_switch_conflicts,
     stash_and_switch,
+    count_commits_only_on_branch,
     delete_branch,
     rename_branch,
     list_worktrees,

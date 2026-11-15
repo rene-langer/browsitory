@@ -2,26 +2,25 @@ import { useCallback } from "react";
 import type { CreatePullRequest, ForgeProvider, PullRequestList, RepoClient } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
 import { errorAfterOwnSuccess, type OwnError } from "./ownError";
-import { failureError, type RunMutation, type RunMutationWithOutcome } from "./useMutationRunner";
+import { failureError, type RunMutationWithMessage } from "./useMutationRunner";
 
 export interface ForgeActions {
   listPullRequests(remoteName: string, account: string): Promise<void>;
-  saveForgeToken(provider: ForgeProvider, account: string, token: string): Promise<void>;
-  forgetForgeToken(provider: ForgeProvider, account: string): Promise<void>;
-  // `Promise<boolean>` (unlike the other forge actions above) so `PullRequestPanel` can tell a
-  // failed creation from a successful one and only clear its form on success — `runMutation`
-  // swallows the underlying error into `state.error` rather than rejecting, so the boolean is
-  // the only success/failure signal available to the caller. Matches `renameRemote`/
-  // `setRemoteAuthMode`'s existing `Promise<boolean>` pattern in `RemoteTransferActions`.
-  createPullRequest(remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<boolean>;
+  // Resolves to `null` once saved, else why not: the Connect dialog shows it (#1012).
+  saveForgeToken(provider: ForgeProvider, account: string, token: string): Promise<string | null>;
+  // Resolves to `null` once forgotten, else the failure (also in `state.error`): the card then
+  // stays connected, since the token is still saved.
+  forgetForgeToken(provider: ForgeProvider, account: string): Promise<string | null>;
+  // Resolves to `null` once created, else the failure, which the New pull request dialog shows
+  // with the typed fields kept (#1012); the failure also goes to `state.error`, as before.
+  createPullRequest(remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<string | null>;
   openExternalUrl(url: string): Promise<void>;
 }
 
 export function useForgeActions(
   client: RepoClient,
   repoPath: string,
-  runMutation: RunMutation,
-  runMutationWithOutcome: RunMutationWithOutcome,
+  runMutationWithMessage: RunMutationWithMessage,
   setState: (updater: (prev: AppState) => AppState) => void,
   // The error a failed pull request list set: a later successful list clears that one only, never
   // another action's (#177).
@@ -47,7 +46,7 @@ export function useForgeActions(
         setState((prev) => {
           const rest = { ...prev.pullRequests };
           delete rest[remoteName];
-          return { ...prev, pullRequests: rest, ...failure };
+          return { ...prev, pullRequests: rest, ...failure, errorSource: { error: failure.error, source: "read" } };
         });
       }
     },
@@ -55,17 +54,20 @@ export function useForgeActions(
   );
   const saveForgeToken = useCallback(
     (provider: ForgeProvider, account: string, token: string) =>
-      runMutation(() => client.saveForgeToken(repoPath, provider, account, token)),
-    [client, runMutation, repoPath],
+      // Connect's dialog shows the failure (#996).
+      runMutationWithMessage(() => client.saveForgeToken(repoPath, provider, account, token), undefined, {
+        inDialog: true,
+      }),
+    [client, runMutationWithMessage, repoPath],
   );
   const forgetForgeToken = useCallback(
     (provider: ForgeProvider, account: string) =>
-      runMutation(() => client.forgetForgeToken(repoPath, provider, account)),
-    [client, runMutation, repoPath],
+      runMutationWithMessage(() => client.forgetForgeToken(repoPath, provider, account)),
+    [client, runMutationWithMessage, repoPath],
   );
   const createPullRequest = useCallback(
-    (remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<boolean> =>
-      runMutationWithOutcome(async () => {
+    (remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<string | null> =>
+      runMutationWithMessage(async () => {
         const created = await client.createPullRequest(repoPath, remoteName, account, pullRequest);
         setState((prev) => {
           const existing = prev.pullRequests[remoteName];
@@ -78,8 +80,9 @@ export function useForgeActions(
             pullRequests: { ...prev.pullRequests, [remoteName]: updated },
           };
         });
-      }),
-    [client, runMutationWithOutcome, repoPath, setState],
+        // New pull request's dialog shows the failure (#996).
+      }, undefined, { inDialog: true }),
+    [client, runMutationWithMessage, repoPath, setState],
   );
   const openExternalUrl = useCallback(
     (url: string) => client.openExternalUrl(url),

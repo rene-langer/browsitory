@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { BranchInfo, WorktreeInfo } from "../ipc/RepoClient";
 import { WorktreePanel } from "./WorktreePanel";
@@ -48,6 +48,18 @@ function renderPanel(
   return result;
 }
 
+/** Opens the ⋯ menu of the worktree at `path` (#1011). */
+function openRowMenu(path: string) {
+  fireEvent.click(screen.getByRole("button", { name: `Actions for ${path}` }));
+}
+
+/** Opens the New worktree dialog from the section's "+" (#1011). */
+function openNewWorktreeDialog() {
+  fireEvent.click(screen.getByRole("button", { name: "New worktree…" }));
+  const dialog = screen.getByRole("dialog", { name: "New worktree", hidden: true });
+  return { dialog, create: within(dialog).getByRole("button", { name: "Create worktree", hidden: true }) };
+}
+
 describe("WorktreePanel", () => {
   it("shows an empty state when there are no worktrees", () => {
     renderPanel({ worktrees: [] });
@@ -70,65 +82,67 @@ describe("WorktreePanel", () => {
     }
   });
 
-  it("renders main and linked worktree paths but disables removal for the main worktree", () => {
+  it("renders main and linked worktree paths; the main worktree's menu has no Remove (#1011)", () => {
     renderPanel();
 
     expect(screen.getByText("/repos/project")).toBeInTheDocument();
     expect(screen.getByText("/repos/project-feature")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Remove /repos/project" }),
-    ).toHaveAttribute("aria-disabled", "true");
-    expect(
-      screen.getByRole("button", { name: "Remove /repos/project-feature" }),
-    ).toBeEnabled();
+    openRowMenu("/repos/project");
+    expect(screen.getByRole("menuitem", { name: "Open in new tab" })).toBeEnabled();
+    expect(screen.queryByRole("menuitem", { name: "Remove…" })).toBeNull();
+    openRowMenu("/repos/project-feature");
+    expect(screen.getByRole("menuitem", { name: "Remove…" })).toBeEnabled();
   });
 
   // Disabled buttons went inert with no explanation — issue #31/UX-003.
   it("explains why its controls are disabled", () => {
     renderPanel({ operationDisabled: true, operationDisabledReason: "A merge is in progress." });
 
-    expect(screen.getByRole("button", { name: "Create worktree" })).toHaveAttribute(
-      "title",
-      "A merge is in progress.",
-    );
+    openRowMenu("/repos/project");
+    const open = screen.getByRole("menuitem", { name: "Open in new tab" });
+    expect(open).toBeDisabled();
+    expect(open).toHaveAttribute("title", "A merge is in progress.");
+    fireEvent.keyDown(open, { key: "Escape" });
     // #748: the reason is the button's description, not only its title.
-    const open = screen.getByRole("button", { name: "Open /repos/project" });
-    expect(open).toHaveAttribute("aria-disabled", "true");
-    expect(open).toHaveAccessibleDescription("A merge is in progress.");
     const prune = screen.getByRole("button", { name: "Prune worktrees" });
     expect(prune).toHaveAttribute("aria-disabled", "true");
     expect(prune).toHaveAccessibleDescription("A merge is in progress.");
+    const { create } = openNewWorktreeDialog();
+    expect(create).toHaveAttribute("title", "A merge is in progress.");
   });
 
   it("says why in visible text tied to the buttons (#748)", () => {
     const onPruneWorktrees = vi.fn().mockResolvedValue(undefined);
     renderPanel({ operationDisabled: true, operationDisabledReason: "A merge is in progress.", onPruneWorktrees });
 
-    expect(describedByText(screen.getByRole("button", { name: "Create worktree" }))).toBe("A merge is in progress.");
-    expect(screen.getByRole("form", { name: "Create worktree" })).toHaveTextContent("A merge is in progress.");
     fireEvent.click(screen.getByRole("button", { name: "Prune worktrees" }));
     expect(onPruneWorktrees).not.toHaveBeenCalled();
-    const removeMain = screen.getByRole("button", { name: "Remove /repos/project" });
-    expect(describedByText(removeMain)).toBe("A merge is in progress.");
+    openRowMenu("/repos/project-feature");
+    expect(screen.getByRole("menuitem", { name: "Remove…" })).toHaveAttribute("title", "A merge is in progress.");
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Open in new tab" }), { key: "Escape" });
+    const { dialog, create } = openNewWorktreeDialog();
+    expect(describedByText(create)).toBe("A merge is in progress.");
+    expect(dialog).toHaveTextContent("A merge is in progress.");
   });
 
   it("forwards the name, path, branch, and start point supplied by the creation form", async () => {
     const onCreateWorktree = vi.fn().mockResolvedValue(null);
     renderPanel({ onCreateWorktree });
 
-    fireEvent.change(screen.getByLabelText("Worktree name"), {
+    const { dialog, create } = openNewWorktreeDialog();
+    fireEvent.change(within(dialog).getByLabelText("Worktree name"), {
       target: { value: "feature-tree" },
     });
-    fireEvent.change(screen.getByLabelText("Worktree path"), {
+    fireEvent.change(within(dialog).getByLabelText("Worktree path"), {
       target: { value: "/repos/feature-tree" },
     });
-    fireEvent.change(screen.getByLabelText("Branch"), {
+    fireEvent.change(within(dialog).getByLabelText("Branch"), {
       target: { value: "feature-tree" },
     });
-    fireEvent.change(screen.getByLabelText("Start point"), {
+    fireEvent.change(within(dialog).getByLabelText("Start point"), {
       target: { value: "main" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Create worktree" }));
+    fireEvent.click(create);
 
     expect(onCreateWorktree).toHaveBeenCalledWith(
       "feature-tree",
@@ -144,35 +158,87 @@ describe("WorktreePanel", () => {
     const onCreateWorktree = vi.fn().mockResolvedValue("worktree path already exists");
     renderPanel({ onCreateWorktree });
 
-    fireEvent.change(screen.getByLabelText("Worktree name"), { target: { value: "feature-tree" } });
-    fireEvent.change(screen.getByLabelText("Worktree path"), { target: { value: "/repos/feature-tree" } });
-    fireEvent.change(screen.getByLabelText("Branch"), { target: { value: "feature-tree" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create worktree" }));
+    const { dialog, create } = openNewWorktreeDialog();
+    fireEvent.change(within(dialog).getByLabelText("Worktree name"), { target: { value: "feature-tree" } });
+    fireEvent.change(within(dialog).getByLabelText("Worktree path"), { target: { value: "/repos/feature-tree" } });
+    fireEvent.change(within(dialog).getByLabelText("Branch"), { target: { value: "feature-tree" } });
+    fireEvent.click(create);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("worktree path already exists");
-    expect(screen.getByLabelText("Worktree name")).toHaveValue("feature-tree");
+    expect(await within(dialog).findByRole("alert", { hidden: true })).toHaveTextContent("worktree path already exists");
+    expect(within(dialog).getByLabelText("Worktree name")).toHaveValue("feature-tree");
   });
 
   it("clears the create-worktree failure message once the name is edited again", async () => {
     const onCreateWorktree = vi.fn().mockResolvedValue("worktree path already exists");
     renderPanel({ onCreateWorktree });
 
-    fireEvent.change(screen.getByLabelText("Worktree name"), { target: { value: "feature-tree" } });
-    fireEvent.change(screen.getByLabelText("Worktree path"), { target: { value: "/repos/feature-tree" } });
-    fireEvent.change(screen.getByLabelText("Branch"), { target: { value: "feature-tree" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create worktree" }));
-    await screen.findByRole("alert");
+    const { dialog, create } = openNewWorktreeDialog();
+    fireEvent.change(within(dialog).getByLabelText("Worktree name"), { target: { value: "feature-tree" } });
+    fireEvent.change(within(dialog).getByLabelText("Worktree path"), { target: { value: "/repos/feature-tree" } });
+    fireEvent.change(within(dialog).getByLabelText("Branch"), { target: { value: "feature-tree" } });
+    fireEvent.click(create);
+    await within(dialog).findByRole("alert", { hidden: true });
 
-    fireEvent.change(screen.getByLabelText("Worktree name"), { target: { value: "feature-tree-2" } });
+    fireEvent.change(within(dialog).getByLabelText("Worktree name"), { target: { value: "feature-tree-2" } });
 
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("alert", { hidden: true })).not.toBeInTheDocument();
+  });
+
+  it("lists the worktrees with no form fields in the section; + opens New worktree with hints (#1011)", () => {
+    renderPanel();
+
+    const section = screen.getByRole("region", { name: "Worktrees" });
+    expect(within(section).queryAllByRole("textbox")).toHaveLength(0);
+    const { dialog } = openNewWorktreeDialog();
+    expect(within(dialog).getByLabelText("Branch")).toHaveAccessibleDescription(
+      "An existing branch, or the name of a new one.",
+    );
+    expect(within(dialog).getByLabelText("Start point")).toHaveAccessibleDescription(
+      "Where a new branch starts, such as HEAD or main. An existing branch doesn't need one.",
+    );
+    expect(within(dialog).getByLabelText("Worktree path")).toHaveAccessibleDescription(
+      "The folder the worktree's files go in. A relative path starts at this repository's folder.",
+    );
+    expect(within(dialog).getByLabelText("Worktree name")).toHaveAccessibleDescription(
+      "Git's name for the worktree, usually the folder's name.",
+    );
+  });
+
+  it("closes the New worktree dialog once the worktree is created, and on Cancel (#1011)", async () => {
+    const onCreateWorktree = vi.fn().mockResolvedValue(null);
+    renderPanel({ onCreateWorktree });
+
+    let { dialog, create } = openNewWorktreeDialog();
+    expect(create).toBeDisabled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel", hidden: true }));
+    expect(screen.queryByRole("dialog", { name: "New worktree", hidden: true })).toBeNull();
+
+    ({ dialog, create } = openNewWorktreeDialog());
+    fireEvent.change(within(dialog).getByLabelText("Branch"), { target: { value: " topic " } });
+    fireEvent.change(within(dialog).getByLabelText("Worktree path"), { target: { value: "../topic" } });
+    fireEvent.change(within(dialog).getByLabelText("Worktree name"), { target: { value: "topic" } });
+    expect(create).toBeEnabled();
+    fireEvent.click(create);
+
+    expect(onCreateWorktree).toHaveBeenCalledWith("topic", "../topic", "topic", null);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "New worktree", hidden: true })).toBeNull());
+  });
+
+  it("opens a worktree in a new tab from its menu (#1011)", () => {
+    const onOpenWorktree = vi.fn().mockResolvedValue(undefined);
+    renderPanel({ onOpenWorktree });
+
+    openRowMenu("/repos/project-feature");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open in new tab" }));
+    expect(onOpenWorktree).toHaveBeenCalledWith("/repos/project-feature");
   });
 
   it("requires an explicit dialog confirmation before removing the selected worktree", async () => {
     const onRemoveWorktree = vi.fn().mockResolvedValue(undefined);
     renderPanel({ onRemoveWorktree });
 
-    fireEvent.click(screen.getByRole("button", { name: "Remove /repos/project-feature" }));
+    openRowMenu("/repos/project-feature");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove…" }));
     const dialog = screen.getByRole("dialog", { name: "Remove worktree /repos/project-feature" });
 
     expect(within(dialog).getByText("Remove worktree at /repos/project-feature?")).toBeInTheDocument();
@@ -180,7 +246,8 @@ describe("WorktreePanel", () => {
     expect(onRemoveWorktree).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Remove /repos/project-feature" }));
+    openRowMenu("/repos/project-feature");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove…" }));
     fireEvent.click(
       within(screen.getByRole("dialog", { name: "Remove worktree /repos/project-feature" })).getByRole("button", { name: "Remove worktree" }),
     );
@@ -192,7 +259,8 @@ describe("WorktreePanel", () => {
   it("says why the confirmation can't remove once the repository became busy", () => {
     const onRemoveWorktree = vi.fn().mockResolvedValue(undefined);
     const { rerender } = renderPanel({ onRemoveWorktree });
-    fireEvent.click(screen.getByRole("button", { name: "Remove /repos/project-feature" }));
+    openRowMenu("/repos/project-feature");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove…" }));
     rerender(
       <WorktreePanel
         worktrees={[mainWorktree, linkedWorktree]}

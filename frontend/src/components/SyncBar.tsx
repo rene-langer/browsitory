@@ -39,6 +39,7 @@ export function SyncBar({
   leading,
   trailing,
   stash,
+  applyPatch,
   pullPending = false,
   pullStrategy,
   activity,
@@ -63,8 +64,16 @@ export function SyncBar({
   onPublish: () => void;
   leading?: ReactNode;
   trailing?: ReactNode;
-  /** Stash, with "Stash all" and "Stash…" in its menu; `reason` (`stashBlockReason`) disables it. */
+  /**
+   * Stash, with "Stash all changes" and "Stash…" in its menu; `reason` (`stashBlockReason`)
+   * disables it.
+   */
   stash?: { reason: string | null; onStash: () => void; onStashWithOptions: () => void };
+  /**
+   * "Apply patch…" (#649), an item of Stash's menu (#1006): open while Stash itself is blocked
+   * (nothing to stash), disabled with `reason`.
+   */
+  applyPatch?: { reason: string | null; onApplyPatch: () => void };
   /** A diverged pull waits for Merge, Rebase or Cancel: Pull is disabled meanwhile. */
   pullPending?: boolean;
   /**
@@ -91,6 +100,19 @@ export function SyncBar({
   const detachedReason = "Check out a branch to push or pull.";
   const noUpstream = "No upstream set for the current branch.";
   const showCounts = !detached && upstream !== null && upstream.ahead != null && upstream.behind != null;
+  // ↓n on Pull and ↑n on Push, only when not zero (#1006); the status below says both in words.
+  const behindBadge =
+    showCounts && (upstream.behind ?? 0) > 0 ? (
+      <span className={styles.count} title="Commits to pull" aria-hidden="true">
+        ↓{upstream.behind}
+      </span>
+    ) : undefined;
+  const aheadBadge =
+    showCounts && (upstream.ahead ?? 0) > 0 ? (
+      <span className={styles.count} title="Commits to push" aria-hidden="true">
+        ↑{upstream.ahead}
+      </span>
+    ) : undefined;
   const fetchReason = busy ?? (fetchRemote === null ? "No remote configured." : null);
   // The tooltips name the shortcuts (#646).
   const fetchTitle = fetchRemote === null ? undefined : withShortcutLabel(`Fetch from ${fetchRemote}`, shortcutLabel("fetch"));
@@ -146,12 +168,14 @@ export function SyncBar({
         {pullStrategy === undefined ? (
           <ReasonButton reason={pullReason} title={pullTitle} onClick={() => void onPull()}>
             Pull
+            {behindBadge}
           </ReasonButton>
         ) : (
           // The Pull menu (#652): how a diverged pull combines the branches, remembered for the
           // repository; picking one also pulls. Without a choice, git config decides or the pull asks.
           <SplitButton
             label="Pull"
+            badge={behindBadge}
             reason={pullReason}
             title={pullTitle}
             onClick={() => void onPull()}
@@ -170,17 +194,14 @@ export function SyncBar({
           onClick={() => (upstream !== null ? void onPush(upstream.remoteName) : onPublish())}
         >
           Push
+          {aheadBadge}
         </ReasonButton>
       </Toolbar>
       {detached && <span>HEAD detached at {detachedAt}</span>}
       {showCounts && (
-        <span
-          className={styles.counts}
-          role="status"
-          aria-label={`${upstream.ahead} ahead, ${upstream.behind} behind ${upstream.remoteName}/${upstream.remoteBranch}`}
-        >
-          <span title="Commits to push">↑{upstream.ahead}</span>
-          <span title="Commits to pull">↓{upstream.behind}</span>
+        // Text, not an aria-label: a live region announces its content when it changes.
+        <span className={styles.srOnly} role="status">
+          {`${upstream.ahead} ahead, ${upstream.behind} behind ${upstream.remoteName}/${upstream.remoteBranch}`}
         </span>
       )}
       {activity}
@@ -193,17 +214,43 @@ export function SyncBar({
           label="Stash"
           onClick={stash.onStash}
           reason={stash.reason}
+          // Apply patch… keeps the menu open when there is nothing to stash (#1006).
+          menuReason={applyPatch === undefined || applyPatch.reason !== null ? stash.reason : null}
           title="Stash all changes"
           menuLabel="More stash options"
           chevronClassName={styles.split}
           items={[
-            { label: "Stash all", onSelect: () => stash.onStash() },
-            { label: "Stash…", onSelect: () => stash.onStashWithOptions() },
+            {
+              label: "Stash all changes",
+              disabled: stash.reason !== null,
+              title: stash.reason ?? undefined,
+              onSelect: () => stash.onStash(),
+            },
+            {
+              label: "Stash…",
+              disabled: stash.reason !== null,
+              title: stash.reason ?? undefined,
+              onSelect: () => stash.onStashWithOptions(),
+            },
+            ...(applyPatch === undefined
+              ? []
+              : [
+                  {
+                    label: "Apply patch…",
+                    group: "patch",
+                    disabled: applyPatch.reason !== null,
+                    title: applyPatch.reason ?? "Apply a patch file to the working tree",
+                    onSelect: () => applyPatch.onApplyPatch(),
+                  },
+                ]),
           ]}
         />
       )}
       {trailing}
-      {lastFetchedAt !== null && <LastFetch at={lastFetchedAt} autoFetchMinutes={autoFetchMinutes} />}
+      {/* Always there, empty until the first fetch, so the bar doesn't shift when it fills (#1006). */}
+      <span className={styles.lastFetch}>
+        {lastFetchedAt !== null && <LastFetch at={lastFetchedAt} autoFetchMinutes={autoFetchMinutes} />}
+      </span>
     </div>
   );
 }
@@ -226,9 +273,5 @@ function LastFetch({ at, autoFetchMinutes }: { at: number; autoFetchMinutes: num
   const label = now - at < 60_000 ? "just now" : formatRelativeDate(at / 1000, now);
   const when = `Last fetch: ${formatAbsoluteDate(at / 1000, dateFormat)}`;
   const title = autoFetchMinutes > 0 ? `${when}. Fetches automatically ${autoFetchLabel(autoFetchMinutes).toLowerCase()}.` : when;
-  return (
-    <span className={styles.lastFetch} title={title}>
-      Fetched {label}
-    </span>
-  );
+  return <span title={title}>Fetched {label}</span>;
 }

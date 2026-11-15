@@ -1,12 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { formatAbsoluteDate, formatShortDate } from "../lib/formatDate";
 import { shortRefName } from "../lib/shortRefName";
 import { useDateFormat } from "../state/useDateFormat";
 import { History } from "lucide-react";
 import type { ReflogEntry } from "../ipc/RepoClient";
 import { AccordionSection } from "./primitives/AccordionSection";
+import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { ListRow } from "./primitives/ListRow";
-import { Toolbar } from "./primitives/Toolbar";
 import styles from "./ReflogPanel.module.css";
 import { useVirtualRows } from "./useVirtualRows";
 
@@ -37,6 +37,13 @@ export function ReflogPanel({
   const selectableReferences = references.filter(
     (reference) => reference === "HEAD" || reference.startsWith("refs/heads/"),
   );
+  // HEAD's reflog shows without a pick first (#1026); the selection then stays across refreshes.
+  const headAvailable = references.includes("HEAD");
+  useEffect(() => {
+    if (selectedReference === null && headAvailable) void onSelectReference("HEAD");
+    // Only a missing selection (a first open, a reference that went away) picks HEAD again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedReference, headAvailable]);
 
   return (
     <AccordionSection
@@ -46,7 +53,7 @@ export function ReflogPanel({
       icon={History}
       count={selectedReference === null ? undefined : entries.length}
     >
-      <label>
+      <label className={styles.reference}>
         Reflog reference
         <select
           value={selectedReference ?? ""}
@@ -106,23 +113,27 @@ export function ReflogPanel({
         </ul>
       )}
       {restoreConfirmation !== null && (
-        <dialog open aria-label={`Restore ${shortRefName(restoreConfirmation.reference)}`}>
-          <p>Restore {shortRefName(restoreConfirmation.reference)} to {restoreConfirmation.newId}?</p>
-          <p>Your files and staged changes stay as they are.</p>
-          <Toolbar>
-            <button
-              type="button"
-              disabled={operationDisabled}
-              onClick={() => {
-                void onRestore(restoreConfirmation.reference, restoreConfirmation.newId)
-                  .then(() => setRestoreConfirmation(null));
-              }}
-            >
-              Restore reflog entry
-            </button>
-            <button type="button" onClick={() => setRestoreConfirmation(null)}>Cancel</button>
-          </Toolbar>
-        </dialog>
+        // The shared confirmation (#987): the title, what moves and what doesn't, and Undo.
+        <ConfirmDialog
+          title={`Restore ${shortRefName(restoreConfirmation.reference)}`}
+          message={
+            <>
+              <p>
+                Restore {shortRefName(restoreConfirmation.reference)} to {restoreConfirmation.newId}?
+              </p>
+              <p>Your files and staged changes stay as they are.</p>
+              <p>Undo can bring it back.</p>
+            </>
+          }
+          confirmLabel={`Restore ${shortRefName(restoreConfirmation.reference)}`}
+          confirmDisabled={operationDisabled}
+          onConfirm={() => {
+            void onRestore(restoreConfirmation.reference, restoreConfirmation.newId).then(() =>
+              setRestoreConfirmation(null),
+            );
+          }}
+          onCancel={() => setRestoreConfirmation(null)}
+        />
       )}
     </AccordionSection>
   );

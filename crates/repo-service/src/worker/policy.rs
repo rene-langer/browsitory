@@ -16,8 +16,9 @@ use git_core::reset::ResetMode;
 use git_core::undo::SnapshotScope::{self, Full, RefsAndIndex};
 
 use super::undo::{
-    amend_label, count_label, fit, fold_staged_label, merge_label, quoted, reset_label, several,
-    short, start_rebase_label, with_path, HeldReplies, UndoPlan, DISCARD_BUSY, UNDO_BUSY,
+    amend_label, count_label, fit, fold_staged_label, merge_label, quoted, reset_label,
+    reword_label, several, short, start_rebase_label, with_path, HeldReplies, UndoPlan,
+    DISCARD_BUSY, UNDO_BUSY,
 };
 use super::Command;
 
@@ -239,6 +240,7 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         | Command::GetHeadInfo { .. }
         | Command::DetectForgeRepository { .. }
         | Command::GetSwitchConflicts { .. }
+        | Command::CountCommitsOnlyOnBranch { .. }
         | Command::GetPullDefaults { .. }
         | Command::GetUndoState { .. } => P::read(),
 
@@ -359,9 +361,19 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         Command::Commit { message, .. } => {
             P::recorded(quoted("Commit ", message), RefsAndIndex).gated(Refused)
         }
-        Command::AmendCommit { message, .. } => {
-            P::recorded(amend_label(message), RefsAndIndex).gated(Refused)
-        }
+        Command::AmendCommit {
+            message,
+            message_only,
+            ..
+        } => P::recorded(
+            if *message_only {
+                reword_label(message)
+            } else {
+                amend_label(message)
+            },
+            RefsAndIndex,
+        )
+        .gated(Refused),
 
         // Branches and tags. Creating a branch checks it out.
         Command::CreateBranch { name, .. } => {
@@ -575,6 +587,7 @@ pub(super) fn reply_of(command: &mut Command) -> Option<&mut dyn Reply> {
         ListBranches,
         CreateBranch,
         GetSwitchConflicts,
+        CountCommitsOnlyOnBranch,
         StashAndSwitch,
         SetIdentity,
         GetPullDefaults,

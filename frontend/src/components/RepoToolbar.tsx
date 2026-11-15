@@ -1,6 +1,5 @@
-import { ReasonButton } from "./primitives/ReasonButton";
 import type { ComponentProps } from "react";
-import { FileDiff, GitBranch, PanelLeft, RefreshCw } from "lucide-react";
+import { GitBranch, PanelLeft, RefreshCw } from "lucide-react";
 import type { UpstreamInfo } from "../ipc/RepoClient";
 import type { SplitViewLeftState } from "./primitives/SplitView";
 import { ariaKeyShortcuts, shortcutLabel, withShortcutLabel } from "../lib/keybindings";
@@ -15,7 +14,8 @@ import styles from "./RepoToolbar.module.css";
  * The one repository toolbar above the sidebar, graph and diff (#637): the sidebar toggle (a
  * drawer in a narrow layout, #635), the current branch, which opens the branch switcher (#638),
  * Back/Forward, Fetch/Pull/Push with the ahead/behind counts, what is running (a transfer's
- * progress and Cancel, #659), Stash, Apply patch… (#649), Undo/Redo and Refresh.
+ * progress and Cancel, #659), Stash (with Apply patch… in its menu, #649, #1006), Undo/Redo and
+ * Refresh.
  */
 export function RepoToolbar({
   sidebar,
@@ -31,12 +31,16 @@ export function RepoToolbar({
   branch: {
     current: string | null;
     detachedAt: string | null;
+    /** The branch a paused rebase rebases (#995): named instead of the detached HEAD. */
+    rebasing?: string | null;
+    /** The branch of a repository with no commits yet (#983). */
+    unbornBranch?: string | null;
     upstream: UpstreamInfo | null;
     onOpenSwitcher: () => void;
   };
   navigation: ComponentProps<typeof NavigationButtons>;
   /** Includes `activity`, the running transfer or action (#659, #660). */
-  sync: Omit<ComponentProps<typeof SyncBar>, "leading" | "trailing" | "ariaLabel" | "pane">;
+  sync: Omit<ComponentProps<typeof SyncBar>, "leading" | "trailing" | "ariaLabel" | "pane" | "applyPatch">;
   undo: ComponentProps<typeof UndoRedoButtons>;
   /** "Apply patch…" (#649), disabled with `disabledReason` while repository actions can't run. */
   applyPatch: { disabledReason: string | null; onApplyPatch: () => void };
@@ -47,8 +51,11 @@ export function RepoToolbar({
   return (
     <SyncBar
       {...sync}
+      // A paused rebase's detached HEAD is the rebase's, which the branch chip names (#995).
+      detachedAt={branch.rebasing == null ? sync.detachedAt : null}
       ariaLabel="Repository"
       pane
+      applyPatch={{ reason: applyPatch.disabledReason, onApplyPatch: applyPatch.onApplyPatch }}
       leading={
         <>
           <button
@@ -69,15 +76,6 @@ export function RepoToolbar({
       }
       trailing={
         <>
-          <ReasonButton
-            className={styles.iconButton}
-            aria-label="Apply patch…"
-            title="Apply a patch file to the working tree"
-            reason={applyPatch.disabledReason}
-            onClick={applyPatch.onApplyPatch}
-          >
-            <FileDiff size={14} aria-hidden="true" />
-          </ReasonButton>
           <UndoRedoButtons {...undo} />
           <button
             type="button"
@@ -99,15 +97,27 @@ export function RepoToolbar({
 function BranchChip({
   current,
   detachedAt,
+  rebasing = null,
+  unbornBranch = null,
   upstream,
   onOpenSwitcher,
 }: {
   current: string | null;
   detachedAt: string | null;
+  rebasing?: string | null;
+  unbornBranch?: string | null;
   upstream: UpstreamInfo | null;
   onOpenSwitcher: () => void;
 }) {
-  const name = current ?? (detachedAt !== null ? `detached at ${detachedAt}` : "no branch");
+  const name =
+    rebasing !== null
+      ? `Rebasing ${rebasing}`
+      : (current ??
+        (detachedAt !== null
+          ? `detached at ${detachedAt}`
+          : unbornBranch !== null
+            ? `${unbornBranch} (no commits yet)`
+            : "no branch"));
   const tracking = current !== null && upstream !== null ? `${upstream.remoteName}/${upstream.remoteBranch}` : null;
   const label = `Current branch ${name}${tracking === null ? "" : `, tracking ${tracking}`}. Switch branch…`;
   return (

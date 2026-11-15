@@ -5,10 +5,22 @@ When a merge, cherry-pick, revert, rebase or stash pop conflicts, the conflicted
 them. The group shows a badge such as **1 conflict**, and each file is marked "(Conflicted)".
 
 The status strip at the top of the repository says what is in progress and where, for example **Merging
-feature/x into main** or **Cherry-picking onto main**, with the number of conflicts left. **Go to
-conflict** there shows the first conflicted file. During a rebase the strip also has **Continue**
-next to **Abort rebase**; it says "Resolve 1 conflict to continue" until no conflict is
-left.
+feature/x into main**, **Cherry-picking onto main** or **Rebasing main onto feature/x, step 1 of
+2**, with the number of conflicts left. It is the only place with the operation's status and its
+buttons: **Go to conflict** shows the first conflicted file, **Abort merge** (or **Abort
+cherry-pick**, **Abort revert**, **Abort rebase**) stops it, and during a rebase or a
+multi-commit cherry-pick or revert **Continue rebase** (**Continue cherry-pick**, **Continue
+revert**) goes on; it says "Resolve 1 conflict to
+continue" until no conflict is left. Abort asks first when it would throw away your
+resolutions or unsaved edits in the merge editor, since Undo can't bring them back; when nothing
+was resolved yet it aborts at once, and a toast says **Aborted merge**.
+
+While a conflicted file is open, the merge editor gets the room: the history column narrows, the
+file list shrinks to the conflicts (**Show all changes** brings the rest back) and the diff
+options are hidden. The history column goes back to its width when you open another file, when
+the file is resolved, or when the merge, rebase or cherry-pick ends; if you drag its edge
+meanwhile, it keeps the width you chose. While any conflict is left, the commit box is one line:
+"Commit once every conflict is resolved."
 
 A conflicted file opens the **Resolve conflict** pane:
 
@@ -39,8 +51,11 @@ A conflicted file opens the **Resolve conflict** pane:
   editor's changes, not the last Git operation.
 
   **Blocks** shows each conflicting block on its own, our lines and
-  their lines side by side above its result. When the pane is too narrow for three panes (the
-  VS Code side panel, for example), the merge editor shows the blocks. **Show base** adds the
+  their lines side by side above its result. When the pane is too narrow for three panes, the
+  layout button reads **Two panes**: ours and theirs side by side, and under each conflicting
+  block its result across both. When it is too narrow even for that (the VS Code side panel,
+  for example), the merge editor shows the blocks. A note under the layout buttons says which
+  applies. **Show base** adds the
   common ancestor's lines ("Empty: no common lines" when there are none, for example when both
   sides added the file): in the three panes as a fourth pane, **Base**, on the left, level with
   the others and numbering the base's own lines; in the blocks above each block's sides. For each block choose **Accept ours**,
@@ -54,7 +69,7 @@ A conflicted file opens the **Resolve conflict** pane:
   "Theirs (feature)" for a merge. **Previous conflict** and **Next conflict** move between the
   blocks; from an unchanged part of the result you were typing in, they go to the conflict
   before or after it. Our lines, their lines, the base and the unchanged lines are syntax highlighted like
-  the diff, following the diff's **Syntax highlighting** option; in the result, the lines you
+  the diff, following the diff's **Show syntax highlighting** option; in the result, the lines you
   took from a side or left unchanged are highlighted too, and typed lines stay plain. Inside a
   block, the words that differ between our line and their line are marked, as in the diff. A
   line both sides have, a line only one side has, and a pair of lines with no word in common

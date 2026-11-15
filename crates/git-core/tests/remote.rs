@@ -857,6 +857,35 @@ fn current_upstream_returns_none_on_a_detached_head_instead_of_erroring() {
 }
 
 #[test]
+fn current_upstream_returns_none_on_an_unborn_branch_instead_of_erroring() {
+    // A freshly initialised repository (#983): HEAD names a branch with no commit yet. The status
+    // poll runs on every refresh, so it must report no upstream, not libgit2's UnbornBranch.
+    let (_dir, repo) = common::init_repo();
+    repo.set_head("refs/heads/main").unwrap();
+
+    assert_eq!(current_upstream(&repo).unwrap(), None);
+}
+
+#[test]
+fn current_upstream_still_reports_a_configured_upstream_once_the_branch_has_a_commit() {
+    // The unborn-branch case above must not hide a born branch's upstream.
+    let (dir, repo) = common::init_repo();
+    repo.set_head("refs/heads/main").unwrap();
+    common::write_file(dir.path(), "README.md", "one\n");
+    common::commit_all(&repo, "one");
+    repo.remote("origin", "https://example.invalid/repo.git")
+        .unwrap();
+    let head = repo.head().unwrap().target().unwrap();
+    repo.reference("refs/remotes/origin/main", head, true, "test")
+        .unwrap();
+    set_current_upstream(&repo, "origin", "main").unwrap();
+
+    let upstream = current_upstream(&repo).unwrap().unwrap();
+    assert_eq!(upstream.local_branch, "main");
+    assert_eq!(upstream.remote_name, "origin");
+}
+
+#[test]
 fn remote_auth_metadata_is_local_non_secret_and_follows_remote_lifecycle() {
     // Removing profile persistence or failing to move/remove it with the remote must fail this.
     let (_dir, repo) = common::init_repo();

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ReflogEntry } from "../ipc/RepoClient";
 import { formatAbsoluteDate, formatShortDate } from "../lib/formatDate";
@@ -42,6 +42,24 @@ describe("ReflogPanel", () => {
     renderPanel({ selectedReference: null, entries: [] });
 
     expect(screen.getByText(/Select a reference above/)).toBeInTheDocument();
+  });
+
+  it("selects HEAD by itself when no reference is selected (#1026)", () => {
+    const onSelectReference = vi.fn().mockResolvedValue(undefined);
+    renderPanel({ selectedReference: null, entries: [], onSelectReference });
+
+    expect(onSelectReference).toHaveBeenCalledOnce();
+    expect(onSelectReference).toHaveBeenCalledWith("HEAD");
+  });
+
+  it("selects nothing by itself without a HEAD reflog, or with a reference selected (#1026)", () => {
+    const onSelectReference = vi.fn().mockResolvedValue(undefined);
+    renderPanel({ references: ["refs/heads/main"], selectedReference: null, entries: [], onSelectReference });
+    expect(onSelectReference).not.toHaveBeenCalled();
+    cleanup();
+
+    renderPanel({ onSelectReference });
+    expect(onSelectReference).not.toHaveBeenCalled();
   });
 
   it("shows an empty state when the selected reference has no reflog entries", () => {
@@ -96,7 +114,19 @@ describe("ReflogPanel", () => {
     expect(onRestore).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: `Restore main to ${entry.newId}` }));
-    fireEvent.click(within(screen.getByRole("dialog", { name: "Restore main" })).getByRole("button", { name: "Restore reflog entry" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Restore main" })).getByRole("button", { name: "Restore main" }));
+    expect(onRestore).toHaveBeenCalledWith("refs/heads/main", entry.newId);
+  });
+
+  it("confirms with the shared dialog: a title, the consequence, Undo, and Restore main (#987)", () => {
+    const onRestore = vi.fn().mockResolvedValue(undefined);
+    renderPanel({ onRestore });
+    fireEvent.click(screen.getByRole("button", { name: `Restore main to ${entry.newId}` }));
+
+    const dialog = screen.getByRole("dialog", { name: "Restore main" });
+    expect(within(dialog).getByRole("heading", { level: 2, name: "Restore main" })).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("Undo can bring it back.");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Restore main" }));
     expect(onRestore).toHaveBeenCalledWith("refs/heads/main", entry.newId);
   });
 
@@ -223,7 +253,7 @@ describe("ReflogPanel — windowed rows", () => {
       fireEvent.click(screen.getByRole("button", { name: `Restore main to ${many[505].newId}` }));
       fireEvent.click(
         within(screen.getByRole("dialog", { name: "Restore main" })).getByRole("button", {
-          name: "Restore reflog entry",
+          name: "Restore main",
         }),
       );
       expect(onRestore).toHaveBeenCalledWith("refs/heads/main", many[505].newId);

@@ -21,7 +21,9 @@ export interface BranchActions {
   pushToUpstream: MenuAction | null;
   /** The current branch's "Set upstream…", `null` on another branch. */
   setUpstream: MenuAction | null;
-  /** Opens the Push dialog; the palette offers it for the current branch ("Push branch to…"). */
+  /** The current branch's "Clear upstream…" (#1025), `null` without an upstream or on another branch. */
+  clearUpstream: MenuAction | null;
+  /** Opens the Push dialog; the palette offers it as "Push current branch to…". */
   pushTo: PaletteAction;
   delete: MenuAction;
 }
@@ -41,7 +43,8 @@ export function branchActions(context: BranchActionContext, branch: BranchInfo):
   const upstream = isCurrent ? context.upstream : null;
   return {
     checkout: { label: "Switch to", paletteLabel: `Switch to ${name}`, ...gate(blockers, isCurrent ? CURRENT_BRANCH : undefined) },
-    rename: { label: "Rename", ...gate(blockers) },
+    // A dialog follows (#1002).
+    rename: { label: "Rename…", ...gate(blockers) },
     merge: {
       label: "Merge into current branch…",
       paletteLabel: `Merge ${name} into current branch…`,
@@ -49,9 +52,10 @@ export function branchActions(context: BranchActionContext, branch: BranchInfo):
     },
     pushToUpstream: upstream === null ? null : { label: `Push to ${upstream.remoteName}`, ...gate(blockers) },
     setUpstream: isCurrent ? { label: "Set upstream…", ...gate(blockers) } : null,
+    clearUpstream: upstream === null ? null : { label: "Clear upstream…", ...gate(blockers) },
     pushTo: {
       label: "Push to…",
-      paletteLabel: "Push branch to…",
+      paletteLabel: "Push current branch to…",
       ...gate(blockers, context.remoteCount === 0 ? NO_REMOTE : undefined),
     },
     delete: { label: "Delete", ...gate(blockers) },

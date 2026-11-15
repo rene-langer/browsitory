@@ -1,3 +1,4 @@
+import { failedOperation } from "../lib/operationErrors";
 import { useCallback } from "react";
 import type { RepoClient } from "../ipc/RepoClient";
 import type { RunMutation } from "./useMutationRunner";
@@ -13,12 +14,12 @@ export function useSubmoduleActions(
   runMutation: RunMutation,
 ): SubmoduleActions {
   const initSubmodule = useCallback(
-    (path: string) => runMutation(() => client.initSubmodule(repoPath, path)),
+    (path: string) => runMutation(() => client.initSubmodule(repoPath, path), failedOperation.initSubmodule(path)),
     [client, runMutation, repoPath],
   );
   const updateSubmodule = useCallback(
     (path: string, recursive: boolean) =>
-      runMutation(() => client.updateSubmodule(repoPath, path, recursive)),
+      runMutation(() => client.updateSubmodule(repoPath, path, recursive), failedOperation.updateSubmodule(path)),
     [client, runMutation, repoPath],
   );
 

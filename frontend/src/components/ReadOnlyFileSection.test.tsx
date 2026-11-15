@@ -8,6 +8,7 @@ import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
 import { DiffViewOptionsProvider } from "../state/DiffViewOptionsProvider";
 import { fakeRepoClient } from "../test/fakeRepoClient";
 import { UserCommandsContext } from "../state/userCommandsContext";
+import { chooseViewOption, viewOptionState } from "../test/viewMenu";
 
 function renderSection(overrides: Partial<Parameters<typeof ReadOnlyFileSection>[0]> = {}) {
   const props: Parameters<typeof ReadOnlyFileSection>[0] = {
@@ -55,7 +56,8 @@ describe("ReadOnlyFileSection", () => {
       </DiffViewOptionsProvider>,
     );
     const props = { fetchDiff };
-    fireEvent.click(await screen.findByRole("button", { name: "Show whole file" }));
+    await screen.findByRole("button", { name: "View diff options" });
+    chooseViewOption("Show whole file");
     await waitFor(() =>
       expect(props.fetchDiff).toHaveBeenLastCalledWith({
         ignoreWhitespace: false,
@@ -63,7 +65,7 @@ describe("ReadOnlyFileSection", () => {
         algorithm: "Default",
       }),
     );
-    expect(screen.getByRole("button", { name: "Show whole file" })).toHaveAttribute("aria-pressed", "true");
+    expect(viewOptionState("Show whole file")).toBe("true");
     localStorage.clear();
   });
 
@@ -78,21 +80,21 @@ describe("ReadOnlyFileSection", () => {
       onApplyHunk: vi.fn(),
     };
     renderSection({ fetchDiff: vi.fn(async () => [hunk]), patch });
-    fireEvent.click(await screen.findByRole("button", { name: "Revert hunk" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Revert hunk in working tree" }));
     expect(patch.onRevertHunk).toHaveBeenCalledWith({ oldStart: 4, newStart: 5, contextLines: 3, algorithm: "Default" }, false);
-    fireEvent.click(screen.getByRole("button", { name: "Apply hunk" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply hunk to working tree" }));
     expect(patch.onApplyHunk).toHaveBeenCalledWith({ oldStart: 4, newStart: 5, contextLines: 3, algorithm: "Default" }, false);
     // #536: Shift+click also stages, as the title says.
-    expect(screen.getByRole("button", { name: "Apply hunk" })).toHaveAttribute("title", "Shift+click to stage the result too");
-    fireEvent.click(screen.getByRole("button", { name: "Apply hunk" }), { shiftKey: true });
+    expect(screen.getByRole("button", { name: "Apply hunk to working tree" })).toHaveAttribute("title", "Shift+click to stage the result too");
+    fireEvent.click(screen.getByRole("button", { name: "Apply hunk to working tree" }), { shiftKey: true });
     expect(patch.onApplyHunk).toHaveBeenLastCalledWith({ oldStart: 4, newStart: 5, contextLines: 3, algorithm: "Default" }, true);
 
     // The file menu opens without external tools, and holds the file's actions.
     fireEvent.click(screen.getByRole("button", { name: "Actions for a.txt" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Revert this file" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Revert file in working tree" }));
     expect(patch.onRevertFile).toHaveBeenCalledWith(false);
     fireEvent.click(screen.getByRole("button", { name: "Actions for a.txt" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Apply this file and stage" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Apply file to working tree and stage" }));
     expect(patch.onApplyFile).toHaveBeenCalledWith(true);
     expect(screen.queryByRole("menuitem", { name: "Open in editor" })).toBeNull();
   });
@@ -160,7 +162,7 @@ describe("ReadOnlyFileSection", () => {
         />
       </DiffSettingsContext.Provider>,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Revert hunk" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Revert hunk in working tree" }));
     expect(fetchDiff).toHaveBeenCalledWith({ ignoreWhitespace: false, contextLines: 3, algorithm: "Patience" });
     expect(patch.onRevertHunk).toHaveBeenCalledWith({ oldStart: 4, newStart: 5, contextLines: 3, algorithm: "Patience" }, false);
   });
@@ -176,7 +178,7 @@ describe("ReadOnlyFileSection", () => {
       onApplyHunk: vi.fn(),
     };
     renderSection({ fetchDiff: vi.fn(async () => [hunk]), patch });
-    const revert = await screen.findByRole("button", { name: "Revert hunk" });
+    const revert = await screen.findByRole("button", { name: "Revert hunk in working tree" });
     expect(revert).toBeDisabled();
     expect(revert).toHaveAttribute("title", "A rebase is in progress.");
   });
@@ -191,6 +193,24 @@ describe("ReadOnlyFileSection", () => {
     renderSection({ client: fakeRepoClient({ getBlame }), blameAt: "HEAD" });
     fireEvent.click(screen.getByRole("button", { name: "Blame" }));
     await waitFor(() => expect(getBlame).toHaveBeenCalledWith("/repo", "HEAD", "a.txt"));
+  });
+
+  it("puts Back to diff in the file header while blame shows, once (#986)", async () => {
+    const getBlame = vi.fn(async () => [
+      { lineNumber: 1, content: "x", commitId: "c1", shortId: "c111111", authorName: "A", timestamp: 1 },
+    ]);
+    const { props } = renderSection({ client: fakeRepoClient({ getBlame }) });
+    fireEvent.click(screen.getByRole("button", { name: "Blame" }));
+    const table = (await screen.findByText("c111111")).closest("table")!;
+
+    const back = screen.getAllByRole("button", { name: "Back to diff" });
+    expect(back).toHaveLength(1);
+    expect(back[0].compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.click(back[0]);
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.getByRole("button", { name: "Blame" })).toBeInTheDocument();
+    await waitFor(() => expect(props.fetchDiff).toHaveBeenCalledTimes(2));
   });
 
   it("shows the rename and a History button when given", () => {
@@ -235,8 +255,10 @@ describe("ReadOnlyFileSection", () => {
       const onOpenLineHistory = vi.fn();
       renderSection({ path: "src/a.txt", fetchDiff: vi.fn(async () => [hunk]), onOpenLineHistory });
       await screen.findByText("six");
+      // #1023: a ReasonButton, focusable, with the reason as its description.
       const button = screen.getByRole("button", { name: "History of selected lines of src/a.txt" });
-      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute("aria-disabled", "true");
+      expect(button).toHaveAccessibleDescription("Select lines first.");
 
       select(lineElement(5), lineElement(6));
 
@@ -251,7 +273,7 @@ describe("ReadOnlyFileSection", () => {
 
       select(removed, removed);
 
-      expect(screen.getByRole("button", { name: "History of selected lines of a.txt" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "History of selected lines of a.txt" })).toHaveAttribute("aria-disabled", "true");
     });
 
     it("opens the history of lines selected in the blame view", async () => {
@@ -280,15 +302,19 @@ describe("ReadOnlyFileSection", () => {
       expect(screen.queryByRole("button", { name: /selected lines/ })).toBeNull();
     });
 
-    it("opens the history of the file's folder, and has none at the root", () => {
+    // #1023: in the file's "…" menu, not a header button.
+    it("opens the history of the file's folder from the file menu, and has none at the root", () => {
       const onOpenFolderHistory = vi.fn();
       const { unmount } = renderSection({ path: "src/ui/a.txt", onOpenFolderHistory });
-      fireEvent.click(screen.getByRole("button", { name: "History of folder src/ui" }));
+      expect(screen.queryByRole("button", { name: /History of folder/ })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Actions for src/ui/a.txt" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "History of folder src/ui" }));
       expect(onOpenFolderHistory).toHaveBeenCalledWith("src/ui");
       unmount();
 
       renderSection({ path: "a.txt", onOpenFolderHistory });
       expect(screen.queryByRole("button", { name: /History of folder/ })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Actions for a.txt" })).toBeNull();
     });
   });
 

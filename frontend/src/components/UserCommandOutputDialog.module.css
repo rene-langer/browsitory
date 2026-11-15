@@ -2,11 +2,6 @@
   width: min(48rem, calc(100vw - 2rem));
 }
 
-.title {
-  margin: 0 0 var(--space-2);
-  font-size: var(--text-md, 1rem);
-}
-
 .status,
 .muted {
   margin: 0 0 var(--space-2);
@@ -32,11 +27,4 @@
   overflow-wrap: anywhere;
   border: 1px solid var(--color-border);
   border-radius: 4px;
-}
-
-.buttons {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-2);
-  margin-top: var(--space-3);
 }

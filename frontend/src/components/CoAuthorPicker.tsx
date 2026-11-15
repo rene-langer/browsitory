@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import type { SignatureInput } from "../ipc/RepoClient";
 import { placeAnchored, type Placement } from "../lib/anchoredPosition";
 import { formatPerson as label, parsePerson as typedPerson } from "../lib/people";
@@ -11,18 +11,39 @@ import styles from "./CommitBox.module.css";
  * The popover is `position: fixed` and placed with `placeAnchored` (#141): below the button when
  * it fits, otherwise above, shifted to stay inside the window. It re-measures when it opens, when
  * its content changes (the authors load asynchronously), and on window resize and any scroll.
+ *
+ * With `anchor` it has no button of its own (#1003): it is open while mounted, placed by
+ * `anchor.ref` (the commit box's "Add co-author…" menu item opens it), and closing calls
+ * `anchor.onClose` and focuses `anchor.returnFocusTo`.
  */
 export function CoAuthorPicker({
   load,
   exclude,
   onPick,
+  anchor,
 }: {
   load: () => Promise<SignatureInput[]>;
   /** Already chosen (matched by email, case-insensitively). */
   exclude: SignatureInput[];
   onPick: (person: SignatureInput) => void;
+  anchor?: {
+    ref: RefObject<HTMLElement | null>;
+    onClose: () => void;
+    returnFocusTo: RefObject<HTMLElement | null>;
+  };
 }) {
-  const [open, setOpen] = useState(false);
+  const [openState, setOpen] = useState(false);
+  const open = anchor !== undefined || openState;
+  // `anchor` read through a ref, so an inline one doesn't reload the authors on every render.
+  const anchorProp = useRef(anchor);
+  useEffect(() => {
+    anchorProp.current = anchor;
+  });
+  // Closes the popover: unmounted by its owner when anchored.
+  const hide = useCallback(() => {
+    if (anchorProp.current === undefined) setOpen(false);
+    else anchorProp.current.onClose();
+  }, []);
   const [authors, setAuthors] = useState<SignatureInput[] | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [filter, setFilter] = useState("");
@@ -36,17 +57,20 @@ export function CoAuthorPicker({
   // The side it is on, preferred while it still fits, so filtering doesn't make it jump.
   const sideRef = useRef<Placement["side"] | undefined>(undefined);
 
+  // What places the popover, and what gets focus back when it closes.
+  const anchorElement = useCallback(() => (anchorProp.current?.ref ?? buttonRef).current, []);
+  const returnFocus = useCallback(() => (anchorProp.current?.returnFocusTo ?? buttonRef).current?.focus({ preventScroll: true }), []);
   const place = useCallback(() => {
-    const button = buttonRef.current;
+    const button = anchorElement();
     const popover = popoverRef.current;
     if (button === null || popover === null) return;
-    const anchor = button.getBoundingClientRect();
+    const rect = button.getBoundingClientRect();
     // A fixed popover would follow a button scrolled out of view: close it instead.
-    if (!isVisibleIn(anchor, scrollingAncestor(button))) {
+    if (!isVisibleIn(rect, scrollingAncestor(button))) {
       sideRef.current = undefined;
       // Back to the button only from inside the picker: focus that moved on stays where it is.
-      if (rootRef.current?.contains(document.activeElement) === true) button.focus({ preventScroll: true });
-      setOpen(false);
+      if (rootRef.current?.contains(document.activeElement) === true) returnFocus();
+      hide();
       return;
     }
     // Measured uncapped: once placed, `maxHeight` shrinks the list, and the capped height would
@@ -56,7 +80,7 @@ export function CoAuthorPicker({
     const size = { width: popover.offsetWidth, height: popover.scrollHeight };
     popover.style.maxHeight = cap;
     const next = placeAnchored(
-      anchor,
+      rect,
       size,
       { width: window.innerWidth, height: window.innerHeight },
       { prefer: sideRef.current },
@@ -71,7 +95,7 @@ export function CoAuthorPicker({
         ? current
         : next,
     );
-  }, []);
+  }, [anchorElement, returnFocus, hide]);
 
   useEffect(() => {
     if (!open) return;
@@ -99,18 +123,18 @@ export function CoAuthorPicker({
         },
       );
     const onPointerDown = (event: MouseEvent) => {
-      if (rootRef.current !== null && !rootRef.current.contains(event.target as Node)) setOpen(false);
+      if (rootRef.current !== null && !rootRef.current.contains(event.target as Node)) hide();
     };
     document.addEventListener("mousedown", onPointerDown);
     return () => {
       ignore = true;
       document.removeEventListener("mousedown", onPointerDown);
     };
-  }, [open, load]);
+  }, [open, load, hide]);
 
   const close = () => {
-    setOpen(false);
-    buttonRef.current?.focus();
+    hide();
+    returnFocus();
   };
   const excluded = new Set(exclude.map((p) => p.email.toLowerCase()));
   const needle = filter.trim().toLowerCase();
@@ -152,6 +176,7 @@ export function CoAuthorPicker({
 
   return (
     <div className={styles.picker} ref={rootRef}>
+      {anchor === undefined && (
       <button
         type="button"
         ref={buttonRef}
@@ -173,6 +198,7 @@ export function CoAuthorPicker({
       >
         Add co-author
       </button>
+      )}
       {open && (
         <div
           ref={popoverRef}

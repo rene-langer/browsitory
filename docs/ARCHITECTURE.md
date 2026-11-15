@@ -319,7 +319,9 @@ Every dialog has exactly one owner, chosen by who opens and closes it (#493):
   `useAppState` action opens or closes it itself (a push that needs a target opens "Push to…", a
   stash that landed closes the stash dialog). It is one `WorkspaceDialog | null` union
   (`frontend/src/state/workspaceDialog.ts`): push, force push, delete remote branch, create tag,
-  delete remote tag, a remote's edit / credentials / remove, merge, reword and stash. There is one
+  delete remote tag, a remote's edit / credentials / remove, merge, reword and stash, and the
+  palette's delete tag, drop stash and remove worktree (#993, #990: the confirmations the Tags,
+  Stashes and Worktrees panels show themselves for their own buttons). There is one
   `openDialog(dialog)` and one `closeDialog(kind?)`. Only one is open at a time: opening one
   replaces the open one, which is what lets a single field hold them all. An action that finishes
   closes only its own kind (`withoutDialog`), never a dialog opened meanwhile. Being in
@@ -348,6 +350,24 @@ stays with that state. A running fetch, pull or push is no dialog at all: the to
 tab that unmounts mid-transfer hands it to the next mount of its workspace
 (`useRemoteTransferActions`). The rebase planner (`rebaseOnto`/`rebasePreset`) predates
 the rule and still has its own fields.
+
+### A dialog's frame
+
+Every modal dialog is built from the same parts (`frontend/src/components/primitives/`, #987),
+and new dialogs use them too: `FormDialog` (a form or a prompt with several buttons) or
+`ConfirmDialog` (one question, confirm or cancel) for the `<dialog>` itself, `DialogHeader` for
+the visible bold title (both shells render it from their `title`, which is also the dialog's
+`aria-label`, so E2E specs keep finding a dialog as `dialog[aria-label=…]`), and
+`DialogActions` for the one button row: right-aligned, primary action first, Cancel last. The
+primary button carries `data-tone="primary"` (the accent fill the Commit button uses). An action
+that loses data carries `data-tone="danger"` instead (#988): red, outlined and bold in panes and
+menus (`ContextMenuItem.destructive` for a menu item), filled in a dialog's button row.
+`ConfirmDialog` takes it as `tone="danger"` and is a plain primary otherwise; use it only where
+data is lost, not for every confirmation. A confirmation's message says what happens and whether
+**Undo** brings it back (#989); a disabled primary button says why in visible text
+(`BlockedReason`, tied with `aria-describedby`). Overlays that hold a long list (the operation
+log, the shortcut sheet, the rebase planner) use `Panel` with a `footer` instead, so their
+buttons stay in view while the list scrolls.
 
 ### Drag and drop inside the app
 

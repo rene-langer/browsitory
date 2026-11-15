@@ -21,12 +21,18 @@ export type WorkspaceDialog =
   | { kind: "createTag"; commitId: string }
   // "Delete from remote" for that tag.
   | { kind: "deleteRemoteTag"; tagName: string }
+  // The palette's "Delete tag …", "Drop stash: …" and "Remove worktree …" (#993, #990): the same
+  // confirmations as the tag, stash and worktree panels'.
+  | { kind: "deleteTag"; tagName: string }
+  | { kind: "dropStash"; commitId: string }
+  | { kind: "removeWorktree"; name: string }
   // A remote's Edit / Credentials / Remove dialog (`RemoteDialogs`).
   | { kind: "remote"; action: "edit" | "credentials" | "remove"; remoteName: string }
   // The merge options dialog for that branch.
   | { kind: "merge"; branchName: string }
-  // Reword an older commit (#442); `onto` is its parent.
-  | { kind: "reword"; commitId: string; onto: string }
+  // Reword a commit (#442); `onto` is its parent, `null` for HEAD, whose message alone is
+  // amended (#981).
+  | { kind: "reword"; commitId: string; onto: string | null }
   // The stash options dialog; `paths` non-empty for a file stash.
   | { kind: "stash"; paths: string[] }
   // "Apply patch…"'s preview of the patch file picked (#658): Apply, Apply and stage, Apply as

@@ -2,7 +2,7 @@ import { useId, useState } from "react";
 import type { RemoteInfo } from "../ipc/RepoClient";
 import { Field } from "./primitives/Field";
 import { FormDialog } from "./primitives/FormDialog";
-import confirmStyles from "./primitives/ConfirmDialog.module.css";
+import { DialogActions } from "./primitives/DialogActions";
 import styles from "./PushBranchDialog.module.css";
 import { BlockedReason } from "./primitives/BlockedReason";
 import { describedBy } from "../lib/ariaDescribedBy";
@@ -35,7 +35,7 @@ export function DeleteRemoteTagDialog({
   const [deleteLocal, setDeleteLocal] = useState(false);
 
   return (
-    <FormDialog ariaLabel={`Delete tag ${tagName} from remote`} onCancel={onCancel}>
+    <FormDialog title={`Delete tag ${tagName} from remote`} onCancel={onCancel}>
       <div className={styles.form}>
         {remotes.length > 1 && (
           <Field label="Remote">
@@ -64,10 +64,10 @@ export function DeleteRemoteTagDialog({
           Also delete the local tag
         </label>
         <BlockedReason id={reasonId} reason={busyReason} />
-        <div className={styles.actions}>
+        <DialogActions>
           <button
             type="button"
-            className={confirmStyles.confirmButton}
+            data-tone="danger"
             disabled={disabled || remoteName === ""}
             title={busyReason ?? undefined}
             aria-describedby={describedBy(reasonId, busyReason)}
@@ -78,7 +78,7 @@ export function DeleteRemoteTagDialog({
           <button type="button" data-autofocus onClick={onCancel}>
             Cancel
           </button>
-        </div>
+        </DialogActions>
       </div>
     </FormDialog>
   );

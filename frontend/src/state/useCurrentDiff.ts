@@ -6,6 +6,9 @@ export interface DiffViewControls {
   toggleWrap(): void;
   /** Flips "Show whole file"; `null` where the diff has no such toggle. */
   toggleWholeFile: (() => void) | null;
+  /** Whether its lines wrap and it shows the whole file now, for the palette's names (#990). */
+  wrapped: boolean;
+  wholeFile: boolean;
 }
 
 /** The current diff, as the palette lists it. */
@@ -27,6 +30,9 @@ export interface CurrentDiffRegistry {
   claim(id: string): void;
   toggleWrap(): void;
   toggleWholeFile(): void;
+  /** The current diff's state now (read at call time, like the toggles). */
+  isWrapped(): boolean;
+  isWholeFile(): boolean;
 }
 
 export interface RegisteredDiff {
@@ -88,10 +94,12 @@ export function useCurrentDiffRegistry(): CurrentDiffRegistry {
 
   const toggleWrap = useCallback(() => currentEntry()?.controls.current.toggleWrap(), [currentEntry]);
   const toggleWholeFile = useCallback(() => currentEntry()?.controls.current.toggleWholeFile?.(), [currentEntry]);
+  const isWrapped = useCallback(() => currentEntry()?.controls.current.wrapped === true, [currentEntry]);
+  const isWholeFile = useCallback(() => currentEntry()?.controls.current.wholeFile === true, [currentEntry]);
 
   return useMemo(
-    () => ({ current, register, claim, toggleWrap, toggleWholeFile }),
-    [current, register, claim, toggleWrap, toggleWholeFile],
+    () => ({ current, register, claim, toggleWrap, toggleWholeFile, isWrapped, isWholeFile }),
+    [current, register, claim, toggleWrap, toggleWholeFile, isWrapped, isWholeFile],
   );
 }
 

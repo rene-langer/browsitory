@@ -45,7 +45,6 @@ function DiffPaneContent({
   focusCommitMessage = false,
   clearCommitMessage = null,
   rebaseProgress,
-  sequencePending = false,
   commits,
   branchCommits,
   refreshGeneration = 0,
@@ -61,7 +60,10 @@ function DiffPaneContent({
   discardBlockedReason = null,
   restoreBlockedReason = null,
   issueForge = null,
+  onConflictFileOpenChange,
 }: {
+  /** Passed through to `UncommittedDiffPane` (#980). */
+  onConflictFileOpenChange?: (open: boolean) => void;
   // The forge repository a selected commit's `#123` links to (#612), else `null`.
   issueForge?: ForgeRepository | null;
   // Why Restore… can't run now (`operationBlockers`), else `null`.
@@ -108,8 +110,6 @@ function DiffPaneContent({
   // One-shot CommitBox clear request (see its `clearMessage`).
   clearCommitMessage?: string | null;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
-  // An action is running: the sequence's Continue/Abort are disabled (no double submit).
-  sequencePending?: boolean;
 }) {
   const { stashActions } = useWorkspaceActions();
   // A commit's Changes / All files view (#446), kept while moving between commits.
@@ -126,7 +126,6 @@ function DiffPaneContent({
         focusCommitMessage={focusCommitMessage}
         clearCommitMessage={clearCommitMessage}
         rebaseProgress={rebaseProgress}
-        sequencePending={sequencePending}
         refreshGeneration={refreshGeneration}
         initialCommitDraft={initialCommitDraft}
         discardRequest={discardRequest}
@@ -138,6 +137,7 @@ function DiffPaneContent({
         discardBlockedReason={discardBlockedReason}
         commits={commits}
         branchCommits={branchCommits}
+        onConflictFileOpenChange={onConflictFileOpenChange}
       />
     );
   }

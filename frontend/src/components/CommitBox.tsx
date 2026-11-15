@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent } from "react";
 import { X } from "lucide-react";
 import {
   DEFAULT_COMMIT_MESSAGE_SETTINGS,
@@ -54,11 +54,8 @@ export function CommitBox({
   onCommit,
   disabled,
   disabledReason,
-  onAbortMerge,
-  abortLabel = "Abort merge",
   initialMessage,
   initialMessageIsSquash = false,
-  showAbort = initialMessage !== undefined,
   initialDraft,
   onDraftChange,
   amend,
@@ -91,16 +88,12 @@ export function CommitBox({
   disabled: boolean;
   /** Visible explanation shown while `disabled` blocks Commit. */
   disabledReason?: string;
-  onAbortMerge: () => void;
-  abortLabel?: string;
   initialMessage?: string;
   /**
    * `initialMessage` is a pending squash merge's message (#142): co-authors can still be added
    * to it. A merge's or a paused cherry-pick's or revert's message hides them.
    */
   initialMessageIsSquash?: boolean;
-  /** Whether to offer `abortLabel`; defaults to "a message was seeded" (a merge/pick/revert). */
-  showAbort?: boolean;
   /**
    * Draft to start from on mount (read once, like `useState`'s initial value). `App` keeps one per
    * repo so switching tabs — which unmounts the inactive tab's whole workspace (PERF-001) — or
@@ -369,6 +362,28 @@ export function CommitBox({
     });
   };
 
+  // Compact until the message field has focus (#1003): one line and Commit, so the diff above
+  // keeps the room. It stays open while focus is anywhere in the box or anything is in it (a
+  // message, chips, amend), so nothing the user typed or chose is hidden. Focus landing on Commit
+  // or its menu doesn't open it: the button would move away from under the pointer mid-click.
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const commitRowRef = useRef<HTMLDivElement | null>(null);
+  const [focused, setFocused] = useState(false);
+  const [pickingCoAuthor, setPickingCoAuthor] = useState(false);
+  const expanded =
+    focused ||
+    message !== "" ||
+    amendOn ||
+    coAuthors.length > 0 ||
+    pickingCoAuthor ||
+    historyMenu !== null ||
+    canRestore;
+  const handleBlur = (event: FocusEvent<HTMLDivElement>) => {
+    const next = event.relatedTarget;
+    if (next instanceof Node && rootRef.current?.contains(next) === true) return;
+    setFocused(false);
+  };
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
       event.preventDefault();
@@ -392,10 +407,13 @@ export function CommitBox({
   // Without a message Commit is disabled too: say so, unless a stronger reason is shown (#651).
   const showEmptyHint = !amendOn && emptyMessage && !showDisabledReason;
   const describedBy = showDisabledReason ? "commit-disabled-reason" : showEmptyHint ? "commit-message-hint" : undefined;
-  // The button's menu (#651): Commit and push, and amend mode. None while amending: the button
-  // then amends.
+  // The button's menu (#651, #1003): Commit and push, amend mode and co-authors. While amending,
+  // the button amends and the menu keeps only co-authors.
+  const coAuthorItem: ContextMenuItem[] = showCoAuthors
+    ? [{ label: "Add co-author…", onSelect: () => setPickingCoAuthor(true) }]
+    : [];
   const menuItems: ContextMenuItem[] = amendOn
-    ? []
+    ? coAuthorItem
     : [
         ...(commitAndPush === undefined
           ? []
@@ -408,94 +426,103 @@ export function CommitBox({
               },
             ]),
         ...(amend?.available === true ? [{ label: "Amend last commit", onSelect: () => amend.onToggle(true) }] : []),
+        ...coAuthorItem,
       ];
+  const buttonLabel = amendOn ? "Amend" : commitLabel(stagedCount, branchName);
 
   return (
-    <div>
+    <div
+      ref={rootRef}
+      className={expanded ? styles.box : `${styles.box} ${styles.collapsed}`}
+      onBlur={handleBlur}
+    >
       <textarea
         ref={textareaRef}
         className={styles.textarea}
+        rows={expanded ? 4 : 1}
         value={message}
         onChange={(event) => {
           setMessage(event.target.value);
           setReplaced(null);
         }}
+        onFocus={() => setFocused(true)}
         onKeyDown={handleKeyDown}
         placeholder="Commit message"
         aria-label="Commit message"
         {...ruler}
       />
-      <div className={styles.messageTools}>
-        <span
-          aria-label="Summary length"
-          className={styles.counter}
-          data-over={summaryOver ? "true" : undefined}
-          title={summaryOver ? `Many tools cut summaries longer than ${summaryLimit} characters.` : undefined}
-        >
-          Summary {summaryLength}/{summaryLimit}
-        </span>
-        {canRestore && (
-          <button type="button" className={styles.historyButton} onClick={restoreReplaced} title={withShortcutLabel("Undo the pick", shortcutLabel("undo"))}>
-            Restore message
-          </button>
-        )}
-        {loadMessageHistory !== undefined && (
-          <button
-            type="button"
-            className={styles.historyButton}
-            aria-haspopup="menu"
-            aria-expanded={historyMenu !== null}
-            title="Fill the box with an earlier commit message"
-            onClick={(event) => {
-              const button = event.currentTarget;
-              if (historyMenu !== null) {
-                button.focus({ preventScroll: true });
-                setHistoryMenu(null);
-                return;
-              }
-              openHistoryMenu(button);
-            }}
+      {expanded && (
+        <div className={styles.messageTools}>
+          <span
+            aria-label="Summary length"
+            className={styles.counter}
+            data-over={summaryOver ? "true" : undefined}
+            title={summaryOver ? `Many tools cut summaries longer than ${summaryLimit} characters.` : undefined}
           >
-            Recent messages
-          </button>
-        )}
-        {historyMenu !== null && (
-          <ContextMenu
-            x={historyMenu.x}
-            y={historyMenu.y}
-            returnFocusTo={historyMenu.returnFocusTo}
-            items={historyMenu.items}
-            onClose={() => setHistoryMenu(null)}
-          />
-        )}
-      </div>
-      {showCoAuthors && (
-        <div className={styles.coAuthors}>
-          {coAuthors.length > 0 && (
-            <ul className={styles.chips} aria-label="Co-authors">
-              {coAuthors.map((person) => (
-                <li key={person.email.toLowerCase()} className={styles.chip}>
-                  <span>{formatPerson(person)}</span>
-                  <button
-                    type="button"
-                    className={styles.chipRemove}
-                    aria-label={`Remove co-author ${person.name}`}
-                    onClick={() => setCoAuthors((current) => current.filter((p) => !sameEmail(p, person)))}
-                  >
-                    <X size={12} aria-hidden="true" />
-                  </button>
-                </li>
-              ))}
-            </ul>
+            Summary {summaryLength}/{summaryLimit}
+          </span>
+          {canRestore && (
+            <button type="button" className={styles.historyButton} onClick={restoreReplaced} title={withShortcutLabel("Undo the pick", shortcutLabel("undo"))}>
+              Restore message
+            </button>
           )}
-          <CoAuthorPicker
-            load={loadRecentAuthors}
-            exclude={coAuthors}
-            onPick={(person) =>
-              setCoAuthors((current) => (current.some((p) => sameEmail(p, person)) ? current : [...current, person]))
-            }
-          />
+          {loadMessageHistory !== undefined && (
+            <button
+              type="button"
+              className={styles.historyButton}
+              aria-haspopup="menu"
+              aria-expanded={historyMenu !== null}
+              title="Fill the box with an earlier commit message"
+              onClick={(event) => {
+                const button = event.currentTarget;
+                if (historyMenu !== null) {
+                  button.focus({ preventScroll: true });
+                  setHistoryMenu(null);
+                  return;
+                }
+                openHistoryMenu(button);
+              }}
+            >
+              Recent messages
+            </button>
+          )}
+          {historyMenu !== null && (
+            <ContextMenu
+              x={historyMenu.x}
+              y={historyMenu.y}
+              returnFocusTo={historyMenu.returnFocusTo}
+              items={historyMenu.items}
+              onClose={() => setHistoryMenu(null)}
+            />
+          )}
         </div>
+      )}
+      {showCoAuthors && coAuthors.length > 0 && (
+        <ul className={styles.chips} aria-label="Co-authors">
+          {coAuthors.map((person) => (
+            <li key={person.email.toLowerCase()} className={styles.chip}>
+              <span>{formatPerson(person)}</span>
+              <button
+                type="button"
+                className={styles.chipRemove}
+                aria-label={`Remove co-author ${person.name}`}
+                onClick={() => setCoAuthors((current) => current.filter((p) => !sameEmail(p, person)))}
+              >
+                <X size={12} aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {showCoAuthors && pickingCoAuthor && (
+        <CoAuthorPicker
+          load={loadRecentAuthors}
+          exclude={coAuthors}
+          onPick={(person) =>
+            setCoAuthors((current) => (current.some((p) => sameEmail(p, person)) ? current : [...current, person]))
+          }
+          anchor={{ ref: commitRowRef, onClose: () => setPickingCoAuthor(false), returnFocusTo: textareaRef }}
+        />
       )}
       {amendOn && (
         <Field label="Author" error={authorError ? "Use the form Name <email>." : null} className={styles.authorField}>
@@ -514,8 +541,9 @@ export function CommitBox({
           )}
         </Field>
       )}
+      {/* Why Commit is disabled: muted, like the empty-message hint, not a warning (#1005). */}
       {showDisabledReason && (
-        <p id="commit-disabled-reason" className={styles.reason}>
+        <p id="commit-disabled-reason" className={styles.hint}>
           {disabledReason}
         </p>
       )}
@@ -523,16 +551,6 @@ export function CommitBox({
         <p id="commit-message-hint" className={styles.hint}>
           Write a commit message to commit.
         </p>
-      )}
-      {amend?.available === true && (
-        <label className={styles.amendToggle}>
-          <input
-            type="checkbox"
-            checked={amendOn}
-            onChange={(event) => amend.onToggle(event.target.checked)}
-          />
-          Amend last commit
-        </label>
       )}
       {hooks?.installed === true && (
         <label
@@ -547,34 +565,41 @@ export function CommitBox({
         <p className={styles.reason}>Already pushed — you'll need to force push.</p>
       )}
       {hooks?.running != null && <HookStatus running={hooks.running} onCancel={hooks.onCancel} />}
-      <Toolbar>
-        {menuItems.length > 0 ? (
-          <SplitButton
-            label={commitLabel(stagedCount, branchName)}
-            onClick={() => commitIfReady()}
-            disabled={buttonDisabled}
-            title={commitLabel(stagedCount, branchName)}
-            menuTitle="More commit options"
-            className={styles.commitButton}
-            chevronClassName={styles.commitButton}
-            describedBy={describedBy}
-            action="commit"
-            menuLabel="More commit options"
-            items={menuItems}
-          />
-        ) : (
-          <button
-            className={styles.commitButton}
-            onClick={() => commitIfReady()}
-            disabled={buttonDisabled}
-            aria-describedby={describedBy}
-            data-action={amendOn ? "amend" : "commit"}
-          >
-            {amendOn ? "Amend" : commitLabel(stagedCount, branchName)}
-          </button>
-        )}
-        {showAbort && <button onClick={onAbortMerge}>{abortLabel}</button>}
-      </Toolbar>
+      <div ref={commitRowRef} className={styles.commitRow}>
+        <Toolbar>
+          {menuItems.length > 0 ? (
+            <SplitButton
+              label={buttonLabel}
+              onClick={() => commitIfReady()}
+              disabled={buttonDisabled}
+              menuDisabled={submitting}
+              title={buttonLabel}
+              menuTitle={amendOn ? "More amend options" : "More commit options"}
+              className={styles.commitButton}
+              chevronClassName={styles.commitButton}
+              describedBy={describedBy}
+              action={amendOn ? "amend" : "commit"}
+              menuLabel="More commit options"
+              items={menuItems}
+            />
+          ) : (
+            <button
+              className={styles.commitButton}
+              onClick={() => commitIfReady()}
+              disabled={buttonDisabled}
+              aria-describedby={describedBy}
+              data-action={amendOn ? "amend" : "commit"}
+            >
+              {buttonLabel}
+            </button>
+          )}
+          {amendOn && amend !== undefined && (
+            <button type="button" onClick={() => amend.onToggle(false)}>
+              Cancel amend
+            </button>
+          )}
+        </Toolbar>
+      </div>
     </div>
   );
 }

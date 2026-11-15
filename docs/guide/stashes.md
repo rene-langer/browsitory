@@ -5,7 +5,7 @@
 ## Stashing your changes
 
 **Stash** in the repository toolbar sets every change aside, untracked files included. Its
-chevron opens **Stash all** and **Stash…**, a dialog with an optional message, **Keep staged
+chevron opens **Stash all changes** and **Stash…**, a dialog with an optional message, **Keep staged
 changes** (stash them but also leave them staged) and **Include untracked files** (on by
 default).
 
@@ -16,9 +16,9 @@ files](staging-and-committing.md#selecting-several-files)) and use **Stash N fil
 
 ## Getting a stash back
 
-Expand **Stashes** to see everything set aside. Each stash shows its name and, below it, the
-branch it was made on, how long ago, and how many files it holds ("On main · 2 days ago · 3
-files"). The name is the message you gave it, or, for a stash without one, "WIP:" and the commit
+Expand **Stashes** to see everything set aside (with nothing stashed, it points you to **Stash**
+in the toolbar). Each stash shows its name and, below it, the branch it was made on, how long
+ago, and how many files it holds ("On main · 2 days ago · 3 files"). The name is the message you gave it, or, for a stash without one, "WIP:" and the commit
 it was made on. Hover over a stash to read its full message and the date.
 
 Click a stash to see what it holds: **Changes** (diffed against the commit it was made on) and,
@@ -63,8 +63,8 @@ you here.
     stashing the paused step's changes away would commit the wrong result.
 
     While a merge or another operation has left conflicts, stashing refuses and changes nothing:
-    "Resolve the current conflicts before stashing." This applies to Stash all and Stash file…
-    alike, as with git.
+    "Resolve the current conflicts before stashing." This applies to Stash all changes and Stash
+    file… alike, as with git.
 
 ??? note "Details: one file on its own"
     For an untracked file, untracked files are always included. For a staged rename **Stash
@@ -74,16 +74,17 @@ you here.
     name stashes both. A file inside a symlinked folder can't be stashed on its own.
 
 ??? note "Details: names that differ only in case"
-    On macOS, Windows or with `core.ignorecase`, **Stash file…** and **Stash all** refuse a
+    On macOS, Windows or with `core.ignorecase`, **Stash file…** and **Stash all changes** refuse a
     staged rename that changes only the case of a name (`Old` to `old`: "Can't stash 'old': it
     differs from 'Old' only in case."); commit it or undo it first. On macOS this includes names
     the drive treats as the same (`Straße` and `Strasse`, `Café` and `CAFÉ`), on Windows `Café`
     and `CAFÉ`. A macOS rename between two encodings of the same accented letter (`é` as one
     character or as `e` plus an accent, which look identical) is refused the same way, with
-    "…differs from 'Café' only in how its accented letters are encoded…". If the repository holds two files whose names differ only in case (`A` and `a`,
-    committed on a case-sensitive drive), **Stash all** refuses there too, and so does **Stash
-    file…** on either of them ("Can't stash: 'a' and 'A' differ only in case, and stashing would
-    remove one of them…"); stashing other files on their own still works.
+    "…differs from 'Café' only in how its accented letters are encoded…". If the repository holds
+    two files whose names differ only in case (`A` and `a`, committed on a case-sensitive drive),
+    **Stash all changes** refuses there too, and so does **Stash file…** on either of them ("Can't
+    stash: 'a' and 'A' differ only in case, and stashing would remove one of them…"); stashing other
+    files on their own still works.
 
     On macOS and Windows, where `D` and `d` name the same file, a commit that holds a symbolic
     link and a folder whose names differ only in case (`D` and `d/x`) can't be checked out
@@ -97,11 +98,11 @@ you here.
 
 ??? note "Details: symbolic links in place of files or folders"
     If a tracked file was replaced by a symbolic link, stashing keeps the link in the stash and
-    puts the file back; while a symbolic link replaces a tracked folder, **Stash all** refuses
-    (move the link away first). So do switching branches, merging, cherry-picking, reverting,
-    rebasing, applying a stash and pulling, which could otherwise create files through the link
-    — also when nothing tracked the link's name but the operation would create files below it.
-    The message names the link: "'d' is a symbolic link where the repository has a folder.
+    puts the file back; while a symbolic link replaces a tracked folder, **Stash all changes**
+    refuses (move the link away first). So do switching branches, merging, cherry-picking,
+    reverting, rebasing, applying a stash and pulling, which could otherwise create files through
+    the link — also when nothing tracked the link's name but the operation would create files below
+    it. The message names the link: "'d' is a symbolic link where the repository has a folder.
     Remove or rename it first." Staging a file below such a link stages its deletion (git sees
     no file there; nothing is read through the link), and **Stage all** stages the link itself
     in place of the folder, in any order. Unstaging the link or any of the folder's files puts
@@ -135,7 +136,7 @@ you here.
     differs only in Unicode form (`ss` in the way of `ß/f`).
 
 ??? note "Details: a folder where a file was"
-    When a folder replaced a tracked file (`d/x` where the file `d` was), **Stash all** with
+    When a folder replaced a tracked file (`d/x` where the file `d` was), **Stash all changes** with
     untracked files stashes `d/x` and the deletion of `d`, and puts the file `d` back. **Stash
     file…** on `d` does the same and takes the files in the folder with it. Apply and Pop delete
     the file `d` first and then bring the folder back. `git stash pop` can't do that with such a
@@ -147,8 +148,8 @@ you here.
     untracked files with **Include untracked files** off), git stashes and then stops half-way,
     with the index changed. Browsitory refuses before stashing anything: "Can't stash 'd': it was
     a file and is now a directory. Commit or move its contents first." The same applies to a
-    folder that replaced a symbolic link or a submodule, and to **Stash all** when it works like
-    **Stash file…** on every change (see the next two sections).
+    folder that replaced a symbolic link or a submodule, and to **Stash all changes** when it works
+    like **Stash file…** on every change (see the next two sections).
 
     Apply and Pop still refuse, and keep the stash, when the file `d` is there for another
     reason: a commit changed it, or added it after the stash was made. They say "This stash
@@ -158,34 +159,34 @@ you here.
 
 ??? note "Details: ignored files and nested repositories"
     Ignored files and repositories nested in the worktree are never stashed. If one is in the
-    way of a file or folder that stashing puts back, **Stash all** would delete it, as git does.
-    So it refuses, with or without **Include untracked files**, and stashes nothing: "Stashing
+    way of a file or folder that stashing puts back, **Stash all changes** would delete it, as git
+    does. So it refuses, with or without **Include untracked files**, and stashes nothing: "Stashing
     would delete the ignored 'd', which is in the way of the tracked 'd/f'. Move 'd' first." or
     "Stashing would delete the repository in 'd', which is in the way of the tracked 'd'. Move
     'd' first." Ignored files and repositories elsewhere don't matter. A repository inside an
     untracked folder (`vendor/lib` in a new `vendor/`) stays where it is, with its history, as
-    with `git stash -u`: **Stash all** sets aside the folder's other untracked files only.
-    Ignored files in an untracked folder stay too. In that case Stash all works like **Stash
+    with `git stash -u`: **Stash all changes** sets aside the folder's other untracked files only.
+    Ignored files in an untracked folder stay too. In that case Stash all changes works like **Stash
     file…** on every change, so it also refuses what that refuses (for a folder that replaced a
     tracked file, see "A folder where a file was").
 
     A file or folder you removed from the index and then ignored (`.env` after `git rm --cached
     .env`, or `build/` after `git rm -r --cached build`) isn't stashed, and stashing would
-    overwrite it with the committed version. So **Stash all** and **Stash file…** refuse, as git
-    does: "Stashing would overwrite the ignored '.env' with its committed version. Commit the
+    overwrite it with the committed version. So **Stash all changes** and **Stash file…** refuse, as
+    git does: "Stashing would overwrite the ignored '.env' with its committed version. Commit the
     removal of '.env' first, or move it."
 
     A repository you staged inside this one (`git add lib`, where `lib` has its own `.git`)
-    can't be stashed. **Stash all**, and **Stash file…** on `lib`, refuse and change nothing:
-    "'lib' is a repository inside this one. Add it as a submodule or remove it from the index
-    first." A submodule you added but haven't committed yet gets "Can't stash the new submodule
-    'lib'. Commit it first, or remove it from the index." If `lib` is gone, or has no `.git` any
-    more, the message asks you to remove `lib` from the index first. **Stash file…** on other
-    files still works.
+    can't be stashed. **Stash all changes**, and **Stash file…** on `lib`, refuse and change
+    nothing: "'lib' is a repository inside this one. Add it as a submodule or remove it from the
+    index first." A submodule you added but haven't committed yet gets "Can't stash the new
+    submodule 'lib'. Commit it first, or remove it from the index." If `lib` is gone, or has no
+    `.git` any more, the message asks you to remove `lib` from the index first. **Stash file…** on
+    other files still works.
 
 ??? note "Details: files removed from the index"
     If you removed a file or folder from the index without ignoring it (`git rm -r --cached d`)
-    and then edited it, **Stash all** stashes your edit and puts the committed version back.
+    and then edited it, **Stash all changes** stashes your edit and puts the committed version back.
     **Pop** brings the edit back, and the removal from the index comes back too (**Pop as
     unstaged** leaves it out). This is the same with **Stash file…**, and for a removal without
     an edit: the file is back in the index afterwards, so Pop isn't refused. With **Keep staged

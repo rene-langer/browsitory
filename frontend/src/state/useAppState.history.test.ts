@@ -90,7 +90,7 @@ describe("history actions", () => {
   });
 
   describe("one-click history edits (#442)", () => {
-    const span = ["p", "c", "d"].map((id) => ({ id, shortId: `${id}123456`, summary: id, authorName: "A", timestamp: 1 }));
+    const span = ["p", "c", "d"].map((id) => ({ id, shortId: `${id}123456`, summary: id, authorName: "A", timestamp: 1, merge: false }));
     const pick = (commitId: string) => ({ commitId, action: { kind: "Pick" }, combinedMessage: null });
 
     it("squashes with the parent's and the commit's full messages, then toasts", async () => {
@@ -250,7 +250,7 @@ describe("history actions", () => {
       });
       expect(outcome).toBeNull();
       expect(startRebase).not.toHaveBeenCalled();
-      expect(result.current.state.error).toBe("The history changed. Refresh and try again.");
+      expect(result.current.state.error).toBe("Couldn't drop d: The history changed. Refresh and try again.");
     });
 
     it("opens and closes the Reword dialog", () => {
@@ -352,6 +352,21 @@ describe("history actions", () => {
     expect(result.current.state.amendMode).toBe(false);
   });
 
+  it("names the cherry-pick or revert and its commit when it doesn't start (#997)", async () => {
+    const refused = async (): Promise<never> => {
+      throw new RepoError("Other", "Commit or unstage your staged changes first.");
+    };
+    const { result } = renderHook(() =>
+      useAppState(transferClient({ cherryPick: refused, revertCommit: refused }), TEST_REPO_PATH),
+    );
+    await act(() => result.current.cherryPick("4c5beaf0123456789abcdef0123456789abcdef0"));
+    expect(result.current.state.error).toBe(
+      "Cherry-pick of 4c5beaf didn't start: Commit or unstage your staged changes first.",
+    );
+    await act(() => result.current.revertCommit("4c5beaf0123456789abcdef0123456789abcdef0"));
+    expect(result.current.state.error).toBe("Revert of 4c5beaf didn't start: Commit or unstage your staged changes first.");
+  });
+
   it("offers a force push after a non-fast-forward branch push and runs it", async () => {
     let listener: ((progress: TransferProgress) => void) | null = null;
     const forcePushCurrentBranch = vi.fn(async () => "force-push-1");
@@ -451,7 +466,7 @@ describe("history actions", () => {
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     await act(() => result.current.forcePushCurrentBranch("origin"));
     act(() => listener!({ operationId: "force-push-1", operation: "ForcePushBranch", phase: "Failed", errorKind: "TransferFailed", current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null }));
-    expect(result.current.state.error).toBe("Push failed");
+    expect(result.current.state.error).toBe("Couldn't force push HEAD to origin. Check the remote and your connection, then try again.");
   });
 
   describe("force push offer lifecycle", () => {

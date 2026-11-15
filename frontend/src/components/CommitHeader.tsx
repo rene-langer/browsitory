@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState, type KeyboardEvent } from "react";
-import { CircleAlert, CircleCheck, CircleHelp, CircleX, type LucideIcon } from "lucide-react";
+import { CircleAlert, CircleCheck, CircleHelp, CircleX, Tag, type LucideIcon } from "lucide-react";
 import type {
   CommitDetails,
   CommitPerson,
@@ -91,6 +91,8 @@ function ContainedIn({ details }: { details: CommitDetails }) {
       {refs.length === 0 && details.complete && <span className={styles.relative}>No branch or tag</span>}
       {shown.map((ref) => (
         <span key={`${ref.kind}:${ref.name}`} className={styles.ref} data-kind={ref.kind} title={refTitle(ref.kind)}>
+          {/* The graph badge's tag icon, not a "#" that reads as an issue reference (#1024). */}
+          {ref.kind === "tag" && <Tag size={10} aria-hidden="true" className={styles.refIcon} />}
           {ref.name}
         </span>
       ))}

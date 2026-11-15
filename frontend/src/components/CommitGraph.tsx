@@ -33,7 +33,7 @@ import { useCopyToClipboard } from "../state/useCopyToClipboard";
 import { useCommitDrag } from "../state/useCommitDrag";
 import { CommitLaneGraphic, WorkingTreeLaneGraphic } from "./CommitLaneGraphic";
 import { createLaneHover } from "../lib/laneHover";
-import { formatAbsoluteDate, formatShortDate } from "../lib/formatDate";
+import { formatAbsoluteDate, formatCompactAge, formatRelativeDate } from "../lib/formatDate";
 import { useDateFormat } from "../state/useDateFormat";
 import { ListRow } from "./primitives/ListRow";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
@@ -47,6 +47,7 @@ import { tagMenuItems } from "./tagMenuItems";
 import type { UserCommand } from "../ipc/RepoClient";
 import { NO_SELECTION, userCommandMenuItems, type RunUserCommand } from "../lib/userCommands";
 import { useUserCommandsContext } from "../state/userCommandsContext";
+import { DeleteTagMessage } from "./DeleteTagMessage";
 import styles from "./CommitGraph.module.css";
 
 const PAGE_SIZE = 10;
@@ -68,6 +69,7 @@ function CommitGraphContent({
   onRebaseSelection,
   headInfo,
   currentBranch,
+  currentBranchShown = true,
   userCommands: userCommandsProp,
   onRunUserCommand: onRunUserCommandProp,
   onCherryPick,
@@ -128,6 +130,11 @@ function CommitGraphContent({
   headInfo: HeadInfo;
   // Name of the checked-out branch; `null` on a detached HEAD (reset is then unavailable).
   currentBranch: string | null;
+  /**
+   * False while the saved graph selection hides `currentBranch` (an isolated other branch, #985):
+   * the Uncommitted changes row then names the branch its changes are on.
+   */
+  currentBranchShown?: boolean;
   /** The user commands (#895), else the workspace's; those set for commits close the commit menu. */
   userCommands?: UserCommand[];
   onRunUserCommand?: RunUserCommand;
@@ -309,8 +316,8 @@ function CommitGraphContent({
   function singleCommitItems(commitId: string): ContextMenuItem[] {
     const commit = commits.find((candidate) => candidate.id === commitId);
     const isHead = headInfo.headId === commitId;
-    // Grouped (#645): new refs, applying the commit elsewhere, moving HEAD, history edits,
-    // read-only exports, then copying.
+    // Grouped (#645): new refs, rebasing, applying the commit elsewhere, moving HEAD, history
+    // edits, read-only exports, then the Copy submenu (#992).
     const items: ContextMenuItem[] = [
       { label: "Branch from here", onSelect: () => onBranchFromCommit(commitId), group: "refs" },
     ];
@@ -332,14 +339,18 @@ function CommitGraphContent({
         group,
       });
       if (onCreateTag !== undefined) items.push(menuItem(actions.createTag, () => onCreateTag(commitId), "refs"));
+      // Both open the planner (#991): onto this commit, or from it (onto its parent, the commit
+      // itself the first Pick).
+      const interactive = actions.interactiveRebase;
       items.push(
-        {
-          label: "Rebase onto here",
-          onSelect: () => onRebaseFromCommit(commitId),
-          disabled: operationsBlocked,
-          title: busyTitle,
-          group: "apply",
-        },
+        menuItem(actions.rebaseOnto, () => onRebaseFromCommit(commitId), "rebase"),
+        menuItem(
+          interactive,
+          () => {
+            if (interactive.onto !== null) onRebaseSelection?.(interactive.onto, new Map([[commitId, "Pick"]]));
+          },
+          "rebase",
+        ),
         // A merge commit needs a parent to apply against: the ellipsis opens the parent picker.
         menuItem(
           actions.cherryPick,
@@ -355,7 +366,8 @@ function CommitGraphContent({
           "apply",
         ),
         menuItem(actions.checkout, () => onCheckoutCommit(commitId), "head"),
-        menuItem(actions.reset, () => onRequestReset(commitId, listElement), "head"),
+        // Reset can discard work (Hard), so it is marked like Drop (#988).
+        { ...menuItem(actions.reset, () => onRequestReset(commitId, listElement), "head"), destructive: true },
       );
     }
     items.push(...editItems(commitId, isHead));
@@ -369,15 +381,15 @@ function CommitGraphContent({
     if (onSavePatch !== undefined) {
       items.push({ label: "Save as patch…", onSelect: () => onSavePatch([commitId]), group: "export" });
     }
-    items.push(...copyItems(commitId, commit));
+    items.push({ label: "Copy", onSelect: () => {}, submenu: copyItems(commitId, commit), group: "copy" });
     if (onRunUserCommand !== undefined) {
       items.push(...userCommandMenuItems(userCommands, "Commit", { ...NO_SELECTION, commitId }, onRunUserCommand));
     }
     return items;
   }
 
-  // "Copy …" (#614): last in the menu and never disabled (copying is not a Git operation). The
-  // date is the instant the commit details show, in ISO 8601.
+  // "Copy …" (#614): the Copy submenu, last in the menu (#992), never disabled (copying is not a Git
+  // operation). The date is the instant the commit details show, in ISO 8601.
   function copyItems(commitId: string, commit: GraphCommit | undefined): ContextMenuItem[] {
     const copy = (label: string, text: string, what: string): ContextMenuItem => ({
       label,
@@ -918,9 +930,19 @@ function CommitGraphContent({
         <div className={styles.graphCell}>
           <WorkingTreeLaneGraphic lane={commitLayouts[0]?.lane ?? 0} totalLanes={laneCount} />
         </div>
-        <span className={styles.commitSummary}>
-          Uncommitted changes{status.length > 0 && ` (${status.length})`}
-        </span>
+        {currentBranchShown || currentBranch === null ? (
+          <span className={styles.commitSummary}>
+            Uncommitted changes{status.length > 0 && ` (${status.length})`}
+          </span>
+        ) : (
+          <span
+            className={styles.commitSummary}
+            title={`Changes in your working tree, on ${currentBranch}. The graph doesn't show ${currentBranch}.`}
+          >
+            Uncommitted changes on {currentBranch}
+            {status.length > 0 && ` (${status.length})`}
+          </span>
+        )}
       </ListRow>
       )}
       {commits.slice(Math.max(virtual.start - 1, 0), Math.max(virtual.end - 1, 0)).map((commit, offset) => {
@@ -955,6 +977,7 @@ function CommitGraphContent({
           </div>
           <RefBadges
             commit={commit}
+            collapse
             laneColor={laneColor(commitLayouts[index].lane)}
             currentBranch={currentBranch}
             detachedHead={headInfo.detachedAt !== null && headInfo.headId === commit.id}
@@ -981,13 +1004,16 @@ function CommitGraphContent({
           <span className={styles.author} title={commit.authorEmail}>
             {commit.authorName}
           </span>
+          {/* "3d" on screen, "3 days ago" for screen readers. */}
           <span
             className={styles.date}
             data-testid="commit-date"
+            aria-hidden="true"
             title={formatAbsoluteDate(commit.timestamp, dateFormat)}
           >
-            {formatShortDate(commit.timestamp, dateFormat)}
+            {formatCompactAge(commit.timestamp)}
           </span>
+          <span className={styles.srOnly}>{formatRelativeDate(commit.timestamp)}</span>
         </ListRow>
         );
       })}
@@ -1037,12 +1063,8 @@ function CommitGraphContent({
     )}
     {tagToDelete !== null && (
       <ConfirmDialog
-        ariaLabel={`Delete local tag ${tagToDelete}`}
-        message={
-          <>
-            <p>Delete local tag {tagToDelete}?</p>
-          </>
-        }
+        title={`Delete local tag ${tagToDelete}`}
+        message={<DeleteTagMessage name={tagToDelete} />}
         confirmLabel="Delete tag"
         confirmDisabled={operationsBlocked}
         // #521: the repository can become busy while the confirmation is open.

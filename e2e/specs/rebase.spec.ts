@@ -7,6 +7,8 @@ import { git } from "../support/git";
 import { expandSidebarSection, sidebarBranchRow } from "../support/sidebar";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
+// The operation status strip: a paused rebase's status, Continue and Abort (#995).
+const STRIP = "[role='status'][aria-label='Operation status']";
 
 // A rebase start refuses tracked local changes (#170), so every case here needs a clean tracked
 // tree. Untracked files and submodules don't count, as in the app.
@@ -82,7 +84,7 @@ describe("Browsitory interactive rebase", () => {
     await browser.execute((el) => {
       el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }));
     }, commitEntry);
-    await clickInPage("button", "Rebase onto here", { contains: true });
+    await clickInPage("button", "Rebase current branch onto here…", { contains: true });
     await waitUntilInPage("[data-drop-scope='rebase-plan-row']", "e2e: rebase commit c (squash target)", {
       contains: true,
     });
@@ -176,7 +178,7 @@ describe("Browsitory interactive rebase", () => {
       );
     }, commitEntry);
 
-    const rebaseButton = await $("button*=Rebase onto here");
+    const rebaseButton = await $("button*=Rebase current branch onto here");
     await rebaseButton.waitForExist();
     await rebaseButton.click();
 
@@ -247,7 +249,7 @@ describe("Browsitory interactive rebase", () => {
       );
     }, ontoEntry);
 
-    const rebaseButton = await $("button*=Rebase onto here");
+    const rebaseButton = await $("button*=Rebase current branch onto here");
     await rebaseButton.waitForExist();
     await rebaseButton.click();
 
@@ -262,8 +264,8 @@ describe("Browsitory interactive rebase", () => {
     const startButton = await $("button=Start rebase");
     await startButton.click();
 
-    const rebasePanel = await $("h2*=Rebase in progress");
-    await rebasePanel.waitForExist();
+    // The status strip alone shows the paused rebase, with Continue and Abort (#995).
+    await waitUntilInPage(STRIP, "Rebasing ", { contains: true });
 
     const conflictedRow = await $("span=rebase-conflict-resume.txt (Conflicted)");
     await conflictedRow.waitForExist();
@@ -276,11 +278,10 @@ describe("Browsitory interactive rebase", () => {
     const saveResolution = await $("button=Save resolution");
     await browser.execute((el) => (el as HTMLElement).click(), saveResolution);
 
-    const continueButton = await $("button=Continue rebase");
-    await continueButton.waitForEnabled();
-    await browser.execute((el) => (el as HTMLElement).click(), continueButton);
+    // Clicked once it is no longer unavailable (aria-disabled while the conflict remains).
+    await clickInPage(`${STRIP} button`, "Continue rebase");
 
-    await waitUntilGoneInPage("h2", "Rebase in progress", { contains: true });
+    await waitUntilGoneInPage(STRIP);
     const landedEntry = await $("li*=e2e: conflict-resume conflicting change");
     await landedEntry.waitForExist();
     await waitUntilGoneInPage("li", "e2e: conflict-resume change on top", { contains: true });
@@ -318,7 +319,7 @@ describe("Browsitory interactive rebase", () => {
       );
     }, ontoEntry);
 
-    const rebaseButton = await $("button*=Rebase onto here");
+    const rebaseButton = await $("button*=Rebase current branch onto here");
     await rebaseButton.waitForExist();
     await rebaseButton.click();
 
@@ -331,17 +332,16 @@ describe("Browsitory interactive rebase", () => {
     const startButton = await $("button=Start rebase");
     await startButton.click();
 
-    const rebasePanel = await $("h2*=Rebase in progress");
-    await rebasePanel.waitForExist();
+    await waitUntilInPage(STRIP, "Rebasing ", { contains: true });
     const conflictedRow = await $("span=rebase-conflict-abort.txt (Conflicted)");
     await conflictedRow.waitForExist();
 
-    // The operation status strip has an "Abort rebase" button too; this is the panel's. Clicked
-    // in the page, like Continue above: a native WebDriver click sent right after the conflict
-    // row appeared (while the panel was still laying out) left the rebase running in CI (#479).
-    await clickInPage("section[aria-label='Rebase in progress'] button", "Abort rebase");
+    // The status strip's Abort rebase, its only one since #995; nothing was resolved, so it asks
+    // nothing (#979). Clicked in the page: a native WebDriver click sent right after the conflict
+    // row appeared (while the page was still laying out) left the rebase running in CI (#479).
+    await clickInPage(`${STRIP} button`, "Abort rebase");
 
-    await waitUntilGoneInPage("h2", "Rebase in progress", { contains: true });
+    await waitUntilGoneInPage(STRIP);
 
     const headAfterAbort = git(E2E_REPO_PATH, "rev-parse", "HEAD");
     expect(headAfterAbort).toBe(headBeforeRebase);
@@ -377,7 +377,7 @@ describe("Browsitory interactive rebase", () => {
           new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
         );
       }, ontoEntry);
-      const rebaseButton = await $("button*=Rebase onto here");
+      const rebaseButton = await $("button*=Rebase current branch onto here");
       await rebaseButton.waitForExist();
       await rebaseButton.click();
       await $("//li[contains(., 'e2e: dirty tracked file')]//select[starts-with(@aria-label, 'Action for ')]").waitForExist();
@@ -467,7 +467,7 @@ describe("Browsitory interactive rebase", () => {
     await rebaseItem.waitForExist();
     await rebaseItem.click();
 
-    await $("h2=Rebase onto e2e-rebase-onto-target").waitForExist();
+    await $("h2*=onto e2e-rebase-onto-target").waitForExist();
     const row = await $("//li[contains(., 'e2e: rebase-onto my commit')]//select[starts-with(@aria-label, 'Action for ')]");
     await row.waitForExist();
     const startButton = await $("button=Start rebase");

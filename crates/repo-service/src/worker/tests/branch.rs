@@ -14,6 +14,37 @@ fn list_branches_reflects_the_initial_branch_through_the_worker() {
 }
 
 #[test]
+fn count_commits_only_on_branch_round_trips_through_the_worker() {
+    // Delete branch asks first when the branch has commits no other branch has (#996).
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "initial commit");
+    let base = repo.head().unwrap().peel_to_commit().unwrap();
+    let signature = repo.signature().unwrap();
+    // A name no `init.defaultBranch` would pick, so HEAD is never this branch.
+    repo.commit(
+        Some("refs/heads/only-worker-feature"),
+        &signature,
+        &signature,
+        "feature only",
+        &base.tree().unwrap(),
+        &[&base],
+    )
+    .unwrap();
+
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+
+    assert_eq!(
+        handle
+            .count_commits_only_on_branch("only-worker-feature".into())
+            .unwrap(),
+        1
+    );
+    assert!(handle.count_commits_only_on_branch("nope".into()).is_err());
+}
+
+#[test]
 fn create_then_remove_worktree_round_trips_through_the_worker() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "file.txt", "v1");

@@ -1,18 +1,44 @@
 import { useCallback } from "react";
 import { errorKind } from "../ipc/RepoClient";
 import { credentialRemediation, describeError } from "../lib/errorMessages";
+import { FailureWithNextStep, type FailedOperation } from "../lib/operationErrors";
 import type { AppState } from "./useAppState";
 
 // Shared by every domain action hook composed inside `useAppState`: wraps a mutation with the
 // same pending/refresh/error bookkeeping, in one of three result shapes depending on how the
 // caller needs to observe success/failure (see each variant below).
-export type RunMutation = (mutate: () => Promise<void>) => Promise<void>;
-export type RunMutationWithOutcome = (mutate: () => Promise<void>) => Promise<boolean>;
-export type RunMutationWithMessage = (mutate: () => Promise<void>) => Promise<string | null>;
+// `operation`: what the banner names when the mutation fails (#1032, `failureError`).
+export type RunMutation = (mutate: () => Promise<void>, operation?: FailedOperation) => Promise<void>;
+export type RunMutationWithOutcome = (mutate: () => Promise<void>, operation?: FailedOperation) => Promise<boolean>;
+/**
+ * `inDialog`: the caller's dialog shows the failure it resolves to, so the banner leaves it out
+ * (#996, `AppState.errorSource`).
+ */
+export interface WithMessageOptions {
+  inDialog?: boolean;
+}
+export type RunMutationWithMessage = (
+  mutate: () => Promise<void>,
+  operation?: FailedOperation,
+  options?: WithMessageOptions,
+) => Promise<string | null>;
 export type OptimisticUpdate = (prev: AppState) => AppState;
-export type RunOptimisticMutation = (optimisticUpdate: OptimisticUpdate, mutate: () => Promise<void>) => Promise<void>;
-export type RunOptimisticMutationWithMessage = (optimisticUpdate: OptimisticUpdate, mutate: () => Promise<void>) => Promise<string | null>;
-export type RunOptimisticMutationWithOutcome = (optimisticUpdate: OptimisticUpdate, mutate: () => Promise<void>) => Promise<boolean>;
+export type RunOptimisticMutation = (
+  optimisticUpdate: OptimisticUpdate,
+  mutate: () => Promise<void>,
+  operation?: FailedOperation,
+) => Promise<void>;
+export type RunOptimisticMutationWithMessage = (
+  optimisticUpdate: OptimisticUpdate,
+  mutate: () => Promise<void>,
+  operation?: FailedOperation,
+  options?: WithMessageOptions,
+) => Promise<string | null>;
+export type RunOptimisticMutationWithOutcome = (
+  optimisticUpdate: OptimisticUpdate,
+  mutate: () => Promise<void>,
+  operation?: FailedOperation,
+) => Promise<boolean>;
 
 export interface MutationRunner {
   runMutation: RunMutation;
@@ -51,9 +77,20 @@ export function credentialFailureMessage(error: unknown): string {
  * `AppState`'s `error` and `errorHint` for a failed request: `credentialFailureMessage`'s message
  * plus the hint `describeError` gives the error's kind (#573), so the banner explains a failed
  * mutation (a `PermissionDenied` Stage, say) the same way a failed read's inline error does.
+ *
+ * With the `operation` that failed (#1032), the message starts with it and its object, and an
+ * error only git's text explains (kind `Other`) ends with the operation's next step, or the one a
+ * `FailureWithNextStep` carries. A kind whose message is already the remediation gets none.
  */
-export function failureError(error: unknown): { error: string; errorHint: string | null } {
-  return { error: credentialFailureMessage(error), errorHint: describeError(error).hint ?? null };
+export function failureError(error: unknown, operation?: FailedOperation): { error: string; errorHint: string | null } {
+  const message = credentialFailureMessage(error);
+  const hint = describeError(error).hint ?? null;
+  if (operation === undefined) return { error: message, errorHint: hint };
+  const next = error instanceof FailureWithNextStep ? error.next : operation.next;
+  return {
+    error: `${operation.failed}: ${message}`,
+    errorHint: hint ?? (errorKind(error) === "Other" ? next : null),
+  };
 }
 
 /**
@@ -68,6 +105,22 @@ export function withoutStaleErrorHint(prev: AppState, next: AppState): AppState 
   return reworded ? next : { ...next, errorHint: null };
 }
 
+/**
+ * Drops `errorSource` when an update changes `error` without saying where the new one comes
+ * from, so a dialog's or a read's mark never sits on another error. `useAppState` runs every
+ * update through this.
+ */
+export function withoutStaleErrorSource(prev: AppState, next: AppState): AppState {
+  if (next.error === prev.error || (next.errorSource ?? null) === null || next.errorSource !== prev.errorSource) {
+    return next;
+  }
+  return { ...next, errorSource: null };
+}
+
+/** `errorSource` for a failure the caller's dialog shows itself (#996), else nothing. */
+const inDialogSource = (error: string, options: WithMessageOptions | undefined): Pick<AppState, "errorSource"> =>
+  options?.inDialog === true ? { errorSource: { error, source: "dialog" } } : {};
+
 // Builds the `runMutation*` variants that every domain action hook composed inside
 // `useAppState` uses to wrap its mutations. All share the same pending/refresh/error bookkeeping
 // against the top-level `AppState`; they differ only in what they resolve to (see each type
@@ -78,21 +131,21 @@ export function useMutationRunner(
   setState: (updater: (prev: AppState) => AppState) => void,
 ): MutationRunner {
   const runMutation = useCallback<RunMutation>(
-    async (mutate) => {
+    async (mutate, operation) => {
       try {
         setState((prev) => ({ ...prev, pending: true, error: null }));
         await mutate();
         await refresh();
         setState((prev) => ({ ...prev, pending: false }));
       } catch (err) {
-        setState((prev) => ({ ...prev, ...failureError(err), pending: false }));
+        setState((prev) => ({ ...prev, ...failureError(err, operation), pending: false }));
       }
     },
     [refresh, setState],
   );
 
   const runMutationWithOutcome = useCallback<RunMutationWithOutcome>(
-    async (mutate) => {
+    async (mutate, operation) => {
       try {
         setState((prev) => ({ ...prev, pending: true, error: null }));
         await mutate();
@@ -100,7 +153,7 @@ export function useMutationRunner(
         setState((prev) => ({ ...prev, pending: false }));
         return true;
       } catch (err) {
-        setState((prev) => ({ ...prev, ...failureError(err), pending: false }));
+        setState((prev) => ({ ...prev, ...failureError(err, operation), pending: false }));
         return false;
       }
     },
@@ -113,7 +166,7 @@ export function useMutationRunner(
   // `UseAppStateResult` for why: a create-form has one obvious trigger point to show its own
   // failure next to, per issue #30/UX-002).
   const runMutationWithMessage = useCallback<RunMutationWithMessage>(
-    async (mutate) => {
+    async (mutate, operation, options) => {
       try {
         setState((prev) => ({ ...prev, pending: true, error: null }));
         await mutate();
@@ -121,8 +174,8 @@ export function useMutationRunner(
         setState((prev) => ({ ...prev, pending: false }));
         return null;
       } catch (err) {
-        const failure = failureError(err);
-        setState((prev) => ({ ...prev, ...failure, pending: false }));
+        const failure = failureError(err, operation);
+        setState((prev) => ({ ...prev, ...failure, ...inDialogSource(failure.error, options), pending: false }));
         return failure.error;
       }
     },
@@ -137,7 +190,7 @@ export function useMutationRunner(
   // lock (still set here) already rules out two overlapping optimistic mutations racing each
   // other's snapshot/restore.
   const runOptimisticMutation = useCallback<RunOptimisticMutation>(
-    async (optimisticUpdate, mutate) => {
+    async (optimisticUpdate, mutate, operation) => {
       let snapshot: AppState | null = null;
       setState((prev) => {
         snapshot = prev;
@@ -148,14 +201,14 @@ export function useMutationRunner(
         await refresh();
         setState((prev) => ({ ...prev, pending: false }));
       } catch (err) {
-        setState(() => ({ ...(snapshot as AppState), ...failureError(err), pending: false }));
+        setState(() => ({ ...(snapshot as AppState), ...failureError(err, operation), pending: false }));
       }
     },
     [refresh, setState],
   );
 
   const runOptimisticMutationWithMessage = useCallback<RunOptimisticMutationWithMessage>(
-    async (optimisticUpdate, mutate) => {
+    async (optimisticUpdate, mutate, operation, options) => {
       let snapshot: AppState | null = null;
       setState((prev) => {
         snapshot = prev;
@@ -167,8 +220,8 @@ export function useMutationRunner(
         setState((prev) => ({ ...prev, pending: false }));
         return null;
       } catch (err) {
-        const failure = failureError(err);
-        setState(() => ({ ...(snapshot as AppState), ...failure, pending: false }));
+        const failure = failureError(err, operation);
+        setState(() => ({ ...(snapshot as AppState), ...failure, ...inDialogSource(failure.error, options), pending: false }));
         return failure.error;
       }
     },
@@ -176,7 +229,7 @@ export function useMutationRunner(
   );
 
   const runOptimisticMutationWithOutcome = useCallback<RunOptimisticMutationWithOutcome>(
-    async (optimisticUpdate, mutate) => {
+    async (optimisticUpdate, mutate, operation) => {
       let snapshot: AppState | null = null;
       setState((prev) => {
         snapshot = prev;
@@ -188,7 +241,7 @@ export function useMutationRunner(
         setState((prev) => ({ ...prev, pending: false }));
         return true;
       } catch (err) {
-        setState(() => ({ ...(snapshot as AppState), ...failureError(err), pending: false }));
+        setState(() => ({ ...(snapshot as AppState), ...failureError(err, operation), pending: false }));
         return false;
       }
     },

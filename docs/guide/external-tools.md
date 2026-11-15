@@ -30,8 +30,9 @@ document extension such as `.txt` or `.md`). Set an editor to open those.
 
 Don't wrap an editor or terminal command in `sh -c '…'` or `cmd /c …`: Browsitory deliberately
 passes the file path as one plain argument, and a shell would read shell syntax in file names
-(a repository can contain a file called `$(rm -rf ~).txt`). Commands are checked when you save
-them, and one with an unclosed quote is refused.
+(a repository can contain a file called `$(rm -rf ~).txt`). A command is saved and checked
+when you leave its field or press Enter; one with an unclosed quote is refused and stays in the
+field, with the reason below it, for you to fix.
 
 Apps started from the macOS Dock (or a Linux desktop launcher) may not see your shell's `PATH`.
 If an editor, terminal or diff tool isn't found, use its absolute path, for example
@@ -84,7 +85,8 @@ git config --global difftool.mytool.cmd 'mytool "$LOCAL" "$REMOTE"'
 The command must wait until its window closes (for example `code --wait`), as with `git
 difftool`. Terminal tools such as `vimdiff` are not supported, since Browsitory has no terminal
 to run them in; give them a `cmd` that opens a terminal window if you want them anyway.
-**Preferences → External tools** shows which tools Browsitory found and where they were set.
+**Preferences → External tools** shows which tools Browsitory found and where they were set, or
+"Not configured" with the key to set and a link to this section.
 
 Browsitory only reads tool settings from your own git config (global, XDG or system), never
 from a repository's `.git/config`: a repository you downloaded or share with others can't make

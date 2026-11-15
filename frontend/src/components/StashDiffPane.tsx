@@ -6,6 +6,7 @@ import { useWorkspaceActions } from "../state/useWorkspaceActions";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./DiffPane.module.css";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
+import { DropStashMessage } from "./DropStashMessage";
 import { ReasonButton } from "./primitives/ReasonButton";
 import { disabledReason } from "../lib/actions/action";
 import { InlineError } from "./primitives/InlineError";
@@ -111,7 +112,7 @@ export function StashDiffPane({
               {rules.popUnstaged.label}
             </ReasonButton>
           )}
-          <ReasonButton reason={disabledReason(rules.drop)} onClick={() => setConfirmingDrop(true)}>
+          <ReasonButton reason={disabledReason(rules.drop)} data-tone="danger" onClick={() => setConfirmingDrop(true)}>
             {rules.drop.label}
           </ReasonButton>
         </Toolbar>
@@ -179,9 +180,10 @@ export function StashDiffPane({
       )}
       {confirmingDrop && (
         <ConfirmDialog
-          ariaLabel={`Drop stash ${stashTitle(stash)}`}
-          message={<p>Drop "{stashTitle(stash)}"? This cannot be undone.</p>}
+          title={`Drop stash ${stashTitle(stash)}`}
+          message={<DropStashMessage />}
           confirmLabel="Drop stash"
+          tone="danger"
           // #521: the repository can become busy while the confirmation is open.
           confirmReason={dropDisabledReason}
           onConfirm={() => {

@@ -4,12 +4,6 @@
   gap: var(--space-2);
 }
 
-.heading {
-  margin: 0;
-  font-size: var(--text-sm);
-  font-weight: 600;
-}
-
 .choices {
   border: none;
   padding: 0;
@@ -29,4 +23,16 @@
   margin: 0;
   font-size: var(--text-xs);
   color: var(--color-text-muted);
+}
+
+/* Squash and its hint, kept together (#1018). */
+.squash {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Under the checkbox's text, not its box. */
+.squash .hint {
+  padding-left: calc(13px + var(--space-2));
 }

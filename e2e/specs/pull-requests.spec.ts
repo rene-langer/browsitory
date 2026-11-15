@@ -90,6 +90,46 @@ async function expandPullRequests() {
   }
 }
 
+/**
+ * Connects a section (#1012): "Connect to <provider>…" opens a dialog for the account and the
+ * token; the dialog closes once the token is saved. `check` looks at the open dialog first.
+ */
+async function connect(
+  section: WebdriverIO.Element,
+  provider: "GitHub" | "Bitbucket",
+  token: string,
+  check?: (dialog: WebdriverIO.Element) => Promise<void>,
+) {
+  await (await section.$(`button=Connect to ${provider}…`)).click();
+  const dialog = await $(`dialog[aria-label='Connect to ${provider}']`);
+  await dialog.waitForExist();
+  if (check !== undefined) await check(dialog);
+  await (await dialog.$("aria/Account")).setValue("rene");
+  await (await dialog.$("aria/Access token")).setValue(token);
+  await (await dialog.$("button=Connect")).click();
+  await waitUntilGoneInPage(`dialog[aria-label='Connect to ${provider}']`);
+}
+
+/**
+ * A pull request row's text from the DOM. Not getText(): WebKitWebDriver's visible text leaves
+ * out text in the row's ellipsis-truncated lines (#1012), so it returned "" for a row that shows
+ * "#7 Add pull request support".
+ */
+async function rowText(row: WebdriverIO.Element): Promise<string> {
+  return String(await row.getProperty("textContent"));
+}
+
+/** Creates "Add feature" from feature/pr into main in the section's New pull request dialog. */
+async function createPullRequest(section: WebdriverIO.Element) {
+  await (await section.$("button=New pull request…")).click();
+  const dialog = await $("dialog[aria-label='New pull request']");
+  await dialog.waitForExist();
+  await (await dialog.$("aria/Title")).setValue("Add feature");
+  await (await dialog.$("aria/Source branch")).setValue("feature/pr");
+  await (await dialog.$("aria/Target branch")).setValue("main");
+  await (await dialog.$("button=Create pull request")).click();
+}
+
 describe("Browsitory pull requests", () => {
   const server = ForgeFixtureClient.fromEnv();
 
@@ -125,9 +165,10 @@ describe("Browsitory pull requests", () => {
     expect(await gitlabSection.isExisting()).toBe(false);
 
     // Adding remotes (including the unsupported one) never makes a pull-request HTTP call by
-    // itself — only an explicit List/Create action does, and gl-origin renders no such controls
-    // to click in the first place.
+    // itself: nothing is listed until a section is connected (#1012), and gl-origin has no
+    // section to connect.
     expect(await server.requestCount()).toBe(0);
+    await expect(await githubSection.$("button=Connect to GitHub…")).toBeExisting();
   });
 
   // `PullRequestPanel` keys `state.pullRequests` per remote (see `useAppState.ts`), so each
@@ -135,47 +176,32 @@ describe("Browsitory pull requests", () => {
   // section. These two `it()` blocks still run as separate self-contained scenarios per
   // provider purely for readability — not because listing one remote would otherwise clobber
   // or hide another remote's rows.
-  it("lists and creates a GitHub pull request using the saved token, then hides it once forgotten", async () => {
+  it("lists and creates a GitHub pull request using the saved token, then hides it once disconnected", async () => {
     // "Pull requests" was already opened by the previous `it()` in this file (its open state
     // persists in localStorage across `beforeTest`'s page refresh), but expand it again here too
     // — idempotent, and keeps this test self-sufficient if run in isolation.
     await expandPullRequests();
 
     const section = await $("section[aria-label='GitHub: acme/widget (gh-origin)']");
-    await (await section.$("aria/Account")).setValue("rene");
-    await (await section.$("aria/Access token")).setValue("gh-test-token");
-    await (await section.$("button=Save token")).click();
-    await browser.waitUntil(
-      async () => (await (await section.$("aria/Access token")).getValue()) === "",
-      { timeoutMsg: "expected the GitHub token input to clear after save" },
-    );
+    await connect(section, "GitHub", "gh-test-token");
 
-    await (await section.$("button=List pull requests")).click();
+    // Connected, the section lists the pull requests by itself (#1012).
     const listedRow = await section.$("li*=Add pull request support");
     await listedRow.waitForExist();
-    expect(await listedRow.getText()).toContain("#7");
-    expect(await listedRow.getText()).toContain("feature/pr");
+    expect(await rowText(listedRow)).toContain("#7");
+    expect(await rowText(listedRow)).toContain("feature/pr");
 
     const listRequest = await server.lastRequestFor("github-list");
     expect(listRequest?.authorization).toBe("Bearer gh-test-token");
 
-    const createForm = await section.$("form[aria-label='Create pull request for gh-origin']");
-    await (await createForm.$("aria/Title")).setValue("Add feature");
-    await (await createForm.$("aria/Source branch")).setValue("feature/pr");
-    await (await createForm.$("aria/Target branch")).setValue("main");
-    await (await createForm.$("button=Create pull request")).click();
+    await createPullRequest(section);
 
     const createdRow = await section.$("li*=Add feature");
     await createdRow.waitForExist();
-    expect(await createdRow.getText()).toContain("#8");
-    // The row above renders as soon as `createPullRequest`'s own state update lands, but the form
-    // only clears once that call's wrapping `runMutationWithOutcome` also finishes its trailing
-    // `refresh()` (13 parallel RPCs) and resolves `succeeded` — so this must be polled, not
-    // asserted immediately, same as the token-clear wait above.
-    await browser.waitUntil(
-      async () => (await (await createForm.$("aria/Title")).getValue()) === "",
-      { timeoutMsg: "expected the Title field to clear after a successful create" },
-    );
+    expect(await rowText(createdRow)).toContain("#8");
+    // The row above renders as soon as `createPullRequest`'s own state update lands, but the
+    // dialog only closes once that call's trailing `refresh()` has finished too: polled.
+    await waitUntilGoneInPage("dialog[aria-label='New pull request']");
 
     const createRequest = await server.lastRequestFor("github-create");
     expect(createRequest?.authorization).toBe("Bearer gh-test-token");
@@ -186,8 +212,9 @@ describe("Browsitory pull requests", () => {
       base: "main",
     });
 
-    await (await section.$("button=Forget token")).click();
-    // Expected: the stale pull-request list is hidden after forgetting the token.
+    await clickInPage("section[aria-label='GitHub: acme/widget (gh-origin)'] button[aria-label='Pull request actions for gh-origin']");
+    await (await $("button=Disconnect")).click();
+    // Expected: the stale pull-request list is hidden after disconnecting.
     await waitUntilGoneInPage("section[aria-label='GitHub: acme/widget (gh-origin)'] li", "Add pull request support", {
       contains: true,
     });
@@ -198,33 +225,22 @@ describe("Browsitory pull requests", () => {
     await expandPullRequests();
 
     const section = await $("section[aria-label='Bitbucket: acme/widget (bb-origin)']");
-    await expect(section).toHaveText(expect.stringContaining("repository or workspace access token (not an app password)"));
-
-    await (await section.$("aria/Account")).setValue("rene");
-    await (await section.$("aria/Access token")).setValue("bb-test-token");
-    await (await section.$("button=Save token")).click();
-    await browser.waitUntil(
-      async () => (await (await section.$("aria/Access token")).getValue()) === "",
-      { timeoutMsg: "expected the Bitbucket token input to clear after save" },
+    await connect(section, "Bitbucket", "bb-test-token", (dialog) =>
+      expect(dialog).toHaveText(expect.stringContaining("repository or workspace access token (not an app password)")),
     );
 
-    await (await section.$("button=List pull requests")).click();
     const listedRow = await section.$("li*=Add pull request support");
     await listedRow.waitForExist();
-    expect(await listedRow.getText()).toContain("#12");
+    expect(await rowText(listedRow)).toContain("#12");
 
     const listRequest = await server.lastRequestFor("bitbucket-list");
     expect(listRequest?.authorization).toBe("Bearer bb-test-token");
 
-    const createForm = await section.$("form[aria-label='Create pull request for bb-origin']");
-    await (await createForm.$("aria/Title")).setValue("Add feature");
-    await (await createForm.$("aria/Source branch")).setValue("feature/pr");
-    await (await createForm.$("aria/Target branch")).setValue("main");
-    await (await createForm.$("button=Create pull request")).click();
+    await createPullRequest(section);
 
     const createdRow = await section.$("li*=Add feature");
     await createdRow.waitForExist();
-    expect(await createdRow.getText()).toContain("#13");
+    expect(await rowText(createdRow)).toContain("#13");
 
     const createRequest = await server.lastRequestFor("bitbucket-create");
     expect(createRequest?.authorization).toBe("Bearer bb-test-token");

@@ -87,6 +87,18 @@ describe("useTabChangeMarkers (#613)", () => {
     expect(result.current.changedPaths).toEqual(new Set(["/b"]));
   });
 
+  it("counts each tab's changed files, a file staged and unstaged once (#1028)", async () => {
+    const staged: StatusEntry = { ...change, staged: true };
+    const other: StatusEntry = { ...change, path: "other.txt", kind: "New" };
+    const { result } = setup({ "/b": [change, staged, other] });
+    await waitFor(() => expect(result.current.changedCounts).toEqual(new Map([["/b", 2]])));
+
+    act(() => result.current.onLiveStatus("/a", [change]));
+    expect(result.current.changedCounts).toEqual(new Map([["/a", 1], ["/b", 2]]));
+    act(() => result.current.onLiveStatus("/a", []));
+    expect(result.current.changedCounts).toEqual(new Map([["/b", 2]]));
+  });
+
   it("drops the marker of a closed tab", async () => {
     const { result, rerender } = setup({ "/b": [change] });
     await waitFor(() => expect(result.current.changedPaths).toEqual(new Set(["/b"])));

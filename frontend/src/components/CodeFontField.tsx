@@ -111,7 +111,10 @@ export function CodeFontField({
   };
 
   return (
-    <Field label="Code font">
+    <Field
+      label="Code font"
+      hint="For diffs, blame, the file viewer and conflicts. Typing suggests installed fonts; a font that is not installed falls back to the default. Leave it empty for the default."
+    >
       {(props) => (
         <div className={styles.fontField}>
           <input

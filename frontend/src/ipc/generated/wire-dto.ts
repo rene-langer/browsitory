@@ -193,7 +193,12 @@ terminalSequence: TerminalSequence | null,
 /**
  * A `git rebase` or `git am` started in a terminal and not finished, or `null` (#263).
  */
-terminalRebase: TerminalRebase | null, };
+terminalRebase: TerminalRebase | null, 
+/**
+ * The branch HEAD names while it has no commit yet (a new repository, #983); absent
+ * otherwise.
+ */
+unbornBranch?: string, };
 
 export type HistoryEditKind = "Reword" | "Squash" | "Fixup" | "MoveUp" | "MoveDown" | "Drop" | "Edit" | "Split";
 
@@ -334,7 +339,11 @@ editing: string | null,
  */
 splitParts: number, };
 
-export type RebasePlanCommit = { id: string, shortId: string, summary: string, authorName: string, timestamp: number, };
+export type RebasePlanCommit = { id: string, shortId: string, summary: string, authorName: string, timestamp: number, 
+/**
+ * A merge commit: the planner can't replay it (#982).
+ */
+merge: boolean, };
 
 export type RebasePlanEntry = { commitId: string, action: RebaseAction, combinedMessage: string | null, };
 

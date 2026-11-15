@@ -5,6 +5,7 @@ import type { StashEntry } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
+import { DropStashMessage } from "./DropStashMessage";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { ListRow } from "./primitives/ListRow";
 import styles from "./StashPanel.module.css";
@@ -145,7 +146,7 @@ export function StashPanel({
           }}
           className={styles.empty}
         >
-          No stashes. Set changes aside from the commit box to see them here.
+          No stashes. Use Stash in the repository toolbar to set your changes aside.
         </p>
       ) : (
         <>
@@ -211,9 +212,10 @@ export function StashPanel({
       )}
       {dropStash !== undefined && (
         <ConfirmDialog
-          ariaLabel={`Drop stash ${stashTitle(dropStash)}`}
-          message={<p>Drop "{stashTitle(dropStash)}"? This cannot be undone.</p>}
+          title={`Drop stash ${stashTitle(dropStash)}`}
+          message={<DropStashMessage />}
           confirmLabel="Drop stash"
+          tone="danger"
           // #521: the repository can become busy while the confirmation is open.
           confirmReason={dropDisabledReason}
           onConfirm={() => {

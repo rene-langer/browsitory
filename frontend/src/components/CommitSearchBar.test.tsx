@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SEARCH_SYNTAX_FOOTER } from "../lib/searchSyntax";
+import { chooseViewOption, viewOptionNames, viewOptionState } from "../test/viewMenu";
 import { CommitSearchBar } from "./CommitSearchBar";
 
 function renderBar(overrides: Partial<Parameters<typeof CommitSearchBar>[0]> = {}) {
@@ -61,6 +62,35 @@ it("Escape closes an open help panel before closing the search", () => {
   fireEvent.keyDown(field(), { key: "Escape" });
   expect(screen.queryByRole("region", { name: "Search syntax" })).toBeNull();
   expect(props.onClose).not.toHaveBeenCalled();
+});
+
+it("Escape on any control of the bar closes the search, not only in the field (#1001)", () => {
+  const props = renderBar({ query: "path:src/" });
+  const help = screen.getByRole("button", { name: "Search syntax" });
+  help.focus();
+  fireEvent.keyDown(help, { key: "Escape" });
+  expect(props.onClose).toHaveBeenCalledOnce();
+});
+
+it("Escape on the help button closes the open help before the search (#1001)", () => {
+  const props = renderBar({ query: "x" });
+  const help = screen.getByRole("button", { name: "Search syntax" });
+  fireEvent.click(help);
+  fireEvent.keyDown(help, { key: "Escape" });
+  expect(screen.queryByRole("region", { name: "Search syntax" })).toBeNull();
+  expect(props.onClose).not.toHaveBeenCalled();
+});
+
+it("Escape returns focus to where it was before the search (#1001)", () => {
+  const opener = document.createElement("button");
+  document.body.appendChild(opener);
+  opener.focus();
+  const props = renderBar({ query: "x" });
+  field().focus();
+  fireEvent.keyDown(field(), { key: "Escape" });
+  expect(props.onClose).toHaveBeenCalledOnce();
+  expect(opener).toHaveFocus();
+  opener.remove();
 });
 
 it("focuses the field when focus is requested and acknowledges it", () => {
@@ -203,23 +233,21 @@ describe("recent searches (#540)", () => {
 it("toggles the commit list's lines-changed badges (#620)", () => {
   const onToggleLineStats = vi.fn();
   const props = renderBar({ showLineStats: true, onToggleLineStats });
-  const toggle = screen.getByRole("button", { name: "Show lines changed" });
-  expect(toggle).toHaveAttribute("aria-pressed", "true");
-  fireEvent.click(toggle);
+  expect(viewOptionState("Show lines changed", "View graph options")).toBe("true");
+  chooseViewOption("Show lines changed", "View graph options");
   expect(onToggleLineStats).toHaveBeenCalledTimes(1);
   props.rerender({ showLineStats: false });
-  expect(toggle).toHaveAttribute("aria-pressed", "false");
+  expect(viewOptionState("Show lines changed", "View graph options")).toBe("false");
 });
 
 it("toggles Collapse merges (#617)", () => {
   const onToggleCollapseMerges = vi.fn();
   const props = renderBar({ collapseMerges: false, onToggleCollapseMerges });
-  const toggle = screen.getByRole("button", { name: "Collapse merges" });
-  expect(toggle).toHaveAttribute("aria-pressed", "false");
-  fireEvent.click(toggle);
+  expect(viewOptionState("Collapse merges", "View graph options")).toBe("false");
+  chooseViewOption("Collapse merges", "View graph options");
   expect(onToggleCollapseMerges).toHaveBeenCalledTimes(1);
   props.rerender({ collapseMerges: true });
-  expect(toggle).toHaveAttribute("aria-pressed", "true");
+  expect(viewOptionState("Collapse merges", "View graph options")).toBe("true");
 });
 
 // #687: with a search open, Enter / F3 go to the next match, with Shift to the previous one.
@@ -241,4 +269,23 @@ describe("match keys", () => {
     fireEvent.keyDown(screen.getByRole("combobox", { name: "Search commits" }), { key: "Enter" });
     expect(onStepMatch).not.toHaveBeenCalled();
   });
+});
+
+it("names the graph's View menu starting with its visible text (#1007)", () => {
+  renderBar({ showLineStats: true, onToggleLineStats: vi.fn(), collapseMerges: false, onToggleCollapseMerges: vi.fn() });
+  expect(screen.getByRole("button", { name: "View graph options" })).toHaveTextContent("View");
+});
+
+// #1007: the graph's rarely changed toggles are in a View menu, in words.
+it("puts Show lines changed and Collapse merges in the Graph view menu", () => {
+  const onToggleLineStats = vi.fn();
+  const onToggleCollapseMerges = vi.fn();
+  renderBar({ showLineStats: true, onToggleLineStats, collapseMerges: false, onToggleCollapseMerges });
+  expect(screen.queryByRole("button", { name: "Show lines changed" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Collapse merges" })).toBeNull();
+  expect(screen.getByRole("button", { name: "View graph options" })).toHaveTextContent("View");
+  expect(viewOptionNames("View graph options")).toEqual(["Show lines changed", "Collapse merges"]);
+  expect(viewOptionState("Show lines changed", "View graph options")).toBe("true");
+  chooseViewOption("Collapse merges", "View graph options");
+  expect(onToggleCollapseMerges).toHaveBeenCalledTimes(1);
 });

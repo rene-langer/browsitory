@@ -9,7 +9,7 @@ import { HookRunStrip } from "./components/HookRunStrip";
 import { OperationLogDialog } from "./components/OperationLogDialog";
 import { rerunBlockedReason, runRerun } from "./lib/rerun";
 import type { PushToast } from "./state/useToasts";
-import { InlineError } from "./components/primitives/InlineError";
+import { InlineError, type InlineErrorAction } from "./components/primitives/InlineError";
 import { SplitView, type SplitViewLeftState, type SplitViewRequest } from "./components/primitives/SplitView";
 import { RepoToolbar } from "./components/RepoToolbar";
 import { RepoActivity } from "./components/RepoActivity";
@@ -37,10 +37,13 @@ import {
   busyReason,
   operationBlockers,
   pickToast,
+  rebaseOntoName,
+  rebasingBranch,
   sequenceToast,
   sequenceUndoable,
   stashBlockReason,
 } from "./lib/operationStatus";
+import { useAbortWork } from "./state/useAbortWork";
 import { CommitDragContext, useCommitDragSession } from "./state/useCommitDrag";
 import { stashBlockers } from "./lib/actions/stashActions";
 import { useCommitSearch } from "./state/useCommitSearch";
@@ -473,7 +476,12 @@ export function RepoWorkspace({
     busy: discardDropBlockedReason !== null,
     checkForChanges: appState.checkForChanges,
   });
+  // What an Abort would lose, for its confirmation (#979).
+  const abortWork = useAbortWork(appState.state, mergeEditor.current?.edited ?? false);
   const {
+    abortRequest,
+    setAbortRequest,
+    continueRebase,
     terminalAbortRequest,
     setTerminalAbortRequest,
     runPickAction,
@@ -487,7 +495,7 @@ export function RepoWorkspace({
     abortMergeOrSequence,
     paletteAbortSequence,
     paletteAbortMerge,
-  } = useSequenceActions(appState, pushToast, mounted, announce, undoToastAction);
+  } = useSequenceActions(appState, pushToast, mounted, announce, undoToastAction, abortWork);
   // Cherry-pick, revert and reset of one commit, shared by the commit menu and the palette
   // (#507): the toast comes from the outcome (#107).
   const cherryPickCommit = (commitId: string, mainline: number | null) =>
@@ -569,13 +577,59 @@ export function RepoWorkspace({
     if (reason !== null) pushToast(`Can't pull now. ${reason}`, { tone: "info" });
     else void pullCurrentUpstream();
   }, [pullCurrentUpstream, pushToast]);
-  useOutcomeToasts(appState.state, pushToast, undoToastAction, pullFromToast);
+  // A fetch that left the branch only ahead offers Push to its upstream (#999).
+  const latestPush = useRef({ reason: operationDisabledReason, remote: appState.state.upstream?.remoteName ?? null });
+  useEffect(() => {
+    latestPush.current = { reason: operationDisabledReason, remote: appState.state.upstream?.remoteName ?? null };
+  });
+  const { pushCurrentBranch } = appState;
+  const pushFromToast = useCallback(() => {
+    const { reason, remote } = latestPush.current;
+    if (reason !== null) pushToast(`Can't push now. ${reason}`, { tone: "info" });
+    else if (remote !== null) void pushCurrentBranch(remote);
+  }, [pushCurrentBranch, pushToast]);
+  useOutcomeToasts(appState.state, pushToast, undoToastAction, pullFromToast, pushFromToast);
+  // No banner while a dialog handles the same error (#996): the identity dialog, the hook
+  // failure's output, the force push confirm. Closing the last two brings it back. A dialog that
+  // shows its own failure (Rename branch, Connect, New pull request) keeps it, Cancel too.
+  const { error, errorSource } = appState.state;
+  const errorFrom = (source: "dialog" | "read") =>
+    error !== null && errorSource?.source === source && errorSource.error === error;
+  const errorInDialog =
+    appState.state.identityRequired !== null ||
+    appState.state.hookFailure?.dialogOpen === true ||
+    appState.state.dialog?.kind === "forcePush" ||
+    errorFrom("dialog");
+  // A failed read has no operation log entry for Details to open (#984): Copy details instead.
+  const errorFromRead = errorFrom("read");
+  // The banner's next steps, in its row (#984): a rejected push offers Pull first.
+  const { forcePushOffer, hookFailure } = appState.state;
+  const errorActions: InlineErrorAction[] = [
+    ...(forcePushOffer !== null
+      ? [
+          { label: "Pull", primary: true, onClick: pullFromToast },
+          {
+            label: "Force push…",
+            onClick: () => openDialog({ kind: "forcePush", remoteName: forcePushOffer.remoteName }),
+          },
+        ]
+      : []),
+    ...(hookFailure !== null && !hookFailure.dialogOpen
+      ? [{ label: "Show hook output…", onClick: appState.openHookFailure }]
+      : []),
+  ];
   useStashSwitchToasts(appState.state, pushToast, undoToastAction);
 
   // The palette's commands, built only while it is open.
   const paletteCommands = () =>
     buildPaletteCommands({
-      appState: { ...appState, abortRebase, abortSequence: paletteAbortSequence, abortMerge: paletteAbortMerge },
+      appState: {
+        ...appState,
+        abortRebase,
+        abortSequence: paletteAbortSequence,
+        abortMerge: paletteAbortMerge,
+        rebaseContinue: continueRebase,
+      },
       onShowShortcuts: () => setShortcutsOpen(true),
       onShowOperationLog: () => setOperationLog("latest"),
       onFocusCommitMessage: () => {
@@ -662,6 +716,8 @@ export function RepoWorkspace({
             ? null
             : {
                 ...currentDiff.current,
+                wrapped: currentDiff.isWrapped(),
+                wholeFile: currentDiff.isWholeFile(),
                 toggleWrap: currentDiff.toggleWrap,
                 toggleWholeFile: currentDiff.toggleWholeFile,
               },
@@ -758,16 +814,11 @@ export function RepoWorkspace({
     commitFlow,
     onAmendCommit: (message, options) => announce("Amended commit", amendAndRecord, { undoable: true })(message, appState.state.skipHooks, options),
     onSetAmendMode: appState.setAmendMode,
-    onAbortMerge: abortMergeOrSequence,
     onSaveStash: announce("Changes stashed", () => appState.saveStash()),
     onOpenStashDialog: (paths) => openDialog({ kind: "stash", paths }),
-    onRebaseContinue: () => void appState.rebaseContinue(),
     onRebaseEditMessage: appState.setRebaseEditMessage,
     onRebaseCommitPart: appState.rebaseCommitPart,
     splittingCommit: appState.state.splitting,
-    onRebaseAbort: () => void abortRebase(),
-    onSequenceContinue: continueSequence,
-    onSequenceAbort: abortSequence,
     onCommitDraftChange: handleCommitDraftChange,
     onCommitMessageFocused: clearFocusCommitMessage,
     onCommitMessageCleared: appState.clearCommitMessageHandled,
@@ -866,6 +917,18 @@ export function RepoWorkspace({
         rebaseProgress={appState.state.rebaseProgress}
         rebase={appState.state.headInfo.rebase}
         splittingCommit={appState.state.splitting}
+        editingCommit={appState.state.editing}
+        rebaseOnto={
+          appState.state.headInfo.rebase === null
+            ? null
+            : rebaseOntoName(appState.state.headInfo.rebase.onto, appState.state.commits)
+        }
+        // An edit stop's message box left empty, before any part (#995): as the dock said.
+        continueBlockedReason={
+          appState.state.editMessage === "blank" && (appState.state.headInfo.rebase?.splitParts ?? 0) === 0
+            ? "Write a commit message."
+            : null
+        }
         sequence={appState.state.headInfo.sequence}
         bisect={appState.state.headInfo.bisect}
         terminalSequence={terminalSequence}
@@ -880,7 +943,7 @@ export function RepoWorkspace({
         mergeMessage={appState.state.mergeMessage}
         currentBranch={appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null}
         onGoToConflict={goToConflict}
-        onContinueRebase={() => void appState.rebaseContinue()}
+        onContinueRebase={() => void continueRebase()}
       />
       <HookRunStrip running={appState.state.hookRun} onCancel={() => void appState.cancelHookRun()} />
       {externalTools.error !== null && (
@@ -893,31 +956,17 @@ export function RepoWorkspace({
           <InlineError message={clipboard.error} copyDetails onDismiss={clipboard.dismissError} />
         </div>
       )}
-      {appState.state.error !== null && (
+      {appState.state.error !== null && !errorInDialog && (
         <div className={styles.errorLayer}>
           <InlineError
             message={appState.state.error}
             hint={appState.state.errorHint ?? undefined}
-            copyDetails
             earlier={earlierErrors.earlier}
+            actions={errorActions}
+            copyDetails={errorFromRead}
+            onDetails={errorFromRead ? undefined : () => setOperationLog("latestFailed")}
             onDismiss={earlierErrors.dismiss}
           />
-          {appState.state.forcePushOffer !== null && appState.state.dialog?.kind !== "forcePush" && (
-            <button
-              type="button"
-              onClick={() => openDialog({ kind: "forcePush", remoteName: appState.state.forcePushOffer!.remoteName })}
-            >
-              Force push (with lease)…
-            </button>
-          )}
-          {appState.state.hookFailure !== null && !appState.state.hookFailure.dialogOpen && (
-            <button type="button" onClick={appState.openHookFailure}>
-              Show hook output…
-            </button>
-          )}
-          <button type="button" onClick={() => setOperationLog("latestFailed")}>
-            Show details
-          </button>
         </div>
       )}
       {operationLog !== null && (
@@ -950,7 +999,7 @@ export function RepoWorkspace({
       )}
       {userCommandRunner.confirming !== null && (
         <ConfirmDialog
-          ariaLabel={`Run ${userCommandRunner.confirming.command.name}`}
+          title={`Run ${userCommandRunner.confirming.command.name}`}
           message={
             <>
               <p>Run {userCommandRunner.confirming.command.name}?</p>
@@ -985,6 +1034,9 @@ export function RepoWorkspace({
         terminalAbortRequest={terminalAbortRequest}
         onTerminalAbortRequestChange={setTerminalAbortRequest}
         runTerminalAbort={runTerminalAbort}
+        abortRequest={abortRequest}
+        onAbortRequestChange={setAbortRequest}
+        onRebaseContinue={continueRebase}
         commitDialog={commitDialog}
         onCommitDialogChange={setCommitDialog}
         onCherryPick={cherryPickCommit}
@@ -1009,6 +1061,8 @@ export function RepoWorkspace({
         branch={{
           current: currentBranch,
           detachedAt: appState.state.headInfo.detachedAt,
+          rebasing: rebasingBranch(appState.state.headInfo),
+          unbornBranch: appState.state.headInfo.unbornBranch ?? null,
           upstream: appState.state.upstream,
           onOpenSwitcher: openBranchSwitcher,
         }}
@@ -1120,9 +1174,9 @@ export function RepoWorkspace({
             runPickAction={runPickAction}
             onOpenCommitDialog={openCommitDialog}
             onEditHeadMessage={() => {
-              appState.selectRow("uncommitted");
-              appState.setAmendMode(true);
-              setFocusCommitMessage(true);
+              // Reword… on HEAD (#981): the Reword dialog, which changes the message only.
+              const headId = appState.state.headInfo.headId;
+              if (headId !== null) openDialog({ kind: "reword", commitId: headId, onto: null });
             }}
             onOpenFolderHistory={openFolderHistory}
             externalTools={externalTools}

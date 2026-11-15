@@ -1,3 +1,4 @@
+import { failedOperation } from "../lib/operationErrors";
 import { useCallback, useEffect, useRef } from "react";
 import { coversEveryBranch, withRenamedBranch, withoutBranch } from "../lib/graphSelection";
 import { errorKind, type RepoClient, type StashSwitchOutcome, type UndoOutcome } from "../ipc/RepoClient";
@@ -27,8 +28,11 @@ export interface BranchActions {
    */
   stashAndSwitch(name: string, reapply: boolean): Promise<StashSwitchOutcome | null>;
   closeSwitchConflict(): void;
+  /** How many commits of `name` no other branch has (#996): a read, no pending state. */
+  countCommitsOnlyOnBranch(name: string): Promise<number>;
   deleteBranch(name: string, force: boolean): Promise<void>;
-  renameBranch(oldName: string, newName: string): Promise<void>;
+  // Resolves to `null` once renamed, else why not: the Rename branch dialog shows it (#422, #1002).
+  renameBranch(oldName: string, newName: string): Promise<string | null>;
   openCreateBranchDraft(startPoint: string): void;
   closeCreateBranchDraft(): void;
   setGraphBranchSelection(local: string[]): Promise<void>;
@@ -169,6 +173,7 @@ export function useBranchActions(
           await client.createBranch(repoPath, name, startPoint, checkout);
           setState((prev) => ({ ...prev, createBranchDraft: null, selectedRow: "uncommitted" }));
         },
+        failedOperation.createBranch(name),
       );
     },
     [client, refuseTaken, runOptimisticMutationWithMessage, repoPath, setState],
@@ -187,7 +192,7 @@ export function useBranchActions(
           throw error;
         }
         setState((prev) => ({ ...prev, selectedRow: "uncommitted", pullOutcome: null }));
-      }),
+      }, failedOperation.switchBranch(name)),
     [client, runMutation, repoPath, setState],
   );
   const stashAndSwitch = useCallback(
@@ -203,7 +208,7 @@ export function useBranchActions(
           pullOutcome: null,
           stashSwitchOutcome: { branchName: name, outcome },
         }));
-      });
+      }, failedOperation.stashAndSwitch(name));
       return result;
     },
     [client, runMutation, repoPath, setState],
@@ -211,6 +216,10 @@ export function useBranchActions(
   const closeSwitchConflict = useCallback(() => {
     setState((prev) => ({ ...prev, switchConflict: null }));
   }, [setState]);
+  const countCommitsOnlyOnBranch = useCallback(
+    (name: string) => client.countCommitsOnlyOnBranch(repoPath, name),
+    [client, repoPath],
+  );
   const deleteBranch = useCallback(
     (name: string, force: boolean) =>
       runOptimisticMutation(
@@ -219,13 +228,15 @@ export function useBranchActions(
           await client.deleteBranch(repoPath, name, force);
           await dropFromSelection(name);
         },
+        failedOperation.deleteBranch(name),
       ),
     [client, runOptimisticMutation, repoPath, dropFromSelection],
   );
   const renameBranch = useCallback(
     async (oldName: string, newName: string) => {
-      if (refuseTaken(newName, oldName) !== null) return;
-      await runOptimisticMutation(
+      const refused = refuseTaken(newName, oldName);
+      if (refused !== null) return refused;
+      return runOptimisticMutationWithMessage(
         (prev) =>
           refNameClash(
             prev.branches.map((branch) => branch.name).filter((name) => name !== oldName),
@@ -241,9 +252,12 @@ export function useBranchActions(
           const next = withRenamedBranch(selectionRef.current, oldName, newName);
           if (next !== null) await updateSelection(next, "a branch rename");
         },
+        failedOperation.renameBranch(oldName, newName),
+        // The Rename branch dialog shows the failure (#996).
+        { inDialog: true },
       );
     },
-    [client, refuseTaken, runOptimisticMutation, repoPath, updateSelection],
+    [client, refuseTaken, runOptimisticMutationWithMessage, repoPath, updateSelection],
   );
 
   const openCreateBranchDraft = useCallback(
@@ -302,6 +316,7 @@ export function useBranchActions(
     switchBranch,
     stashAndSwitch,
     closeSwitchConflict,
+    countCommitsOnlyOnBranch,
     deleteBranch,
     renameBranch,
     openCreateBranchDraft,

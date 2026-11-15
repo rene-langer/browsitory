@@ -1,6 +1,7 @@
 import { useId } from "react";
 import type { EditRest } from "../ipc/RepoClient";
 import { describedBy } from "../lib/ariaDescribedBy";
+import { DialogActions } from "./primitives/DialogActions";
 import { FormDialog } from "./primitives/FormDialog";
 import styles from "./SwitchConflictDialog.module.css";
 
@@ -29,9 +30,10 @@ export function EditRestDialog({
   const busyReason = operationDisabled ? operationDisabledReason : null;
   const shown = files.slice(0, SHOWN_FILES);
   const more = files.length - shown.length;
-  const button = (rest: EditRest, label: string) => (
+  const button = (rest: EditRest, label: string, tone: "primary" | "danger") => (
     <button
       type="button"
+      data-tone={tone}
       disabled={operationDisabled}
       title={busyReason ?? undefined}
       aria-describedby={describedBy(reasonId, busyReason)}
@@ -41,7 +43,7 @@ export function EditRestDialog({
     </button>
   );
   return (
-    <FormDialog ariaLabel="Changes not staged" onCancel={onCancel}>
+    <FormDialog title="Changes not staged" onCancel={onCancel}>
       <div className={styles.body}>
         <p className={styles.message}>
           {files.length === 1
@@ -66,13 +68,13 @@ export function EditRestDialog({
             {busyReason}
           </p>
         )}
-        <div className={styles.actions}>
-          {button("Commit", "Commit the rest")}
-          {button("Discard", "Discard the rest")}
+        <DialogActions>
+          {button("Commit", "Commit the rest", "primary")}
+          {button("Discard", "Discard the rest", "danger")}
           <button type="button" data-autofocus onClick={onCancel}>
             Cancel
           </button>
-        </div>
+        </DialogActions>
       </div>
     </FormDialog>
   );

@@ -6,6 +6,12 @@ import {
   abortToast,
   busyReason,
   conflictReason,
+  editStopAbortToast,
+  editStopDoneToast,
+  editStopKind,
+  operationAbortToast,
+  rebaseOntoName,
+  rebasingBranch,
   leftoverReason,
   operationBlockers,
   pickToast,
@@ -303,5 +309,92 @@ describe("mergeSource and mergeContext (#665)", () => {
     expect(mergeContext("Merge branch 'x'", null)).toBe("x");
     expect(mergeContext("edited", "main")).toBe("into main");
     expect(mergeContext("edited", null)).toBeNull();
+  });
+
+  describe("Edit commit… and Split commit… stops (#994)", () => {
+    const stop = (editing: string | null, splitParts = 0): RebaseInfo => ({
+      branch: "main",
+      onto: "o",
+      currentStep: 1,
+      totalSteps: 1,
+      health: { kind: "Paused" },
+      editing,
+      splitParts,
+    });
+
+    it("names a stop after the history edit that made it", () => {
+      expect(editStopKind(stop("c2"), null, "c2")).toBe("Edit");
+      expect(editStopKind(stop("c2"), "c2", null)).toBe("Split");
+      // Parts committed: a split, whoever made the stop.
+      expect(editStopKind(stop("c2", 1), null, null)).toBe("Split");
+    });
+
+    it("leaves a planner's Edit step, and any other stop, a rebase", () => {
+      expect(editStopKind(stop("c2"), null, null)).toBeNull();
+      expect(editStopKind(stop("c2"), null, "c3")).toBeNull();
+      expect(editStopKind(stop(null), "c2", "c2")).toBeNull();
+      expect(editStopKind(null, "c2", "c2")).toBeNull();
+    });
+
+    it("toasts after the operation", () => {
+      expect(editStopDoneToast("Edit", "1a2b3c4d5e")).toBe("Edited 1a2b3c4");
+      expect(editStopDoneToast("Split", "1a2b3c4d5e")).toBe("Split 1a2b3c4");
+      expect(editStopAbortToast("Edit", "1a2b3c4d5e")).toBe("Cancelled the edit of 1a2b3c4");
+      expect(editStopAbortToast("Split", "1a2b3c4d5e")).toBe("Cancelled the split of 1a2b3c4");
+    });
+  });
+
+  it("toasts the abort of a merge, cherry-pick or revert (#979)", () => {
+    expect(operationAbortToast("Merge")).toBe("Aborted merge");
+    expect(operationAbortToast("CherryPick")).toBe("Aborted cherry-pick");
+    expect(operationAbortToast("Revert")).toBe("Aborted revert");
+  });
+
+  describe("what a rebase is rebased onto (#995)", () => {
+    const commit = (id: string, refs: Partial<{ branchRefs: string[]; remoteBranchRefs: string[]; tags: string[] }>) => ({
+      id,
+      shortId: id.slice(0, 7),
+      summary: "s",
+      authorName: "a",
+      authorEmail: "a@x",
+      timestamp: 0,
+      parentIds: [],
+      branchRefs: [],
+      remoteBranchRefs: [],
+      ...refs,
+    });
+
+    it("names a branch, a remote branch or a tag at the commit, else its short id", () => {
+      const onto = "f00dcafe0123456789";
+      expect(rebaseOntoName(onto, [commit(onto, { branchRefs: ["feature/x"], tags: ["v1"] })])).toBe("feature/x");
+      expect(rebaseOntoName(onto, [commit(onto, { remoteBranchRefs: ["origin/main"] })])).toBe("origin/main");
+      expect(rebaseOntoName(onto, [commit(onto, { tags: ["v1"] })])).toBe("v1");
+      expect(rebaseOntoName(onto, [commit(onto, {})])).toBe("f00dcaf");
+      expect(rebaseOntoName(onto, [])).toBe("f00dcaf");
+    });
+  });
+
+  describe("the branch a rebase rebases, for the toolbar (#995)", () => {
+    const head = {
+      rebase: null as RebaseInfo | null,
+      terminalRebase: null as TerminalRebase | null,
+    };
+
+    it("is the stored rebase's branch, or a terminal rebase's when known", () => {
+      expect(rebasingBranch(head)).toBeNull();
+      expect(
+        rebasingBranch({
+          ...head,
+          rebase: { branch: "main", onto: "o", currentStep: 1, totalSteps: 2, health: { kind: "Paused" }, editing: null, splitParts: 0 },
+        }),
+      ).toBe("main");
+      expect(
+        rebasingBranch({ ...head, terminalRebase: { kind: "Rebase", branch: "topic", onto: "", currentStep: 1, totalSteps: 2 } }),
+      ).toBe("topic");
+      expect(
+        rebasingBranch({ ...head, terminalRebase: { kind: "Rebase", branch: "", onto: "", currentStep: 0, totalSteps: 0 } }),
+      ).toBeNull();
+      expect(rebasingBranch({ ...head, terminalRebase: { kind: "Am", branch: "", onto: "", currentStep: 1, totalSteps: 2 } })).toBeNull();
+    });
   });
 });

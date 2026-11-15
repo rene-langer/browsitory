@@ -14,35 +14,56 @@
 
 .prList li {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-1) var(--space-2);
+  gap: var(--space-2);
 }
 
 .rowIcon {
-  vertical-align: text-bottom;
-  margin-right: var(--space-1);
+  flex: none;
   color: var(--color-text-muted);
+}
+
+/* Two lines per pull request (#1012): "#7 Title", then "source → target · author · state". */
+.text {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.title,
+.details {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.details {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.linkButton,
+.iconButton {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.linkButton:hover:not(:disabled),
+.iconButton:hover:not(:disabled),
+.iconButton[aria-expanded="true"] {
+  background: var(--color-control);
+  color: var(--color-text);
 }
 
 .empty {
   padding: var(--space-2) 0;
   color: var(--color-text-muted);
-  font-size: var(--text-sm);
-}
-
-.form {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: end;
-  gap: var(--space-2);
-  margin: var(--space-2) 0;
-}
-
-/* Stacks the caption above its control, matching every other form in the panel stack. */
-.label {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
   font-size: var(--text-sm);
 }

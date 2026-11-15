@@ -1,18 +1,21 @@
-import { useId, useRef, useState } from "react";
-import { ExternalLink, GitMerge, GitPullRequest, GitPullRequestClosed } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ExternalLink, GitMerge, GitPullRequest, GitPullRequestClosed, MoreHorizontal } from "lucide-react";
 import type {
   CreatePullRequest,
   ForgeProvider,
   ForgeRepository,
   PullRequestList,
 } from "../ipc/RepoClient";
+import { rectAnchor } from "../lib/menuKeys";
+import { useForgeAccount } from "../state/useForgeAccount";
 import { AccordionGroup } from "./primitives/AccordionGroup";
 import { AccordionSection } from "./primitives/AccordionSection";
+import { ContextMenu } from "./primitives/ContextMenu";
 import { ListRow } from "./primitives/ListRow";
 import { Toolbar } from "./primitives/Toolbar";
+import { ConnectForgeDialog } from "./ConnectForgeDialog";
+import { NewPullRequestDialog } from "./NewPullRequestDialog";
 import styles from "./PullRequestPanel.module.css";
-import { BlockedReason } from "./primitives/BlockedReason";
-import { describedBy } from "../lib/ariaDescribedBy";
 
 // Providers report state as free-form strings ("open"/"closed" from GitHub, "OPEN"/"MERGED"/…
 // from Bitbucket, lowercased by the backend — see `crates/repo-service/src/pull_requests.rs`), so
@@ -31,15 +34,15 @@ interface ForgeRepositorySectionProps {
   // against one remote can never clobber or hide another remote's rows.
   pullRequests: PullRequestList | undefined;
   onListPullRequests: (remoteName: string, account: string) => Promise<void>;
-  onSaveForgeToken: (provider: ForgeProvider, account: string, token: string) => Promise<void>;
-  onForgetForgeToken: (provider: ForgeProvider, account: string) => Promise<void>;
-  // Resolves `true` only when the create actually succeeded (see `useAppState.ts`'s
-  // `createPullRequest` doc comment) — `submitCreate` below uses this to decide whether the
-  // form is safe to clear, per the brief's "clears only the non-secret form fields on success".
-  onCreatePullRequest: (remoteName: string, account: string, pullRequest: CreatePullRequest) => Promise<boolean>;
+  /** Resolves to `null` once saved, else the failure the Connect dialog shows. */
+  onSaveForgeToken: (provider: ForgeProvider, account: string, token: string) => Promise<string | null>;
+  /** Resolves to `null` once forgotten, else the failure (the error banner shows it). */
+  onForgetForgeToken: (provider: ForgeProvider, account: string) => Promise<string | null>;
+  /** Resolves to `null` once created, else the failure the New pull request dialog shows. */
+  onCreatePullRequest: (remoteName: string, account: string, pullRequest: CreatePullRequest) => Promise<string | null>;
   onOpenExternalUrl: (url: string) => Promise<void>;
   operationDisabled: boolean;
-  // Human-readable reason `operationDisabled` is true, shown as a `title` on the buttons it
+  // Human-readable reason `operationDisabled` is true, shown as a `title` on the controls it
   // disables (issue #31/UX-003). `null` when nothing is blocking.
   operationDisabledReason: string | null;
   // Known local branches: offered as suggestions for the source/target fields and used to
@@ -47,14 +50,31 @@ interface ForgeRepositorySectionProps {
   branches: { name: string; isCurrent: boolean }[];
 }
 
+/**
+ * Connected, a card lists its pull requests by itself (#1012): each time its body opens, so the
+ * list is fresh, and right after connecting. Mounted only in the open body, so a collapsed card
+ * lists nothing and raises no failure banner.
+ */
+function ListWhenOpen({ account, onList }: { account: string; onList: (account: string) => void }) {
+  useEffect(() => {
+    onList(account);
+    // Not on every change of `onList` (a new function each render): a failed listing clears the
+    // list, and must not retry in a loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account]);
+  return null;
+}
+
 // Rendered once outside the sections (see `PullRequestPanel`): WebKitWebDriver cannot compute the
 // text of an element that contains a `<datalist>`, which breaks the e2e `toHaveText` assertions.
 const BRANCH_SUGGESTIONS_ID = "pr-branch-suggestions";
 
-function defaultTargetBranch(branches: { name: string }[]): string {
-  return ["main", "master"].find((candidate) => branches.some((branch) => branch.name === candidate)) ?? "";
-}
-
+/**
+ * One forge repository's card (#1012). Not connected, it offers "Connect to <provider>", a dialog
+ * for the account and its token. Connected (an account is remembered for the provider), it lists
+ * the pull requests by itself, "New pull request…" opens a dialog, and its "…" menu has Refresh
+ * and Disconnect, which forgets the token.
+ */
 function ForgeRepositorySection({
   repository,
   pullRequests,
@@ -67,235 +87,192 @@ function ForgeRepositorySection({
   operationDisabledReason,
   branches,
 }: ForgeRepositorySectionProps) {
-  const tokenRef = useRef<HTMLInputElement>(null);
-  // Why the forms' buttons can't run, in visible text they name as their description (#748).
-  const tokenReasonId = useId();
-  const createReasonId = useId();
-  const busyReason = operationDisabled ? operationDisabledReason : null;
-  const [account, setAccount] = useState("");
+  const [account, setAccount] = useForgeAccount(repository.provider);
+  // True while a listing is out; an open connected card starts one (`ListWhenOpen`).
   const [listing, setListing] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [sourceBranch, setSourceBranch] = useState(() => branches.find((branch) => branch.isCurrent)?.name ?? "");
-  const [targetBranch, setTargetBranch] = useState(() => defaultTargetBranch(branches));
-  // Hides this section's rows immediately after its token is forgotten, even though
-  // `state.pullRequests[repository.remoteName]` itself isn't cleared until the next list call —
-  // showing rows fetched with a token the user just forgot would be misleading. Cleared again by
-  // the next successful/attempted listing.
-  const [tokenForgotten, setTokenForgotten] = useState(false);
+  const [dialog, setDialog] = useState<"connect" | "create" | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; returnFocusTo?: HTMLElement } | null>(null);
+  const busyReason = operationDisabled ? operationDisabledReason : null;
+  const menuKey = `pull-requests:${repository.remoteName}`;
 
-  const clearToken = () => {
-    if (tokenRef.current !== null) tokenRef.current.value = "";
-  };
-
-  const submitToken = async (event: React.FormEvent) => {
-    event.preventDefault();
-    const acct = account.trim();
-    const token = tokenRef.current?.value ?? "";
-    if (acct === "" || token === "") return;
-    try {
-      await onSaveForgeToken(repository.provider, acct, token);
-    } finally {
-      clearToken();
-    }
-  };
-
-  const forgetToken = async () => {
-    const acct = account.trim();
-    if (acct === "") {
-      clearToken();
-      return;
-    }
-    try {
-      await onForgetForgeToken(repository.provider, acct);
-      setTokenForgotten(true);
-    } finally {
-      clearToken();
-    }
-  };
-
-  const cancelToken = () => {
-    clearToken();
-  };
-
-  const listPullRequests = async () => {
-    const acct = account.trim();
-    if (acct === "" || listing) return;
+  // `listing` is set by whoever starts it: the Refresh item, Connect, or the initial state.
+  const listPullRequests = (connectedAccount: string) =>
+    onListPullRequests(repository.remoteName, connectedAccount).finally(() => setListing(false));
+  const refresh = (connectedAccount: string) => {
     setListing(true);
-    try {
-      await onListPullRequests(repository.remoteName, acct);
-      setTokenForgotten(false);
-    } finally {
-      setListing(false);
-    }
+    void listPullRequests(connectedAccount);
   };
 
-  const submitCreate = async (event: React.FormEvent) => {
-    event.preventDefault();
-    const acct = account.trim();
-    const trimmedTitle = title.trim();
-    const trimmedSource = sourceBranch.trim();
-    const trimmedTarget = targetBranch.trim();
-    if (acct === "" || trimmedTitle === "" || trimmedSource === "" || trimmedTarget === "" || creating) {
-      return;
-    }
-    setCreating(true);
-    try {
-      const succeeded = await onCreatePullRequest(repository.remoteName, acct, {
-        title: trimmedTitle,
-        description: description.trim() === "" ? null : description.trim(),
-        sourceBranch: trimmedSource,
-        targetBranch: trimmedTarget,
-      });
-      // Only clear the form when the create actually went through — `useAppState.ts`'s
-      // `createPullRequest` swallows a failed request into `state.error` rather than
-      // rejecting, so `succeeded` is the only way to tell a failure from a success here. A
-      // failed submission must leave the user's typed title/description/branches in place
-      // rather than silently discarding them.
-      if (succeeded) {
-        setTitle("");
-        setDescription("");
-        setSourceBranch("");
-        setTargetBranch("");
-      }
-    } finally {
-      setCreating(false);
-    }
+  const disconnect = async () => {
+    if (account === null) return;
+    // A token that couldn't be forgotten is still saved: stay connected.
+    if ((await onForgetForgeToken(repository.provider, account)) === null) setAccount(null);
   };
 
-  // The Panel's identifying title/region-name — provider, owner/name, and remoteName together,
-  // since remoteName is the true disambiguator (a repo can be listed under multiple
-  // remotes/providers with identical owner/name, per `AppState.pullRequests`' per-remote
-  // keying above). `ForgeRepository` has no single "slug" field (confirmed against
-  // `RepoClient.ts`: provider/host/owner/name/remoteName), so this composes the closest
-  // equivalent — matching the identifying text the section heading showed before this reskin.
+  // The card's title — provider, owner/name, and remoteName together, since remoteName is the
+  // true disambiguator (a repo can be listed under multiple remotes/providers with identical
+  // owner/name, per `AppState.pullRequests`' per-remote keying above).
   const sectionLabel = `${repository.provider}: ${repository.owner}/${repository.name} (${repository.remoteName})`;
-  const visibleRows = tokenForgotten ? null : (pullRequests?.pullRequests ?? null);
+  const visibleRows = account === null ? null : (pullRequests?.pullRequests ?? null);
 
   return (
+    <>
     <AccordionSection
       title={sectionLabel}
       storageKey={`sidebar-pr-${repository.remoteName}`}
       headingLevel={3}
       defaultOpen
       icon={GitPullRequest}
-      count={pullRequests?.pullRequests.length}
-    >
-      <form className={styles.form} onSubmit={submitToken} aria-label={`Forge token for ${repository.remoteName}`}>
-        <label className={styles.label}>
-          Account
-          <input value={account} onChange={(event) => setAccount(event.target.value)} autoComplete="off" />
-        </label>
-        <label className={styles.label}>
-          Access token
-          <input ref={tokenRef} type="password" autoComplete="off" />
-        </label>
-        {repository.provider === "Bitbucket" && (
-          <p>
-            Requires a Bitbucket repository or workspace access token (not an app password).
-          </p>
-        )}
-        <BlockedReason id={tokenReasonId} reason={busyReason} />
-        <Toolbar>
-          <button
-            type="submit"
-            disabled={operationDisabled}
-            title={busyReason ?? undefined}
-            aria-describedby={describedBy(tokenReasonId, busyReason)}
-          >
-            Save token
-          </button>
+      count={account === null ? undefined : pullRequests?.pullRequests.length}
+      actions={
+        account === null ? undefined : (
           <button
             type="button"
-            disabled={operationDisabled}
-            title={busyReason ?? undefined}
-            aria-describedby={describedBy(tokenReasonId, busyReason)}
-            onClick={() => void forgetToken()}
+            className={styles.iconButton}
+            aria-label={`Pull request actions for ${repository.remoteName}`}
+            aria-haspopup="menu"
+            aria-expanded={menu !== null}
+            data-menu-key={menuKey}
+            onClick={(event) => {
+              const trigger = event.currentTarget;
+              if (menu !== null) {
+                trigger.focus({ preventScroll: true });
+                setMenu(null);
+              } else setMenu({ ...rectAnchor(trigger), returnFocusTo: trigger });
+            }}
           >
-            Forget token
+            <MoreHorizontal size={14} aria-hidden="true" />
           </button>
-          <button type="button" onClick={cancelToken}>Cancel</button>
-        </Toolbar>
-      </form>
-
-      <Toolbar>
-        <button type="button" disabled={listing} onClick={() => void listPullRequests()}>
-          List pull requests
-        </button>
-      </Toolbar>
-      {visibleRows !== null && (
+        )
+      }
+    >
+      {account === null ? (
         <>
-          {!tokenForgotten && pullRequests?.truncated === true && (
-            <p role="status">
-              Showing the first {visibleRows.length} pull requests — more may be available on the provider.
-            </p>
-          )}
-          {visibleRows.length === 0 ? (
-            <p className={styles.empty}>No pull requests found for this remote.</p>
+          <p className={styles.empty}>
+            Connect with a personal access token to see this repository&apos;s pull requests and create new ones.
+          </p>
+          <Toolbar>
+            <button type="button" onClick={() => setDialog("connect")}>
+              Connect to {repository.provider}…
+            </button>
+          </Toolbar>
+        </>
+      ) : (
+        <>
+          <ListWhenOpen account={account} onList={refresh} />
+          <Toolbar>
+            <button type="button" onClick={() => setDialog("create")}>
+              New pull request…
+            </button>
+          </Toolbar>
+          {visibleRows === null ? (
+            listing && <p className={styles.empty}>Loading pull requests…</p>
           ) : (
-            <ul className={styles.prList} aria-label={`Pull requests for ${repository.remoteName}`}>
-              {visibleRows.map((pullRequest) => {
-                const StateIcon = pullRequestStateIcon(pullRequest.state);
-                return (
-                  <ListRow key={pullRequest.id}>
-                    <StateIcon size={14} aria-hidden="true" className={styles.rowIcon} />
-                    <span>
-                      #{pullRequest.number} {pullRequest.title} ({pullRequest.state}){" "}
-                      {pullRequest.sourceBranch} → {pullRequest.targetBranch} by {pullRequest.author}
-                    </span>
-                    <Toolbar>
-                      <button type="button" onClick={() => void onOpenExternalUrl(pullRequest.url)}>
-                        <ExternalLink size={14} aria-hidden="true" />
-                        {pullRequest.url}
-                      </button>
-                    </Toolbar>
-                  </ListRow>
-                );
-              })}
-            </ul>
+            <>
+              {pullRequests?.truncated === true && (
+                <p role="status" className={styles.empty}>
+                  Showing the first {visibleRows.length} pull requests — more may be available on the provider.
+                </p>
+              )}
+              {visibleRows.length === 0 ? (
+                <p className={styles.empty}>No pull requests found for this remote.</p>
+              ) : (
+                <ul className={styles.prList} aria-label={`Pull requests for ${repository.remoteName}`}>
+                  {visibleRows.map((pullRequest) => {
+                    const StateIcon = pullRequestStateIcon(pullRequest.state);
+                    return (
+                      <ListRow key={pullRequest.id}>
+                        <StateIcon size={14} aria-hidden="true" className={styles.rowIcon} />
+                        <span className={styles.text}>
+                          <span className={styles.title} title={pullRequest.title}>
+                            #{pullRequest.number} {pullRequest.title}
+                          </span>
+                          <span className={styles.details}>
+                            {pullRequest.sourceBranch} → {pullRequest.targetBranch} · {pullRequest.author} ·{" "}
+                            {pullRequest.state}
+                          </span>
+                        </span>
+                        <button
+                          type="button"
+                          className={styles.linkButton}
+                          aria-label={`Open #${pullRequest.number} in your browser`}
+                          title={pullRequest.url}
+                          onClick={() => void onOpenExternalUrl(pullRequest.url)}
+                        >
+                          <ExternalLink size={14} aria-hidden="true" />
+                        </button>
+                      </ListRow>
+                    );
+                  })}
+                </ul>
+              )}
+            </>
           )}
         </>
       )}
-
-      <form className={styles.form} onSubmit={submitCreate} aria-label={`Create pull request for ${repository.remoteName}`}>
-        <label className={styles.label}>
-          Title
-          <input value={title} onChange={(event) => setTitle(event.target.value)} />
-        </label>
-        <label className={styles.label}>
-          Description
-          <textarea value={description} onChange={(event) => setDescription(event.target.value)} />
-        </label>
-        <label className={styles.label}>
-          Source branch
-          <input
-            list={BRANCH_SUGGESTIONS_ID}
-            value={sourceBranch}
-            onChange={(event) => setSourceBranch(event.target.value)}
-          />
-        </label>
-        <label className={styles.label}>
-          Target branch
-          <input
-            list={BRANCH_SUGGESTIONS_ID}
-            value={targetBranch}
-            onChange={(event) => setTargetBranch(event.target.value)}
-          />
-        </label>
-        <BlockedReason id={createReasonId} reason={busyReason} />
-        <Toolbar>
-          <button
-            type="submit"
-            disabled={operationDisabled || creating}
-            title={busyReason ?? undefined}
-            aria-describedby={describedBy(createReasonId, busyReason)}
-          >
-            Create pull request
-          </button>
-        </Toolbar>
-      </form>
     </AccordionSection>
+      {/* Outside the card's body, so its header's "…" works while the card is collapsed. */}
+      {menu !== null && account !== null && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          returnFocusTo={menu.returnFocusTo}
+          isTrigger={(button) => button.getAttribute("data-menu-key") === menuKey}
+          onClose={() => setMenu(null)}
+          items={[
+            {
+              label: "New pull request…",
+              onSelect: () => setDialog("create"),
+              group: "pull-requests",
+            },
+            {
+              label: "Refresh",
+              disabled: listing,
+              onSelect: () => refresh(account),
+              group: "pull-requests",
+            },
+            {
+              label: "Disconnect",
+              disabled: operationDisabled,
+              title: busyReason ?? `Forget the token of ${account} for ${repository.provider}`,
+              onSelect: () => void disconnect(),
+              group: "connection",
+            },
+          ]}
+        />
+      )}
+      {dialog === "connect" && (
+        <ConnectForgeDialog
+          provider={repository.provider}
+          disabled={operationDisabled}
+          disabledReason={operationDisabledReason}
+          onConnect={async (name, token) => {
+            const failure = await onSaveForgeToken(repository.provider, name, token);
+            if (failure === null) {
+              setDialog(null);
+              setAccount(name);
+            }
+            return failure;
+          }}
+          onCancel={() => setDialog(null)}
+        />
+      )}
+      {dialog === "create" && account !== null && (
+        <NewPullRequestDialog
+          remoteName={repository.remoteName}
+          branches={branches}
+          branchSuggestionsId={BRANCH_SUGGESTIONS_ID}
+          disabled={operationDisabled}
+          disabledReason={operationDisabledReason}
+          onCreate={async (pullRequest) => {
+            const failure = await onCreatePullRequest(repository.remoteName, account, pullRequest);
+            if (failure === null) setDialog(null);
+            return failure;
+          }}
+          onCancel={() => setDialog(null)}
+        />
+      )}
+    </>
   );
 }
 
@@ -315,13 +292,9 @@ export function PullRequestPanel({
   forgeRepositories: ForgeRepository[];
   pullRequests: Record<string, PullRequestList>;
   onListPullRequests: (remoteName: string, account: string) => Promise<void>;
-  onSaveForgeToken: (provider: ForgeProvider, account: string, token: string) => Promise<void>;
-  onForgetForgeToken: (provider: ForgeProvider, account: string) => Promise<void>;
-  // Resolves `true` only when the create actually succeeded (see `useAppState.ts`'s
-  // `createPullRequest` doc comment); forwarded to each `ForgeRepositorySection`, whose
-  // `submitCreate` uses it to decide whether the form is safe to clear, per the brief's
-  // "clears only the non-secret form fields on success".
-  onCreatePullRequest: (remoteName: string, account: string, pullRequest: CreatePullRequest) => Promise<boolean>;
+  onSaveForgeToken: (provider: ForgeProvider, account: string, token: string) => Promise<string | null>;
+  onForgetForgeToken: (provider: ForgeProvider, account: string) => Promise<string | null>;
+  onCreatePullRequest: (remoteName: string, account: string, pullRequest: CreatePullRequest) => Promise<string | null>;
   onOpenExternalUrl: (url: string) => Promise<void>;
   operationDisabled: boolean;
   // Human-readable reason `operationDisabled` is true, forwarded to each `ForgeRepositorySection`
@@ -331,6 +304,8 @@ export function PullRequestPanel({
   /** Expands and scrolls to the section (`useSidebarReveal`, #494). */
   revealRequest?: number;
 }) {
+  const [githubAccount] = useForgeAccount("GitHub");
+  const [bitbucketAccount] = useForgeAccount("Bitbucket");
   if (forgeRepositories.length === 0) {
     return (
       <AccordionSection
@@ -346,8 +321,13 @@ export function PullRequestPanel({
     );
   }
 
-  const totalPullRequests = forgeRepositories.reduce(
-    (sum, repository) => sum + (pullRequests[repository.remoteName]?.pullRequests.length ?? 0),
+  // Only connected repositories' rows count: a disconnected one's rows are hidden.
+  const connected = (provider: ForgeProvider) => (provider === "GitHub" ? githubAccount : bitbucketAccount) !== null;
+  const listed = forgeRepositories.filter(
+    (repository) => connected(repository.provider) && pullRequests[repository.remoteName] !== undefined,
+  );
+  const totalPullRequests = listed.reduce(
+    (sum, repository) => sum + pullRequests[repository.remoteName].pullRequests.length,
     0,
   );
 
@@ -361,11 +341,7 @@ export function PullRequestPanel({
         storageKey="sidebar-pull-requests"
         icon={GitPullRequest}
         revealRequest={revealRequest}
-        count={
-          forgeRepositories.some((repository) => pullRequests[repository.remoteName] !== undefined)
-            ? totalPullRequests
-            : undefined
-        }
+        count={listed.length > 0 ? totalPullRequests : undefined}
       >
         <AccordionGroup>
           <div className={styles.sections}>

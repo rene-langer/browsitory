@@ -9,6 +9,8 @@ import type {
   TransferErrorKind,
 } from "../ipc/RepoClient";
 import { copyText } from "../lib/clipboard";
+import { hintForKind } from "../lib/errorMessages";
+import { CopyDetailsButton } from "./primitives/InlineError";
 import { Overlay } from "./primitives/Overlay";
 import { Panel } from "./primitives/Panel";
 import styles from "./OperationLogDialog.module.css";
@@ -53,8 +55,46 @@ function isFailure(entry: OperationLogEntry): boolean {
   return entry.outcome === "Failed";
 }
 
+// The word between an operation and its remote (#1022): "Fetch from broken" reads as what it
+// is, "Fetch broken" as a verdict.
+const TARGET_PREPOSITION: Record<string, string> = {
+  Fetch: "from",
+  Push: "to",
+  "Push tags": "to",
+};
+
 function title(entry: OperationLogEntry): string {
-  return entry.target === null ? entry.name : `${entry.name} ${entry.target}`;
+  if (entry.target === null) return entry.name;
+  const preposition = TARGET_PREPOSITION[entry.name];
+  return preposition === undefined ? `${entry.name} ${entry.target}` : `${entry.name} ${preposition} ${entry.target}`;
+}
+
+/**
+ * Why it failed, in the app's words (#1022): the transfer's own failure, else the next step the
+ * error's kind has. `null` when only git's text says why.
+ */
+function cause(entry: OperationLogEntry): string | null {
+  if (entry.transferError !== null && entry.transferError !== "TransferFailed") return TRANSFER_ERROR[entry.transferError];
+  return entry.errorKind === null ? null : hintForKind(entry.errorKind);
+}
+
+/** What Copy details copies: the title, the cause and git's full text, then the facts. */
+function details(entry: OperationLogEntry): string {
+  const lines = [title(entry)];
+  const why = cause(entry);
+  if (why !== null) lines.push(why);
+  if (entry.message !== null) lines.push(entry.message);
+  lines.push(
+    `Result: ${entry.outcome}`,
+    `Started: ${new Date(entry.startedAt).toLocaleString()}`,
+    `Duration: ${formatDuration(entry.durationMs)}`,
+  );
+  if (entry.transferError !== null) lines.push(`Transfer: ${TRANSFER_ERROR[entry.transferError]}`);
+  for (const param of entry.params) lines.push(`${param.name}: ${param.value}`);
+  for (const failure of entry.remoteFailures) {
+    lines.push(`${failure.remoteName}: ${failure.message || TRANSFER_ERROR[failure.error]}`);
+  }
+  return lines.join("\n");
 }
 
 function formatTime(startedAt: number): string {
@@ -238,17 +278,13 @@ function OperationDetails({ entry, runAgain }: { entry: OperationLogEntry; runAg
   // is offered again.
   const rerun = entry.outcome === "Failed" ? entry.rerun : null;
   const blocked = rerun !== null && runAgain !== undefined ? runAgain.blockedReason(rerun) : null;
+  const why = cause(entry);
+  // Cause first (#1022): in the app's words, then git's own text, then the facts, then Run again.
   return (
     <section className={styles.details} aria-label="Operation details">
       <h3 className={styles.detailsTitle}>{title(entry)}</h3>
-      {rerun !== null && runAgain !== undefined && (
-        <div className={styles.runAgain}>
-          <button type="button" disabled={blocked !== null} onClick={() => runAgain.run(rerun)}>
-            Run again
-          </button>
-          {blocked !== null && <span className={styles.muted}>{blocked}</span>}
-        </div>
-      )}
+      {why !== null && <p className={styles.cause}>{why}</p>}
+      {entry.message !== null && <p className={styles.message}>{entry.message}</p>}
       <dl className={styles.facts}>
         <dt>Result</dt>
         <dd>{entry.outcome}</dd>
@@ -266,7 +302,6 @@ function OperationDetails({ entry, runAgain }: { entry: OperationLogEntry; runAg
           <ParamRow key={param.name} name={param.name} value={param.value} />
         ))}
       </dl>
-      {entry.message !== null && <p className={styles.message}>{entry.message}</p>}
       {entry.remoteFailures.length > 0 && (
         <>
           <h4 className={styles.subTitle}>Remotes that failed</h4>
@@ -282,6 +317,17 @@ function OperationDetails({ entry, runAgain }: { entry: OperationLogEntry; runAg
       {entry.runs.map((run, index) => (
         <RunOutput key={index} run={run} />
       ))}
+      <div className={styles.runAgain}>
+        {rerun !== null && runAgain !== undefined && (
+          <>
+            <button type="button" disabled={blocked !== null} onClick={() => runAgain.run(rerun)}>
+              Run again
+            </button>
+            {blocked !== null && <span className={styles.muted}>{blocked}</span>}
+          </>
+        )}
+        <CopyDetailsButton key={entry.id} text={details(entry)} className="" />
+      </div>
     </section>
   );
 }

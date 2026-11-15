@@ -350,6 +350,17 @@ describe("CommitHeader details (#641)", () => {
     expect(list.getByText("v1.0")).toHaveAttribute("data-kind", "tag");
   });
 
+  // #1024: the graph badge's tag icon, not a "#" that reads as an issue reference.
+  it("marks a tag with the graph's tag icon", async () => {
+    renderHeader({ client: clientWithDetails(details({ branches: ["main"], tags: ["v1.0"] })) });
+    await screen.findByText("Contained in", { selector: "dt" });
+    const list = within(row("Contained in"));
+    const tag = list.getByText("v1.0");
+    expect(tag.querySelector("svg.lucide-tag")).not.toBeNull();
+    expect(tag.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+    expect(list.getByText("main").querySelector("svg")).toBeNull();
+  });
+
   it("says when no branch or tag contains the commit", async () => {
     renderHeader({ client: clientWithDetails(details()) });
 

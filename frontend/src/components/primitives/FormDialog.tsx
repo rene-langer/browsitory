@@ -1,4 +1,5 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
+import { DialogHeader } from "./DialogHeader";
 import { useRestoreFocus } from "./useRestoreFocus";
 import styles from "./FormDialog.module.css";
 
@@ -8,17 +9,43 @@ import styles from "./FormDialog.module.css";
  * unsupported), Escape (`cancel` event) routed to `onCancel` instead of letting the browser close
  * the element behind React's state, and initial focus on an element marked `data-autofocus`, else
  * the first form field, else the first button. Callers render it conditionally — mounting is
- * opening, unmounting is closing (same model as `ConfirmDialog`). The `aria-label` sits on the
- * `<dialog>` itself so both tests and E2E specs can address it as `dialog[aria-label=...]`.
+ * opening, unmounting is closing (same model as `ConfirmDialog`).
+ *
+ * `title` is the dialog's visible heading (`DialogHeader`, #987) and its accessible name
+ * (`aria-labelledby`); the `aria-label` on the `<dialog>` is the same text, so tests and E2E specs
+ * can address it as `dialog[aria-label=...]`. `description` describes it (`aria-describedby`).
+ * Put the buttons in `DialogActions`.
  */
+/**
+ * Where a dialog's focus starts (#1029): a `data-autofocus` element, else its first enabled form
+ * field (a radio group's checked radio, where Tab would enter the group), else its first enabled
+ * button. Never the frame itself.
+ */
+function initialFocusTarget(dialog: HTMLElement): HTMLElement | null {
+  const marked = dialog.querySelector<HTMLElement>("[data-autofocus]");
+  if (marked !== null) return marked;
+  const enabled = (selector: string) =>
+    [...dialog.querySelectorAll<HTMLInputElement>(selector)].filter((field) => !field.disabled && field.type !== "hidden");
+  const field = enabled("input, select, textarea")[0];
+  if (field !== undefined) {
+    if (field.type !== "radio" || field.name === "") return field;
+    const group = enabled(`input[type="radio"][name="${CSS.escape(field.name)}"]`);
+    return group.find((radio) => radio.checked) ?? field;
+  }
+  return enabled("button")[0] ?? null;
+}
+
 export function FormDialog({
-  ariaLabel,
+  title,
+  description,
   onCancel,
   returnFocusTo,
   className,
   children,
 }: {
-  ariaLabel: string;
+  title: string;
+  /** A line under the title: what the dialog acts on, a count. */
+  description?: ReactNode;
   /** Added to the dialog's own class, e.g. for a dialog that needs another size. */
   className?: string;
   onCancel: () => void;
@@ -27,6 +54,9 @@ export function FormDialog({
   children: ReactNode;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  const descriptionId = useId();
+  const described = description !== undefined && description !== null;
   useRestoreFocus(returnFocusTo);
 
   useEffect(() => {
@@ -37,23 +67,22 @@ export function FormDialog({
     } else if (!dialog.open) {
       dialog.setAttribute("open", "");
     }
-    const target =
-      dialog.querySelector<HTMLElement>("[data-autofocus]") ??
-      dialog.querySelector<HTMLElement>("input, select, textarea") ??
-      dialog.querySelector<HTMLElement>("button");
-    target?.focus();
+    initialFocusTarget(dialog)?.focus();
   }, []);
 
   return (
     <dialog
       ref={dialogRef}
       className={className === undefined ? styles.dialog : `${styles.dialog} ${className}`}
-      aria-label={ariaLabel}
+      aria-label={title}
+      aria-labelledby={titleId}
+      aria-describedby={described ? descriptionId : undefined}
       onCancel={(event) => {
         event.preventDefault();
         onCancel();
       }}
     >
+      <DialogHeader title={title} description={description} id={titleId} descriptionId={descriptionId} />
       {children}
     </dialog>
   );

@@ -26,7 +26,8 @@ Other actions don't wait for it, and closing the history stops the search.
 To see only the commits that changed some lines, select them with the mouse in a commit's diff
 (or in its **Blame** view, in a comparison of two commits, or in a file under
 [All files](files-at-a-commit.md)), then click **History of lines N–M** in the file's header;
-the button reads **Line history** and is disabled while nothing is selected. Lines of the newer side count: in a diff, removed lines are skipped.
+while nothing is selected the button reads **Line history** and says "Select lines first.". Lines
+of the newer side count: in a diff, removed lines are skipped.
 
 The list shows the commits whose changes touched those lines, newest first, starting at the
 commit you selected them in. Like `git log -L`, the lines are followed back through earlier
@@ -50,9 +51,9 @@ The same search is available in the search field as `line:PATH:FROM-TO` (see
 
 ## Folder history
 
-**Folder history** in a file's header (in the working tree, a commit or a comparison) lists
-the commits that changed anything in that file's folder; under
-[All files](files-at-a-commit.md) each folder's row has one too. It fills the search field with a
-`path:` search for the folder (for example `path:src/ui/`), so it covers the commits the graph
-shows, and you can narrow it further there. Esc or × goes back to the graph.
+**Folder history** in a file's header in the working tree, or **History of folder ⟨folder⟩** in
+the **…** menu of a file in a commit or a comparison, lists the commits that changed anything in
+that file's folder; under [All files](files-at-a-commit.md) each folder's row has one too. It fills
+the search field with a `path:` search for the folder (for example `path:src/ui/`), so it covers the
+commits the graph shows, and you can narrow it further there. Esc or × goes back to the graph.
 

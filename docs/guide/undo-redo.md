@@ -26,7 +26,12 @@ Confirmations follow the same rule. Discarding a file's changes, **Discard all�
 untracked…**, **Reset hard** and force-deleting a branch still ask first, because they drop work
 in one go, and say that Undo can bring it back. Discarding a hunk or lines doesn't ask. What
 Undo can't restore, such as dropping a stash or deleting a branch or tag on a remote, asks and
-says it can't be undone.
+says it can't be undone. So does aborting a paused merge, cherry-pick, revert or rebase, or
+cancelling an **Edit commit…** or **Split commit…** stop, when it would throw away work: conflict
+resolutions, unsaved edits in the merge editor, files changed at an edit stop, a new commit
+message or a split's committed parts ("Abort the merge? Your resolutions in 1 file are lost, and
+Undo can't bring them back."). **Cancel** has the focus. When nothing was touched yet it aborts
+at once.
 
 Undo refuses, instead of overwriting, when the repository changed since the operation. It also
 refuses when it would delete, move or switch to a branch that a worktree holds, and names it:

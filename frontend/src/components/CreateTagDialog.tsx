@@ -3,6 +3,7 @@ import type { RemoteInfo } from "../ipc/RepoClient";
 import { tagNameProblem } from "../lib/refName";
 import { refNameClash, takenNameMessage } from "../lib/takenNames";
 import { Field } from "./primitives/Field";
+import { DialogActions } from "./primitives/DialogActions";
 import { FormDialog } from "./primitives/FormDialog";
 import { InlineError } from "./primitives/InlineError";
 import styles from "./PushBranchDialog.module.css";
@@ -70,9 +71,26 @@ export function CreateTagDialog({
     trimmedName === "" ||
     nameProblem !== null ||
     (kind === "annotated" && trimmedMessage === "");
+  // Why Create is off, in view under the form (#1014). A name problem shows at its field instead.
+  const reason =
+    busyReason ??
+    (trimmedName === ""
+      ? "Enter a tag name."
+      : nameProblem === null && kind === "annotated" && trimmedMessage === ""
+        ? "Enter a message for the annotated tag."
+        : null);
 
   return (
-    <FormDialog ariaLabel="Create tag" onCancel={onCancel}>
+    <FormDialog
+      title="Create tag"
+      description={
+        <>
+          On commit <code>{shortId}</code>
+          {summary !== null && summary !== "" && <> {summary}</>}
+        </>
+      }
+      onCancel={onCancel}
+    >
       <form
         className={styles.form}
         onSubmit={(event) => {
@@ -85,10 +103,6 @@ export function CreateTagDialog({
           });
         }}
       >
-        <p className={styles.message}>
-          Tag commit <code>{shortId}</code>
-          {summary !== null && summary !== "" && <> {summary}</>}
-        </p>
         <Field label="Tag name" error={nameProblem}>
           {(props) => (
             <input
@@ -142,20 +156,21 @@ export function CreateTagDialog({
           </>
         )}
         {error !== null && <InlineError message={error} onDismiss={() => setError(null)} />}
-        <BlockedReason id={reasonId} reason={busyReason} />
-        <div className={styles.actions}>
+        <BlockedReason id={reasonId} reason={reason} />
+        <DialogActions>
           <button
             type="submit"
+            data-tone="primary"
             disabled={blocked}
             title={busyReason ?? undefined}
-            aria-describedby={describedBy(reasonId, busyReason)}
+            aria-describedby={describedBy(reasonId, reason)}
           >
             {pushTo === null ? "Create tag" : `Create and push to ${pushTo}`}
           </button>
           <button type="button" onClick={onCancel}>
             Cancel
           </button>
-        </div>
+        </DialogActions>
       </form>
     </FormDialog>
   );

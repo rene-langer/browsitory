@@ -78,7 +78,7 @@ describe("Browsitory cherry-pick sequence", () => {
     // Continue is a `ReasonButton`: blocked, it is `aria-disabled`, not `disabled`, and ignores
     // a click, so `waitForEnabled` passed at once and the click could land while "Use ours" was
     // still being applied and do nothing (#790). `clickInPage` waits until it isn't blocked.
-    await clickInPage('[aria-label="Operation status"] button', "Continue");
+    await clickInPage('[aria-label="Operation status"] button', "Continue cherry-pick");
 
     await browser.waitUntil(() => git("log", "-1", "--format=%s") === "e2e: seq three", {
       timeoutMsg: "the sequence did not finish",

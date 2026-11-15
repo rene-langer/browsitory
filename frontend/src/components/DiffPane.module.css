@@ -20,6 +20,17 @@
   gap: var(--space-1);
 }
 
+/* A merge commit's "Changes compared with <parent>" picker (#1009). */
+.parentPicker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
 .groupHeading > span:first-child {
   flex: 1 1 auto;
 }
@@ -115,6 +126,21 @@ li.fileRow.current {
 .groupList {
   max-height: 28vh;
   overflow-y: auto;
+}
+
+/* A conflicted file is open (#980): the merge editor gets the room. The list shrinks to the
+   Changes heading and the conflicts, which come first; the rest scrolls, and "Show all changes"
+   brings it back. */
+.fileGroups[data-collapsed="true"] {
+  max-height: 8.5rem;
+  overflow-y: auto;
+  /* It starts at its top (UncommittedDiffPane); content changing above a row must not scroll
+     it down past the conflicts. */
+  overflow-anchor: none;
+}
+
+.fileGroups[data-collapsed="true"] .fileListBar {
+  display: none;
 }
 
 .groupList:focus-visible {
@@ -314,6 +340,17 @@ li.fileRow.current {
   padding: var(--space-3) var(--space-4) calc(var(--space-2) + var(--space-3));
   background: var(--color-bg-subtle);
   border-top: 1px solid var(--color-border);
+  /* The diff above keeps at least half the column (#1003): a taller box (a long message, chips,
+     amend's author) scrolls inside itself. */
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+/* The commit box while conflicts remain (#980): one line. */
+.commitDockNote {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
 }
 
 .renamedFrom {

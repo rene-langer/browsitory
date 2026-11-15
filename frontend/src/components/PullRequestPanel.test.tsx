@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ForgeRepository, PullRequest } from "../ipc/RepoClient";
 import { PullRequestPanel } from "./PullRequestPanel";
 import { describedByText } from "../test/describedBy";
@@ -31,6 +31,14 @@ const openPullRequest: PullRequest = {
   state: "open",
 };
 
+/**
+ * Remembers `account` as connected for `provider` (#1012): the account a saved token belongs to
+ * is kept in the app's web storage, the token itself in the system's credential store.
+ */
+function connect(provider: "GitHub" | "Bitbucket" = "GitHub", account = "rene") {
+  localStorage.setItem(`forge-account.${provider}`, account);
+}
+
 function renderPanel(overrides: Partial<Parameters<typeof PullRequestPanel>[0]> = {}) {
   localStorage.removeItem("sidebar-pull-requests");
   const result = render(
@@ -38,9 +46,9 @@ function renderPanel(overrides: Partial<Parameters<typeof PullRequestPanel>[0]> 
       forgeRepositories={[githubRepo]}
       pullRequests={{}}
       onListPullRequests={vi.fn().mockResolvedValue(undefined)}
-      onSaveForgeToken={vi.fn().mockResolvedValue(undefined)}
-      onForgetForgeToken={vi.fn().mockResolvedValue(undefined)}
-      onCreatePullRequest={vi.fn().mockResolvedValue(true)}
+      onSaveForgeToken={vi.fn().mockResolvedValue(null)}
+      onForgetForgeToken={vi.fn().mockResolvedValue(null)}
+      onCreatePullRequest={vi.fn().mockResolvedValue(null)}
       onOpenExternalUrl={vi.fn().mockResolvedValue(undefined)}
       operationDisabled={false}
       operationDisabledReason={null}
@@ -52,13 +60,42 @@ function renderPanel(overrides: Partial<Parameters<typeof PullRequestPanel>[0]> 
   return result;
 }
 
+const githubSection = () => screen.getByRole("region", { name: /github: acme\/widget \(origin\)/i });
+
+/** Opens the Connect to GitHub dialog of the GitHub section. */
+function openConnectDialog() {
+  fireEvent.click(within(githubSection()).getByRole("button", { name: "Connect to GitHub…" }));
+  const dialog = screen.getByRole("dialog", { name: "Connect to GitHub", hidden: true });
+  return {
+    dialog,
+    account: within(dialog).getByLabelText("Account"),
+    token: within(dialog).getByLabelText("Access token") as HTMLInputElement,
+    connect: within(dialog).getByRole("button", { name: "Connect", hidden: true }),
+  };
+}
+
+/** Opens the GitHub section's ⋯ menu. */
+function openSectionMenu() {
+  fireEvent.click(within(githubSection()).getByRole("button", { name: "Pull request actions for origin" }));
+}
+
+/** Opens the New pull request dialog of the GitHub section. */
+function openNewPullRequestDialog() {
+  fireEvent.click(within(githubSection()).getByRole("button", { name: "New pull request…" }));
+  const dialog = screen.getByRole("dialog", { name: "New pull request", hidden: true });
+  return { dialog, create: within(dialog).getByRole("button", { name: "Create pull request", hidden: true }) };
+}
+
 describe("PullRequestPanel", () => {
-  it("renders no token form and no pull-request controls for an unsupported remote", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("renders no Connect and no pull-request controls for an unsupported remote", () => {
     renderPanel({ forgeRepositories: [] });
 
-    expect(screen.queryByLabelText("Access token")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /list pull requests/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /create pull request/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /connect to/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /new pull request/i })).not.toBeInTheDocument();
   });
 
   it("points to Add remote in the Branches section when no remote is supported (#320)", () => {
@@ -71,99 +108,153 @@ describe("PullRequestPanel", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows account/token save-forget controls and a creation form for a supported repository", () => {
-    renderPanel();
+  it("offers only Connect to GitHub until connected: no token or create form in the section (#1012)", () => {
+    const onListPullRequests = vi.fn().mockResolvedValue(undefined);
+    renderPanel({ onListPullRequests });
 
-    const section = screen.getByRole("region", { name: /github: acme\/widget \(origin\)/i });
+    const section = githubSection();
     expect(
       within(section).getByRole("heading", { level: 3, name: /github: acme\/widget \(origin\)/i }),
     ).toBeInTheDocument();
-    expect(within(section).getByLabelText("Account")).toBeInTheDocument();
-    expect(within(section).getByLabelText("Access token")).toBeInTheDocument();
-    expect(within(section).getByRole("button", { name: "Save token" })).toBeInTheDocument();
-    expect(within(section).getByRole("button", { name: "Forget token" })).toBeInTheDocument();
-    expect(within(section).getByRole("button", { name: "List pull requests" })).toBeInTheDocument();
-    const createForm = within(section).getByRole("form", { name: "Create pull request for origin" });
-    expect(within(createForm).getByLabelText("Title")).toBeInTheDocument();
-    expect(within(createForm).getByLabelText("Description")).toBeInTheDocument();
-    expect(within(createForm).getByLabelText("Source branch")).toBeInTheDocument();
-    expect(within(createForm).getByLabelText("Target branch")).toBeInTheDocument();
+    expect(within(section).getByRole("button", { name: "Connect to GitHub…" })).toBeInTheDocument();
+    expect(within(section).queryByRole("textbox")).toBeNull();
+    expect(within(section).queryByRole("button", { name: "New pull request…" })).toBeNull();
+    expect(onListPullRequests).not.toHaveBeenCalled();
   });
 
-  it("shows the Bitbucket access-token warning only for a Bitbucket repository", () => {
+  it("names Connect with \"…\": it opens a dialog (#990)", () => {
+    renderPanel();
+    fireEvent.click(within(githubSection()).getByRole("button", { name: "Connect to GitHub…" }));
+    expect(screen.getByRole("dialog", { name: "Connect to GitHub", hidden: true })).toBeInTheDocument();
+  });
+
+  it("shows the Bitbucket access-token warning only when connecting to Bitbucket", () => {
     renderPanel({ forgeRepositories: [githubRepo, bitbucketRepo] });
 
-    const githubSection = screen.getByRole("region", { name: /github: acme\/widget \(origin\)/i });
+    const { dialog } = openConnectDialog();
+    expect(within(dialog).queryByText(/not an app password/i)).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel", hidden: true }));
+
     const bitbucketSection = screen.getByRole("region", { name: /bitbucket: acme\/widget \(bb-origin\)/i });
-    expect(within(githubSection).queryByText(/not an app password/i)).not.toBeInTheDocument();
-    expect(within(bitbucketSection).getByText(/repository or workspace access token \(not an app password\)/i)).toBeInTheDocument();
+    fireEvent.click(within(bitbucketSection).getByRole("button", { name: "Connect to Bitbucket…" }));
+    const bitbucketDialog = screen.getByRole("dialog", { name: "Connect to Bitbucket", hidden: true });
+    expect(
+      within(bitbucketDialog).getByText(/repository or workspace access token \(not an app password\)/i),
+    ).toBeInTheDocument();
   });
 
-  it("saves the token only to the save callback and clears the input", async () => {
-    const onSaveForgeToken = vi.fn().mockResolvedValue(undefined);
-    renderPanel({ onSaveForgeToken });
+  it("saves the token only to the save callback, then lists the pull requests by itself (#1012)", async () => {
+    const onSaveForgeToken = vi.fn().mockResolvedValue(null);
+    const onListPullRequests = vi.fn().mockResolvedValue(undefined);
+    renderPanel({ onSaveForgeToken, onListPullRequests });
 
-    fireEvent.change(screen.getByLabelText("Account"), { target: { value: "rene" } });
-    fireEvent.change(screen.getByLabelText("Access token"), { target: { value: "gh-token-123" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save token" }));
+    const { account, token, connect: submit } = openConnectDialog();
+    fireEvent.change(account, { target: { value: "rene" } });
+    fireEvent.change(token, { target: { value: "gh-token-123" } });
+    fireEvent.click(submit);
 
     await waitFor(() => {
       expect(onSaveForgeToken).toHaveBeenCalledWith("GitHub", "rene", "gh-token-123");
     });
-    expect(screen.getByLabelText("Access token")).toHaveValue("");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Connect to GitHub", hidden: true })).toBeNull());
+    await waitFor(() => expect(onListPullRequests).toHaveBeenCalledWith("origin", "rene"));
+    expect(within(githubSection()).getByRole("button", { name: "New pull request…" })).toBeInTheDocument();
   });
 
   it("never puts the typed token into component state before save", () => {
     renderPanel();
 
-    const tokenInput = screen.getByLabelText("Access token") as HTMLInputElement;
-    fireEvent.change(tokenInput, { target: { value: "super-secret" } });
+    const { token } = openConnectDialog();
+    fireEvent.change(token, { target: { value: "super-secret" } });
 
     // An uncontrolled input reflects the DOM value regardless of React state, so this alone
-    // doesn't prove the ref-only contract — the meaningful guarantee is that Save clears it
-    // (covered above) and the value never round-trips through a controlled `value=` prop tied
-    // to component state (which would force a re-render on every keystroke). Assert the input
-    // has no controlling `value` prop wired to state by checking it accepts direct DOM mutation
-    // that a controlled input would otherwise fight/revert.
-    expect(tokenInput.value).toBe("super-secret");
+    // doesn't prove the ref-only contract — the meaningful guarantee is that the value never
+    // round-trips through a controlled `value=` prop tied to component state.
+    expect(token.value).toBe("super-secret");
   });
 
-  it("clears the token after forgetting it", async () => {
-    const onForgetForgeToken = vi.fn().mockResolvedValue(undefined);
+  it("keeps the dialog open with the failure, and the token field cleared, when saving fails", async () => {
+    const onSaveForgeToken = vi.fn().mockResolvedValue("The credential store is locked.");
+    const onListPullRequests = vi.fn().mockResolvedValue(undefined);
+    renderPanel({ onSaveForgeToken, onListPullRequests });
+
+    const { dialog, account, token, connect: submit } = openConnectDialog();
+    fireEvent.change(account, { target: { value: "rene" } });
+    fireEvent.change(token, { target: { value: "gh-token-123" } });
+    fireEvent.click(submit);
+
+    expect(await within(dialog).findByText("The credential store is locked.")).toBeInTheDocument();
+    expect(token).toHaveValue("");
+    expect(account).toHaveValue("rene");
+    expect(onListPullRequests).not.toHaveBeenCalled();
+  });
+
+  it("Disconnect forgets the token and shows Connect again", async () => {
+    connect();
+    const onForgetForgeToken = vi.fn().mockResolvedValue(null);
     renderPanel({ onForgetForgeToken });
 
-    fireEvent.change(screen.getByLabelText("Account"), { target: { value: "rene" } });
-    fireEvent.change(screen.getByLabelText("Access token"), { target: { value: "stale" } });
-    fireEvent.click(screen.getByRole("button", { name: "Forget token" }));
+    openSectionMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Disconnect" }));
 
     await waitFor(() => {
       expect(onForgetForgeToken).toHaveBeenCalledWith("GitHub", "rene");
     });
-    expect(screen.getByLabelText("Access token")).toHaveValue("");
+    expect(await within(githubSection()).findByRole("button", { name: "Connect to GitHub…" })).toBeInTheDocument();
   });
 
-  it("clears the token on cancel without calling any callback", () => {
+  // A11: a token that couldn't be forgotten is still saved, so the card stays connected; the
+  // error banner says why.
+  it("stays connected when the token couldn't be forgotten", async () => {
+    connect();
+    const onForgetForgeToken = vi.fn().mockResolvedValue("Couldn't forget the token: locked");
+    renderPanel({ onForgetForgeToken });
+
+    openSectionMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Disconnect" }));
+
+    await waitFor(() => expect(onForgetForgeToken).toHaveBeenCalledWith("GitHub", "rene"));
+    await Promise.resolve();
+    expect(within(githubSection()).getByRole("button", { name: "New pull request…" })).toBeInTheDocument();
+    expect(within(githubSection()).queryByRole("button", { name: /^Connect to/ })).toBeNull();
+    expect(localStorage.getItem("forge-account.GitHub")).toBe("rene");
+  });
+
+  // A12: a collapsed card lists nothing (and raises no failure banner) until it is opened.
+  it("lists a connected repository's pull requests only once its card is open", async () => {
+    connect();
+    localStorage.setItem("sidebar-pr-origin", "closed");
+    const onListPullRequests = vi.fn().mockResolvedValue(undefined);
+    renderPanel({ onListPullRequests });
+
+    await Promise.resolve();
+    expect(onListPullRequests).not.toHaveBeenCalled();
+    fireEvent.click(within(githubSection()).getByRole("button", { name: /github: acme\/widget \(origin\)/i }));
+    await waitFor(() => expect(onListPullRequests).toHaveBeenCalledWith("origin", "rene"));
+    expect(onListPullRequests).toHaveBeenCalledTimes(1);
+  });
+
+  it("Cancel closes the Connect dialog without calling any callback", () => {
     const onSaveForgeToken = vi.fn();
     const onForgetForgeToken = vi.fn();
     renderPanel({ onSaveForgeToken, onForgetForgeToken });
 
-    fireEvent.change(screen.getByLabelText("Access token"), { target: { value: "abandoned" } });
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    const { dialog, token } = openConnectDialog();
+    fireEvent.change(token, { target: { value: "abandoned" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel", hidden: true }));
 
-    expect(screen.getByLabelText("Access token")).toHaveValue("");
+    expect(screen.queryByRole("dialog", { name: "Connect to GitHub", hidden: true })).toBeNull();
     expect(onSaveForgeToken).not.toHaveBeenCalled();
     expect(onForgetForgeToken).not.toHaveBeenCalled();
   });
 
-  it("lists pull requests for the account and renders provider-neutral rows", async () => {
+  it("lists the pull requests of a connected account by itself and renders provider-neutral rows (#1012)", async () => {
+    connect();
     const onListPullRequests = vi.fn().mockResolvedValue(undefined);
     renderPanel({
       onListPullRequests,
       pullRequests: { origin: { pullRequests: [openPullRequest], truncated: false } },
     });
-
-    fireEvent.change(screen.getByLabelText("Account"), { target: { value: "rene" } });
-    fireEvent.click(screen.getByRole("button", { name: "List pull requests" }));
 
     await waitFor(() => {
       expect(onListPullRequests).toHaveBeenCalledWith("origin", "rene");
@@ -176,40 +267,35 @@ describe("PullRequestPanel", () => {
   });
 
   it("shows a 'more available' notice when the listing was truncated", async () => {
+    connect();
     renderPanel({
       pullRequests: { origin: { pullRequests: [openPullRequest], truncated: true } },
     });
-
-    fireEvent.change(screen.getByLabelText("Account"), { target: { value: "rene" } });
-    fireEvent.click(screen.getByRole("button", { name: "List pull requests" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent(/more may be available/i);
   });
 
   it("shows no 'more available' notice when the listing was not truncated", async () => {
+    connect();
     renderPanel({
       pullRequests: { origin: { pullRequests: [openPullRequest], truncated: false } },
     });
-
-    fireEvent.change(screen.getByLabelText("Account"), { target: { value: "rene" } });
-    fireEvent.click(screen.getByRole("button", { name: "List pull requests" }));
 
     await screen.findByText(/Add pull request support/);
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
-  it("opens a pull request's URL in the external browser instead of navigating the app", async () => {
+  it("opens a pull request in the external browser instead of navigating the app", async () => {
+    connect();
     const onOpenExternalUrl = vi.fn().mockResolvedValue(undefined);
     renderPanel({
       onOpenExternalUrl,
       pullRequests: { origin: { pullRequests: [openPullRequest], truncated: false } },
     });
 
-    fireEvent.change(screen.getByLabelText("Account"), { target: { value: "rene" } });
-    fireEvent.click(screen.getByRole("button", { name: "List pull requests" }));
-
-    const link = await screen.findByRole("button", { name: openPullRequest.url });
+    const link = await screen.findByRole("button", { name: "Open #7 in your browser" });
     expect(link.tagName).toBe("BUTTON");
+    expect(link).toHaveAttribute("title", openPullRequest.url);
     fireEvent.click(link);
 
     await waitFor(() => {
@@ -218,6 +304,8 @@ describe("PullRequestPanel", () => {
   });
 
   it("shows each repository's own pull requests independently, keyed by remote", () => {
+    connect("GitHub");
+    connect("Bitbucket");
     const bitbucketPullRequest: PullRequest = {
       id: "12",
       number: 12,
@@ -236,64 +324,63 @@ describe("PullRequestPanel", () => {
       },
     });
 
-    const githubSection = screen.getByRole("region", { name: /github: acme\/widget \(origin\)/i });
     const bitbucketSection = screen.getByRole("region", { name: /bitbucket: acme\/widget \(bb-origin\)/i });
-    expect(within(githubSection).getByText(/Add pull request support/)).toBeInTheDocument();
-    expect(within(githubSection).queryByText(/Add Bitbucket support/)).not.toBeInTheDocument();
+    expect(within(githubSection()).getByText(/Add pull request support/)).toBeInTheDocument();
+    expect(within(githubSection()).queryByText(/Add Bitbucket support/)).not.toBeInTheDocument();
     expect(within(bitbucketSection).getByText(/Add Bitbucket support/)).toBeInTheDocument();
     expect(within(bitbucketSection).queryByText(/Add pull request support/)).not.toBeInTheDocument();
   });
 
-  it("disables List pull requests while a listing request is in flight", async () => {
+  it("lists once by itself, and disables Refresh while a listing request is in flight", async () => {
+    connect();
     let resolveList: () => void = () => {};
     const onListPullRequests = vi.fn(
       () => new Promise<void>((resolve) => { resolveList = resolve; }),
     );
     renderPanel({ onListPullRequests });
 
-    fireEvent.change(screen.getByLabelText("Account"), { target: { value: "rene" } });
-    const listButton = screen.getByRole("button", { name: "List pull requests" });
-    fireEvent.click(listButton);
-    fireEvent.click(listButton);
-
-    expect(onListPullRequests).toHaveBeenCalledTimes(1);
-    expect(listButton).toBeDisabled();
+    await waitFor(() => expect(onListPullRequests).toHaveBeenCalledTimes(1));
+    openSectionMenu();
+    expect(screen.getByRole("menuitem", { name: "Refresh" })).toBeDisabled();
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Disconnect" }), { key: "Escape" });
 
     resolveList();
-    await waitFor(() => expect(listButton).toBeEnabled());
+    await waitFor(() => {
+      openSectionMenu();
+      expect(screen.getByRole("menuitem", { name: "Refresh" })).toBeEnabled();
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Refresh" }));
+    expect(onListPullRequests).toHaveBeenCalledTimes(2);
   });
 
-  it("stops showing pull requests for a repository once its token is forgotten", async () => {
-    const onListPullRequests = vi.fn().mockResolvedValue(undefined);
-    const onForgetForgeToken = vi.fn().mockResolvedValue(undefined);
+  it("stops showing pull requests for a repository once it is disconnected", async () => {
+    connect();
+    const onForgetForgeToken = vi.fn().mockResolvedValue(null);
     renderPanel({
-      onListPullRequests,
       onForgetForgeToken,
       pullRequests: { origin: { pullRequests: [openPullRequest], truncated: false } },
     });
-
-    fireEvent.change(screen.getByLabelText("Account"), { target: { value: "rene" } });
-    fireEvent.click(screen.getByRole("button", { name: "List pull requests" }));
     await screen.findByText(/Add pull request support/);
 
-    fireEvent.click(screen.getByRole("button", { name: "Forget token" }));
+    openSectionMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Disconnect" }));
 
     await waitFor(() => {
       expect(screen.queryByText(/Add pull request support/)).not.toBeInTheDocument();
     });
   });
 
-  it("submits a new pull request with the exact fields and clears only the non-secret fields", async () => {
-    const onCreatePullRequest = vi.fn().mockResolvedValue(true);
+  it("submits a new pull request with the exact fields from its dialog, which then closes", async () => {
+    connect();
+    const onCreatePullRequest = vi.fn().mockResolvedValue(null);
     renderPanel({ onCreatePullRequest });
 
-    fireEvent.change(screen.getByLabelText("Account"), { target: { value: "rene" } });
-    fireEvent.change(screen.getByLabelText("Access token"), { target: { value: "gh-token" } });
-    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Add feature" } });
-    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Implements the thing" } });
-    fireEvent.change(screen.getByLabelText("Source branch"), { target: { value: "feature/pr" } });
-    fireEvent.change(screen.getByLabelText("Target branch"), { target: { value: "main" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create pull request" }));
+    const { dialog, create } = openNewPullRequestDialog();
+    fireEvent.change(within(dialog).getByLabelText("Title"), { target: { value: "Add feature" } });
+    fireEvent.change(within(dialog).getByLabelText("Description"), { target: { value: "Implements the thing" } });
+    fireEvent.change(within(dialog).getByLabelText("Source branch"), { target: { value: "feature/pr" } });
+    fireEvent.change(within(dialog).getByLabelText("Target branch"), { target: { value: "main" } });
+    fireEvent.click(create);
 
     await waitFor(() => {
       expect(onCreatePullRequest).toHaveBeenCalledWith("origin", "rene", {
@@ -303,25 +390,19 @@ describe("PullRequestPanel", () => {
         targetBranch: "main",
       });
     });
-    expect(screen.getByLabelText("Title")).toHaveValue("");
-    expect(screen.getByLabelText("Description")).toHaveValue("");
-    expect(screen.getByLabelText("Source branch")).toHaveValue("");
-    expect(screen.getByLabelText("Target branch")).toHaveValue("");
-    // Non-secret fields owned by the token form are untouched by a successful PR creation.
-    expect(screen.getByLabelText("Account")).toHaveValue("rene");
-    // The token ref is only ever cleared by save/forget/cancel of the token form itself.
-    expect(screen.getByLabelText("Access token")).toHaveValue("gh-token");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "New pull request", hidden: true })).toBeNull());
   });
 
   it("sends a null description when the description field is left blank", async () => {
-    const onCreatePullRequest = vi.fn().mockResolvedValue(true);
+    connect();
+    const onCreatePullRequest = vi.fn().mockResolvedValue(null);
     renderPanel({ onCreatePullRequest });
 
-    fireEvent.change(screen.getByLabelText("Account"), { target: { value: "rene" } });
-    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Add feature" } });
-    fireEvent.change(screen.getByLabelText("Source branch"), { target: { value: "feature/pr" } });
-    fireEvent.change(screen.getByLabelText("Target branch"), { target: { value: "main" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create pull request" }));
+    const { dialog, create } = openNewPullRequestDialog();
+    fireEvent.change(within(dialog).getByLabelText("Title"), { target: { value: "Add feature" } });
+    fireEvent.change(within(dialog).getByLabelText("Source branch"), { target: { value: "feature/pr" } });
+    fireEvent.change(within(dialog).getByLabelText("Target branch"), { target: { value: "main" } });
+    fireEvent.click(create);
 
     await waitFor(() => {
       expect(onCreatePullRequest).toHaveBeenCalledWith("origin", "rene", {
@@ -333,64 +414,60 @@ describe("PullRequestPanel", () => {
     });
   });
 
-  it("does not clear the creation form when the create call fails", async () => {
-    // `useAppState.ts`'s `createPullRequest` swallows a failed request into `state.error`
-    // rather than rejecting, resolving `false` instead — this is what a failed submission looks
-    // like to the component in practice, not a rejected promise.
-    const onCreatePullRequest = vi.fn().mockResolvedValue(false);
+  it("keeps the dialog's fields and shows the failure when the create call fails", async () => {
+    connect();
+    const onCreatePullRequest = vi.fn().mockResolvedValue("Validation failed: a pull request already exists.");
     renderPanel({ onCreatePullRequest });
 
-    fireEvent.change(screen.getByLabelText("Account"), { target: { value: "rene" } });
-    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Add feature" } });
-    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Implements the thing" } });
-    fireEvent.change(screen.getByLabelText("Source branch"), { target: { value: "feature/pr" } });
-    fireEvent.change(screen.getByLabelText("Target branch"), { target: { value: "main" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create pull request" }));
+    const { dialog, create } = openNewPullRequestDialog();
+    fireEvent.change(within(dialog).getByLabelText("Title"), { target: { value: "Add feature" } });
+    fireEvent.change(within(dialog).getByLabelText("Description"), { target: { value: "Implements the thing" } });
+    fireEvent.change(within(dialog).getByLabelText("Source branch"), { target: { value: "feature/pr" } });
+    fireEvent.change(within(dialog).getByLabelText("Target branch"), { target: { value: "main" } });
+    fireEvent.click(create);
 
-    await waitFor(() => {
-      expect(onCreatePullRequest).toHaveBeenCalledWith("origin", "rene", {
-        title: "Add feature",
-        description: "Implements the thing",
-        sourceBranch: "feature/pr",
-        targetBranch: "main",
-      });
-    });
-    expect(screen.getByLabelText("Title")).toHaveValue("Add feature");
-    expect(screen.getByLabelText("Description")).toHaveValue("Implements the thing");
-    expect(screen.getByLabelText("Source branch")).toHaveValue("feature/pr");
-    expect(screen.getByLabelText("Target branch")).toHaveValue("main");
+    expect(await within(dialog).findByText("Validation failed: a pull request already exists.")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Title")).toHaveValue("Add feature");
+    expect(within(dialog).getByLabelText("Description")).toHaveValue("Implements the thing");
+    expect(within(dialog).getByLabelText("Source branch")).toHaveValue("feature/pr");
+    expect(within(dialog).getByLabelText("Target branch")).toHaveValue("main");
   });
 
-  it("disables Save/Forget/Create controls while another repository operation is active", () => {
+  it("disables Connect, Disconnect and Create while another repository operation is active", () => {
     renderPanel({ operationDisabled: true });
-
-    expect(screen.getByRole("button", { name: "Save token" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Forget token" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Create pull request" })).toBeDisabled();
+    expect(openConnectDialog().connect).toBeDisabled();
   });
 
   // Disabled buttons went inert with no explanation — issue #31/UX-003.
-  it("explains why Save/Forget/Create controls are disabled via their title", () => {
-    renderPanel({ operationDisabled: true, operationDisabledReason: "A merge is in progress." });
+  it("explains why Connect, Disconnect and Create are disabled via their title", () => {
+    const reason = "A merge is in progress.";
+    renderPanel({ operationDisabled: true, operationDisabledReason: reason });
+    const { dialog, connect: submit } = openConnectDialog();
+    expect(submit).toHaveAttribute("title", reason);
+    // #748: and as the button's description, in visible text.
+    expect(describedByText(submit)).toBe(reason);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel", hidden: true }));
+  });
 
-    expect(screen.getByRole("button", { name: "Save token" })).toHaveAttribute(
-      "title",
-      "A merge is in progress.",
-    );
-    expect(screen.getByRole("button", { name: "Forget token" })).toHaveAttribute(
-      "title",
-      "A merge is in progress.",
-    );
-    expect(screen.getByRole("button", { name: "Create pull request" })).toHaveAttribute(
-      "title",
-      "A merge is in progress.",
-    );    // #748: and as the buttons' description, in visible text.
-    for (const name of ["Save token", "Forget token", "Create pull request"]) {
-      expect(describedByText(screen.getByRole("button", { name }))).toBe("A merge is in progress.");
-    }
+  it("explains a disabled Disconnect and Create pull request while connected", () => {
+    connect();
+    const reason = "A merge is in progress.";
+    renderPanel({ operationDisabled: true, operationDisabledReason: reason });
+
+    openSectionMenu();
+    const disconnect = screen.getByRole("menuitem", { name: "Disconnect" });
+    expect(disconnect).toBeDisabled();
+    expect(disconnect).toHaveAttribute("title", reason);
+    fireEvent.keyDown(disconnect, { key: "Escape" });
+
+    const { create } = openNewPullRequestDialog();
+    expect(create).toBeDisabled();
+    expect(create).toHaveAttribute("title", reason);
+    expect(describedByText(create)).toBe(reason);
   });
 
   it("shows an icon and the total open pull-request count on the outer Pull requests header", () => {
+    connect();
     renderPanel({
       pullRequests: { origin: { pullRequests: [openPullRequest], truncated: false } },
     });
@@ -427,26 +504,25 @@ describe("PullRequestPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /github: acme\/widget \(origin\)/i }));
 
-    expect(screen.queryByLabelText("Account")).toBeTruthy();
     // The GitHub card's own content collapses...
-    const githubSection = screen.getByRole("region", { name: /github: acme\/widget \(origin\)/i });
-    expect(within(githubSection).queryByRole("button", { name: "List pull requests" })).not.toBeInTheDocument();
+    expect(within(githubSection()).queryByRole("button", { name: "Connect to GitHub…" })).not.toBeInTheDocument();
     // ...while the Bitbucket card, untouched, stays open.
     const bitbucketSection = screen.getByRole("region", { name: /bitbucket: acme\/widget \(bb-origin\)/i });
-    expect(within(bitbucketSection).getByRole("button", { name: "List pull requests" })).toBeInTheDocument();
+    expect(within(bitbucketSection).getByRole("button", { name: "Connect to Bitbucket…" })).toBeInTheDocument();
   });
 
   it("defaults source to the current branch, target to main, and suggests known branches", () => {
-    localStorage.clear();
-    const { container } = renderPanel({
+    connect();
+    const { baseElement } = renderPanel({
       branches: [
         { name: "main", isCurrent: false },
         { name: "feat/x", isCurrent: true },
       ],
     });
-    expect(screen.getByLabelText("Source branch")).toHaveValue("feat/x");
-    expect(screen.getByLabelText("Target branch")).toHaveValue("main");
-    const options = Array.from(container.querySelectorAll("datalist option")).map((o) => o.getAttribute("value"));
+    const { dialog } = openNewPullRequestDialog();
+    expect(within(dialog).getByLabelText("Source branch")).toHaveValue("feat/x");
+    expect(within(dialog).getByLabelText("Target branch")).toHaveValue("main");
+    const options = Array.from(baseElement.querySelectorAll("datalist option")).map((o) => o.getAttribute("value"));
     expect(options).toEqual(["main", "feat/x"]);
   });
 });

@@ -19,7 +19,9 @@ pub async fn get_head_info(
 }
 
 /// `author` replaces HEAD's author name and email (keeping its time); `trailers` (absent: none)
-/// are appended before the hooks run.
+/// are appended before the hooks run. `message_only` (Reword… on HEAD, #981) keeps HEAD's tree and
+/// ignores `author` and `trailers`.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn amend_commit(
     repo_path: String,
@@ -27,6 +29,7 @@ pub async fn amend_commit(
     no_verify: bool,
     author: Option<SignatureInputDto>,
     trailers: Option<Vec<TrailerDto>>,
+    message_only: Option<bool>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<CommitOutcomeDto, ErrorDto> {
@@ -35,13 +38,18 @@ pub async fn amend_commit(
     Ok(CommitOutcomeDto::from(
         repo_worker(&state, &repo_path)?
             .call(move |w| {
-                w.amend_commit(
-                    message,
-                    no_verify,
-                    author.map(Into::into),
-                    to_trailers(trailers.unwrap_or_default()),
-                    event_tx,
-                )
+                // Reword… on HEAD (#981): the message only, staged changes stay staged.
+                if message_only.unwrap_or(false) {
+                    w.reword_head(message, no_verify, event_tx)
+                } else {
+                    w.amend_commit(
+                        message,
+                        no_verify,
+                        author.map(Into::into),
+                        to_trailers(trailers.unwrap_or_default()),
+                        event_tx,
+                    )
+                }
             })
             .await?,
     ))

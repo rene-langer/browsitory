@@ -23,6 +23,7 @@ import {
   type HistoryEditRequest,
 } from "../lib/historyEdits";
 import { logFailure } from "../lib/logger";
+import { failedOperation, FailureWithNextStep } from "../lib/operationErrors";
 import { shortRefName } from "../lib/shortRefName";
 import type { PresetAction } from "../lib/rebaseSelection";
 import type { AppState } from "./useAppState";
@@ -83,7 +84,7 @@ export interface MergeRebaseActions {
    * the rest dialog (`state.editRest`) instead; Continue again with `rest` says what to do with
    * them (#884).
    */
-  rebaseContinue(rest?: EditRest): Promise<void>;
+  rebaseContinue(rest?: EditRest): Promise<RebaseStepResult | null>;
   /** Closes the rest dialog without continuing (#884). */
   closeEditRest(): void;
   /**
@@ -113,7 +114,7 @@ export function useMergeRebaseActions(
         setState((prev) => ({ ...prev, dialog: withoutDialog(prev.dialog, "merge"), mergeOutcome: null }));
         const outcome: MergeOutcome = await client.mergeBranch(repoPath, branchName, options);
         setState((prev) => ({ ...prev, mergeOutcome: { branchName, outcome } }));
-      }),
+      }, failedOperation.merge(branchName, options.fastForward === "Only")),
     [client, runMutation, repoPath, setState],
   );
   const mergeBranch = useCallback(
@@ -149,7 +150,7 @@ export function useMergeRebaseActions(
           const message = `Rebased onto ${shortRefName(upstreamRef)}`;
           setState((prev) => ({ ...prev, historyEditOutcome: { message } }));
         }
-      }),
+      }, failedOperation.rebaseOnto(upstreamRef)),
     [client, runMutation, repoPath, setState],
   );
   const getPullStrategy = useCallback(() => client.getPullStrategy(repoPath), [client, repoPath]);
@@ -188,7 +189,7 @@ export function useMergeRebaseActions(
     [client, runMutation, repoPath],
   );
   const abortMerge = useCallback(
-    () => runMutation(() => client.abortMerge(repoPath)),
+    () => runMutation(() => client.abortMerge(repoPath), failedOperation.abortMerge()),
     [client, runMutation, repoPath],
   );
 
@@ -214,7 +215,7 @@ export function useMergeRebaseActions(
         const result: RebaseStepResult = await client.startRebase(repoPath, onto, plan);
         void result;
         setState((prev) => ({ ...prev, rebaseOnto: null, rebasePreset: null }));
-      }),
+      }, failedOperation.rebaseOnto(onto)),
     [client, runMutation, repoPath, setState],
   );
   const editHistory = useCallback(
@@ -226,7 +227,7 @@ export function useMergeRebaseActions(
         let edit: HistoryEdit;
         if (request.kind === "Squash") {
           // The parent is the span's first commit; `buildHistoryEditPlan` checks the rest.
-          if (span[1]?.id !== commitId) throw new Error(HISTORY_CHANGED);
+          if (span[1]?.id !== commitId) throw new FailureWithNextStep(HISTORY_CHANGED, null);
           const [parentMessage, message] = await Promise.all([
             client.getCommitMessage(repoPath, span[0].id),
             client.getCommitMessage(repoPath, commitId),
@@ -238,16 +239,18 @@ export function useMergeRebaseActions(
         const plan = buildHistoryEditPlan(edit, commitId, span);
         const step = await client.startRebase(repoPath, onto, plan, { kind: request.kind, commitId });
         result = step;
-        // Split commit… stops like Edit commit…; the stop says "Splitting" (#884).
+        // Split commit… stops like Edit commit…; the stop says "Splitting" (#884). Both name
+        // the stop's controls and toasts after the edit (#994).
         const splitting = request.kind === "Split" && step.kind !== "Done" ? commitId : null;
-        setState((prev) => ({ ...prev, splitting }));
+        const editing = request.kind === "Edit" && step.kind !== "Done" ? commitId : null;
+        setState((prev) => ({ ...prev, splitting, editing }));
         // A pause shows in the rebase progress panel instead.
         if (step.kind === "Done") {
           const shortId = span.find((commit) => commit.id === commitId)?.shortId ?? commitId.slice(0, 7);
           const message = historyEditDoneMessage(request.kind, shortId);
           setState((prev) => ({ ...prev, historyEditOutcome: { message } }));
         }
-      });
+      }, failedOperation.historyEdit(request.kind, commitId));
       return result;
     },
     [client, runMutation, repoPath, setState],
@@ -263,25 +266,32 @@ export function useMergeRebaseActions(
           const message = `Folded staged changes into ${commitId.slice(0, 7)}`;
           setState((prev) => ({ ...prev, historyEditOutcome: { message } }));
         }
-      });
+      }, failedOperation.foldStaged(commitId));
       return result;
     },
     [client, runMutation, repoPath, setState],
   );
   // Not state: only Continue reads it, and typing in the message box re-renders nothing else.
   const rebaseEditMessage = useRef<string | null>(null);
-  const setRebaseEditMessage = useCallback((message: string | null) => {
-    rebaseEditMessage.current = message;
-  }, []);
+  const setRebaseEditMessage = useCallback(
+    (message: string | null) => {
+      rebaseEditMessage.current = message;
+      const kind = message === null ? "unchanged" : message.trim() === "" ? "blank" : "changed";
+      // Typing re-renders nothing else unless the kind changes.
+      setState((prev) => (prev.editMessage === kind ? prev : { ...prev, editMessage: kind }));
+    },
+    [setState],
+  );
   const rebaseContinue = useCallback(
-    (rest?: EditRest): Promise<void> =>
-      runMutation(async () => {
+    async (rest?: EditRest): Promise<RebaseStepResult | null> => {
+      let result: RebaseStepResult | null = null;
+      await runMutation(async () => {
         const message = rebaseEditMessage.current;
         setState((prev) => ({ ...prev, editRest: null }));
         try {
-          if (rest !== undefined) await client.rebaseContinue(repoPath, message ?? undefined, rest);
-          else if (message === null) await client.rebaseContinue(repoPath);
-          else await client.rebaseContinue(repoPath, message);
+          if (rest !== undefined) result = await client.rebaseContinue(repoPath, message ?? undefined, rest);
+          else if (message === null) result = await client.rebaseContinue(repoPath);
+          else result = await client.rebaseContinue(repoPath, message);
         } catch (error) {
           if (errorKind(error) !== "RestLeft") throw error;
           // Not an error: the dialog asks what to do with the files (#884).
@@ -291,7 +301,10 @@ export function useMergeRebaseActions(
         }
         // Landed: the message belonged to that stop, not to the next one.
         rebaseEditMessage.current = null;
-      }),
+        setState((prev) => (prev.editMessage === "unchanged" ? prev : { ...prev, editMessage: "unchanged" }));
+      }, failedOperation.continueRebase());
+      return result;
+    },
     [client, runMutation, repoPath, setState],
   );
   const closeEditRest = useCallback(() => {
@@ -303,7 +316,7 @@ export function useMergeRebaseActions(
       await runMutation(async () => {
         await client.rebaseCommitPart(repoPath, message);
         committed = true;
-      });
+      }, failedOperation.commitPart());
       return committed;
     },
     [client, runMutation, repoPath],
@@ -313,7 +326,7 @@ export function useMergeRebaseActions(
       let abort: RebaseAbort | null = null;
       await runMutation(async () => {
         abort = await client.abortRebase(repoPath);
-      });
+      }, failedOperation.abortRebase());
       return abort;
     },
     [client, runMutation, repoPath],

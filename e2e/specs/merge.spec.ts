@@ -15,7 +15,7 @@ const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
  * else) and confirms with Merge, which is enabled once the dialog has loaded its options.
  */
 async function confirmMergeDialog(branch: string) {
-  const dialog = `dialog[aria-label="Merge ${branch}"]`;
+  const dialog = `dialog[aria-label^="Merge ${branch} into "]`;
   await $(dialog).waitForExist();
   // WebdriverIO cannot mix a CSS prefix with its `button=Text` selector, so chain them.
   const confirmMerge = await $(dialog).$("button=Merge");
@@ -77,7 +77,7 @@ describe("Browsitory merge with conflict resolution", () => {
     await $(`button=Rebase ${currentBranch} onto e2e-merge-feature…`).waitForExist();
     await browser.execute((el) => (el as HTMLElement).click(), mergeItem);
 
-    const dialog = `dialog[aria-label="Merge e2e-merge-feature"]`;
+    const dialog = `dialog[aria-label="Merge e2e-merge-feature into ${currentBranch}"]`;
     await $(dialog).waitForExist();
     const cancel = await $(dialog).$("button=Cancel");
     await browser.execute((el) => (el as HTMLElement).click(), cancel);
@@ -263,7 +263,8 @@ describe("Browsitory merge with conflict resolution", () => {
     const conflictedRow = await $("span=abort.txt (Conflicted)");
     await conflictedRow.waitForExist();
 
-    // The commit box offers "Abort merge" too; this is the operation status strip's.
+    // Abort merge is the operation status strip's alone (#995); nothing was resolved, so it asks
+    // nothing (#979).
     const abortMergeButton = await $("div[aria-label='Operation status']").$("button=Abort merge");
     await abortMergeButton.waitForExist();
     await browser.execute((el) => (el as HTMLElement).click(), abortMergeButton);

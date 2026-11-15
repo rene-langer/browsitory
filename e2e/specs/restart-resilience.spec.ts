@@ -37,7 +37,8 @@ async function alertTexts(): Promise<string> {
 }
 
 /**
- * Clicks **Continue rebase** once the restarted app has settled: the same button element has been
+ * Clicks the status strip's **Continue rebase** (its only Continue since #995) once the restarted
+ * app has settled: the same button element has been
  * in the page, enabled and rendered, for a full second. The strip shows the paused rebase as soon
  * as the restarted app's first refresh lands, but the workspace can still re-render or remount
  * right after (startup tab reconciliation, the next refresh), and a click on a button that is
@@ -50,10 +51,16 @@ async function clickContinueRebaseWhenSettled(): Promise<void> {
   await browser.waitUntil(
     () =>
       browser.execute(() => {
-        const button = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
-          (el) => (el.textContent ?? "").trim() === "Continue rebase",
-        );
-        if (button === undefined || button.disabled || button.getClientRects().length === 0) return false;
+        const button = Array.from(
+          document.querySelectorAll<HTMLButtonElement>("[role='status'][aria-label='Operation status'] button"),
+        ).find((el) => (el.textContent ?? "").trim() === "Continue rebase");
+        if (
+          button === undefined ||
+          button.disabled ||
+          button.getAttribute("aria-disabled") === "true" ||
+          button.getClientRects().length === 0
+        )
+          return false;
         const now = Date.now();
         const seenAt = Number(button.dataset.e2eSeenAt ?? "0");
         if (seenAt === 0) {
@@ -64,7 +71,7 @@ async function clickContinueRebaseWhenSettled(): Promise<void> {
         button.click();
         return true;
       }),
-    { timeout: RESTART_TIMEOUT, interval: 200, timeoutMsg: "Continue rebase never stayed clickable in the restarted app" },
+    { timeout: RESTART_TIMEOUT, interval: 200, timeoutMsg: "Continue never stayed clickable in the restarted app" },
   );
 }
 
@@ -95,7 +102,7 @@ describe("Browsitory restart resilience", () => {
     await browser.execute((el) => {
       el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }));
     }, onto);
-    const rebaseButton = await $("button*=Rebase onto here");
+    const rebaseButton = await $("button*=Rebase current branch onto here");
     await rebaseButton.waitForExist();
     await rebaseButton.click();
     const editRow = await $("//li[contains(., 'e2e: restart commit a')]//select[starts-with(@aria-label, 'Action for ')]");

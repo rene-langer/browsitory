@@ -3,6 +3,7 @@ import { errorKind, type HunkOptions, type RepoClient, type StatusEntry, type St
 import type { AppState, SelectedRow } from "./useAppState";
 import { failureError, type RunMutation, type RunMutationWithOutcome, type RunOptimisticMutation } from "./useMutationRunner";
 import { hookFailedMessage } from "../lib/hookFailure";
+import { failedOperation, FailureWithNextStep, hookNextStep } from "../lib/operationErrors";
 import { recordVisit, type VisitKind } from "../lib/navigationHistory";
 
 export interface StagingActions {
@@ -193,11 +194,11 @@ export function useStagingActions(
               dialogOpen: true,
             },
           }));
-          throw new Error(hookFailedMessage(outcome.hook));
+          throw new FailureWithNextStep(hookFailedMessage(outcome.hook), hookNextStep("commit again"));
         }
         setState((prev) => ({ ...prev, skipHooks: false, hookFailure: null }));
         onCommitted?.(outcome.commitId);
-      });
+      }, failedOperation.commit());
       setState((prev) => ({ ...prev, hookRun: null }));
       return ok;
     },
@@ -211,12 +212,16 @@ export function useStagingActions(
       } catch (error) {
         return failureError(error).error;
       }
-      setState((prev) => ({ ...prev, identityRequired: null }));
+      // The dialog handled the error, so no banner is left behind (#996).
+      setState((prev) => ({ ...prev, identityRequired: null, error: null }));
       return null;
     },
     [client, repoPath, setState],
   );
-  const dismissIdentity = useCallback(() => setState((prev) => ({ ...prev, identityRequired: null })), [setState]);
+  const dismissIdentity = useCallback(
+    () => setState((prev) => ({ ...prev, identityRequired: null, error: null })),
+    [setState],
+  );
 
   return {
     setIdentity,

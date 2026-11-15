@@ -68,9 +68,16 @@ describe("Browsitory remote management", () => {
     await upstreamBranch.setValue("main");
     await (await upstreamDialog.$("button=Set upstream")).click();
 
-    // The Upstream summary is a plain `<section>` headed "Upstream" (no `aria-labelledby`
-    // any more — select it by its heading text instead).
-    const upstreamSection = await $("//section[h3[text()='Upstream']]");
+    // The current branch's name says what it tracks in its tooltip ("main\nTracks origin/main",
+    // #1025): the name is the element whose `title` starts with the branch's name and that
+    // holds the " (current)" suffix.
+    const currentBranchTitle = () =>
+      browser.execute(() => {
+        const names = document.querySelectorAll<HTMLElement>(
+          "[data-active-repo='true'] li[role='button'] span[title]",
+        );
+        return Array.from(names).find((name) => name.textContent?.endsWith(" (current)") === true)?.title ?? "";
+      });
 
     // `onSetUpstream` is an async IPC round-trip; without waiting for `state.upstream` to
     // actually reflect it, the immediate remove-remote click below can race ahead of the
@@ -78,24 +85,24 @@ describe("Browsitory remote management", () => {
     // `remoteUpstreams[REMOTE]` and skips the "clear upstreams" confirmation entirely, so the
     // confirmation `<dialog>` never appears).
     await browser.waitUntil(
-      async () => (await upstreamSection.getText()).includes(`tracks ${REMOTE}/main`),
+      async () => (await currentBranchTitle()).includes(`Tracks ${REMOTE}/main`),
       { timeoutMsg: "expected the upstream to be set before removing its remote" },
     );
 
-    // Removing a remote is now a context-menu item ("Remove remote") on the remote's folder
+    // Removing a remote is now a context-menu item ("Remove remote…") on the remote's folder
     // header, not a standalone "Remove <name>" icon button.
     await browser.execute((el) => {
       el.dispatchEvent(
         new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
       );
     }, remoteFolderHeader);
-    await (await $("button=Remove remote")).click();
-    const blockingDialog = await $("dialog[aria-label='Remove remote confirmation']");
+    await (await $("button=Remove remote…")).click();
+    const blockingDialog = await $(`dialog[aria-label='Remove remote ${REMOTE}']`);
     await blockingDialog.waitForExist();
-    expect(await blockingDialog.getText()).toContain("clear upstreams for");
-    await (await blockingDialog.$("button=Confirm remove")).click();
+    expect(await blockingDialog.getText()).toContain("clears the upstream of");
+    await (await blockingDialog.$("button=Remove remote")).click();
     await browser.waitUntil(
-      async () => (await upstreamSection.getText()).includes("No upstream"),
+      async () => !(await currentBranchTitle()).includes("Tracks "),
       { timeoutMsg: "expected removing the remote to clear its upstream" },
     );
 

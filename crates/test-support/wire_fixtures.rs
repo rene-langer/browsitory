@@ -1690,6 +1690,7 @@ fn empty_head() -> git_core::repo::HeadInfo {
         bisect: None,
         terminal_sequence: None,
         terminal_rebase: None,
+        unborn_branch: None,
     }
 }
 
@@ -1715,6 +1716,15 @@ pub fn head_infos() -> Cases<git_core::repo::HeadInfo> {
                 }),
                 terminal_sequence: Some(terminal_sequence(SequenceKind::CherryPick)),
                 terminal_rebase: Some(terminal_rebase(TerminalRebaseKind::Rebase)),
+                unborn_branch: None,
+            },
+        ),
+        // A new repository (#983): HEAD names a branch with no commit yet.
+        case(
+            "unborn",
+            git_core::repo::HeadInfo {
+                unborn_branch: some("main"),
+                ..empty_head()
             },
         ),
     ];
@@ -2199,6 +2209,7 @@ pub fn rebase_plan_commits() -> Cases<git_core::rebase::RebasePlanCommit> {
             summary: "Add".to_string(),
             author_name: "Ada Lovelace".to_string(),
             timestamp: 1_700_000_400,
+            merge: false,
         },
     )]
 }

@@ -1,8 +1,10 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { removeShortcutChord, resetAllShortcuts } from "../lib/keymap";
 import type { RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { SyncBar } from "./SyncBar";
+import styles from "./SyncBar.module.css";
+import syncBarCss from "./SyncBar.module.css?raw";
 
 const remote: RemoteInfo = { name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null };
 const upstream: UpstreamInfo = {
@@ -39,6 +41,30 @@ describe("SyncBar", () => {
 
     expect(screen.getByText("↑2")).toBeInTheDocument();
     expect(screen.getByText("↓1")).toBeInTheDocument();
+  });
+
+  it("puts ↓n on Pull and ↑n on Push, each only when it isn't zero (#1006)", () => {
+    renderBar({ upstream: { ...upstream, ahead: 2, behind: 0 } });
+    const push = screen.getByRole("button", { name: "Push" });
+    const pull = screen.getByRole("button", { name: "Pull" });
+    expect(within(push).getByText("↑2")).toBeInTheDocument();
+    expect(pull).toHaveTextContent(/^Pull$/);
+    expect(screen.queryByText("↓0")).toBeNull();
+    // Said in words for assistive tech, as before.
+    expect(screen.getByText("2 ahead, 0 behind origin/main").closest('[role="status"]')).not.toBeNull();
+  });
+
+  it("says ahead and behind in words as the status's text, which a live region announces (#1006)", () => {
+    renderBar();
+    const words = screen.getByText("2 ahead, 1 behind origin/main");
+    expect(words.closest('[role="status"]')).not.toBeNull();
+    expect(words.closest('[role="status"]')).not.toHaveAttribute("aria-label");
+  });
+
+  it("puts ↓n on Pull when it has a menu too (#1006)", () => {
+    renderBar({ upstream: { ...upstream, ahead: 0, behind: 3 }, pullStrategy: { current: null, onPullWith: vi.fn() } });
+    expect(within(screen.getByRole("button", { name: "Pull" })).getByText("↓3")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Push" })).toHaveTextContent(/^Push$/);
   });
 
   it("hides counts when the tracking ref was never fetched", () => {
@@ -183,10 +209,25 @@ describe("SyncBar", () => {
 });
 
 describe("SyncBar last fetch", () => {
+  it("lets the last fetch's slot shrink to its text in a narrow window (#1006)", () => {
+    const narrow = [...syncBarCss.matchAll(/@media\s*\(max-width:\s*([\d.]+)rem\)\s*\{([\s\S]*?)\n\}/g)];
+    const slot = narrow.find(([, , body]) => /\.lastFetch\s*\{[^}]*min-width:\s*0\b/.test(body));
+    expect(slot).toBeDefined();
+    // At 900 px and in a narrow VS Code panel the fixed slot gives way.
+    expect(Number(slot![1]) * 16).toBeGreaterThan(900);
+  });
+
   it("shows nothing before the first fetch of the session", () => {
     renderBar({ lastFetchedAt: null });
 
     expect(screen.queryByText(/^Fetched/)).toBeNull();
+  });
+
+  it("keeps the last fetch's place before the first fetch, so the bar doesn't shift when it shows (#1006)", () => {
+    renderBar({ lastFetchedAt: null });
+    const slot = document.querySelector(`.${styles.lastFetch}`);
+    expect(slot).not.toBeNull();
+    expect(slot).toHaveTextContent("");
   });
 
   it("shows when the last fetch ran and keeps the label current", () => {
@@ -236,6 +277,28 @@ describe("SyncBar leading slot", () => {
     fireEvent.click(screen.getByRole("button", { name: "More stash options" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Stash…" }));
     expect(stash.onStashWithOptions).toHaveBeenCalledOnce();
+  });
+
+  // #990: the palette's name for it.
+  it("names the menu's stash-everything item as the palette does", () => {
+    const stash = { reason: null, onStash: vi.fn(), onStashWithOptions: vi.fn() };
+    renderBar({ stash });
+    fireEvent.click(screen.getByRole("button", { name: "More stash options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Stash all changes" }));
+    expect(stash.onStash).toHaveBeenCalledOnce();
+  });
+
+  it("offers Apply patch… in Stash's menu, also when there is nothing to stash (#1006)", () => {
+    const onApplyPatch = vi.fn();
+    renderBar({
+      stash: { reason: "No changes to stash.", onStash: vi.fn(), onStashWithOptions: vi.fn() },
+      applyPatch: { reason: null, onApplyPatch },
+    });
+    expect(screen.getByRole("button", { name: "Stash" })).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(screen.getByRole("button", { name: "More stash options" }));
+    expect(screen.getByRole("menuitem", { name: "Stash all changes" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Apply patch…" }));
+    expect(onApplyPatch).toHaveBeenCalledOnce();
   });
 
   it("disables Stash and its menu with the reason", () => {

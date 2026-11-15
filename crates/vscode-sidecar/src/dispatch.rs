@@ -255,6 +255,7 @@ methods!(|params, repos, stdout| {
     "create_branch" => create_branch(CreateBranchParams, repos),
     "switch_branch" => switch_branch(SwitchBranchParams, repos, stdout),
     "get_switch_conflicts" => get_switch_conflicts(SwitchBranchParams, repos),
+    "count_commits_only_on_branch" => count_commits_only_on_branch(SwitchBranchParams, repos),
     "stash_and_switch" => stash_and_switch(StashAndSwitchParams, repos, stdout),
     "delete_branch" => delete_branch(DeleteBranchParams, repos),
     "rename_branch" => rename_branch(RenameBranchParams, repos),
@@ -393,6 +394,9 @@ struct CommitMessageParams {
     /// `amend_commit` only: replaces HEAD's author name and email.
     #[serde(default)]
     author: Option<SignatureInputDto>,
+    /// `amend_commit` only: Reword… on HEAD (#981), the message only.
+    #[serde(default)]
+    message_only: bool,
 }
 
 /// A hook event channel relayed as `hookProgress` notifications for `repo_path`.

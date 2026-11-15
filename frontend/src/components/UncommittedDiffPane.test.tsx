@@ -112,6 +112,24 @@ describe("working-tree view (#639)", () => {
     expect(viewer()).toHaveAccessibleName("Changes in c.txt (staged)");
   });
 
+  it("marks an untracked file '?' and names each file's state plainly in the header (#1027)", async () => {
+    const files = [entry("notes.md", false, "New"), entry("a.txt", false), entry("c.txt", true, "New")];
+    render(<Pane client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")} status={files} />);
+    const unstaged = screen.getByRole("listbox", { name: "Unstaged changes" });
+    expect(within(unstaged).getByRole("option", { name: /^notes\.md/ })).toHaveTextContent(/^\?/);
+
+    await within(viewer()).findByText("unstaged notes.md");
+    expect(within(viewer()).getByText("Untracked")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("option", { name: /a\.txt/ }));
+    await within(viewer()).findByText("unstaged a.txt");
+    expect(within(viewer()).getByText("Modified, not staged")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("option", { name: /c\.txt/ }));
+    await within(viewer()).findByText("staged c.txt");
+    expect(within(viewer()).getByText("Added, staged")).toBeInTheDocument();
+  });
+
   it("keeps the Staged group on screen when it is empty", () => {
     render(<Pane client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")} status={[entry("a.txt", false)]} />);
     expect(screen.getByText("Staged (0)")).toBeInTheDocument();

@@ -3783,6 +3783,58 @@ fn file_sides_trailers_and_commit_message_settings_round_trip_through_the_sideca
 }
 
 #[test]
+fn amend_commit_message_only_rewords_head_and_keeps_the_staged_change_out() {
+    // Reword… on HEAD (#981): `messageOnly` replaces the message only; what is staged stays
+    // staged and out of HEAD.
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "one\n");
+    commit_all(&repo, "first");
+    write_file(dir.path(), "a.txt", "two\n");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+    sidecar.call(
+        2,
+        "stage_file",
+        serde_json::json!({"repoPath": repo_path, "path": "a.txt"}),
+    );
+
+    let reworded = sidecar.call(
+        3,
+        "amend_commit",
+        serde_json::json!({
+            "repoPath": repo_path,
+            "message": "Reworded",
+            "noVerify": false,
+            "author": null,
+            "trailers": [],
+            "messageOnly": true,
+        }),
+    );
+    assert_eq!(reworded["result"]["kind"], "Committed");
+
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.summary().unwrap(), Some("Reworded"));
+    assert_eq!(head.parent_count(), 0);
+    let blob = head
+        .tree()
+        .unwrap()
+        .get_path(std::path::Path::new("a.txt"))
+        .unwrap()
+        .to_object(&repo)
+        .unwrap()
+        .peel_to_blob()
+        .unwrap();
+    assert_eq!(blob.content(), b"one\n");
+    let status = sidecar.call(4, "get_status", serde_json::json!({"repoPath": repo_path}));
+    assert_eq!(
+        status["result"],
+        serde_json::json!([{"path": "a.txt", "oldPath": null, "staged": true, "kind": "Modified"}])
+    );
+}
+
+#[test]
 fn a_staged_rename_round_trips_its_old_path() {
     let (_guard, config_dir) = ConfigDirGuard::new();
     let (dir, repo) = init_repo();

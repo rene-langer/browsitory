@@ -1278,7 +1278,29 @@ pub fn amend_head(
     repo: &git2::Repository,
     message: &str,
     author: Option<&SignatureInput>,
+    hooks: HookOptions<'_>,
+) -> Result<String, CommitError> {
+    rewrite_head(repo, message, author, hooks, false)
+}
+
+/// Reword… on HEAD (#981): rewrites HEAD's commit with `message` only, like
+/// `git commit --amend --only`: the tree stays HEAD's, so staged changes stay staged and out of
+/// the commit. Otherwise as `amend_head` (author kept, refusals, hooks, signing).
+pub fn reword_head(
+    repo: &git2::Repository,
+    message: &str,
+    hooks: HookOptions<'_>,
+) -> Result<String, CommitError> {
+    rewrite_head(repo, message, None, hooks, true)
+}
+
+/// `amend_head` and `reword_head`: `keep_tree` keeps HEAD's tree instead of the index's.
+fn rewrite_head(
+    repo: &git2::Repository,
+    message: &str,
+    author: Option<&SignatureInput>,
     mut hooks: HookOptions<'_>,
+    keep_tree: bool,
 ) -> Result<String, CommitError> {
     let author = match author {
         Some(author) => Some(valid_author(author).ok_or(CommitError::InvalidAuthor)?),
@@ -1307,12 +1329,16 @@ pub fn amend_head(
         MessageFile::CommitEditmsg,
         &mut hooks,
     )?;
-    let mut index = repo.index()?;
-    if hooked.reload_index {
-        index.read(true)?;
-    }
-    let tree_id = index.write_tree()?;
-    let tree = repo.find_tree(tree_id)?;
+    let tree = if keep_tree {
+        head.tree()?
+    } else {
+        let mut index = repo.index()?;
+        if hooked.reload_index {
+            index.read(true)?;
+        }
+        let tree_id = index.write_tree()?;
+        repo.find_tree(tree_id)?
+    };
     let committer = repo.signature()?;
     // Like `git commit --amend --author`: the new name and email, the original author time.
     let author = match author {

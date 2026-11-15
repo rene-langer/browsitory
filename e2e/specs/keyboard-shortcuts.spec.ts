@@ -8,7 +8,7 @@ import { waitForAppReady } from "../support/app";
 // key works and the toolbar says so, and Reset all brings the built-in key back.
 
 const CONFIG_FILE = path.join(os.tmpdir(), "browsitory-e2e-config", "config.toml");
-const REFRESH = "Refresh the repository";
+const REFRESH = "Refresh";
 
 async function openKeyboardPreferences(): Promise<void> {
   const preferences = await $("header button[aria-label='Preferences']");

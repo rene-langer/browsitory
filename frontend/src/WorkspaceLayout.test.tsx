@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { RepoError, type FileDropEvent, type RepoClient } from "./ipc/RepoClient";
-import { fakeRepoClient, graphPage } from "./test/fakeRepoClient";
+import { EMPTY_RESULTS, fakeRepoClient, graphPage } from "./test/fakeRepoClient";
 
 // Whole-App renders, like App.test.tsx (#217's slow-machine budget).
 vi.setConfig({ testTimeout: 20_000 });
@@ -68,11 +68,11 @@ describe("the diverged-pull prompt (#636)", () => {
     const pull = within(toolbar()).getByRole("button", { name: "Pull" });
     await waitFor(() => expect(pull).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(pull);
-    const dialog = await screen.findByRole("dialog", { name: "Pull has diverged" });
+    const dialog = await screen.findByRole("dialog", { name: "main and origin/main have diverged" });
     expect(dialog).toHaveTextContent("origin/main");
     expect(pull).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Pull has diverged" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "main and origin/main have diverged" })).toBeNull());
     expect(pull).not.toHaveAttribute("aria-disabled");
   });
 
@@ -83,7 +83,7 @@ describe("the diverged-pull prompt (#636)", () => {
     const pull = within(toolbar()).getByRole("button", { name: "Pull" });
     await waitFor(() => expect(pull).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(pull);
-    const dialog = await screen.findByRole("dialog", { name: "Pull has diverged" });
+    const dialog = await screen.findByRole("dialog", { name: "main and origin/main have diverged" });
     // `showModal()` inside a hidden ancestor is an invisible modal that makes the page inert.
     expect(dialog.closest("[hidden]")).toBeNull();
   });
@@ -107,7 +107,7 @@ describe("a pull git config wants as a merge commit (#740)", () => {
       expect(mergeBranch).toHaveBeenCalledWith("/repos/a", "refs/remotes/origin/main", { fastForward: "Never", squash: false }),
     );
     expect(mergeBranch).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("dialog", { name: "Pull has diverged" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "main and origin/main have diverged" })).toBeNull();
   });
 });
 
@@ -179,7 +179,8 @@ describe("the repository toolbar (#637)", () => {
   });
 });
 
-describe("Apply patch… in the toolbar (#649)", () => {
+// #1006: Apply patch… moved from an icon button in the toolbar into Stash's menu.
+describe("Apply patch… in the toolbar's Stash menu (#649, #1006)", () => {
   it("asks for a patch file, previews it and applies it to the working tree (#658)", async () => {
     const content = { base64: "ZGlmZg==" };
     const openPatchFile = vi.fn(async () => content);
@@ -190,9 +191,11 @@ describe("Apply patch… in the toolbar (#649)", () => {
     const previewPatch = vi.fn(async () => preview);
     const applyPatch = vi.fn(async () => ({ kind: "Applied" as const }));
     await renderApp(layoutClient({ openPatchFile, previewPatch, applyPatch }));
-    const button = within(toolbar()).getByRole("button", { name: "Apply patch…" });
-    await waitFor(() => expect(button).not.toHaveAttribute("aria-disabled"));
-    fireEvent.click(button);
+    expect(within(toolbar()).queryByRole("button", { name: "Apply patch…" })).toBeNull();
+    const menuButton = within(toolbar()).getByRole("button", { name: "More stash options" });
+    await waitFor(() => expect(menuButton).not.toHaveAttribute("aria-disabled"));
+    fireEvent.click(menuButton);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Apply patch…" }));
     const dialog = await screen.findByRole("dialog", { name: "Apply patch" });
     expect(previewPatch).toHaveBeenCalledWith("/repos/a", content);
     expect(applyPatch).not.toHaveBeenCalled();
@@ -256,6 +259,20 @@ describe("the current-branch switcher (#638)", () => {
     expect(options).not.toContain("fix/login");
     fireEvent.click(screen.getByRole("option", { name: "feature" }));
     await waitFor(() => expect(switchBranch).toHaveBeenCalledWith("/repos/a", "feature"));
+  });
+
+  it("names the branch of a repository with no commits yet (#983)", async () => {
+    const headInfo = await EMPTY_RESULTS.getHeadInfo!("/repos/a");
+    await renderApp(
+      layoutClient({
+        listBranches: async () => [],
+        getCurrentUpstream: async () => null,
+        getHeadInfo: async () => ({ ...headInfo, unbornBranch: "main" }),
+      }),
+    );
+    const chip = await within(toolbar()).findByRole("button", { name: /^Current branch main \(no commits yet\)/ });
+    expect(chip).toHaveTextContent("main (no commits yet)");
+    expect(chip).not.toHaveTextContent("no branch");
   });
 
   it("lists recently switched branches first", async () => {
@@ -324,5 +341,43 @@ describe("the current-branch switcher (#638)", () => {
     fireEvent.click(await screen.findByRole("option", { name: "origin/spike" }));
     await waitFor(() => expect(createBranch).toHaveBeenCalledWith("/repos/a", "spike", "origin/spike", true));
     await waitFor(() => expect(setCurrentUpstream).toHaveBeenCalledWith("/repos/a", "origin", "spike"));
+  });
+});
+
+describe("the history column (#1004)", () => {
+  it("starts at 40% of the window", async () => {
+    setWindowWidth(1600);
+    await renderApp(layoutClient());
+    expect(screen.getByRole("separator", { name: "History and diff width" })).toHaveAttribute("aria-valuenow", "640");
+  });
+});
+
+describe("the history column while a conflicted file is open (#980)", () => {
+  const conflictClient = () =>
+    layoutClient({
+      getStatus: async () => [
+        { path: "shared.txt", oldPath: null, staged: false, kind: "Conflicted" },
+        { path: "README.md", oldPath: null, staged: false, kind: "Modified" },
+      ],
+      getConflictHunks: async () => [],
+      getWorkingDiff: async () => [],
+    });
+  const historyWidth = () => screen.getByRole("separator", { name: "History and diff width" });
+  const fileRow = (label: string) =>
+    screen.getByText(
+      (_, element) => element?.tagName === "SPAN" && element.textContent === label && element.closest('[role="option"]') !== null,
+    );
+
+  it("narrows to 240 px for the merge editor, unsaved, and comes back when another file is selected", async () => {
+    setWindowWidth(1280);
+    localStorage.setItem("history-diff-width", "500");
+    await renderApp(conflictClient());
+    await screen.findByText("Save resolution");
+    await waitFor(() => expect(historyWidth()).toHaveAttribute("aria-valuenow", "240"));
+    expect(localStorage.getItem("history-diff-width")).toBe("500");
+
+    fireEvent.click(fileRow("README.md (Modified)"));
+    await waitFor(() => expect(historyWidth()).toHaveAttribute("aria-valuenow", "500"));
+    expect(localStorage.getItem("history-diff-width")).toBe("500");
   });
 });

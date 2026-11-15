@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useState, type ReactNode } from "react";
 import { DEFAULT_DIFF_SETTINGS, type DiffHunk, type DiffSettings } from "../ipc/RepoClient";
@@ -7,6 +7,7 @@ import { DiffViewOptionsProvider } from "../state/DiffViewOptionsProvider";
 import { useDiffViewOptions } from "../state/useDiffViewOptions";
 import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
 import { DiffView } from "./DiffView";
+import { chooseViewOption, viewOptionNames, viewOptionState } from "../test/viewMenu";
 
 const hunks: DiffHunk[] = [
   {
@@ -91,7 +92,7 @@ describe("DiffOptionsToolbar (#640)", () => {
         <WholeFileProbe />
       </DiffViewOptionsProvider>,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Show whole file" }));
+    chooseViewOption("Show whole file");
     expect(screen.getByTestId("whole-file")).toHaveTextContent("true");
     unmount();
 
@@ -100,7 +101,7 @@ describe("DiffOptionsToolbar (#640)", () => {
         <DiffOptionsToolbar />
       </DiffViewOptionsProvider>,
     );
-    expect(screen.getByRole("button", { name: "Show whole file" })).toHaveAttribute("aria-pressed", "true");
+    expect(viewOptionState("Show whole file")).toBe("true");
   });
 
   it("a nested provider shares its parent's options", () => {
@@ -112,7 +113,7 @@ describe("DiffOptionsToolbar (#640)", () => {
         </DiffViewOptionsProvider>
       </DiffViewOptionsProvider>,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Show whole file" }));
+    chooseViewOption("Show whole file");
     expect(screen.getByTestId("whole-file")).toHaveTextContent("true");
   });
 
@@ -144,16 +145,15 @@ describe("DiffOptionsToolbar (#640)", () => {
         <DiffOptionsToolbar />
       </Settings>,
     );
-    const wrap = screen.getByRole("button", { name: "Wrap lines" });
-    expect(wrap).toHaveAttribute("aria-pressed", "mixed");
+    expect(viewOptionState("Wrap lines (automatic)")).toBe("mixed");
 
-    fireEvent.click(wrap);
+    chooseViewOption("Wrap lines (automatic)");
     expect(onUpdate).toHaveBeenLastCalledWith({ wordWrap: "On" });
-    expect(wrap).toHaveAttribute("aria-pressed", "true");
+    expect(viewOptionState("Wrap lines")).toBe("true");
 
-    fireEvent.click(wrap);
+    chooseViewOption("Wrap lines");
     expect(onUpdate).toHaveBeenLastCalledWith({ wordWrap: "Off" });
-    expect(wrap).toHaveAttribute("aria-pressed", "false");
+    expect(viewOptionState("Wrap lines")).toBe("false");
   });
 
   it("Wrap lines on wraps every diff below it", () => {
@@ -165,24 +165,28 @@ describe("DiffOptionsToolbar (#640)", () => {
       </Settings>,
     );
     expect(container.querySelectorAll('[data-wrap="true"]')).toHaveLength(0);
-    fireEvent.click(screen.getByRole("button", { name: "Wrap lines" }));
+    chooseViewOption("Wrap lines");
     expect(container.querySelectorAll('[data-wrap="true"]')).toHaveLength(2);
   });
 
-  it("gives every icon button a tooltip", () => {
+  it("gives every icon button and View's toggles a tooltip", () => {
     render(
       <DiffViewOptionsProvider>
         <DiffOptionsToolbar />
       </DiffViewOptionsProvider>,
     );
-    for (const name of ["Unified view", "Split view", "Wrap lines", "Show whole file", "Ignore whitespace", "Show whitespace", "Syntax highlighting"]) {
+    for (const name of ["Unified view", "Split view", "View diff options"]) {
       expect(screen.getByRole("button", { name })).toHaveAttribute("title");
+    }
+    fireEvent.click(screen.getByRole("button", { name: "View diff options" }));
+    for (const name of ["Wrap lines (automatic)", "Show whole file", "Ignore whitespace", "Show whitespace", "Show syntax highlighting"]) {
+      expect(screen.getByRole("menuitemcheckbox", { name })).toHaveAttribute("title");
     }
   });
 
   it("omits Show whole file when the pane has no such toggle", () => {
     render(<DiffOptionsToolbar wholeFile={false} />);
-    expect(screen.queryByRole("button", { name: "Show whole file" })).not.toBeInTheDocument();
+    expect(viewOptionNames()).not.toContain("Show whole file");
   });
 
   it("disables the context stepper while the whole file is shown", () => {
@@ -191,10 +195,83 @@ describe("DiffOptionsToolbar (#640)", () => {
         <DiffOptionsToolbar />
       </DiffViewOptionsProvider>,
     );
-    act(() => {
-      fireEvent.click(screen.getByRole("button", { name: "Show whole file" }));
-    });
+    // Not inside act(): the menu has to render before its item is picked.
+    chooseViewOption("Show whole file");
     expect(screen.getByRole("button", { name: "More context lines" })).toBeDisabled();
     cleanup();
+  });
+});
+
+describe("the View menu's name, Auto and toggling (#1007)", () => {
+  const viewButton = () => screen.getByText("View").closest("button")!;
+
+  it("is named starting with its visible text", () => {
+    render(
+      <DiffViewOptionsProvider>
+        <DiffOptionsToolbar />
+      </DiffViewOptionsProvider>,
+    );
+    expect(screen.getByRole("button", { name: "View diff options" })).toBe(viewButton());
+  });
+
+  it("says Wrap lines is automatic while on Auto, and stays open, focus in place, after a toggle", () => {
+    const onUpdate = vi.fn();
+    render(
+      <Settings onUpdate={onUpdate}>
+        <DiffOptionsToolbar />
+      </Settings>,
+    );
+    fireEvent.click(viewButton());
+    const wrap = screen.getByRole("menuitemcheckbox", { name: "Wrap lines (automatic)" });
+    wrap.focus();
+    fireEvent.click(wrap);
+    expect(onUpdate).toHaveBeenLastCalledWith({ wordWrap: "On" });
+
+    const on = within(screen.getByRole("menu")).getByRole("menuitemcheckbox", { name: "Wrap lines" });
+    expect(on).toHaveAttribute("aria-checked", "true");
+    expect(on).toHaveFocus();
+  });
+});
+
+describe("the View menu (#1007)", () => {
+  it("keeps the layout and the context lines in the row, and the rarely changed toggles in View, in words", () => {
+    render(
+      <DiffViewOptionsProvider>
+        <DiffOptionsToolbar />
+      </DiffViewOptionsProvider>,
+    );
+    for (const name of ["Unified view", "Split view", "Fewer context lines", "More context lines"]) {
+      expect(screen.getByRole("button", { name })).toBeInTheDocument();
+    }
+    for (const name of ["Wrap lines", "Show whole file", "Ignore whitespace", "Show whitespace", "Syntax highlighting"]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    }
+    expect(screen.getByRole("button", { name: "View diff options" })).toHaveTextContent("View");
+    expect(viewOptionNames()).toEqual(["Wrap lines (automatic)", "Show whole file", "Ignore whitespace", "Show whitespace", "Show syntax highlighting"]);
+  });
+
+  it("marks Wrap lines on Auto as mixed (an A badge), and a choice turns it on", () => {
+    const onUpdate = vi.fn();
+    render(
+      <Settings onUpdate={onUpdate}>
+        <DiffOptionsToolbar />
+      </Settings>,
+    );
+    expect(viewOptionState("Wrap lines (automatic)")).toBe("mixed");
+    chooseViewOption("Wrap lines (automatic)");
+    expect(onUpdate).toHaveBeenLastCalledWith({ wordWrap: "On" });
+    expect(viewOptionState("Wrap lines")).toBe("true");
+  });
+
+  it("toggles syntax highlighting from the menu", () => {
+    const onUpdate = vi.fn();
+    render(
+      <Settings onUpdate={onUpdate}>
+        <DiffOptionsToolbar />
+      </Settings>,
+    );
+    expect(viewOptionState("Show syntax highlighting")).toBe("true");
+    chooseViewOption("Show syntax highlighting");
+    expect(onUpdate).toHaveBeenLastCalledWith({ syntaxHighlight: false });
   });
 });

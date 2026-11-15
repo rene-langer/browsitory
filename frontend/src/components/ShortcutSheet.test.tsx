@@ -40,10 +40,10 @@ describe("ShortcutSheet", () => {
   it("lists the core loop's shortcuts and F6 (#646, #670)", () => {
     render(<ShortcutSheet onClose={vi.fn()} apple={false} />);
     for (const [keys, description] of [
-      ["F5", "Refresh the repository"],
+      ["F5", "Refresh"],
       ["Shift+F5", "Fetch"],
-      ["Ctrl+Shift+L", "Pull the current branch"],
-      ["Ctrl+Shift+K", "Push the current branch"],
+      ["Ctrl+Shift+L", "Pull"],
+      ["Ctrl+Shift+K", "Push current branch"],
       ["Ctrl+Shift+A", "Stage all changes"],
       ["F6", "Move to the next pane"],
       ["Shift+F6", "Move to the previous pane"],
@@ -56,12 +56,12 @@ describe("ShortcutSheet", () => {
 
   it("in VSCode, drops the host caveat from the keys the extension binds, and says where to change them (#679)", () => {
     const { unmount } = render(<ShortcutSheet onClose={vi.fn()} apple={false} vscode={false} />);
-    expect(screen.getByText("Close the active tab (where the host doesn't claim it)")).toBeInTheDocument();
+    expect(screen.getByText("Close tab (where the host doesn't claim it)")).toBeInTheDocument();
     expect(screen.queryByText(/Keyboard Shortcuts/)).toBeNull();
     unmount();
 
     render(<ShortcutSheet onClose={vi.fn()} apple={false} vscode />);
-    expect(screen.getByText("Close the active tab").closest("div")).toHaveTextContent("Ctrl+W");
+    expect(screen.getByText("Close tab").closest("div")).toHaveTextContent("Ctrl+W");
     expect(document.body.textContent).not.toMatch(/where the host/);
     expect(screen.getByText(/search for "Browsitory" in VSCode's Keyboard Shortcuts/)).toBeInTheDocument();
   });
@@ -123,10 +123,10 @@ describe("ShortcutSheet", () => {
       setShortcutChords("conflict-ours", [{ key: "q" }]);
       removeShortcutChord("push", { mod: true, shift: true, key: "k" });
       render(<ShortcutSheet onClose={vi.fn()} apple={false} />);
-      expect(screen.getByText("Refresh the repository").closest("div")).toHaveTextContent("F4");
+      expect(screen.getByText("Refresh").closest("div")).toHaveTextContent("F4");
       expect(screen.getByText("Next conflict").closest("div")).toHaveTextContent("F8");
       expect(screen.getByText("Accept ours (in a conflict block, outside its result)").closest("div")).toHaveTextContent("q");
-      expect(screen.queryByText("Push the current branch")).toBeNull();
+      expect(screen.queryByText("Push current branch")).toBeNull();
     });
   });
 

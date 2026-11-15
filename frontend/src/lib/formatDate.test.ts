@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatAbsoluteDate, formatRelativeDate, formatShortDate } from "./formatDate";
+import { formatAbsoluteDate, formatCompactAge, formatRelativeDate, formatShortDate } from "./formatDate";
 
 describe("formatDate", () => {
   it("formats a relative date in days", () => {
@@ -41,5 +41,24 @@ describe("formatDate with a date format", () => {
     const now = Date.UTC(2026, 0, 10);
     expect(formatRelativeDate(now / 1000 - 3 * 86400, now)).toBe("3 days ago");
     expect(formatRelativeDate(now / 1000 - 2 * 3600, now)).toBe("2 hours ago");
+  });
+});
+
+describe("formatCompactAge (#1004)", () => {
+  const now = Date.UTC(2026, 10, 15, 12, 0, 0);
+  const ago = (seconds: number) => formatCompactAge(now / 1000 - seconds, now);
+
+  it("says how long ago in a few characters, for the history's date column", () => {
+    expect(ago(30)).toBe("now");
+    expect(ago(5 * 60)).toBe("5m");
+    expect(ago(3 * 3600)).toBe("3h");
+    expect(ago(3 * 86400)).toBe("3d");
+    expect(ago(20 * 86400)).toBe("2w");
+    expect(ago(45 * 86400)).toBe("1mo");
+    expect(ago(400 * 86400)).toBe("1y");
+  });
+
+  it("says now for a time ahead of the clock", () => {
+    expect(ago(-3600)).toBe("now");
   });
 });

@@ -417,6 +417,7 @@ pub(super) fn table() -> Vec<((&'static str, Command), &'static str)> {
             "undo(RefsAndIndex, Create branch topic) lock hold gate",
         ),
         (cmd!(GetSwitchConflicts { name: s("topic") }), "read"),
+        (cmd!(CountCommitsOnlyOnBranch { name: s("topic") }), "read"),
         (
             cmd!(StashAndSwitch {
                 name: s("topic"),
@@ -795,6 +796,7 @@ pub(super) fn table() -> Vec<((&'static str, Command), &'static str)> {
                 no_verify: false,
                 author: None,
                 trailers: vec![],
+                message_only: false,
                 operation_id: op(),
                 events: channel().0
             }),

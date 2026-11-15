@@ -2,6 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
 import { withFailureDiagnostics } from "../support/diagnostics";
+import { clickInPage, waitUntilGoneInPage } from "../support/dom";
 import { expandSidebarSection, sidebarState } from "../support/sidebar";
 import { git } from "../support/git";
 import { UI_TIMEOUT } from "../support/timeouts";
@@ -19,8 +20,8 @@ const WORKTREE_PATH = path.join(os.tmpdir(), `browsitory-e2e-${Date.now()}`);
 // `App.tsx` mounts only the active tab's `RepoWorkspace` (inactive tabs are unmounted — PERF-001),
 // so every tab switch tears down one workspace's DOM and mounts a fresh one that renders its
 // `BranchTree`/`WorktreePanel` only after its own refresh lands. Both tabs' `WorktreePanel`s list
-// identical "Open <path>"/"Remove <path>" buttons (the worktree list belongs to the underlying
-// repository, not the tab — see `WorktreePanel.tsx`), so the text alone can't tell the old
+// identical "Actions for <path>" menu buttons (the worktree list belongs to the underlying
+// repository, not the tab — see `WorktreePanel.tsx`), so the label alone can't tell the old
 // workspace's (about-to-unmount) copy from the new one's, and a reference captured before the
 // switch goes stale. This polls until a displayed match exists after the switch, and returns it.
 async function activeElement(selector: string, timeout = UI_TIMEOUT) {
@@ -56,47 +57,68 @@ function activeCurrentBranchButton(branch: string) {
   return activeElement(`//li[@role="button" and contains(., '${branch} (current)')]`);
 }
 
+/** The ⋯ menu button of the worktree at `worktreePath`, in the active tab's workspace. */
+function worktreeActions(worktreePath: string) {
+  return `[data-active-repo="true"] button[aria-label="Actions for ${worktreePath}"]`;
+}
+
+/**
+ * Opens the ⋯ menu of the worktree at `worktreePath` in the active tab and picks `item` (#1011).
+ * The button is transparent until its row is hovered or focused (like the Stashes rows), which
+ * WebDriver's isDisplayed() counts as hidden: it is clicked in the page, once it renders.
+ */
+async function worktreeMenuItem(worktreePath: string, item: string) {
+  await clickInPage(worktreeActions(worktreePath));
+  const menuItem = await $(`button=${item}`);
+  await menuItem.waitForExist();
+  await menuItem.click();
+}
+
 describe("Browsitory worktrees", () => {
   before(() => {
     git(E2E_REPO_PATH, "commit", "--allow-empty", "-m", "e2e: seed commit for worktree");
   });
 
   it("creates, opens, returns from, and removes a linked worktree", async () => {
-    // "Worktrees" holds the create form; "Branches" holds the current-branch row this test reads
-    // text from throughout. Both default closed.
+    // "Worktrees" holds the list and its "+" (New worktree…); "Branches" holds the current-branch
+    // row this test reads text from throughout. Both default closed.
     await expandSidebarSection("Worktrees");
     await expandSidebarSection("Branches");
 
-    const createForm = await $("form[aria-label='Create worktree']");
+    const newWorktree = await $('button[aria-label="New worktree…"]');
     // On failure, the sidebar's sections (which are open) and a screenshot (#824).
-    await withFailureDiagnostics("worktree-create-form", () => createForm.waitForExist(), sidebarState);
+    await withFailureDiagnostics("worktree-new-button", () => newWorktree.waitForExist(), sidebarState);
     const currentBranchButton = await $('//li[@role="button" and contains(., \' (current)\')]');
     await currentBranchButton.waitForExist();
     // The row reads "<name> (current)" optionally followed by ahead/behind counts (↑n ↓m).
-    const mainBranch = (await currentBranchButton.getText()).replace(/ \(current\).*$/s, "");
-    const nameInput = await $("aria/Worktree name");
-    await nameInput.setValue(WORKTREE_NAME);
-    await (await $("aria/Worktree path")).setValue(WORKTREE_PATH);
-    await (await $("aria/Branch")).setValue(WORKTREE_BRANCH);
-    await (await $("aria/Start point")).setValue("HEAD");
-    await (await createForm.$("button=Create worktree")).click();
-    await browser.waitUntil(async () => (await nameInput.getValue()) === "", { timeoutMsg: "expected worktree creation to complete" });
+    // From the DOM text, not getText(): WebKitWebDriver's visible text leaves out a branch row's
+    // name (see branch-management.spec.ts).
+    const rowText = String(await currentBranchButton.getProperty("textContent")).replace(/\s+/g, " ").trim();
+    const mainBranch = rowText.replace(/ \(current\).*$/s, "");
+    expect(mainBranch).not.toBe("");
+    await newWorktree.click();
+    const createDialog = await $("dialog[aria-label='New worktree']");
+    await createDialog.waitForExist();
+    await (await createDialog.$("aria/Branch")).setValue(WORKTREE_BRANCH);
+    await (await createDialog.$("aria/Start point")).setValue("HEAD");
+    await (await createDialog.$("aria/Worktree path")).setValue(WORKTREE_PATH);
+    await (await createDialog.$("aria/Worktree name")).setValue(WORKTREE_NAME);
+    await (await createDialog.$("button=Create worktree")).click();
+    await waitUntilGoneInPage("dialog[aria-label='New worktree']");
 
-    const openLinkedWorktree = await $(`button=Open ${WORKTREE_PATH}`);
-    await openLinkedWorktree.waitForExist();
-    await expect(openLinkedWorktree).toBeExisting();
-
-    await openLinkedWorktree.click();
+    await (await $(worktreeActions(WORKTREE_PATH))).waitForExist();
+    await worktreeMenuItem(WORKTREE_PATH, "Open in new tab");
     // The row may also carry ahead/behind counts (↑n ↓m) after the name.
-    await expect(await activeCurrentBranchButton(WORKTREE_BRANCH_LEAF)).toHaveText(expect.stringContaining(`${WORKTREE_BRANCH_LEAF} (current)`));
-    const openMainWorktree = await activeElement(`button=Open ${E2E_REPO_PATH}`);
+    // The wait is the check: a displayed row whose DOM text has "<leaf> (current)" (not
+    // toHaveText, which reads WebDriver's visible text; see mainBranch above).
+    await activeCurrentBranchButton(WORKTREE_BRANCH_LEAF);
 
-    await openMainWorktree.click();
-    await expect(await activeCurrentBranchButton(mainBranch)).toHaveText(expect.stringContaining(`${mainBranch} (current)`));
-    const removeLinkedWorktree = await activeElement(`button=Remove ${WORKTREE_PATH}`);
+    await worktreeMenuItem(E2E_REPO_PATH, "Open in new tab");
+    await activeCurrentBranchButton(mainBranch);
 
-    await removeLinkedWorktree.click();
-    const removalDialog = await $("aria/Remove worktree " + WORKTREE_PATH);
+    await worktreeMenuItem(WORKTREE_PATH, "Remove…");
+    // The dialog element: its title has the same name (ConfirmDialog, #987).
+    const removalDialog = await $(`dialog[aria-label="Remove worktree ${WORKTREE_PATH}"]`);
     await removalDialog.waitForExist();
     await (await removalDialog.$("button=Remove worktree")).click();
     // Not a whole-DOM `aria/${WORKTREE_PATH}` absence check: the linked worktree's own tab
@@ -105,15 +127,7 @@ describe("Browsitory worktrees", () => {
     // `title` attribute still references the removed path — so that check would never pass.
     // What actually matters here is that the *active* tab's own (live, refreshed) worktree list
     // no longer lists it.
-    await browser.waitUntil(
-      async () => {
-        const candidates = await $$(`button=Open ${WORKTREE_PATH}`);
-        for (const candidate of candidates) {
-          if (await candidate.isDisplayed()) return false;
-        }
-        return true;
-      },
-      { timeoutMsg: "expected the linked worktree to no longer be listed in the active tab" },
-    );
+    // Not isDisplayed(): the ⋯ button is transparent until hovered, so that would pass at once.
+    await waitUntilGoneInPage(worktreeActions(WORKTREE_PATH));
   });
 });

@@ -4,6 +4,28 @@
   margin-block: 10vh var(--space-4);
 }
 
+/* Over a repository (#1013): the overlay is the dialog, so no band above and no card inside it. */
+.inDialog > section {
+  border: none;
+  border-radius: 0;
+}
+
+.closeButton {
+  display: inline-flex;
+  padding: var(--space-1);
+  color: var(--color-text-muted);
+  background: transparent;
+}
+
+/* A recent repository already open as a tab (#1013): a click switches to that tab. */
+.openBadge {
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  background: var(--color-bg-subtle);
+}
+
 .list {
   list-style: none;
   margin: var(--space-3) 0 0;
@@ -77,6 +99,14 @@
 
 .pinned {
   color: var(--color-accent-text);
+}
+
+/* Locate… (#998), in place of Pin on a row whose folder is gone. */
+.locate {
+  flex: none;
+  margin-inline-end: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
 }
 
 .repoName {

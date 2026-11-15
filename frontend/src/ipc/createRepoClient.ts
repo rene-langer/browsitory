@@ -292,6 +292,8 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
       call<StashSwitchOutcome>("stash_and_switch", { repoPath, name, reapply }),
     setIdentity: (repoPath: string, name: string, email: string, global: boolean) =>
       call<void>("set_identity", { repoPath, name, email, global }),
+    countCommitsOnlyOnBranch: (repoPath: string, name: string) =>
+      call<number>("count_commits_only_on_branch", { repoPath, name }),
     deleteBranch: (repoPath: string, name: string, force: boolean) =>
       call<void>("delete_branch", { repoPath, name, force }),
     renameBranch: (repoPath: string, oldName: string, newName: string) =>
@@ -406,6 +408,8 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
         noVerify,
         author: options?.author ?? null,
         trailers: options?.trailers ?? [],
+        // Sent only for Reword… on HEAD (#981); absent, the backend amends with the index.
+        ...(options?.messageOnly === true ? { messageOnly: true } : {}),
       }),
     getFileSides: (repoPath: string, path: string, source: DiffSource) =>
       call<FileSides>("get_file_sides", { repoPath, path, source }),

@@ -4,7 +4,7 @@ import { UncommittedFileViewer } from "./UncommittedFileViewer";
 import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
 import { NO_HEAD_INFO, type DiscardRequest, type SelectionActionKind } from "./diffPaneShared";
 import { stashBlockReason } from "../lib/operationStatus";
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { useVirtualRows } from "./useVirtualRows";
 import type { GraphCommit, HeadInfo, HunkOptions, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
@@ -94,7 +94,6 @@ export function UncommittedDiffPane({
   focusCommitMessage = false,
   clearCommitMessage = null,
   rebaseProgress,
-  sequencePending = false,
   refreshGeneration,
   discardRequest,
   onDiscardRequestChange: setDiscardRequest,
@@ -104,7 +103,13 @@ export function UncommittedDiffPane({
   initialCommitDraft,
   selectionBusyReason,
   discardBlockedReason,
+  onConflictFileOpenChange,
 }: {
+  /**
+   * True while a conflicted file is open in the merge editor, false once it isn't (another file,
+   * resolved, the pane gone): the workspace narrows the history column meanwhile (#980).
+   */
+  onConflictFileOpenChange?: (open: boolean) => void;
   selectionBusyReason: string | null;
   discardBlockedReason: string | null;
   repoPath: string;
@@ -137,8 +142,6 @@ export function UncommittedDiffPane({
   // One-shot CommitBox clear request (see its `clearMessage`).
   clearCommitMessage?: string | null;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
-  // An action is running: the sequence's Continue/Abort are disabled (no double submit).
-  sequencePending?: boolean;
 }) {
   const actions = useWorkspaceActions();
   const {
@@ -396,22 +399,36 @@ export function UncommittedDiffPane({
     }
   }
   const currentKey = currentEntry === undefined ? null : entryKey(currentEntry);
+  // A conflicted file is open (#980): the file list collapses to the conflicts, and the diff
+  // options (which don't apply to the merge editor) go, until "Show all changes" for this file.
+  const conflictOpen = currentEntry !== undefined && currentEntry.kind === "Conflicted";
+  const [fileListExpandedFor, setFileListExpandedFor] = useState<string | null>(null);
+  const fileListCollapsed = conflictOpen && fileListExpandedFor !== currentKey;
+  const fileGroupsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!conflictOpen || onConflictFileOpenChange === undefined) return;
+    onConflictFileOpenChange(true);
+    return () => onConflictFileOpenChange(false);
+  }, [conflictOpen, onConflictFileOpenChange]);
 
   // A row the window leaves out is scrolled to by its place in the list.
   const scrollToCurrent = useRef<() => void>(() => {});
-  useEffect(() => {
+  useLayoutEffect(() => {
     scrollToCurrent.current = () => {
       if (currentEntry === undefined || treeLayout) return;
       if (currentEntry.staged) stagedWindow.scrollToIndex(stagedEntries.indexOf(currentEntry));
       else unstagedWindow.scrollToIndex(unstagedEntries.indexOf(currentEntry) - conflictEntries.length);
     };
   });
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (currentKey === null) return;
+    // The collapsed list (#980) starts at its top, where the conflicts are, whatever it was
+    // scrolled to before; then the current row comes into view.
+    if (fileListCollapsed && fileGroupsRef.current !== null) fileGroupsRef.current.scrollTop = 0;
     const row = rowRefs.current[currentKey];
     if (row) row.scrollIntoView?.({ block: "nearest" });
     else scrollToCurrent.current();
-  }, [currentKey]);
+  }, [currentKey, fileListCollapsed]);
 
   const isEntryCurrent = (entry: StatusEntry) => currentEntry === entry;
   const isEntrySelected = (entry: StatusEntry) =>
@@ -973,7 +990,7 @@ export function UncommittedDiffPane({
         </div>
       )}
       {status.length > 0 && (
-        <div className={styles.fileGroups}>
+        <div ref={fileGroupsRef} className={styles.fileGroups} data-collapsed={conflictOpen ? String(fileListCollapsed) : undefined}>
           <div className={styles.fileListBar}>
             <input
               type="search"
@@ -1007,6 +1024,15 @@ export function UncommittedDiffPane({
               <span className={styles.conflictBadge}>
                 {conflictCount} conflict{conflictCount === 1 ? "" : "s"}
               </span>
+            )}
+            {conflictOpen && (
+              <button
+                type="button"
+                aria-expanded={!fileListCollapsed}
+                onClick={() => setFileListExpandedFor(fileListCollapsed ? currentKey : null)}
+              >
+                Show all changes
+              </button>
             )}
             {/* One group (#832): it wraps as a whole under the title, never one button alone. */}
             <div role="group" aria-label="Changes actions" className={styles.groupActions}>
@@ -1042,6 +1068,7 @@ export function UncommittedDiffPane({
               )}
               <button
                 type="button"
+                data-tone="danger"
                 onClick={() =>
                   setDiscardRequest(filtering ? { kind: "all", paths: shownDiscardablePaths } : { kind: "all" })
                 }
@@ -1052,6 +1079,7 @@ export function UncommittedDiffPane({
               {untrackedCount > 0 && (
                 <button
                   type="button"
+                  data-tone="danger"
                   onClick={() =>
                     setDiscardRequest(filtering ? { kind: "untracked", paths: shownUntrackedPaths } : { kind: "untracked" })
                   }
@@ -1105,7 +1133,7 @@ export function UncommittedDiffPane({
       )}
       {currentEntry !== undefined && currentEntry.untrackedFolder !== true && (
         <>
-          <DiffOptionsToolbar sticky />
+          {!conflictOpen && <DiffOptionsToolbar sticky />}
           <UncommittedFileViewer
             key={currentKey}
             repoPath={repoPath}
@@ -1129,7 +1157,7 @@ export function UncommittedDiffPane({
       )}
       {discardRequest?.kind === "all" && discardAllEntries.length > 0 && (
         <ConfirmDialog
-          ariaLabel={discardRequest.paths === undefined ? "Discard all changes" : "Discard shown changes"}
+          title={discardRequest.paths === undefined ? "Discard all changes" : "Discard shown changes"}
           message={
             discardRequest.paths === undefined ? (
               discardAllConfirmMessage(discardAllEntries, true)
@@ -1145,6 +1173,7 @@ export function UncommittedDiffPane({
               </>
             )
           }
+          tone="danger"
           confirmLabel={
             discardRequest.paths === undefined
               ? "Discard all"
@@ -1161,7 +1190,7 @@ export function UncommittedDiffPane({
       )}
       {discardRequest?.kind === "untracked" && deleteUntrackedPaths.length > 0 && (
         <ConfirmDialog
-          ariaLabel="Delete untracked files"
+          title="Delete untracked files"
           message={
             <>
               <p>{deleteUntrackedConfirmMessage(
@@ -1183,6 +1212,7 @@ export function UncommittedDiffPane({
             </>
           }
           confirmLabel={`Delete ${deleteUntrackedPaths.length} ${deleteUntrackedPaths.length === 1 ? "file" : "files"}`}
+          tone="danger"
           confirmReason={discardBlockedReason}
           onConfirm={() => {
             if (discardBlockedReason !== null) return;
@@ -1194,9 +1224,10 @@ export function UncommittedDiffPane({
       )}
       {discardRequest?.kind === "files" && discardFilesEntries.length > 0 && (
         <ConfirmDialog
-          ariaLabel="Discard selected changes"
+          title="Discard selected changes"
           message={discardAllConfirmMessage(discardFilesEntries)}
           confirmLabel={`Discard ${discardFilesEntries.length} ${discardFilesEntries.length === 1 ? "file" : "files"}`}
+          tone="danger"
           confirmReason={discardFilesBlockedReason}
           onConfirm={() => {
             if (discardFilesBlockedReason !== null) return;
@@ -1209,8 +1240,9 @@ export function UncommittedDiffPane({
       )}
       {discardFileEntry !== undefined && (
         <ConfirmDialog
-          ariaLabel="Discard changes"
+          title="Discard changes"
           message={discardConfirmMessage(discardFileEntry)}
+          tone="danger"
           confirmLabel={
             discardFileEntry.untrackedFolder === true
               ? "Delete folder"
@@ -1236,8 +1268,8 @@ export function UncommittedDiffPane({
         amendMode={amendMode}
         headInfo={headInfo}
         rebaseProgress={rebaseProgress}
-        sequencePending={sequencePending}
         stagedCount={stagedCount}
+        unstagedCount={allUnstagedCount}
         conflictCount={conflictCount}
         initialCommitDraft={initialCommitDraft}
         focusCommitMessage={focusCommitMessage}

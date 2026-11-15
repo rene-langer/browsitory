@@ -1539,8 +1539,11 @@ pub fn current_upstream_cached(
     // Unlike `current_local_branch_name`'s other callers (pull, set/clear upstream — all
     // genuine user actions that don't make sense without a current branch), this is a read-only
     // status query polled on every `refresh()`. A detached HEAD (normal mid-rebase or mid-merge)
-    // just has no upstream to report, not an error.
-    if repo.head_detached()? {
+    // just has no upstream to report, not an error. Nor has a branch with no commit yet (a new
+    // repository, #983): `repo.head()` fails with UnbornBranch there.
+    let unborn =
+        matches!(repo.head(), Err(ref error) if error.code() == git2::ErrorCode::UnbornBranch);
+    if unborn || repo.head_detached()? {
         return Ok(None);
     }
     let local_branch = current_local_branch_name(repo)?;

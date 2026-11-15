@@ -73,11 +73,11 @@ describe("OperationLogDialog (#889)", () => {
     const list = await screen.findByRole("list", { name: "Operations" });
     const buttons = within(list).getAllByRole("button");
     expect(buttons).toHaveLength(3);
-    expect(buttons[0]).toHaveAccessibleName(/^Push origin, Failed/);
+    expect(buttons[0]).toHaveAccessibleName(/^Push to origin, Failed/);
     expect(buttons[0]).toHaveTextContent("1.5 s");
     expect(buttons[1]).toHaveAccessibleName(/^Commit Add a file, Succeeded/);
     expect(buttons[1]).toHaveTextContent("250 ms");
-    expect(buttons[2]).toHaveAccessibleName(/^Fetch origin, Running/);
+    expect(buttons[2]).toHaveAccessibleName(/^Fetch from origin, Running/);
   });
 
   it("says so when nothing was logged yet", async () => {
@@ -112,10 +112,10 @@ describe("OperationLogDialog (#889)", () => {
     ]);
     renderDialog(repoClient);
 
-    fireEvent.click(await screen.findByRole("button", { name: /^Push origin/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Push to origin/ }));
 
     const details = screen.getByRole("region", { name: "Operation details" });
-    expect(within(details).getByRole("heading", { name: "Push origin" })).toBeInTheDocument();
+    expect(within(details).getByRole("heading", { name: "Push to origin" })).toBeInTheDocument();
     expect(details).toHaveTextContent("Failed");
     expect(details).toHaveTextContent("The pre-push hook failed.");
     expect(details).toHaveTextContent("Skip hooks");
@@ -138,7 +138,7 @@ describe("OperationLogDialog (#889)", () => {
     renderDialog(repoClient, "latestFailed");
 
     const details = await screen.findByRole("region", { name: "Operation details" });
-    await waitFor(() => expect(within(details).getByRole("heading", { name: "Fetch origin" })).toBeInTheDocument());
+    await waitFor(() => expect(within(details).getByRole("heading", { name: "Fetch from origin" })).toBeInTheDocument());
     expect(details).toHaveTextContent("could not resolve host");
   });
 
@@ -250,7 +250,7 @@ describe("OperationLogDialog's Run again (#890)", () => {
       entry(2, "Commit", { outcome: "Failed" }),
       entry(1, "Fetch", { target: "backup", outcome: "Cancelled", rerun: fetchAgain }),
     ]);
-    for (const name of [/^Fetch origin/, /^Commit/, /^Fetch backup/]) {
+    for (const name of [/^Fetch from origin/, /^Commit/, /^Fetch from backup/]) {
       fireEvent.click(await screen.findByRole("button", { name }));
       const details = screen.getByRole("region", { name: "Operation details" });
       expect(within(details).queryByRole("button", { name: "Run again" })).toBeNull();
@@ -269,5 +269,80 @@ describe("OperationLogDialog's Run again (#890)", () => {
     expect(details).toHaveTextContent("The remote origin no longer exists.");
     fireEvent.click(button);
     expect(run).not.toHaveBeenCalled();
+  });
+});
+
+describe("OperationLogDialog's details, cause first (#1022)", () => {
+  function renderEntry(logged: OperationLogEntry) {
+    const { repoClient } = client([page([logged])]);
+    render(
+      <OperationLogDialog
+        client={repoClient}
+        repoPath="/repo"
+        focus="latestFailed"
+        onClose={() => {}}
+        runAgain={{ run: vi.fn(), blockedReason: () => null }}
+      />,
+    );
+    return screen.findByRole("region", { name: "Operation details" });
+  }
+
+  /** Where each of `parts` starts in `element`'s text; -1 when missing. */
+  const positions = (element: HTMLElement, parts: string[]) => parts.map((part) => element.textContent!.indexOf(part));
+
+  it("shows the cause in the app's words, then git's own text, then the facts, then Run again", async () => {
+    const details = await renderEntry(
+      entry(1, "Pull", {
+        outcome: "Failed",
+        errorKind: "DirtyWorktree",
+        transferError: "TransferFailed",
+        message: "cannot pull with a dirty worktree",
+        rerun: { kind: "Pull" },
+      }),
+    );
+    await waitFor(() => expect(details).toHaveTextContent("cannot pull with a dirty worktree"));
+    const order = positions(details, [
+      "Commit or stash your changes, then try again.",
+      "cannot pull with a dirty worktree",
+      "Result",
+      "Run again",
+    ]);
+    expect(order.every((position) => position >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  it("names a transfer's own failure as the cause", async () => {
+    const details = await renderEntry(
+      entry(1, "Push", { target: "origin", outcome: "Failed", transferError: "NonFastForward", message: "rejected" }),
+    );
+    await waitFor(() => expect(details).toHaveTextContent("rejected"));
+    const order = positions(details, ["The remote has commits this branch doesn't", "rejected", "Result"]);
+    expect(order.every((position) => position >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  it("copies the details with git's full text, libgit2's codes included", async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    try {
+      const raw = "failed to resolve path '/gone': No such file or directory; class=Os (2); code=NotFound (-3)";
+      const details = await renderEntry(entry(1, "Fetch", { target: "broken", outcome: "Failed", message: raw }));
+      await waitFor(() => expect(details).toHaveTextContent("No such file or directory"));
+      fireEvent.click(within(details).getByRole("button", { name: "Copy details" }));
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringContaining(raw)));
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining("Fetch from broken"));
+    } finally {
+      Reflect.deleteProperty(navigator, "clipboard");
+    }
+  });
+
+  it.each([
+    ["Fetch", "broken", "Fetch from broken"],
+    ["Push", "origin", "Push to origin"],
+    ["Push tags", "origin", "Push tags to origin"],
+    ["Delete branch", "old", "Delete branch old"],
+  ])("labels %s on %s as %s", async (name, target, label) => {
+    await renderEntry(entry(1, name, { target }));
+    expect(await screen.findByRole("heading", { name: label })).toBeInTheDocument();
   });
 });

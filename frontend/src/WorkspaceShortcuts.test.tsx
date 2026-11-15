@@ -119,7 +119,8 @@ describe("global shortcuts for the core loop (#646)", () => {
         }),
       }),
     );
-    fireEvent.click(screen.getByRole("tab", { name: "b" }));
+    // By the repository's name, whatever its changes (#1028).
+    fireEvent.click(screen.getByRole("tab", { name: /^b(,|$)/ }));
     await waitFor(() => expect(view.container.querySelectorAll("[data-active-repo]")).toHaveLength(2));
     await waitFor(() => expect(getStatus).toHaveBeenCalledWith("/repos/b"));
     await screen.findByRole("listbox", { name: "Unstaged changes" });
@@ -183,7 +184,8 @@ describe("switching tabs by keyboard (#646)", () => {
     });
   const selectedTab = () => screen.getByRole("tab", { selected: true });
   const whenActive = async (name: string) => {
-    await waitFor(() => expect(selectedTab()).toHaveAccessibleName(name));
+    // The repository's name; a tab with changes adds them after a comma (#1028).
+    await waitFor(() => expect(selectedTab()).toHaveAccessibleName(new RegExp(`^${name}(,|$)`)));
     await waitFor(() =>
       expect(document.querySelector('[data-active-repo="true"]')?.getAttribute("aria-labelledby")).toBe(selectedTab().id),
     );

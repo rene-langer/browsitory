@@ -106,7 +106,7 @@ describe("useAppState", () => {
     await act(() => result.current.deleteBranch("feature", false));
 
     expect(result.current.state.branches).toEqual([branchA]);
-    expect(result.current.state.error).toBe("branch has unmerged changes");
+    expect(result.current.state.error).toBe("Couldn't delete branch feature: branch has unmerged changes");
   });
 
   it("createBranch adds a not-yet-current branch to state before the backend call resolves", async () => {
@@ -151,7 +151,7 @@ describe("useAppState", () => {
 
     const failure = await act(() => result.current.createBranch("feature", "main"));
 
-    expect(failure).toBe("branch already exists");
+    expect(failure).toBe("Couldn't create branch feature: branch already exists");
     expect(result.current.state.branches).toEqual([]);
   });
 
@@ -165,7 +165,7 @@ describe("useAppState", () => {
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     await act(() => result.current.refresh());
 
-    let renamePromise!: Promise<void>;
+    let renamePromise!: Promise<string | null>;
     act(() => {
       renamePromise = result.current.renameBranch("old-name", "new-name");
     });

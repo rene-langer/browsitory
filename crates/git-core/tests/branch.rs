@@ -186,6 +186,127 @@ fn delete_branch_without_force_fails_on_an_unmerged_branch() {
         .any(|b| b.name == "feature"));
 }
 
+/// `main` with one commit, `feature` from it with `extra` commits of its own, HEAD back on
+/// `main`.
+fn repo_with_feature(extra: usize) -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    repo.set_head("refs/heads/main").unwrap();
+    write_file(dir.path(), "file.txt", "v0");
+    commit_all(&repo, "initial commit");
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    for n in 0..extra {
+        write_file(dir.path(), "file.txt", &format!("v{}", n + 1));
+        commit_all(&repo, &format!("feature commit {n}"));
+    }
+    git_core::branch::switch_branch(&repo, "main").unwrap();
+    (dir, repo)
+}
+
+#[test]
+fn commits_only_on_branch_counts_the_commits_no_other_branch_has() {
+    // Delete branch asks first when commits would be left on no branch (#996).
+    let (_dir, repo) = repo_with_feature(2);
+
+    assert_eq!(
+        git_core::branch::commits_only_on_branch(&repo, "feature").unwrap(),
+        2
+    );
+}
+
+#[test]
+fn commits_only_on_branch_is_zero_for_a_branch_merged_into_head() {
+    let (_dir, repo) = repo_with_feature(0);
+
+    assert_eq!(
+        git_core::branch::commits_only_on_branch(&repo, "feature").unwrap(),
+        0
+    );
+}
+
+#[test]
+fn commits_only_on_branch_counts_another_local_branch_as_keeping_them() {
+    // Not merged into HEAD, but `keep` still has the commits: deleting loses nothing.
+    let (_dir, repo) = repo_with_feature(1);
+    let tip = repo
+        .find_branch("feature", git2::BranchType::Local)
+        .unwrap()
+        .get()
+        .peel_to_commit()
+        .unwrap();
+    repo.branch("keep", &tip, false).unwrap();
+
+    assert_eq!(
+        git_core::branch::commits_only_on_branch(&repo, "feature").unwrap(),
+        0
+    );
+}
+
+#[test]
+fn commits_only_on_branch_counts_a_remote_tracking_branch_as_keeping_them() {
+    let (_dir, repo) = repo_with_feature(3);
+    let feature = repo
+        .find_branch("feature", git2::BranchType::Local)
+        .unwrap()
+        .get()
+        .peel_to_commit()
+        .unwrap();
+    // origin/feature has all but the newest commit.
+    let parent = feature.parent_id(0).unwrap();
+    repo.reference("refs/remotes/origin/feature", parent, true, "test")
+        .unwrap();
+
+    assert_eq!(
+        git_core::branch::commits_only_on_branch(&repo, "feature").unwrap(),
+        1
+    );
+}
+
+#[test]
+fn commits_only_on_branch_fails_for_a_missing_branch() {
+    let (_dir, repo) = repo_with_feature(0);
+
+    assert!(git_core::branch::commits_only_on_branch(&repo, "nope").is_err());
+}
+
+#[test]
+fn commits_only_on_branch_counts_a_tag_as_keeping_them() {
+    // A tag keeps its commit and the history behind it reachable: deleting loses nothing there.
+    let (_dir, repo) = repo_with_feature(3);
+    let feature = repo
+        .find_branch("feature", git2::BranchType::Local)
+        .unwrap()
+        .get()
+        .peel_to_commit()
+        .unwrap();
+    let parent = repo.find_commit(feature.parent_id(0).unwrap()).unwrap();
+    repo.tag_lightweight("v1", parent.as_object(), false)
+        .unwrap();
+
+    assert_eq!(
+        git_core::branch::commits_only_on_branch(&repo, "feature").unwrap(),
+        1
+    );
+}
+
+#[test]
+fn commits_only_on_branch_counts_an_annotated_tag_as_keeping_them() {
+    let (_dir, repo) = repo_with_feature(2);
+    let feature = repo
+        .find_branch("feature", git2::BranchType::Local)
+        .unwrap()
+        .get()
+        .peel_to_commit()
+        .unwrap();
+    let signature = repo.signature().unwrap();
+    repo.tag("v2", feature.as_object(), &signature, "release", false)
+        .unwrap();
+
+    assert_eq!(
+        git_core::branch::commits_only_on_branch(&repo, "feature").unwrap(),
+        0
+    );
+}
+
 #[test]
 fn delete_branch_with_force_deletes_an_unmerged_branch() {
     let (dir, repo) = init_repo();

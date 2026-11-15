@@ -126,6 +126,45 @@ describe("RepoPicker recent repositories (#690)", () => {
     expect(onOpenRepo).not.toHaveBeenCalled();
   });
 
+  it("Locate… picks the folder's new place, replaces the entry and opens it (#998)", async () => {
+    const onOpenRepo = vi.fn();
+    const removeRecentRepo = vi.fn(async () => {});
+    const pickRepoFolder = vi.fn(async () => "/moved/gone");
+    const client = fakeClient({
+      listRecentRepos: async () => ["/repo/a", "/repo/gone"],
+      listMissingRecentRepos: async () => ["/repo/gone"],
+      removeRecentRepo,
+      pickRepoFolder,
+    });
+    render(<RepoPicker client={client} onOpenRepo={onOpenRepo} {...workspaceProps()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Locate gone…" }));
+
+    await waitFor(() => expect(onOpenRepo).toHaveBeenCalledWith("/moved/gone"));
+    expect(removeRecentRepo).toHaveBeenCalledWith("/repo/gone");
+    await waitFor(() => expect(screen.queryByText("/repo/gone")).toBeNull());
+  });
+
+  it("Locate… keeps the entry when the folder dialog is cancelled (#998)", async () => {
+    const onOpenRepo = vi.fn();
+    const removeRecentRepo = vi.fn(async () => {});
+    const pickRepoFolder = vi.fn(async () => null);
+    const client = fakeClient({
+      listRecentRepos: async () => ["/repo/gone"],
+      listMissingRecentRepos: async () => ["/repo/gone"],
+      removeRecentRepo,
+      pickRepoFolder,
+    });
+    render(<RepoPicker client={client} onOpenRepo={onOpenRepo} {...workspaceProps()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Locate gone…" }));
+
+    await waitFor(() => expect(pickRepoFolder).toHaveBeenCalled());
+    expect(removeRecentRepo).not.toHaveBeenCalled();
+    expect(onOpenRepo).not.toHaveBeenCalled();
+    expect(screen.getByText("/repo/gone")).toBeInTheDocument();
+  });
+
   it("keeps the entry and shows the error when removing fails", async () => {
     const client = fakeClient({
       listRecentRepos: async () => ["/repo/a"],
@@ -141,7 +180,8 @@ describe("RepoPicker recent repositories (#690)", () => {
     expect(screen.getByText("/repo/a")).toBeInTheDocument();
   });
 
-  it("marks a recent repository whose folder is gone, and still opens it on click", async () => {
+  // #998: opening it could only fail, so the row doesn't open; Locate… takes Pin's place.
+  it("marks a recent repository whose folder is gone; it doesn't open, and offers Locate… instead of Pin", async () => {
     const onOpenRepo = vi.fn();
     const client = fakeClient({
       listRecentRepos: async () => ["/repo/a", "/repo/gone"],
@@ -149,11 +189,14 @@ describe("RepoPicker recent repositories (#690)", () => {
     });
     render(<RepoPicker client={client} onOpenRepo={onOpenRepo} {...workspaceProps()} />);
 
-    const gone = await screen.findByRole("button", { name: /^gone Folder not found/ });
+    expect(await screen.findByRole("button", { name: "Locate gone…" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^a\/repo\/a$/ })).toBeInTheDocument();
     expect(screen.getAllByText("Folder not found")).toHaveLength(1);
-    fireEvent.click(gone);
-    expect(onOpenRepo).toHaveBeenCalledWith("/repo/gone");
+    expect(screen.queryByRole("button", { name: /^gone Folder not found/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Pin gone" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Remove gone from recent repositories" })).toBeInTheDocument();
+    fireEvent.click(screen.getByText("/repo/gone"));
+    expect(onOpenRepo).not.toHaveBeenCalled();
   });
 
   it("lists every recent repository as present when the missing check fails", async () => {
@@ -200,6 +243,30 @@ describe("RepoPicker recent repositories (#690)", () => {
 
     fireEvent.change(filter, { target: { value: "nothing" } });
     expect(screen.getAllByText("Nothing matches “nothing”.")).toHaveLength(2);
+  });
+
+  it("starts keyboard focus in the filter once the recent repositories are listed (#1029)", async () => {
+    const client = fakeClient({ listRecentRepos: async () => ["/code/widget"] });
+    render(<RepoPicker client={client} onOpenRepo={vi.fn()} {...workspaceProps()} />);
+    await screen.findByText("/code/widget");
+    expect(screen.getByRole("searchbox", { name: "Filter repositories and workspaces" })).toHaveFocus();
+  });
+
+  it("starts on Open repository… when there is nothing to filter (#1029)", async () => {
+    render(<RepoPicker client={fakeClient()} onOpenRepo={vi.fn()} {...workspaceProps()} />);
+    await screen.findByText("No recent repositories");
+    expect(screen.getByRole("button", { name: "Open repository…" })).toHaveFocus();
+  });
+
+  it("leaves focus where it is when something else already has it (#1029)", async () => {
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    outside.focus();
+    const client = fakeClient({ listRecentRepos: async () => ["/code/widget"] });
+    render(<RepoPicker client={client} onOpenRepo={vi.fn()} {...workspaceProps()} />);
+    await screen.findByText("/code/widget");
+    expect(outside).toHaveFocus();
+    outside.remove();
   });
 
   it("shows no filter while there is nothing to filter", async () => {
@@ -295,8 +362,8 @@ describe("RepoPicker pinned repositories (#766)", () => {
     });
     render(<RepoPicker client={client} onOpenRepo={vi.fn()} {...workspaceProps()} />);
 
-    expect(await screen.findByRole("button", { name: /^gone Folder not found/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Unpin gone" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Locate gone…" })).toBeInTheDocument();
+    expect(screen.getAllByText("Folder not found")).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Remove gone from recent repositories" }));
 
     await waitFor(() => expect(screen.queryByText("/repo/gone")).toBeNull());
@@ -347,6 +414,65 @@ describe("RepoPicker welcome (#688)", () => {
     render(<RepoPicker client={fakeClient()} onOpenRepo={vi.fn()} {...workspaceProps()} />);
     await screen.findByText("No recent repositories");
     expect(screen.queryByRole("region", { name: "Welcome to Browsitory" })).toBeNull();
+  });
+});
+
+describe("RepoPicker's title (#1013)", () => {
+  it("is Open repository on the start page too, as in the dialog", async () => {
+    render(<RepoPicker client={fakeClient()} onOpenRepo={vi.fn()} {...workspaceProps()} />);
+    await screen.findByText("No recent repositories");
+    expect(screen.getByRole("heading", { name: "Open repository" })).toBeInTheDocument();
+  });
+});
+
+describe("RepoPicker opened over a repository (#1013)", () => {
+  it("has an Open repository header with a close button, and no palette tip", async () => {
+    const onClose = vi.fn();
+    render(<RepoPicker client={fakeClient()} onOpenRepo={vi.fn()} {...workspaceProps()} onClose={onClose} />);
+    await screen.findByText("No recent repositories");
+
+    expect(screen.getByRole("heading", { name: "Open repository" })).toBeInTheDocument();
+    expect(screen.queryByText(/to search every command/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("on the start page, shows the palette tip below the lists and no close button", async () => {
+    render(<RepoPicker client={fakeClient()} onOpenRepo={vi.fn()} {...workspaceProps()} />);
+    await screen.findByText("No recent repositories");
+
+    const tip = screen.getByText(/to search every command/);
+    const workspaces = screen.getByRole("region", { name: "Workspaces" });
+    expect(workspaces.compareDocumentPosition(tip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+  });
+
+  it("marks the repositories already open as tabs and switches to their tab on click", async () => {
+    const client = fakeClient({ listRecentRepos: async () => ["/repo/a", "/repo/b"] });
+    const onOpenRepo = vi.fn();
+    const onSwitchToTab = vi.fn();
+    render(
+      <RepoPicker
+        client={client}
+        onOpenRepo={onOpenRepo}
+        {...workspaceProps()}
+        openPaths={new Set(["/repo/a"])}
+        onSwitchToTab={onSwitchToTab}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const openRow = (await screen.findByText("/repo/a")).closest("button")!;
+    expect(within(openRow).getByText("Open in a tab")).toBeInTheDocument();
+    const otherRow = screen.getByText("/repo/b").closest("button")!;
+    expect(within(otherRow).queryByText("Open in a tab")).toBeNull();
+
+    fireEvent.click(openRow);
+    expect(onSwitchToTab).toHaveBeenCalledWith("/repo/a");
+    expect(onOpenRepo).not.toHaveBeenCalled();
+
+    fireEvent.click(otherRow);
+    expect(onOpenRepo).toHaveBeenCalledWith("/repo/b");
   });
 });
 

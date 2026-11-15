@@ -25,6 +25,8 @@ export type MergePane = "base" | "ours" | "result" | "theirs";
 const MERGE_PANES: readonly MergePane[] = ["ours", "result", "theirs"];
 /** With Show base (#877): the base first, before the side each block starts from. */
 const MERGE_PANES_WITH_BASE: readonly MergePane[] = ["base", ...MERGE_PANES];
+/** The columns of the two-pane layout (#980): the result and the base go across both. */
+const TWO_PANE_SIDES: readonly MergePane[] = ["ours", "theirs"];
 
 /** Where a result line came from (#878): a side taken, typed, or a block still in conflict. */
 export type LineOrigin = "ours" | "theirs" | "base" | "edited" | "conflict";
@@ -202,6 +204,11 @@ export interface MergePanesProps {
   blockTitle(index: number): string;
   /** Each block's changed words between ours and theirs (#879), by segment index. */
   wordMarks: readonly (BlockWordMarks | null)[];
+  /**
+   * "two" for a pane too narrow for three (#980): ours and theirs side by side, the base and the
+   * result each across both, under them; an unchanged run shows once, as the result.
+   */
+  layout?: "three" | "two";
 }
 
 export function MergePanes({
@@ -218,12 +225,14 @@ export function MergePanes({
   onTake,
   blockTitle,
   wordMarks,
+  layout = "three",
 }: MergePanesProps) {
   const results = segments.map((segment, index) => segmentResult(segment, stateAt(index)));
   const starts = paneStarts(segments, results);
   const end = starts[segments.length];
   const digits = String(Math.max(end.ours, end.result, end.theirs, end.base)).length;
-  const panes = showBase ? MERGE_PANES_WITH_BASE : MERGE_PANES;
+  const twoPanes = layout === "two";
+  const panes = twoPanes ? TWO_PANE_SIDES : showBase ? MERGE_PANES_WITH_BASE : MERGE_PANES;
   const headings: Record<MergePane, string> = { base: "Base", ...labels };
   const gridStyle = {
     "--merge-panes": panes.length,
@@ -241,26 +250,45 @@ export function MergePanes({
     cells: Record<MergePane, ReactNode>,
     chosen: ReadonlySet<MergePane> = new Set(),
     run?: number,
-  ) => (
-    <div key={key} className={styles.row} data-run={run}>
-      {panes.map((pane) => {
-        const side = pane !== "result";
-        return (
-          <div
-            key={pane}
-            data-pane={pane}
-            data-chosen={chosen.has(pane) ? "true" : undefined}
-            role={side && run === undefined ? "group" : undefined}
-            aria-label={side && run === undefined ? headings[pane] : undefined}
-            aria-hidden={side && run !== undefined ? true : undefined}
-            className={`${styles.cell} ${chosen.has(pane) ? styles.chosen : ""}`}
-          >
-            {cells[pane]}
+  ) => {
+    const cell = (pane: MergePane, wide = false) => {
+      const side = pane !== "result";
+      return (
+        <div
+          key={pane}
+          data-pane={pane}
+          data-chosen={chosen.has(pane) ? "true" : undefined}
+          data-wide={wide ? "true" : undefined}
+          role={side && run === undefined ? "group" : undefined}
+          aria-label={side && run === undefined ? headings[pane] : undefined}
+          aria-hidden={side && run !== undefined ? true : undefined}
+          className={`${styles.cell} ${chosen.has(pane) ? styles.chosen : ""}`}
+        >
+          {cells[pane]}
+        </div>
+      );
+    };
+    if (!twoPanes) {
+      return (
+        <div key={key} className={styles.row} data-run={run}>
+          {panes.map((pane) => cell(pane))}
+        </div>
+      );
+    }
+    // Two panes (#980): the sides in one row, the base and the result each in a row of its own
+    // across both. An unchanged run is the same on every side, so it shows once, as the result.
+    const wide: MergePane[] = showBase && run === undefined ? ["base", "result"] : ["result"];
+    return (
+      <Fragment key={key}>
+        {run === undefined && <div className={styles.row}>{panes.map((pane) => cell(pane))}</div>}
+        {wide.map((pane) => (
+          <div key={pane} className={styles.row} data-run={run}>
+            {cell(pane, true)}
           </div>
-        );
-      })}
-    </div>
-  );
+        ))}
+      </Fragment>
+    );
+  };
 
   /** Part of an unchanged run, read-only: the lines next to a collapsed middle. */
   const cleanRow = (key: string, content: string, index: number, from: number, to: number) => {

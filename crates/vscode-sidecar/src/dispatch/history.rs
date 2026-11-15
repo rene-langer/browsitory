@@ -58,16 +58,22 @@ pub(super) fn amend_commit(
 ) -> Result<Value, ErrorDto> {
     let (event_tx, event_rx) = mpsc::channel();
     spawn_hook_relay(params.repo_path.clone(), event_rx, Arc::clone(stdout));
-    let outcome = worker_handle(repos, &params.repo_path)?.amend_commit(
-        params.message,
-        params.no_verify,
-        params.author.map(|a| git_core::commit::SignatureInput {
-            name: a.name,
-            email: a.email,
-        }),
-        to_trailers(params.trailers),
-        event_tx,
-    )?;
+    let handle = worker_handle(repos, &params.repo_path)?;
+    // Reword… on HEAD (#981): the message only, staged changes stay staged.
+    let outcome = if params.message_only {
+        handle.reword_head(params.message, params.no_verify, event_tx)?
+    } else {
+        handle.amend_commit(
+            params.message,
+            params.no_verify,
+            params.author.map(|a| git_core::commit::SignatureInput {
+                name: a.name,
+                email: a.email,
+            }),
+            to_trailers(params.trailers),
+            event_tx,
+        )?
+    };
     serde_json::to_value(CommitOutcomeDto::from(outcome)).map_err(ErrorDto::from_error)
 }
 

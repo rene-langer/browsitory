@@ -4,7 +4,14 @@ import { describe, expect, it } from "vitest";
 import type { AppState } from "./useAppState";
 import { RepoError } from "../ipc/RepoClient";
 import { credentialRemediation } from "../lib/errorMessages";
-import { credentialFailureMessage, failureError, useMutationRunner, withoutStaleErrorHint } from "./useMutationRunner";
+import { FailureWithNextStep } from "../lib/operationErrors";
+import {
+  credentialFailureMessage,
+  failureError,
+  REPO_CONNECTION_LOST_MESSAGE,
+  useMutationRunner,
+  withoutStaleErrorHint,
+} from "./useMutationRunner";
 
 const BASE_STATE: AppState = {
   repoPath: "/repo",
@@ -43,6 +50,8 @@ const BASE_STATE: AppState = {
   switchConflict: null,
   editRest: null,
   splitting: null,
+  editing: null,
+  editMessage: "unchanged",
   stashSwitchOutcome: null,
   identityRequired: null,
   pullOutcome: null,
@@ -268,6 +277,53 @@ describe("failureError", () => {
       errorHint: null,
     });
     expect(failureError(new Error("boom"))).toEqual({ error: "boom", errorHint: null });
+  });
+});
+
+// #1032: a failed operation's banner names it and its object first, and ends with a next step.
+describe("failureError with the operation that failed", () => {
+  const operation = { failed: "Couldn't switch to feature/x", next: "Switch again." };
+
+  it("starts with the operation and ends with its next step for an error only git's text explains", () => {
+    expect(failureError(new RepoError("Other", "reference 'refs/heads/feature/x' not found"), operation)).toEqual({
+      error: "Couldn't switch to feature/x: reference 'refs/heads/feature/x' not found",
+      errorHint: "Switch again.",
+    });
+    expect(failureError(new Error("boom"), operation)).toEqual({
+      error: "Couldn't switch to feature/x: boom",
+      errorHint: "Switch again.",
+    });
+  });
+
+  it.each([
+    ["LocalChanges", "Commit or stash the changes to those files first, or use Stash and switch."],
+    ["DirtyWorktree", "Commit or stash your changes, then try again."],
+    ["PermissionDenied", "File permissions blocked this. Check that you can read and write the file or folder."],
+    ["Cancelled", "It was cancelled before it finished. Run it again when you are ready."],
+  ] as const)("ends with the next step %s has", (kind, hint) => {
+    expect(failureError(new RepoError(kind, "raw"), operation)).toEqual({
+      error: "Couldn't switch to feature/x: raw",
+      errorHint: hint,
+    });
+  });
+
+  it("adds no next step to a message that already is the remediation", () => {
+    expect(failureError(new RepoError("WorkerStopped", "gone"), operation)).toEqual({
+      error: `Couldn't switch to feature/x: ${REPO_CONNECTION_LOST_MESSAGE}`,
+      errorHint: null,
+    });
+    expect(failureError(new RepoError("CredentialStoreFailure", "locked"), operation)).toEqual({
+      error: `Couldn't switch to feature/x: ${credentialRemediation("CredentialStoreFailure")}`,
+      errorHint: null,
+    });
+  });
+
+  it("takes the next step a failure made in the app carries over the operation's", () => {
+    const hook = new FailureWithNextStep("The pre-commit hook failed.", "Fix what the hook reports, then commit again.");
+    expect(failureError(hook, operation)).toEqual({
+      error: "Couldn't switch to feature/x: The pre-commit hook failed.",
+      errorHint: "Fix what the hook reports, then commit again.",
+    });
   });
 });
 

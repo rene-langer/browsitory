@@ -60,6 +60,7 @@ where
             | Command::PreviewPatch { .. }
             | Command::ListBranches { .. }
             | Command::GetSwitchConflicts { .. }
+            | Command::CountCommitsOnlyOnBranch { .. }
             | Command::GetPullDefaults { .. }
             | Command::ListWorktrees { .. }
             | Command::ListSubmodules { .. }
@@ -443,6 +444,7 @@ where
                 no_verify,
                 author,
                 trailers,
+                message_only,
                 operation_id,
                 events,
                 reply,
@@ -452,6 +454,7 @@ where
                 no_verify,
                 author,
                 trailers,
+                message_only,
                 remote::TransferOp::new(operation_id),
                 events,
                 reply,

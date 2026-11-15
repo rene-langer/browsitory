@@ -25,7 +25,7 @@ import type {
   WorktreeInfo,
 } from "../ipc/RepoClient";
 import { type SavedGraphSelection, toGraphSelection } from "./graphSelection";
-import { failureError, useMutationRunner, withoutStaleErrorHint } from "./useMutationRunner";
+import { failureError, useMutationRunner, withoutStaleErrorHint, withoutStaleErrorSource } from "./useMutationRunner";
 import { errorAfterOwnSuccess, forgettingStaleOwnErrors, useOwnError } from "./ownError";
 import { readFetchPrune } from "../lib/fetchPrune";
 import { MERGE_PAGE_SIZE, type MergeExpansion, withExpandedMerges } from "../lib/mergeExpansion";
@@ -70,6 +70,12 @@ export function rowsEqual(a: SelectedRow, b: SelectedRow): boolean {
     return a === b;
   }
   return a.commitId === b.commitId;
+}
+
+/** `AppState.errorSource`: the error it marks, and what showed or set it. */
+export interface ErrorSource {
+  error: string;
+  source: "dialog" | "read";
 }
 
 export interface AppState {
@@ -153,7 +159,7 @@ export interface AppState {
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   rebaseOnto: string | null;
   // Per-commit actions to default to in the rebase planner, set only when it was opened via a
-  // CommitGraph multi-select action (as opposed to "Rebase onto here").
+  // CommitGraph multi-select action (as opposed to "Rebase current branch onto here…").
   rebasePreset: ReadonlyMap<string, PresetAction> | null;
   // The last one-click history edit that finished, for its toast (#442).
   historyEditOutcome: { message: string } | null;
@@ -176,6 +182,13 @@ export interface AppState {
   // The commit Split commit… stopped at in this session, so the stop reads "Splitting" before
   // its first part (#884).
   splitting: string | null;
+  // The commit Edit commit… stopped at in this session, so the stop's controls and toasts are
+  // named after the edit (#994).
+  editing: string | null;
+  // An edit stop's message box (#882): the commit's own message, one of the user's, or blank.
+  // Only the kind is state: the strip's Continue says why a blank one can't go on (#995), and
+  // Abort asks before a typed one is lost (#979).
+  editMessage: "unchanged" | "changed" | "blank";
   // The last Stash and switch, for its toast (#653).
   stashSwitchOutcome: { branchName: string; outcome: StashSwitchOutcome } | null;
   // A commit or amend refused for lack of a git identity: the identity dialog shows (#689).
@@ -194,6 +207,11 @@ export interface AppState {
   // A plain-language next step for `error`, from its kind (`failureError`, #573); shown under it in
   // the banner. Dropped whenever `error` changes without a new one (`withoutStaleErrorHint`).
   errorHint: string | null;
+  // Where `error` comes from when the banner treats it differently (`withoutStaleErrorSource`
+  // drops it once `error` changes): a dialog that shows the failure itself, so no banner repeats
+  // it (#996); a read, which has no operation log entry, so the banner offers Copy details
+  // rather than Details (#984).
+  errorSource?: ErrorSource | null;
   // True only while a `runMutation` call is in flight (from just before its `mutate()` call
   // through the trailing `refresh()`). Lets callers (e.g. `HistoryList`'s Apply/Drop buttons)
   // disable themselves so a rapid double-click can't fire the same index-based mutation twice
@@ -345,6 +363,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     switchConflict: null,
     editRest: null,
     splitting: null,
+    editing: null,
+    editMessage: "unchanged",
     stashSwitchOutcome: null,
     identityRequired: null,
     mergeOutcome: null,
@@ -354,6 +374,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     transferOutcome: null,
     error: null,
     errorHint: null,
+    errorSource: null,
     pending: false,
     refreshGeneration: 0,
     loaded: false,
@@ -374,7 +395,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
   // Every update goes through this, so a read's remembered error never outlives it on screen.
   const setState = useMemo(() => {
     const set = forgettingStaleOwnErrors(setRawState, [refreshError, reflogError, forgeError]);
-    return (updater: (prev: AppState) => AppState) => set((prev) => withoutStaleErrorHint(prev, updater(prev)));
+    return (updater: (prev: AppState) => AppState) =>
+      set((prev) => withoutStaleErrorSource(prev, withoutStaleErrorHint(prev, updater(prev))));
   }, [refreshError, reflogError, forgeError]);
   // Replies don't arrive in the order their requests were sent: the VSCode sidecar answers each
   // request on its own thread, Tauri runs commands concurrently. So a read sent before a
@@ -613,6 +635,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       setState((prev) => ({
         ...prev,
         ...failure,
+        errorSource: { error: failure.error, source: "read" },
         refreshGeneration: prev.refreshGeneration + 1,
         loaded: true,
       }));
@@ -866,12 +889,12 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
 
   const mergeRebase = useMergeRebaseActions(client, repoPath, runMutation, setState);
 
-  const history = useHistoryActions(client, repoPath, runMutation, runMutationWithOutcome, setState);
+  const history = useHistoryActions(client, repoPath, runMutation, runMutationWithOutcome, setState, state.headInfo.headId);
   const hooks = useHookActions(client, repoPath, state.hookRun, setState);
   // The slice objects are new on every render, their actions are not: the callback depends on
   // the actions, so it stays as stable as they are.
   const { commit } = staging;
-  const { amendCommit, continueSequence } = history;
+  const { amendCommit, rewordHead, continueSequence } = history;
   const { pushCurrentBranch, forcePushCurrentBranch, pushTags, pushBranch, deleteRemoteBranch, deleteRemoteTag } =
     remoteTransfer;
   const retryWithoutHooks = useCallback(
@@ -887,6 +910,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         // pre-amend draft back into the CommitBox.
         return amendCommit(retry.message, true, retry.options);
       }
+      if (retry.kind === "reword") return rewordHead(retry.commitId, retry.message, true);
       if (retry.kind === "continueSequence") return (await continueSequence(true)) !== null;
       // A pick's `prepare-commit-msg` can't be skipped; the dialog offers no retry for it.
       if (retry.kind === "pick" || retry.kind === "applyPatch") return false;
@@ -901,12 +925,12 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       else await deleteRemoteBranch(push.remoteName, push.branchName, true);
       return true;
     },
-    [commit, amendCommit, continueSequence, pushCurrentBranch, forcePushCurrentBranch, pushTags, pushBranch, deleteRemoteBranch, deleteRemoteTag, setState],
+    [commit, amendCommit, rewordHead, continueSequence, pushCurrentBranch, forcePushCurrentBranch, pushTags, pushBranch, deleteRemoteBranch, deleteRemoteTag, setState],
   );
 
   const undoActions = useUndoActions(client, repoPath, runMutationWithOutcome, setState, afterUndoStep);
 
-  const forge = useForgeActions(client, repoPath, runMutation, runMutationWithOutcome, setState, forgeError);
+  const forge = useForgeActions(client, repoPath, mutationRunner.runMutationWithMessage, setState, forgeError);
   const dismissError = useCallback(() => {
     setState((prev) => ({
       ...prev,

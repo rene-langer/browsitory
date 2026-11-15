@@ -48,7 +48,7 @@ describe("stashActions", () => {
     const actions = stashActions({ apply: "Resolve conflicts first.", drop: null }, { index: 0, message: "WIP", commitId: "s", branch: null, timestamp: 1700000000, fileCount: 1, hasStagedChanges: false });
     expect(actions.apply).toEqual({ label: "Apply", paletteLabel: "Apply stash: WIP", enabled: false, reason: "Resolve conflicts first." });
     expect(actions.pop).toMatchObject({ label: "Pop", paletteLabel: "Pop stash: WIP", enabled: false });
-    expect(actions.drop).toEqual({ label: "Drop…", paletteLabel: "Drop stash: WIP", enabled: true, reason: undefined });
+    expect(actions.drop).toEqual({ label: "Drop…", paletteLabel: "Drop stash: WIP…", enabled: true, reason: undefined });
   });
 });
 

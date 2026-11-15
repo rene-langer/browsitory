@@ -24,12 +24,21 @@
   color: var(--color-text);
 }
 
-.counts {
-  display: inline-flex;
-  gap: var(--space-2);
+/* ↓n on Pull, ↑n on Push (#1006). */
+.count {
+  margin-left: var(--space-1);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-  color: var(--color-text-muted);
+}
+
+/* The ahead/behind status in words, for assistive tech; the buttons show the numbers. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 /* Fetch's chevron (`SplitButton`): narrower than the bar's other buttons. */
@@ -39,8 +48,20 @@
   padding: 2px 4px;
 }
 
+/* A fixed slot (#1006): "Fetched 59 minutes ago" fits, and the centred sync group doesn't move
+   when the text appears after the first fetch. */
 .lastFetch {
+  min-width: 9.5rem;
+  text-align: right;
   font-size: var(--text-xs);
   color: var(--color-text-muted);
   white-space: nowrap;
+}
+
+/* Where the bar is short of room (a 900 px window, a narrow VS Code panel), the slot is only as
+   wide as its text: the sync group may move once when the text first shows. */
+@media (max-width: 60rem) {
+  .lastFetch {
+    min-width: 0;
+  }
 }

@@ -20,17 +20,20 @@ window has three columns:
   **Undo** takes it back); with nothing typed, **Create branch…** opens the New branch form. The
   command palette's **Switch branch…** opens the same list;
 - **Back** and **Forward** through the commits you selected (see [History](history.md));
-- **Fetch**, **Pull** and **Push**, with `↑n` (commits to push) and `↓m` (commits to pull) for
-  the current branch (see [Branches and remotes](branches-and-remotes.md)). Pull's menu chooses
+- **Fetch**, **Pull** and **Push**, with `↓m` on **Pull** (commits to pull) and `↑n` on **Push**
+  (commits to push) for the current branch when they aren't zero (see
+  [Branches and remotes](branches-and-remotes.md)). Pull's menu chooses
   how a pull combines diverged branches: **Pull with merge**, **Pull with rebase** or **Pull,
   fast-forward only** (see [Pulling](branches-and-remotes.md#pulling));
 - what is running: a fetch, pull or push by name ("Pushing main to origin/main") with a progress
   bar and **Cancel**, or, when another action takes more than a moment, "Working…";
-- **Stash** (see [Stashes](stashes.md)), **Apply patch…** (see [Patches](patches.md#apply-a-patch-file)),
-  **Undo** and **Redo** (see [Undo and redo](undo-redo.md)), and **Refresh**, which reloads the
+- **Stash** (see [Stashes](stashes.md)), with **Apply patch…** in its menu (see
+  [Patches](patches.md#apply-a-patch-file)), **Undo** and **Redo** (see
+  [Undo and redo](undo-redo.md); hover them for the step they undo or redo), and **Refresh**, which reloads the
   repository's state (changes made outside Browsitory also show by themselves, see
   [Changes made outside Browsitory](tabs.md#changes-made-outside-browsitory));
-- when the repository was last fetched.
+- when the repository was last fetched, in a place kept for it, so the buttons don't move when
+  it appears.
 
 While a repository opens, or when you switch to a tab you haven't looked at for a while (see
 [Multiple repositories](tabs.md)), the graph and the Branches section show grey placeholder rows
@@ -42,11 +45,18 @@ focus to it and a note under it says why. A menu item that can't run shows the r
 label, and a dialog or form shows it above its buttons.
 
 **Errors.** When something fails, a red banner appears between the toolbar and the columns,
-pushing them down rather than covering them. It shows Git's or the system's own message and,
-where there is one, what to do next, for example "Commit or stash your changes, then try again."
-**Copy details** copies the message and that hint, for a bug report. An error you didn't
-dismiss isn't lost when a later action fails: the banner lists it under **1 earlier error** (up
-to five). The ✕ dismisses the banner with them.
+pushing them down rather than covering them. It says what failed and, where there is one, what
+to do next, for example "Cherry-pick of 4c5beaf didn't start: Commit or unstage your staged
+changes first." Its buttons sit in the same row: the next steps, if any (a rejected push offers
+**Pull** first, then **Force push…**), then **Details**, which opens the
+[operation log](operation-log.md) on the failed operation with its full error and **Copy
+details** for a bug report. An error with no operation behind it (reading the repository failed)
+has **Copy details** in the banner instead, with the full error. An error you didn't dismiss isn't lost when a later action fails: the
+banner lists it under **1 earlier error** (up to five). The ✕ dismisses the banner with them.
+While a dialog deals with the error (setting your git identity, a hook's output, the force push
+confirm), the banner waits; closing the identity dialog clears it. A dialog that shows why it
+failed (Rename branch, Connect to GitHub, New pull request) keeps the error to itself, also when
+you cancel it.
 
 **Menus.** A menu (right-click, the **⋯** button, or the Menu key or Shift+F10) is split into
 groups by thin lines: in a commit's menu, for example, new branches and tags, applying the commit
@@ -63,8 +73,8 @@ first one that doesn't apply.
 
 Drag the dividers between the columns to resize them. Double-click a divider to collapse the
 sidebar, and again to bring it back at its width. With a divider focused, the arrow keys resize
-too. The sidebar and the commit graph keep their width when you resize the window; only the
-diff pane grows or shrinks.
+too. The commit graph starts at about 40% of the window's width. The sidebar and the commit graph
+keep their width when you resize the window; only the diff pane grows or shrinks.
 
 **From the keyboard.** **F6** moves the focus from pane to pane (the repository toolbar, the
 sidebar, the commit graph, the diff pane) and **Shift+F6** back, returning to where the focus
@@ -82,7 +92,10 @@ sidebar (**Go to Tags**, **New branch…** and the like) open the drawer by them
 **Sidebar sections.** Click a section's header to open or close it. The buttons at the top of
 the sidebar open every section (**Expand all sections**) or close them all (**Collapse all
 sections**). The gear button there lists every section except Branches with a switch, so you can
-hide the ones a project doesn't use.
+hide the ones a project doesn't use. An open section keeps room for what it holds, up to about
+fifteen lines; a longer list scrolls inside its section, with the cut edge faded, and when the
+open sections don't fit at all, the sidebar scrolls. A form that opens in a section, such as **New
+branch…** or **Add remote…**, scrolls into view with its buttons.
 
 **Header.** The top row holds the repository tabs (see [Multiple repositories](tabs.md)) and, on
 the right:
@@ -124,7 +137,9 @@ the arrow keys. The groups are:
 - **Updates**, in the desktop app (see below).
 
 Type in **Filter settings** above the list to keep only the groups with a setting whose name
-contains the text, for example "font"; Escape clears the filter. Preferences opens on the group
+contains the text, for example "font", with those settings highlighted; Escape clears the
+filter. Every setting is saved as soon as you change it: a choice at once, a text field when
+you leave it or press Enter. Preferences opens on the group
 you looked at last, and the **Diff preferences** button next to an untracked file's **Show
 contents** opens it on **Diff**.
 
@@ -151,8 +166,8 @@ Each change shows at once, without a restart:
   conflicts, from 10 to 24 pixels. Empty keeps each view's built-in size.
 - **Interface size**: Small, Normal or Large text for the rest of the window.
 - **Date format**: **ISO** (2026-11-11 14:05, the default) or **System**, your operating
-  system's short date and time. Every date follows it: the history, search results, file
-  history, the Reflog, stashes and commit details. "3 days ago" labels stay in English.
+  system's short date and time. Every date follows it: the history's date tooltips, search
+  results, file history, the Reflog, stashes and commit details. "3 days ago" labels stay in English.
 - **Tab size**: how many columns a tab character takes in file content, from 1 to 16 (4 at
   first).
 
@@ -167,7 +182,8 @@ in view while you scroll: **Close** (or Escape, or a click outside the dialog) c
 **Updates (desktop app).** Browsitory checks for a new version when it starts and every six
 hours, and downloads it in the background. If a check or download fails (for example while the
 download server is down), it tries again after 10 minutes, then waits twice as long each time, up
-to 3 hours, until a check succeeds. When it is ready, a banner says "Update v… ready".
+to 3 hours, until a check succeeds. When it is ready, a notice with the notifications says
+"Update v… ready" and stays until you restart.
 Click **Restart to update** to install it, or keep working: nothing changes until you restart.
 
 To stop the automatic checks, clear **Check for updates automatically** under **Updates** in
@@ -179,7 +195,8 @@ the same banner.
 The VSCode extension updates through VSCode instead and has neither setting, menu item nor
 command.
 
-**Notifications.** A finished action shows a short notification in the bottom-right corner:
+**Notifications.** A finished action shows a short notification in the bottom-left corner, away
+from the commit box:
 green for done, blue for information, amber for a warning, red for an error, each with its own
 icon. It closes by itself after 5 to 15 seconds, depending on its length; one with a button
 (such as **Undo**) stays at least 10 seconds, and an error stays until you close it. While the

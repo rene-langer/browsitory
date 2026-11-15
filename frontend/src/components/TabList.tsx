@@ -40,7 +40,7 @@ export function TabList({
   openRepos,
   activePath,
   workspaceNames,
-  changedPaths,
+  changedCounts,
   onSwitchTo,
   onClose,
   trigger,
@@ -51,7 +51,8 @@ export function TabList({
   openRepos: OpenRepo[];
   activePath: string | null;
   workspaceNames: Record<string, string>;
-  changedPaths?: ReadonlySet<string>;
+  /** Each tab's number of changed files, for the ±N mark (#1028); a tab not in it has none. */
+  changedCounts?: ReadonlyMap<string, number>;
   onSwitchTo: (path: string) => void;
   onClose: () => void;
   /** The list button: focus returns to it, and a press on it is left to its own toggle. */
@@ -180,7 +181,8 @@ export function TabList({
               </div>
             )}
             {group.repos.map((repo) => {
-              const changed = changedPaths?.has(repo.path) ?? false;
+              const changedFiles = changedCounts?.get(repo.path) ?? 0;
+              const files = `${changedFiles} ${changedFiles === 1 ? "file" : "files"}`;
               const current = repo.path === activePath;
               return (
                 <div
@@ -198,10 +200,13 @@ export function TabList({
                 >
                   <span className={styles.name}>
                     {repo.displayName}
-                    {changed && (
+                    {/* "±N" as on the tab (#1028), not a dot that reads as "unsaved". */}
+                    {changedFiles > 0 && (
                       <>
-                        <span className={styles.changeMarker} aria-hidden="true" title="Uncommitted changes" />
-                        <span className={styles.srOnly}>, uncommitted changes</span>
+                        <span className={styles.srOnly}>, uncommitted changes in {files}</span>
+                        <span className={styles.changeMarker} aria-hidden="true" title={`Uncommitted changes in ${files}`}>
+                          ±{changedFiles}
+                        </span>
                       </>
                     )}
                     {current && <span className={styles.current}>current</span>}

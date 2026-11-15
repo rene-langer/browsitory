@@ -1,5 +1,6 @@
 import type {
   BisectInfo,
+  GraphCommit,
   HeadInfo,
   OperationKind,
   PickOutcome,
@@ -339,4 +340,59 @@ export function stashBlockReason(state: {
 export function isSplitting(rebase: RebaseInfo | null, splittingCommit: string | null): boolean {
   if (rebase === null || rebase.editing === null) return false;
   return rebase.splitParts > 0 || splittingCommit === rebase.editing;
+}
+
+/** What made an edit stop (#994): Edit commit… or Split commit…. */
+export type EditStopKind = "Edit" | "Split";
+
+/**
+ * Whether an edit stop is Edit commit…'s or Split commit…'s (#994), whose controls and toasts are
+ * named after the edit; `null` for a planner's Edit step and every other stop, which stay a
+ * rebase. `editingCommit` / `splittingCommit`: the commit those made a stop at in this session.
+ */
+export function editStopKind(
+  rebase: RebaseInfo | null,
+  splittingCommit: string | null,
+  editingCommit: string | null,
+): EditStopKind | null {
+  if (rebase === null || rebase.editing === null) return null;
+  if (isSplitting(rebase, splittingCommit)) return "Split";
+  return editingCommit === rebase.editing ? "Edit" : null;
+}
+
+/** The toast once an edit stop's rebase finished: "Edited 1a2b3c4", "Split 1a2b3c4". */
+export function editStopDoneToast(kind: EditStopKind, commitId: string): string {
+  return `${kind === "Edit" ? "Edited" : "Split"} ${commitId.slice(0, 7)}`;
+}
+
+/** The toast once an edit stop was cancelled: "Cancelled the edit of 1a2b3c4". */
+export function editStopAbortToast(kind: EditStopKind, commitId: string): string {
+  return `Cancelled the ${kind === "Edit" ? "edit" : "split"} of ${commitId.slice(0, 7)}`;
+}
+
+/** The toast after Abort merge / cherry-pick / revert of a single paused operation (#979). */
+export function operationAbortToast(kind: OperationKind): string {
+  return `Aborted ${leftoverNoun(kind)}`;
+}
+
+/**
+ * What a rebase is rebased onto, for the strip (#995): a branch, remote branch or tag at
+ * `onto` among the loaded commits, else its short id.
+ */
+export function rebaseOntoName(
+  onto: string,
+  commits: readonly Pick<GraphCommit, "id" | "branchRefs" | "remoteBranchRefs" | "tags">[],
+): string {
+  const commit = commits.find((candidate) => candidate.id === onto);
+  return commit?.branchRefs[0] ?? commit?.remoteBranchRefs[0] ?? commit?.tags?.[0] ?? onto.slice(0, 7);
+}
+
+/**
+ * The branch a rebase rebases, which the toolbar names instead of a detached HEAD (#995): the
+ * stored rebase's, or a terminal rebase's when it is known.
+ */
+export function rebasingBranch(headInfo: Pick<HeadInfo, "rebase" | "terminalRebase">): string | null {
+  if (headInfo.rebase !== null) return headInfo.rebase.branch;
+  const terminal = headInfo.terminalRebase;
+  return terminal !== null && terminal.kind === "Rebase" && terminal.branch !== "" ? terminal.branch : null;
 }

@@ -48,9 +48,10 @@ describe("Browsitory multi-repo tabs", () => {
     expect(await secondRepoCommitFromFirstTab.isExisting()).toBe(false);
 
     // #613: a change made in the inactive second repo shows its tab's "uncommitted changes"
-    // marker once the user has been there and left again (the check on leaving a tab).
+    // marker once the user has been there and left again (the check on leaving a tab). Since
+    // #1028 the marker is "±N" (the number of changed files), said in the tab's accessible name.
     const untracked = path.join(E2E_SECOND_REPO_PATH, "e2e-tab-marker.txt");
-    const marked = async () => (await secondTab.getAttribute("aria-describedby")) !== null;
+    const marked = async () => (await secondTab.getAttribute("aria-label")) !== null;
     try {
       fs.writeFileSync(untracked, "uncommitted\n");
       await browser.execute((el) => (el as HTMLElement).click(), secondTab);
@@ -59,12 +60,18 @@ describe("Browsitory multi-repo tabs", () => {
       });
       await browser.execute((el) => (el as HTMLElement).click(), firstTab);
       await browser.waitUntil(marked, { timeoutMsg: "expected the inactive second tab to show the changes marker" });
-      const description = await browser.execute(
-        (id) => document.getElementById(id)?.textContent ?? null,
-        (await secondTab.getAttribute("aria-describedby")) ?? "",
+      // Two files: the fixture's uncommitted README.md (wdio.conf.ts) and this one.
+      expect(await secondTab.getAttribute("aria-label")).toBe(
+        `${path.basename(E2E_SECOND_REPO_PATH)}, uncommitted changes in 2 files`,
       );
-      expect(description).toBe("Uncommitted changes");
-      expect(await firstTab.getAttribute("aria-describedby")).toBeNull();
+      const markerText = await browser.execute(
+        (repoPath) =>
+          document.querySelector(`button[role="tab"][title="${repoPath}"]`)?.parentElement?.querySelector("span")
+            ?.textContent ?? null,
+        E2E_SECOND_REPO_PATH,
+      );
+      expect(markerText).toBe("±2");
+      expect(await firstTab.getAttribute("aria-label")).toBeNull();
     } finally {
       fs.unlinkSync(untracked);
     }

@@ -4,8 +4,8 @@ import type { RebaseTarget } from "./branchActions";
 import { gate, UNAVAILABLE_REASON, type PaletteAction } from "./action";
 
 /**
- * One action on a commit, as both the commit menu ("Cherry-pick…") and the command palette
- * ("Cherry-pick abc1234…") offer it.
+ * One action on a commit, as both the commit menu ("Cherry-pick onto main") and the command
+ * palette ("Cherry-pick abc1234 onto main") offer it.
  */
 export type CommitAction = PaletteAction;
 
@@ -20,6 +20,13 @@ export interface CommitActions {
   revert: PickAction;
   checkout: CommitAction;
   reset: CommitAction;
+  /** Opens the rebase planner onto the commit (#991). */
+  rebaseOnto: CommitAction;
+  /**
+   * Opens the rebase planner from the commit (#991): onto its parent (`onto`, `null` for a merge
+   * or root commit, which it refuses), the commit itself the plan's first Pick.
+   */
+  interactiveRebase: CommitAction & { onto: string | null };
 }
 
 export interface CommitActionContext {
@@ -32,10 +39,14 @@ export interface CommitActionContext {
 
 const HEAD_PICK = "HEAD already contains this commit.";
 const NO_BRANCH = "Check out a branch first.";
+/** The rule `planRebaseSelection` applies to a multi-selection, for one commit (#991). */
+const NO_REBASE_BASE = "Merge and root commits can't be rebased.";
 
 /**
  * Availability, reason and labels of the single-commit actions (#495), shared by `CommitGraph`'s
- * commit menu and the command palette so mouse and keyboard users get the same answer.
+ * commit menu and the command palette so mouse and keyboard users get the same answer. The
+ * palette's label is the menu's with the commit for "here" or added after the verb (#990).
+ * Cherry-pick and Revert say where their commit lands (#1020).
  */
 export function commitActions(context: CommitActionContext, commit: GraphCommit): CommitActions {
   const { blockers } = context;
@@ -43,25 +54,43 @@ export function commitActions(context: CommitActionContext, commit: GraphCommit)
   const isHead = context.headId === commit.id;
   const needsParent = commit.parentIds.length > 1;
   const ellipsis = needsParent ? "…" : "";
+  const target = context.currentBranch ?? "HEAD";
   const action = (label: string, paletteLabel: string, refusal?: string): CommitAction => ({
     label,
     paletteLabel,
     ...gate(blockers, refusal),
   });
+  const onto = commit.parentIds.length === 1 ? commit.parentIds[0] : null;
   return {
     // Only opens the dialog, whose Create button carries the busy rule and its reason.
     createTag: { label: "Create tag…", paletteLabel: `Create tag at ${short}…`, enabled: true, reason: undefined },
     cherryPick: {
-      ...action(`Cherry-pick${ellipsis}`, `Cherry-pick ${short}${ellipsis}`, isHead ? HEAD_PICK : undefined),
+      ...action(
+        `Cherry-pick onto ${target}${ellipsis}`,
+        `Cherry-pick ${short} onto ${target}${ellipsis}`,
+        isHead ? HEAD_PICK : undefined,
+      ),
       needsParent,
     },
-    revert: { ...action(`Revert${ellipsis}`, `Revert ${short}${ellipsis}`), needsParent },
+    revert: {
+      ...action(`Revert (new commit on ${target})${ellipsis}`, `Revert ${short} (new commit on ${target})${ellipsis}`),
+      needsParent,
+    },
     checkout: action("Switch to (detached)", `Switch to ${short} (detached)`),
     reset: action(
-      `Reset ${context.currentBranch ?? "HEAD"} to here…`,
-      `Reset to ${short}…`,
+      `Reset ${target} to here…`,
+      `Reset ${target} to ${short}…`,
       context.currentBranch === null ? NO_BRANCH : undefined,
     ),
+    rebaseOnto: action("Rebase current branch onto here…", `Rebase current branch onto ${short}…`),
+    interactiveRebase: {
+      ...action(
+        "Interactive rebase from here…",
+        `Interactive rebase from ${short}…`,
+        onto === null ? NO_REBASE_BASE : undefined,
+      ),
+      onto,
+    },
   };
 }
 

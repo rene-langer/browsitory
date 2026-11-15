@@ -16,6 +16,8 @@ import type { AmendOptions, Trailer } from "../ipc/RepoClient";
 export type HookRetry =
   | { kind: "commit"; message: string; trailers: Trailer[] }
   | { kind: "amend"; message: string; options: AmendOptions }
+  /** The Reword dialog on HEAD (#981): its message only, retried as it was sent. */
+  | { kind: "reword"; commitId: string; message: string }
   | { kind: "push"; push: PushRequest }
   /** A paused cherry-pick/revert sequence's Continue (the step it commits runs the hooks). */
   | { kind: "continueSequence" }
@@ -59,6 +61,7 @@ export function retryLabel(failure: HookFailure): string | null {
   }
   if (failure.retry.kind === "commit") return "Commit without hooks";
   if (failure.retry.kind === "amend") return "Amend without hooks";
+  if (failure.retry.kind === "reword") return "Reword without hooks";
   if (failure.retry.kind === "continueSequence") return "Continue without hooks";
   return "Push without hooks";
 }
@@ -68,6 +71,9 @@ export function retryLabel(failure: HookFailure): string | null {
  * A Continue's toast comes from its outcome (`sequenceToast`), a push's from its transfer
  * (`transferToast`), so they are not listed here.
  */
-export function retrySuccessLabel(retry: Extract<HookRetry, { kind: "commit" } | { kind: "amend" }>): string {
+export function retrySuccessLabel(
+  retry: Extract<HookRetry, { kind: "commit" } | { kind: "amend" } | { kind: "reword" }>,
+): string {
+  if (retry.kind === "reword") return `Reworded ${retry.commitId.slice(0, 7)}`;
   return retry.kind === "commit" ? "Committed" : "Amended commit";
 }

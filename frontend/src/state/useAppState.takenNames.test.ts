@@ -102,7 +102,7 @@ describe("taken names (#413)", () => {
       rejectCreate?.(new Error("tag refused"));
       outcome = await promise;
     });
-    expect(outcome).toBe("tag refused");
+    expect(outcome).toBe("Couldn't create tag v2: tag refused");
     expect(result.current.state.tags).toEqual([tag("v1")]);
   });
 
@@ -160,6 +160,32 @@ describe("taken names (#413)", () => {
     expect(result.current.state.error).toBe('A branch named "main" already exists.');
     expect(result.current.state.branches).toEqual(branches);
     expect(renameBranch).not.toHaveBeenCalled();
+  });
+
+  // #422, #1002: the Rename branch dialog shows the reason a rename failed, so it resolves to it.
+  it("renameBranch resolves to the refusal, the backend's failure, or null once renamed", async () => {
+    const branches: BranchInfo[] = [{ name: "main", isCurrent: true }, { name: "topic", isCurrent: false }];
+    const renameBranch = vi.fn(async (_repoPath: string, _oldName: string, newName: string) => {
+      if (newName === "locked") throw new Error("the branch is locked");
+    });
+    const result = await loaded({ listBranches: async () => branches, renameBranch });
+
+    let outcome: string | null | undefined;
+    await act(async () => {
+      outcome = await result.current.renameBranch("topic", "main");
+    });
+    expect(outcome).toBe('A branch named "main" already exists.');
+
+    await act(async () => {
+      outcome = await result.current.renameBranch("topic", "locked");
+    });
+    // Named by the operation, as every failed mutation is (#1032).
+    expect(outcome).toBe("Couldn't rename branch topic to locked: the branch is locked");
+
+    await act(async () => {
+      outcome = await result.current.renameBranch("topic", "renamed");
+    });
+    expect(outcome).toBeNull();
   });
 
   it("renameBranch may move a branch into a folder named after itself", async () => {
@@ -230,7 +256,7 @@ describe("taken names (#413)", () => {
     );
 
     expect(createWorktree).toHaveBeenCalledWith(TEST_REPO_PATH, "again", "../work/feature/", "again", "HEAD");
-    expect(outcome).toBe("worktree path already exists");
+    expect(outcome).toBe("Couldn't create worktree again: worktree path already exists");
     expect(result.current.state.worktrees).toEqual([mainWorktree, linked]);
   });
 
@@ -249,7 +275,7 @@ describe("taken names (#413)", () => {
       },
     );
 
-    expect(outcome).toBe("branch is checked out elsewhere");
+    expect(outcome).toBe("Couldn't create worktree wt: branch is checked out elsewhere");
     expect(result.current.state.worktrees).toEqual([mainWorktree]);
   });
 });

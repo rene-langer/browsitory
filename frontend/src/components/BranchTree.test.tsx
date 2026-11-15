@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import type { RepoClient } from "../ipc/RepoClient";
 import { BranchTree } from "./BranchTree";
@@ -57,7 +57,7 @@ describe("BranchTree — local branches", () => {
   it("right-clicking a branch opens a context menu with Rename/Delete, and Merge for non-current branches", () => {
     renderTree();
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
-    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Rename…" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Merge into current branch…" })).toBeInTheDocument();
   });
@@ -95,44 +95,56 @@ describe("BranchTree — local branches", () => {
     expect(screen.queryByRole("menuitem", { name: "Merge into current branch…" })).not.toBeInTheDocument();
   });
 
-  it("Delete calls onDeleteBranch with force=false, then confirming Force Delete calls it again with force=true", async () => {
-    const { props } = renderTree();
+  it("Delete counts the branch's own commits first, then one confirm deletes it with force=true (#996)", async () => {
+    const onCountCommitsOnlyOnBranch = vi.fn().mockResolvedValue(1);
+    const { props } = renderTree({ onCountCommitsOnlyOnBranch });
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
-    expect(props.onDeleteBranch).toHaveBeenCalledWith("feat/foo", false);
-    fireEvent.click(await screen.findByRole("button", { name: "Force delete" }));
+    expect(onCountCommitsOnlyOnBranch).toHaveBeenCalledWith("feat/foo");
+    const dialog = await screen.findByRole("dialog", { name: "Delete feat/foo" });
+    expect(dialog).toHaveTextContent(
+      "feat/foo has 1 commit on no other branch. Delete it anyway? Undo can bring it back.",
+    );
+    expect(props.onDeleteBranch).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete branch" }));
+    expect(props.onDeleteBranch).toHaveBeenCalledOnce();
     expect(props.onDeleteBranch).toHaveBeenCalledWith("feat/foo", true);
   });
 
-  // Regression test for a bug where the force-delete dialog fired after every *successful*
-  // delete too: `handleDeleteClick` unconditionally arms `pendingForceFor` after the soft
-  // delete, with no check for whether it actually failed. The app's real optimistic-update flow
-  // removes a deleted branch from `branches` immediately on success (only rolling back on
-  // failure), so a re-render with the branch gone from `branches` is what "the delete
-  // succeeded" looks like from BranchTree's point of view.
-  it("does not show the force-delete dialog after a successful delete (branch removed from branches)", async () => {
-    const { props, rerender } = renderTree();
+  it("confirms a delete Undo can take back with a plain \"Delete branch\" button, not a danger one (#988)", async () => {
+    renderTree({ onCountCommitsOnlyOnBranch: vi.fn().mockResolvedValue(2) });
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete feat/foo" });
+    expect(within(dialog).getByRole("button", { name: "Delete branch" })).toHaveAttribute("data-tone", "primary");
+  });
+
+  // Before #996 a plain delete was tried first, and its "unmerged commits" failure showed as an
+  // error banner beside the Force delete confirm. A branch whose commits another branch still
+  // has loses nothing, so it goes without asking.
+  it("deletes a branch whose commits another branch has without asking (#996)", async () => {
+    const onCountCommitsOnlyOnBranch = vi.fn().mockResolvedValue(0);
+    const { props } = renderTree({ onCountCommitsOnlyOnBranch });
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
-    expect(props.onDeleteBranch).toHaveBeenCalledWith("feat/foo", false);
-    await Promise.resolve();
+    await waitFor(() => expect(props.onDeleteBranch).toHaveBeenCalledWith("feat/foo", true));
 
-    // Simulate the optimistic removal: re-render with the deleted branch gone from `branches`.
-    rerender(<BranchTreeWithDialogs {...props} branches={baseBranches.filter((b) => b.name !== "feat/foo")} />);
-
-    expect(screen.queryByRole("dialog", { name: "Force delete feat/foo" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Force delete" })).not.toBeInTheDocument();
+    expect(props.onDeleteBranch).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("dialog", { name: "Delete feat/foo" })).not.toBeInTheDocument();
   });
 
-  it("Rename shows an inline input; Enter calls onRenameBranch", () => {
+  it("Rename… opens the Rename branch dialog; Rename calls onRenameBranch (#1002)", async () => {
     const { props } = renderTree();
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
-    const input = screen.getByDisplayValue("feat/foo");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename…" }));
+    const dialog = screen.getByRole("dialog", { name: "Rename branch", hidden: true });
+    const input = within(dialog).getByRole("textbox", { name: "New name", hidden: true });
+    expect(input).toHaveValue("feat/foo");
     fireEvent.change(input, { target: { value: "feat/bar" } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Rename", hidden: true }));
     expect(props.onRenameBranch).toHaveBeenCalledWith("feat/foo", "feat/bar");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Rename branch", hidden: true })).toBeNull());
   });
 
   it("Merge into current branch calls onMergeBranch with that branch's name", () => {
@@ -174,7 +186,7 @@ describe("BranchTree — local branches", () => {
   it("disables Rename/Delete/Merge menu items while a rebase is in progress", () => {
     renderTree({ operationDisabled: true, operationDisabledReason: "A rebase is in progress." });
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
-    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Rename…" })).toBeDisabled();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeDisabled();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toHaveAttribute("title", "A rebase is in progress.");
     expect(screen.getByRole("menuitem", { name: "Merge into current branch…" })).toBeDisabled();
@@ -192,7 +204,7 @@ describe("BranchTree — local branches", () => {
   it("disables Switch to and Rename, and ignores a double-click, during a merge, like the palette", () => {
     const { props } = renderTree({ operationDisabled: true, operationDisabledReason: "A merge is in progress." });
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
-    for (const name of ["Switch to", "Rename"]) {
+    for (const name of ["Switch to", "Rename…"]) {
       const item = screen.getByRole("menuitem", { name });
       expect(item).toBeDisabled();
       expect(item).toHaveAttribute("title", "A merge is in progress.");
@@ -201,16 +213,16 @@ describe("BranchTree — local branches", () => {
     expect(props.onSwitchBranch).not.toHaveBeenCalled();
   });
 
-  it("blocks an open force-delete confirmation, saying why, once the repository is busy (#521)", async () => {
-    const { props, rerender } = renderTree();
+  it("blocks an open delete confirmation, saying why, once the repository is busy (#521)", async () => {
+    const { props, rerender } = renderTree({ onCountCommitsOnlyOnBranch: vi.fn().mockResolvedValue(1) });
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
-    await screen.findByRole("dialog", { name: "Force delete feat/foo" });
+    await screen.findByRole("dialog", { name: "Delete feat/foo" });
 
     rerender(<BranchTreeWithDialogs {...props} operationDisabled operationDisabledReason="A transfer is in progress." />);
-    const dialog = screen.getByRole("dialog", { name: "Force delete feat/foo" });
+    const dialog = screen.getByRole("dialog", { name: "Delete feat/foo" });
     expect(dialog).toHaveTextContent("A transfer is in progress.");
-    const confirm = within(dialog).getByRole("button", { name: "Force delete" });
+    const confirm = within(dialog).getByRole("button", { name: "Delete branch" });
     expect(confirm).toBeDisabled();
     expect(confirm).toHaveAttribute("title", "A transfer is in progress.");
     expect(describedByText(confirm)).toBe("A transfer is in progress.");
@@ -308,6 +320,38 @@ describe("BranchTree — local branches", () => {
     expect(props.onSetGraphBranchSelection).not.toHaveBeenCalled();
   });
 
+  it("offers Show all branches in every branch menu while the graph is filtered, and only then (#985)", async () => {
+    const remotes = [{ name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null }];
+    const onListRemoteBranches = vi.fn().mockResolvedValue(["topic"]);
+    const { props, rerender } = renderTree({ remotes, onListRemoteBranches });
+    fireEvent.click(screen.getByRole("button", { name: "Actions for main" }));
+    expect(screen.queryByRole("menuitem", { name: "Show all branches" })).toBeNull();
+
+    rerender(<BranchTreeWithDialogs {...props} graphBranchSelection={["feat/foo"]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Actions for feat/foo" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Show all branches" }));
+    expect(props.onShowAllGraphBranches).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Actions for origin/topic" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Show all branches" }));
+    expect(props.onShowAllGraphBranches).toHaveBeenCalledTimes(2);
+  });
+
+  it("leaves Show all branches out of the branch menus while the graph shows every branch (#985)", async () => {
+    const remotes = [{ name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null }];
+    renderTree({ remotes, onListRemoteBranches: vi.fn().mockResolvedValue(["topic"]) });
+    fireEvent.click(screen.getByRole("button", { name: "Actions for main" }));
+    expect(screen.getByRole("menuitem", { name: "Isolate branch" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Show all branches" })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Actions for origin/topic" }));
+    expect(screen.getByRole("menuitem", { name: "Isolate branch" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Show all branches" })).toBeNull();
+  });
+
   it("Show all branches is enabled when only a remote selection is saved", () => {
     const { props } = renderTree({ graphRemoteBranchSelection: [] });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
@@ -387,19 +431,19 @@ describe("BranchTree — local branches", () => {
   });
 
   // Transformation: open-popover-then-click-Delete-twice → right-click-then-click-Delete-menuitem.
-  it("Cancel in the force-delete dialog dismisses it without deleting, leaving Delete in place", async () => {
-    const { props } = renderTree();
+  it("Cancel in the delete dialog dismisses it without deleting, leaving Delete in place", async () => {
+    const { props } = renderTree({ onCountCommitsOnlyOnBranch: vi.fn().mockResolvedValue(2) });
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     await Promise.resolve();
 
-    const dialog = await screen.findByRole("dialog", { name: "Force delete feat/foo" });
+    const dialog = await screen.findByRole("dialog", { name: "Delete feat/foo" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
 
-    expect(props.onDeleteBranch).toHaveBeenCalledTimes(1);
-    expect(props.onDeleteBranch).not.toHaveBeenCalledWith("feat/foo", true);
-    expect(screen.queryByRole("dialog", { name: "Force delete feat/foo" })).not.toBeInTheDocument();
+    // No plain delete is tried first any more (#996): nothing was deleted at all.
+    expect(props.onDeleteBranch).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: "Delete feat/foo" })).not.toBeInTheDocument();
 
     // "leaving Delete in place": right-clicking again still offers Delete, not a stale
     // force-delete state.
@@ -407,62 +451,97 @@ describe("BranchTree — local branches", () => {
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
   });
 
-  it("Enter on an empty/whitespace-only rename value does not call onRenameBranch", () => {
-    const { props } = renderTree();
-
+  /** Opens the Rename branch dialog on feat/foo; returns the dialog and its name field. */
+  function openRenameDialog() {
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
-    const input = screen.getByDisplayValue("feat/foo");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename…" }));
+    const dialog = screen.getByRole("dialog", { name: "Rename branch", hidden: true });
+    return { dialog, input: within(dialog).getByRole("textbox", { name: "New name", hidden: true }) };
+  }
+
+  it("an empty/whitespace-only name never reaches onRenameBranch", () => {
+    const { props } = renderTree();
+    const { dialog, input } = openRenameDialog();
     fireEvent.change(input, { target: { value: "   " } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.submit(input.closest("form")!);
 
     expect(props.onRenameBranch).not.toHaveBeenCalled();
+    expect(within(dialog).getByRole("button", { name: "Rename", hidden: true })).toBeDisabled();
   });
 
-  // #418: the inline rename follows the New branch form's rules.
+  // #418: the rename follows the New branch form's rules.
   it("trims the new branch name before renaming", () => {
     const { props } = renderTree();
-    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
-    const input = screen.getByDisplayValue("feat/foo");
+    const { input } = openRenameDialog();
     fireEvent.change(input, { target: { value: "  feat/bar " } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.submit(input.closest("form")!);
     expect(props.onRenameBranch).toHaveBeenCalledWith("feat/foo", "feat/bar");
   });
 
-  it("Enter on an unchanged name (spaces aside) closes the input without renaming", () => {
+  it("an unchanged name (spaces aside) closes the dialog without renaming", () => {
     const { props } = renderTree();
-    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
-    const input = screen.getByDisplayValue("feat/foo");
-    fireEvent.keyDown(input, { key: "Enter" });
-    expect(screen.queryByRole("textbox", { name: "Rename feat/foo" })).not.toBeInTheDocument();
+    let { input } = openRenameDialog();
+    fireEvent.submit(input.closest("form")!);
+    expect(screen.queryByRole("dialog", { name: "Rename branch", hidden: true })).toBeNull();
 
-    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
-    const again = screen.getByDisplayValue("feat/foo");
-    fireEvent.change(again, { target: { value: "feat/foo  " } });
-    fireEvent.keyDown(again, { key: "Enter" });
-    expect(screen.queryByRole("textbox", { name: "Rename feat/foo" })).not.toBeInTheDocument();
+    ({ input } = openRenameDialog());
+    fireEvent.change(input, { target: { value: "feat/foo  " } });
+    fireEvent.submit(input.closest("form")!);
+    expect(screen.queryByRole("dialog", { name: "Rename branch", hidden: true })).toBeNull();
     expect(props.onRenameBranch).not.toHaveBeenCalled();
   });
 
-  it("shows the New branch form's message for an invalid name and keeps the input open on Enter", () => {
+  it("shows the New branch form's message for an invalid name in the dialog and keeps it open", () => {
     const { props } = renderTree();
-    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
-    const input = screen.getByDisplayValue("feat/foo");
+    const { dialog, input } = openRenameDialog();
     fireEvent.change(input, { target: { value: "feat bar" } });
 
-    expect(screen.getByText("Branch names can't contain spaces.")).toBeInTheDocument();
+    expect(within(dialog).getByText("Branch names can't contain spaces.")).toBeInTheDocument();
     expect(input).toHaveAttribute("aria-invalid", "true");
     expect(input).toHaveAccessibleDescription("Branch names can't contain spaces.");
-    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.submit(input.closest("form")!);
     expect(props.onRenameBranch).not.toHaveBeenCalled();
-    expect(screen.getByRole("textbox", { name: "Rename feat/foo" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Rename branch", hidden: true })).toBeInTheDocument();
 
     fireEvent.change(input, { target: { value: "feat/bar" } });
-    expect(screen.queryByText("Branch names can't contain spaces.")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("Branch names can't contain spaces.")).not.toBeInTheDocument();
+  });
+
+  it("refuses a taken name in the dialog without calling onRenameBranch (#1002)", () => {
+    const { props } = renderTree();
+    const { dialog, input } = openRenameDialog();
+    fireEvent.change(input, { target: { value: "main" } });
+
+    expect(within(dialog).getByText('A branch named "main" already exists.')).toBeInTheDocument();
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(within(dialog).getByRole("button", { name: "Rename", hidden: true })).toBeDisabled();
+    fireEvent.submit(input.closest("form")!);
+    expect(props.onRenameBranch).not.toHaveBeenCalled();
+  });
+
+  it("keeps the dialog open with the typed name and the failure inside it when the rename fails (#422)", async () => {
+    const onRenameBranch = vi.fn().mockResolvedValue("the branch is locked");
+    renderTree({ onRenameBranch });
+    const { dialog, input } = openRenameDialog();
+    fireEvent.change(input, { target: { value: "feat/bar" } });
+    fireEvent.submit(input.closest("form")!);
+
+    expect(await within(dialog).findByText("the branch is locked")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Rename branch", hidden: true })).toBeInTheDocument();
+    expect(input).toHaveValue("feat/bar");
+  });
+
+  it("disables Rename with the reason once the repository is busy (#1002)", () => {
+    const { props, rerender } = renderTree();
+    const { dialog, input } = openRenameDialog();
+    fireEvent.change(input, { target: { value: "feat/bar" } });
+    rerender(<BranchTreeWithDialogs {...props} operationDisabled operationDisabledReason="A merge is in progress." />);
+
+    const rename = within(dialog).getByRole("button", { name: "Rename", hidden: true });
+    expect(rename).toBeDisabled();
+    expect(describedByText(rename)).toBe("A merge is in progress.");
+    fireEvent.submit(input.closest("form")!);
+    expect(props.onRenameBranch).not.toHaveBeenCalled();
   });
 
   it("disables the merge action while a merge is already in progress", () => {
@@ -505,13 +584,12 @@ describe("BranchTree — local branches", () => {
   // "...clears an in-progress rename..." — there is no popover to close in this interaction model.
   // The equivalent guard here is that starting a fresh interaction on another branch clears any
   // stale per-branch edit state rather than leaving it attached to the wrong row.
-  it("right-clicking a different branch after starting a rename on one clears that rename's input", () => {
+  it("the rename is a dialog, so the row keeps its name while renaming (#1002)", () => {
     renderTree();
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
-    expect(screen.getByDisplayValue("feat/foo")).toBeInTheDocument();
-    fireEvent.contextMenu(screen.getByText(/main.*\(current\)/));
-    expect(screen.queryByDisplayValue("feat/foo")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename…" }));
+    expect(screen.getByRole("dialog", { name: "Rename branch", hidden: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "foo" })).toBeInTheDocument();
   });
 });
 
@@ -527,7 +605,7 @@ describe("BranchTree — remotes", () => {
   it("disables every remote action with the reason while the repository is busy, like the palette", () => {
     renderTree({ remotes: oneRemote, operationDisabled: true, operationDisabledReason: "A transfer is in progress." });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    for (const name of ["Fetch", "Push current branch here", "Edit remote", "Manage credentials", "Remove remote"]) {
+    for (const name of ["Fetch", "Push current branch to origin", "Edit remote…", "Manage credentials…", "Remove remote…"]) {
       const item = screen.getByRole("menuitem", { name });
       expect(item).toBeDisabled();
       expect(item).toHaveAttribute("title", "A transfer is in progress.");
@@ -774,10 +852,10 @@ describe("BranchTree — remotes", () => {
     renderTree({ remotes: oneRemote });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
     expect(screen.getByRole("menuitem", { name: "Fetch" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Push current branch here" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Edit remote" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Manage credentials" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Remove remote" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Push current branch to origin" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Edit remote…" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Manage credentials…" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Remove remote…" })).toBeInTheDocument();
   });
 
   it("Fetch calls onFetchRemote with the remote's name", () => {
@@ -788,11 +866,11 @@ describe("BranchTree — remotes", () => {
     expect(onFetchRemote).toHaveBeenCalledWith("origin");
   });
 
-  it("Push current branch here calls onPushCurrentBranch with the remote's name", () => {
+  it("Push current branch to origin calls onPushCurrentBranch with the remote's name", () => {
     const onPushCurrentBranch = vi.fn().mockResolvedValue(undefined);
     renderTree({ remotes: oneRemote, onPushCurrentBranch });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Push current branch here" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Push current branch to origin" }));
     expect(onPushCurrentBranch).toHaveBeenCalledWith("origin");
   });
 
@@ -800,7 +878,7 @@ describe("BranchTree — remotes", () => {
     const onUpdateRemoteUrls = vi.fn().mockResolvedValue(undefined);
     renderTree({ remotes: oneRemote, onUpdateRemoteUrls });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Edit remote" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit remote…" }));
     const dialog = await screen.findByRole("dialog", { name: "Edit origin" });
     expect(within(dialog).getByDisplayValue("git@github.com:user/repo.git")).toBeInTheDocument();
     expect(within(dialog).getByLabelText("Remote name")).toHaveFocus();
@@ -816,7 +894,7 @@ describe("BranchTree — remotes", () => {
     const onSaveHttpsCredential = vi.fn().mockResolvedValue(undefined);
     renderTree({ remotes: oneRemote, onSetRemoteAuthMode, onSaveHttpsCredential });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Manage credentials" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Manage credentials…" }));
     const dialog = await screen.findByRole("dialog", { name: "Credentials for origin" });
     fireEvent.change(within(dialog).getByLabelText("HTTPS username"), { target: { value: "me" } });
     fireEvent.change(within(dialog).getByLabelText("Access token"), { target: { value: "tok" } });
@@ -831,8 +909,8 @@ describe("BranchTree — remotes", () => {
     const onRemoveRemote = vi.fn().mockResolvedValue(undefined);
     renderTree({ remotes: oneRemote, onRemoveRemote });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Remove remote" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Confirm remove" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove remote…" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Remove remote" }));
     expect(onRemoveRemote).toHaveBeenCalledWith("origin", false);
   });
 
@@ -842,8 +920,8 @@ describe("BranchTree — remotes", () => {
       remoteUpstreams: { origin: [{ localBranch: "main", remoteName: "origin", remoteBranch: "main" }] },
     });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Remove remote" }));
-    expect(await screen.findByText(/clear upstreams for main/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove remote…" }));
+    expect(await screen.findByText(/clears the upstream of main/)).toBeInTheDocument();
   });
 
   it("the header '+' menu's Add Remote opens the add-remote draft", () => {
@@ -854,9 +932,10 @@ describe("BranchTree — remotes", () => {
     expect(onOpenAddRemoteDraft).toHaveBeenCalledOnce();
   });
 
-  it("shows the current branch's upstream status, with no Pull of its own (#637)", () => {
+  it("shows the current branch's upstream in its tooltip, with no Pull of its own (#637, #1025)", () => {
     renderTree({ upstream: { localBranch: "main", remoteName: "origin", remoteBranch: "main" } });
-    expect(screen.getByText(/main tracks origin\/main/)).toBeInTheDocument();
+    expect(screen.getByTitle("main\nTracks origin/main", { normalizer: (text) => text })).toHaveTextContent(/^main \(current\)$/);
+    expect(screen.queryByRole("heading", { name: "Upstream" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Pull" })).toBeNull();
   });
 
@@ -883,10 +962,10 @@ describe("BranchTree — remotes", () => {
   // why (single global credential/edit modals replace the old per-row inline forms, so a few
   // row-isolation and disclosure-default tests no longer have anything to attach to).
 
-  it("disables Push current branch here while another operation is active", () => {
+  it("disables Push current branch to origin while another operation is active", () => {
     renderTree({ remotes: oneRemote, operationDisabled: true });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    expect(screen.getByRole("menuitem", { name: "Push current branch here" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Push current branch to origin" })).toBeDisabled();
   });
 
   it("disables Fetch and the Add-remote submit button while another operation is active", () => {
@@ -921,7 +1000,7 @@ describe("BranchTree — remotes", () => {
     });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
     expect(screen.getByRole("menuitem", { name: "Fetch" })).toHaveAttribute("title", "A rebase is in progress.");
-    expect(screen.getByRole("menuitem", { name: "Push current branch here" })).toHaveAttribute(
+    expect(screen.getByRole("menuitem", { name: "Push current branch to origin" })).toHaveAttribute(
       "title",
       "A rebase is in progress.",
     );
@@ -946,17 +1025,17 @@ describe("BranchTree — remotes", () => {
       onRemoveRemote,
     });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Remove remote" }));
-    expect(await screen.findByText(/clear upstreams for main, topic/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Confirm remove" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove remote…" }));
+    expect(await screen.findByText(/clears the upstream of main, topic/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove remote" }));
     expect(onRemoveRemote).toHaveBeenCalledWith("origin", true);
   });
 
   it("focuses Cancel when the remove-remote confirmation opens", async () => {
     renderTree({ remotes: oneRemote });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Remove remote" }));
-    const dialog = await screen.findByRole("dialog", { name: "Remove remote confirmation" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove remote…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Remove remote origin" });
     await waitFor(() => {
       expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
     });
@@ -965,7 +1044,7 @@ describe("BranchTree — remotes", () => {
   it("marks Remove remote as a destructive context-menu item", () => {
     renderTree({ remotes: oneRemote });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    expect(screen.getByRole("menuitem", { name: "Remove remote" })).toHaveAttribute("data-destructive", "true");
+    expect(screen.getByRole("menuitem", { name: "Remove remote…" })).toHaveAttribute("data-destructive", "true");
   });
 });
 
@@ -1037,14 +1116,14 @@ describe("BranchTree — local row actions button", () => {
     const actions = screen.getByRole("button", { name: "Actions for feat/foo" });
     expect(actions).toHaveAttribute("aria-haspopup", "menu");
     fireEvent.click(actions);
-    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Rename…" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
   });
 
-  it("the current branch is marked with a bold weight and a marker", () => {
+  it("the current branch is marked once, by its (current) suffix, with no extra dot (#1025)", () => {
     renderTree();
-    const marker = screen.getByLabelText("current branch");
-    expect(marker.closest("span[title='main']")).not.toBeNull();
+    expect(screen.queryByLabelText("current branch")).toBeNull();
+    expect(screen.getByTitle("main")).toHaveTextContent(/^main \(current\)$/);
   });
 });
 
@@ -1056,27 +1135,27 @@ describe("BranchTree — inline forms focus and Escape", () => {
   function startRename() {
     const utils = renderTree();
     fireEvent.click(screen.getByRole("button", { name: "Actions for feat/foo" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename…" }));
     return utils;
   }
 
-  it("the rename input is labelled, focused, and Escape cancels", () => {
-    startRename();
-    const input = screen.getByRole("textbox", { name: "Rename feat/foo" });
+  it("the rename field is labelled and focused; Escape and Cancel close the dialog (#1002)", () => {
+    const { props } = startRename();
+    const dialog = screen.getByRole("dialog", { name: "Rename branch", hidden: true });
+    const input = within(dialog).getByRole("textbox", { name: "New name", hidden: true });
     expect(input).toHaveFocus();
-    fireEvent.keyDown(input, { key: "Escape" });
-    expect(screen.queryByRole("textbox", { name: "Rename feat/foo" })).not.toBeInTheDocument();
-  });
+    fireEvent(dialog, new Event("cancel", { cancelable: true }));
+    expect(screen.queryByRole("dialog", { name: "Rename branch", hidden: true })).toBeNull();
 
-  it("blurring the rename input with an unchanged value cancels, a changed value stays", () => {
-    startRename();
-    const input = screen.getByRole("textbox", { name: "Rename feat/foo" });
-    fireEvent.change(input, { target: { value: "feat/bar" } });
-    fireEvent.blur(input);
-    expect(screen.getByRole("textbox", { name: "Rename feat/foo" })).toBeInTheDocument();
-    fireEvent.change(input, { target: { value: "feat/foo" } });
-    fireEvent.blur(input);
-    expect(screen.queryByRole("textbox", { name: "Rename feat/foo" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Actions for feat/foo" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename…" }));
+    const again = screen.getByRole("dialog", { name: "Rename branch", hidden: true });
+    fireEvent.change(within(again).getByRole("textbox", { name: "New name", hidden: true }), {
+      target: { value: "feat/bar" },
+    });
+    fireEvent.click(within(again).getByRole("button", { name: "Cancel", hidden: true }));
+    expect(screen.queryByRole("dialog", { name: "Rename branch", hidden: true })).toBeNull();
+    expect(props.onRenameBranch).not.toHaveBeenCalled();
   });
 });
 
@@ -1086,31 +1165,52 @@ describe("BranchTree — remote list states and upstream block", () => {
   });
   const up = { localBranch: "main", remoteName: "origin", remoteBranch: "main" };
 
+  /** Opens the current branch's menu and chooses Clear upstream… (#1025). */
+  function chooseClearUpstream() {
+    fireEvent.click(screen.getByRole("button", { name: "Actions for main" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Clear upstream…" }));
+  }
+
+  it("offers Clear upstream… only on the current branch, and only with an upstream (#1025)", () => {
+    renderTree({ upstream: up });
+    fireEvent.click(screen.getByRole("button", { name: "Actions for main" }));
+    expect(screen.getByRole("menuitem", { name: "Clear upstream…" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Actions for feat/foo" }));
+    expect(screen.queryByRole("menuitem", { name: "Clear upstream…" })).toBeNull();
+    cleanup();
+
+    renderTree();
+    fireEvent.click(screen.getByRole("button", { name: "Actions for main" }));
+    expect(screen.queryByRole("menuitem", { name: "Clear upstream…" })).toBeNull();
+    expect(screen.getByTitle("main")).toBeInTheDocument();
+  });
+
   it("asks for confirmation before clearing the upstream", async () => {
     const { props } = renderTree({ upstream: up });
-    fireEvent.click(screen.getByRole("button", { name: "Clear upstream" }));
+    chooseClearUpstream();
     expect(props.onClearUpstream).not.toHaveBeenCalled();
-    const dialog = await screen.findByRole("dialog", { name: "Clear upstream confirmation", hidden: true });
+    const dialog = await screen.findByRole("dialog", { name: "Clear upstream of main", hidden: true });
     fireEvent.click(within(dialog).getByRole("button", { name: "Clear upstream", hidden: true }));
     expect(props.onClearUpstream).toHaveBeenCalledOnce();
   });
 
   it("says why Clear upstream can't run while the repository is busy, there and in its confirmation (#748)", async () => {
     const { props, rerender } = renderTree({ upstream: up });
-    fireEvent.click(screen.getByRole("button", { name: "Clear upstream" }));
-    await screen.findByRole("dialog", { name: "Clear upstream confirmation", hidden: true });
+    chooseClearUpstream();
+    await screen.findByRole("dialog", { name: "Clear upstream of main", hidden: true });
     rerender(<BranchTreeWithDialogs {...props} operationDisabled operationDisabledReason="A merge is in progress." />);
-    const dialog = screen.getByRole("dialog", { name: "Clear upstream confirmation", hidden: true });
+    const dialog = screen.getByRole("dialog", { name: "Clear upstream of main", hidden: true });
     const confirm = within(dialog).getByRole("button", { name: "Clear upstream", hidden: true });
     expect(confirm).toBeDisabled();
     expect(describedByText(confirm)).toBe("A merge is in progress.");
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel", hidden: true }));
 
-    const button = screen.getByRole("button", { name: "Clear upstream" });
-    expect(button).toHaveAttribute("aria-disabled", "true");
-    expect(describedByText(button)).toBe("A merge is in progress.");
-    fireEvent.click(button);
-    expect(screen.queryByRole("dialog", { name: "Clear upstream confirmation", hidden: true })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Actions for main" }));
+    const item = screen.getByRole("menuitem", { name: "Clear upstream…" });
+    expect(item).toBeDisabled();
+    expect(item).toHaveAttribute("title", "A merge is in progress.");
+    fireEvent.click(item);
+    expect(screen.queryByRole("dialog", { name: "Clear upstream of main", hidden: true })).toBeNull();
     expect(props.onClearUpstream).not.toHaveBeenCalled();
   });
 });
@@ -1240,7 +1340,7 @@ describe("BranchTree — keyboard menus", () => {
     const row = screen.getByTitle("main").closest('[role="button"]') as HTMLElement;
     row.focus();
     fireEvent.keyDown(row, { key: "ContextMenu" });
-    expect(screen.getByRole("menuitem", { name: "Rename" })).toHaveFocus();
+    expect(screen.getByRole("menuitem", { name: "Rename…" })).toHaveFocus();
   });
 
   it("the Menu key on a row's '…' button opens the row's menu and Escape returns to the button", () => {
@@ -1257,8 +1357,8 @@ describe("BranchTree — keyboard menus", () => {
     const row = screen.getByTitle("feat/foo").closest('[role="button"]') as HTMLElement;
     row.focus();
     fireEvent.keyDown(row, { key: "ContextMenu" });
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
-    fireEvent.keyDown(screen.getByRole("textbox", { name: "Rename feat/foo" }), { key: "F10", shiftKey: true });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename…" }));
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "New name", hidden: true }), { key: "F10", shiftKey: true });
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
@@ -1283,7 +1383,7 @@ describe("BranchTree — keyboard menus", () => {
     const prevented = !fireEvent.keyDown(header, { key: "ContextMenu" });
     expect(prevented).toBe(true);
     expect(screen.getByRole("menu")).toHaveStyle({ left: "4px", top: "322px" });
-    expect(screen.getByRole("menuitem", { name: "Edit remote" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Edit remote…" })).toBeInTheDocument();
     fireEvent.keyDown(screen.getByRole("menuitem", { name: "Fetch" }), { key: "Escape" });
     expect(header).toHaveFocus();
     // The header's own toggle did not run.
@@ -1304,7 +1404,7 @@ describe("BranchTree — keyboard menus", () => {
     expect(actions).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(actions);
     expect(actions).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("menuitem", { name: "Manage credentials" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Manage credentials…" })).toBeInTheDocument();
   });
 
   // WebKit (macOS) does not focus a button on mouse click, so the menu cannot rely on the focused
@@ -1362,9 +1462,9 @@ describe("BranchTree — remote dialogs belong to the owner", () => {
   beforeEach(() => localStorage.clear());
 
   it.each([
-    ["Edit remote", "edit"],
-    ["Manage credentials", "credentials"],
-    ["Remove remote", "remove"],
+    ["Edit remote…", "edit"],
+    ["Manage credentials…", "credentials"],
+    ["Remove remote…", "remove"],
   ] as const)("%s asks onOpenRemoteDialog for the %s dialog and renders none itself", (item, action) => {
     const onOpenRemoteDialog = vi.fn();
     render(<BranchTree {...treeProps({ remotes: [origin], onOpenRemoteDialog })} />);
@@ -1433,7 +1533,7 @@ describe("BranchTree — copy items (#614)", () => {
     };
     renderTree({ remotes: [remote] });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    expect(menuNames().slice(-3)).toEqual(["Copy fetch URL", "Copy push URL", "Remove remote"]);
+    expect(menuNames().slice(-3)).toEqual(["Copy fetch URL", "Copy push URL", "Remove remote…"]);
     fireEvent.click(screen.getByRole("menuitem", { name: "Copy push URL" }));
     expect(writeText).toHaveBeenCalledWith("git@example.com:r.git");
   });

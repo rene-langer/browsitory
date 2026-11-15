@@ -1,3 +1,4 @@
+import { failedOperation } from "../lib/operationErrors";
 import { useCallback } from "react";
 import type { RepoClient, StashEntry, StashOptions } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
@@ -36,7 +37,7 @@ export function useStashActions(
       runMutation(async () => {
         setState((prev) => ({ ...prev, dialog: withoutDialog(prev.dialog, "stash") }));
         await client.saveStash(repoPath, options);
-      }),
+      }, failedOperation.saveStash()),
     [client, runMutation, repoPath, setState],
   );
   // Apply/Pop/Drop send the listed stash's commit id along with its index; the backend refuses
@@ -58,7 +59,7 @@ export function useStashActions(
         setState((prev) => ({ ...prev, stashOutcome: null }));
         const outcome = await client.applyStash(repoPath, index, commitId, restoreIndex);
         setState((prev) => ({ ...prev, stashOutcome: { action: "apply", outcome } }));
-      });
+      }, failedOperation.applyStash(index));
     },
     [client, runMutation, repoPath, setState, listedCommitId],
   );
@@ -81,7 +82,7 @@ export function useStashActions(
             stashOutcome: { action: "pop", outcome },
           };
         });
-      });
+      }, failedOperation.popStash(index));
     },
     [client, runMutation, repoPath, setState, listedCommitId],
   );
@@ -101,6 +102,7 @@ export function useStashActions(
           };
         },
         () => client.dropStash(repoPath, index, droppedCommitId),
+        failedOperation.dropStash(index),
       );
     },
     [client, runOptimisticMutation, repoPath, listedCommitId],

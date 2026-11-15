@@ -10,8 +10,12 @@ import { DiffPane as WorkspaceDiffPane, type DiscardRequest, type StashActions }
 import { WorkspaceActionsContext, type WorkspaceActions } from "../state/useWorkspaceActions";
 import { splitWorkspaceActions, testWorkspaceActions } from "../test/workspaceActions";
 import styles from "./DiffPane.module.css";
+import diffPaneCss from "./DiffPane.module.css?raw";
+import { cascadedValue, rulesOf, subjectOf } from "../test/cssCascade";
 import { fakeRepoClient } from "../test/fakeRepoClient";
 import { describedByText } from "../test/describedBy";
+import { chooseCommitMenuItem, commitMenuItems } from "../test/commitMenu";
+import { chooseViewOption } from "../test/viewMenu";
 
 const TEST_REPO_PATH = "/repo";
 
@@ -78,9 +82,6 @@ const noopHandlers = {
   onDiscardFile: vi.fn(),
   onDiscardAllUnstaged: vi.fn(),
   onIgnorePath: vi.fn(),
-  onAbortMerge: vi.fn(),
-  onRebaseContinue: vi.fn(),
-  onRebaseAbort: vi.fn(),
 };
 
 function renderUncommitted(
@@ -323,7 +324,7 @@ describe("DiffPane", () => {
         const dialog = screen.getByRole("dialog", { name: "Discard changes", hidden: true });
         expect(within(dialog).getByText("Discard changes to src/a.ts? Undo can bring them back.")).toBeInTheDocument();
         expect(onDiscardFile).not.toHaveBeenCalled();
-        fireEvent.click(within(dialog).getByText("Discard changes"));
+        fireEvent.click(within(dialog).getByRole("button", { name: "Discard changes", hidden: true }));
 
         expect(onDiscardFile).toHaveBeenCalledWith("src/a.ts");
       });
@@ -503,6 +504,14 @@ describe("DiffPane", () => {
         expect(screen.queryByRole("button", { name: "Actions for shared.txt" })).not.toBeInTheDocument();
       });
 
+      it("marks Discard all… and its confirmation as a danger (#988)", () => {
+        render();
+        const discardAll = screen.getByRole("button", { name: "Discard all…" });
+        expect(discardAll).toHaveAttribute("data-tone", "danger");
+        fireEvent.click(discardAll);
+        expect(screen.getByRole("button", { name: "Discard all" })).toHaveAttribute("data-tone", "danger");
+      });
+
       it("Discard all confirms then calls onDiscardAllUnstaged", () => {
         const onDiscardAllUnstaged = vi.fn();
         render({ onDiscardAllUnstaged });
@@ -561,7 +570,7 @@ describe("DiffPane", () => {
           onCurrentFileChange,
         });
 
-        fireEvent.click(screen.getByText("Discard changes"));
+        fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
 
         expect(onDiscardFile).toHaveBeenCalledWith("src/a.ts");
         expect(onDiscardRequestChange).toHaveBeenCalledWith(null);
@@ -589,13 +598,13 @@ describe("DiffPane", () => {
           );
         }
         const { rerender } = rtlRender(<Harness status={fileStatus} />);
-        expect(screen.getByText("Discard changes")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Discard changes" })).toBeInTheDocument();
 
         rerender(<Harness status={[fileStatus[1]]} />);
-        expect(screen.queryByText("Discard changes")).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Discard changes" })).not.toBeInTheDocument();
 
         rerender(<Harness status={fileStatus} />);
-        expect(screen.queryByText("Discard changes")).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Discard changes" })).not.toBeInTheDocument();
       });
 
       it("clears an all request when nothing is discardable and shows no dialog", () => {
@@ -896,7 +905,7 @@ describe("DiffPane", () => {
         mergeMessage: null,
         headInfo: { ...headInfo, squashMessage: "Squashed commit of the following:\n" },
       });
-      expect(screen.getByRole("button", { name: "Add co-author" })).toBeInTheDocument();
+      expect(commitMenuItems()).toContain("Add co-author…");
       squash.unmount();
 
       for (const operation of [null, "CherryPick", "Revert"] as const) {
@@ -905,13 +914,24 @@ describe("DiffPane", () => {
           headInfo: { ...headInfo, operation },
         });
         expect(screen.getByPlaceholderText("Commit message")).toHaveValue("git's message\n");
-        expect(screen.queryByRole("button", { name: "Add co-author" }), String(operation)).toBeNull();
+        expect(commitMenuItems(), String(operation)).not.toContain("Add co-author…");
         paused.unmount();
       }
 
       // Without anything pre-filled the user's own commit offers them too.
       renderUncommitted(fakeClient({}), status, { mergeMessage: null, headInfo });
-      expect(screen.getByRole("button", { name: "Add co-author" })).toBeInTheDocument();
+      expect(commitMenuItems()).toContain("Add co-author…");
+    });
+
+    it("says Nothing to commit on a clean tree and Stage changes only with unstaged changes (#1005)", () => {
+      const clean = renderUncommitted(fakeClient({}), []);
+      expect(screen.getByText("Nothing to commit.")).toBeInTheDocument();
+      expect(screen.queryByText(/Stage changes to commit/)).toBeNull();
+      clean.unmount();
+
+      renderUncommitted(fakeClient({}), [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }]);
+      expect(screen.getByText("Stage changes to commit.")).toBeInTheDocument();
+      expect(screen.queryByText("Nothing to commit.")).toBeNull();
     });
 
     it("offers amend and an empty message box after a leftover cherry-pick (#240, #232)", () => {
@@ -922,13 +942,13 @@ describe("DiffPane", () => {
       const { unmount } = renderUncommitted(fakeClient({}), status, { mergeMessage: "picked message\n", headInfo });
 
       expect(screen.getByPlaceholderText("Commit message")).toHaveValue("");
-      expect(screen.getByLabelText("Amend last commit")).toBeInTheDocument();
+      expect(commitMenuItems()).toContain("Amend last commit");
       unmount();
 
       // A cherry-pick still in progress keeps its message and blocks amend.
       renderUncommitted(fakeClient({}), status, { mergeMessage: "picked message\n", headInfo: { ...headInfo, operationLeftover: false } });
       expect(screen.getByPlaceholderText("Commit message")).toHaveValue("picked message\n");
-      expect(screen.queryByLabelText("Amend last commit")).toBeNull();
+      expect(commitMenuItems()).not.toContain("Amend last commit");
     });
 
     it("offers no Abort merge or amend during a rebase started in a terminal (#263)", () => {
@@ -953,15 +973,14 @@ describe("DiffPane", () => {
       expect(within(dock).queryByText(/amend/i)).toBeNull();
     });
 
-    it("keeps the rebase actions in a pinned commit-actions group so they never scroll away with long diffs", () => {
+    it("keeps the rebase's Continue and Abort out of the commit-actions group: the strip has them (#995)", () => {
       renderUncommitted(fakeClient({}), status, { rebaseProgress: { currentStep: 1, totalSteps: 3 } });
 
       const dock = screen.getByRole("group", { name: "Commit actions" });
-      expect(within(dock).getByRole("button", { name: /abort rebase/i })).toBeInTheDocument();
+      expect(within(dock).queryByRole("button", { name: /abort rebase|continue rebase/i })).toBeNull();
     });
 
-    it("disables Continue with the divergence reason", () => {
-      const onRebaseAbort = vi.fn();
+    it("leaves an interrupted rebase's reason and Abort to the strip (#995)", () => {
       renderUncommitted(fakeClient({}), status, {
         rebaseProgress: { currentStep: 1, totalSteps: 3 },
         headInfo: {
@@ -969,14 +988,24 @@ describe("DiffPane", () => {
           rebase: { branch: "topic", onto: "o", currentStep: 1, totalSteps: 3, editing: null, splitParts: 0, health: { kind: "Diverged", reason: "BranchMoved" } },
           bisect: null, terminalSequence: null, terminalRebase: null,
         },
-        onRebaseAbort,
       });
 
       const dock = screen.getByRole("group", { name: "Commit actions" });
-      expect(within(dock).getByRole("button", { name: /continue rebase/i })).toBeDisabled();
-      expect(within(dock).getByText("topic was changed outside Browsitory.")).toBeInTheDocument();
-      fireEvent.click(within(dock).getByRole("button", { name: /abort rebase/i }));
-      expect(onRebaseAbort).toHaveBeenCalled();
+      expect(within(dock).queryByRole("button", { name: /continue rebase|abort rebase/i })).toBeNull();
+      expect(within(dock).queryByText("topic was changed outside Browsitory.")).toBeNull();
+    });
+
+    it("shows a sequence Continue's running hook with Cancel in the dock", () => {
+      const onCancel = vi.fn();
+      const sequence = { kind: "CherryPick" as const, currentStep: 1, totalSteps: 2, currentCommit: "c" };
+      renderUncommitted(fakeClient({}), status, {
+        headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null },
+        commitHooks: { skip: false, onToggleSkip: () => {}, running: { operationId: "continue-1", hook: "pre-commit" }, onCancel },
+      });
+      const dock = screen.getByRole("group", { name: "Commit actions" });
+      expect(within(dock).getByRole("status")).toHaveTextContent("Running pre-commit hook…");
+      fireEvent.click(within(dock).getByRole("button", { name: "Cancel" }));
+      expect(onCancel).toHaveBeenCalledTimes(1);
     });
 
     it("names the pre-hook the merge commit will run in the Skip hooks tooltip", () => {
@@ -996,47 +1025,29 @@ describe("DiffPane", () => {
       );
     });
 
-    it("shows a paused cherry-pick sequence in the dock instead of the commit box", () => {
-      const onSequenceContinue = vi.fn();
-      const onSequenceAbort = vi.fn();
+    it("keeps a paused cherry-pick sequence's status and controls out of the dock: the strip has them (#995)", () => {
       const sequence = { kind: "CherryPick" as const, currentStep: 2, totalSteps: 5, currentCommit: "c" };
       const headInfo = { headId: "abc", detachedAt: null, headPushed: false, operation: "CherryPick" as const, operationLeftover: false, squashMessage: null, commitHooks: [], sequence, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null };
       const { unmount } = renderUncommitted(
         fakeClient({ getConflictHunks: async () => [] }),
         [...status, { path: "c.txt", oldPath: null, staged: false, kind: "Conflicted" }],
-        { headInfo, onSequenceContinue, onSequenceAbort },
+        { headInfo },
       );
 
       const dock = screen.getByRole("group", { name: "Commit actions" });
-      expect(within(dock).getByText("Cherry-pick in progress")).toBeInTheDocument();
-      expect(within(dock).getByText("Step 2 of 5")).toBeInTheDocument();
-      expect(within(dock).getByRole("button", { name: "Continue cherry-pick" })).toBeDisabled();
+      expect(within(dock).queryByText("Cherry-pick in progress")).toBeNull();
+      expect(within(dock).queryByText("Step 2 of 5")).toBeNull();
+      expect(within(dock).queryByRole("button", { name: /cherry-pick/ })).toBeNull();
       expect(within(dock).queryByRole("textbox", { name: "Commit message" })).toBeNull();
-      fireEvent.click(within(dock).getByRole("button", { name: "Abort cherry-pick" }));
-      expect(onSequenceAbort).toHaveBeenCalled();
       unmount();
 
-      // Stopped by an error: nothing conflicted, so Continue (a retry) is enabled.
+      // Stopped by an error: the same.
       renderUncommitted(fakeClient({}), status, {
         headInfo: { ...headInfo, operation: null, sequence: { ...sequence, kind: "Revert" }, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null },
-        onSequenceContinue,
-        onSequenceAbort,
       });
       const revertDock = screen.getByRole("group", { name: "Commit actions" });
-      expect(within(revertDock).getByText("Revert in progress")).toBeInTheDocument();
-      fireEvent.click(within(revertDock).getByRole("button", { name: "Continue revert" }));
-      expect(onSequenceContinue).toHaveBeenCalled();
-    });
-
-    it("disables the sequence's Continue and Abort while an action is pending", () => {
-      const sequence = { kind: "Revert" as const, currentStep: 1, totalSteps: 2, currentCommit: "c" };
-      renderUncommitted(fakeClient({}), status, {
-        headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null },
-        sequencePending: true,
-      });
-      const dock = screen.getByRole("group", { name: "Commit actions" });
-      expect(within(dock).getByRole("button", { name: "Continue revert" })).toBeDisabled();
-      expect(within(dock).getByRole("button", { name: "Abort revert" })).toBeDisabled();
+      expect(within(revertDock).queryByText("Revert in progress")).toBeNull();
+      expect(within(revertDock).queryByRole("button", { name: /revert/ })).toBeNull();
     });
 
     it("keeps the commit box in the pinned commit-actions group", () => {
@@ -1053,6 +1064,22 @@ describe("DiffPane", () => {
       expect(within(screen.getByRole("region", { name: "Changes in a.txt (unstaged)" })).getByText("Blame")).toBeInTheDocument();
     });
 
+    it("puts Back to diff in the viewer's header while blame shows, once (#986)", async () => {
+      const blameLines: BlameLine[] = [
+        { lineNumber: 1, content: "hello", commitId: "abc123", shortId: "abc1234", authorName: "Rene", timestamp: 1 },
+      ];
+      renderUncommitted(fakeClient({ getBlame: vi.fn(async () => blameLines), getWorkingDiff: async () => [] }), status);
+
+      fireEvent.click(screen.getAllByText("Blame")[0]);
+      const table = (await screen.findByText("hello")).closest("table")!;
+
+      const back = screen.getAllByRole("button", { name: "Back to diff" });
+      expect(back).toHaveLength(1);
+      expect(back[0].compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      fireEvent.click(back[0]);
+      expect(screen.queryByRole("table")).toBeNull();
+    });
+
     it("clicking Blame fetches and renders blame for that file", async () => {
       const blameLines: BlameLine[] = [
         { lineNumber: 1, content: "hello", commitId: "abc123", shortId: "abc1234", authorName: "Rene", timestamp: 1 },
@@ -1066,7 +1093,7 @@ describe("DiffPane", () => {
       expect(getBlame).toHaveBeenCalledWith(TEST_REPO_PATH, "HEAD", "a.txt");
     });
 
-    it("clicking a blame line calls onSelectRow with that line's commit id", async () => {
+    it("clicking a blame line's commit id calls onSelectRow with that commit", async () => {
       const blameLines: BlameLine[] = [
         { lineNumber: 1, content: "hello", commitId: "abc123", shortId: "abc1234", authorName: "Rene", timestamp: 1 },
       ];
@@ -1075,8 +1102,7 @@ describe("DiffPane", () => {
       renderUncommitted(fakeClient({ getBlame, getWorkingDiff: async () => [] }), status, { onSelectRow });
 
       fireEvent.click(screen.getAllByText("Blame")[0]);
-      const row = await screen.findByText("hello");
-      fireEvent.click(row.closest("tr")!);
+      fireEvent.click(await screen.findByRole("button", { name: "abc1234" }));
 
       expect(onSelectRow).toHaveBeenCalledWith({ commitId: "abc123" });
     });
@@ -1207,15 +1233,17 @@ describe("DiffPane", () => {
       expect(screen.queryByText("Keep our version")).not.toBeInTheDocument();
     });
 
-    it("disables Commit while a Conflicted entry exists in status, even with staged files", () => {
+    it("shrinks the commit box to one line while a Conflicted entry exists, even with staged files (#980)", () => {
       const mixedStatus: StatusEntry[] = [
         { path: "a.txt", oldPath: null, staged: true, kind: "New" },
         { path: "shared.txt", oldPath: null, staged: false, kind: "Conflicted" },
       ];
       renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), mixedStatus);
 
-      const commitButton = screen.getByText("Commit 1 file").closest("button");
-      expect(commitButton).toBeDisabled();
+      const dock = screen.getByRole("group", { name: "Commit actions" });
+      expect(within(dock).queryByRole("button", { name: /^Commit/ })).toBeNull();
+      expect(within(dock).queryByRole("textbox", { name: "Commit message" })).toBeNull();
+      expect(dock).toHaveTextContent("Commit once every conflict is resolved.");
     });
 
     it("groups unstaged and staged entries under labelled headings with counts", () => {
@@ -1327,10 +1355,204 @@ describe("DiffPane", () => {
       expect(onUnstageFile).toHaveBeenCalledWith("b.txt");
     });
 
-    it("shows RebaseProgressPanel instead of CommitBox while a rebase is in progress", () => {
+    describe("an edit stop's dock: the message, without the strip's controls (#995, #994)", () => {
+      const editHead = (splitParts: number) => ({
+        headId: "c1",
+        detachedAt: "c1",
+        headPushed: false,
+        operation: null,
+        operationLeftover: false,
+        squashMessage: null,
+        commitHooks: [],
+        sequence: null,
+        rebase: { branch: "main", onto: "c0", currentStep: 1, totalSteps: 1, health: { kind: "Paused" as const }, editing: "c2c2c2c2c2", splitParts },
+        bisect: null,
+        terminalSequence: null,
+        terminalRebase: null,
+      });
+
+      it("keeps the message field, with no step, Continue or Abort", async () => {
+        renderUncommitted(fakeClient({ getCommitMessage: async () => "two\n" }), status, {
+          headInfo: editHead(0),
+          rebaseProgress: { currentStep: 1, totalSteps: 1 },
+        });
+        const dock = screen.getByRole("group", { name: "Commit actions" });
+        expect(await within(dock).findByRole("textbox", { name: "Commit message" })).toHaveValue("two\n");
+        expect(within(dock).queryByText(/Step 1 of 1/)).toBeNull();
+        expect(within(dock).queryByRole("button", { name: /Continue|Abort/ })).toBeNull();
+        // Commit part stays at any edit stop (#884): a part makes the edit a split.
+        expect(within(dock).getByRole("button", { name: "Commit part" })).toBeInTheDocument();
+      });
+
+      it("tells a split what to do, with Commit part", async () => {
+        renderUncommitted(fakeClient({ getCommitMessage: async () => "two\n" }), status, {
+          headInfo: editHead(0),
+          rebaseProgress: { currentStep: 1, totalSteps: 1 },
+          splittingCommit: "c2c2c2c2c2",
+          onRebaseCommitPart: vi.fn(async () => true),
+        });
+        const dock = screen.getByRole("group", { name: "Commit actions" });
+        await within(dock).findByRole("textbox", { name: "Commit message" });
+        expect(
+          within(dock).getByText("Unstage what belongs in a later part, write its message, then Commit part. Finish split commits the rest."),
+        ).toBeInTheDocument();
+        expect(within(dock).getByRole("button", { name: "Commit part" })).toBeInTheDocument();
+        expect(within(dock).queryByRole("button", { name: /Continue|Abort/ })).toBeNull();
+      });
+    });
+
+    describe("a conflicted file gives the merge editor the space (#980)", () => {
+      const mixed: StatusEntry[] = [
+        { path: "shared.txt", oldPath: null, staged: false, kind: "Conflicted" },
+        { path: "README.md", oldPath: null, staged: false, kind: "Modified" },
+        { path: "b.txt", oldPath: null, staged: true, kind: "New" },
+      ];
+
+      it("collapses the file list to the conflict and hides the diff options, until asked for all files", async () => {
+        renderUncommitted(fakeClient({ getConflictHunks: async () => [], getWorkingDiff: async () => [] }), mixed, {
+          mergeMessage: "Merge branch 'feature'\n",
+        });
+        await screen.findByText("Save resolution");
+        const showAll = screen.getByRole("button", { name: "Show all changes" });
+        expect(showAll).toHaveAttribute("aria-expanded", "false");
+        const groups = rowLabel("shared.txt (Conflicted)").closest("[data-collapsed]");
+        expect(groups).toHaveAttribute("data-collapsed", "true");
+        expect(screen.queryByRole("group", { name: "Diff view options" })).toBeNull();
+
+        fireEvent.click(showAll);
+        expect(screen.getByRole("button", { name: "Show all changes" })).toHaveAttribute("aria-expanded", "true");
+        expect(rowLabel("README.md (Modified)").closest("[data-collapsed]")).toHaveAttribute("data-collapsed", "false");
+
+        // Another file: the list and the diff options as always.
+        fireEvent.click(rowLabel("README.md (Modified)"));
+        expect(await screen.findByRole("group", { name: "Diff view options" })).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Show all changes" })).toBeNull();
+      });
+
+      const conflictClient = () => fakeClient({ getConflictHunks: async () => [], getWorkingDiff: async () => [] });
+
+      it("tells the workspace while a conflicted file is open, and when another file is selected", async () => {
+        const onConflictFileOpenChange = vi.fn();
+        renderUncommitted(conflictClient(), mixed, { mergeMessage: "Merge branch 'feature'\n", onConflictFileOpenChange });
+        await screen.findByText("Save resolution");
+        expect(onConflictFileOpenChange).toHaveBeenLastCalledWith(true);
+
+        fireEvent.click(rowLabel("README.md (Modified)"));
+        await waitFor(() => expect(onConflictFileOpenChange).toHaveBeenLastCalledWith(false));
+      });
+
+      it("tells the workspace when the conflict is resolved and when the pane goes", async () => {
+        const onConflictFileOpenChange = vi.fn();
+        const client = conflictClient();
+        const props = { mergeMessage: "Merge branch 'feature'\n", onConflictFileOpenChange };
+        const { rerender, unmount } = renderUncommitted(client, mixed, props);
+        await screen.findByText("Save resolution");
+        expect(onConflictFileOpenChange).toHaveBeenLastCalledWith(true);
+
+        // Resolved: the file is a plain change now.
+        const resolved: StatusEntry[] = [
+          { path: "shared.txt", oldPath: null, staged: true, kind: "Modified" },
+          ...mixed.slice(1),
+        ];
+        rerender(
+          <DiffPane
+            repoPath={TEST_REPO_PATH}
+            client={client}
+            selectedRow="uncommitted"
+            status={resolved}
+            rebaseProgress={null}
+            {...noopHandlers}
+            {...props}
+          />,
+        );
+        await waitFor(() => expect(onConflictFileOpenChange).toHaveBeenLastCalledWith(false));
+
+        // Open again, then the pane unmounts (a commit selected, the operation over).
+        rerender(
+          <DiffPane
+            repoPath={TEST_REPO_PATH}
+            client={client}
+            selectedRow="uncommitted"
+            status={mixed}
+            rebaseProgress={null}
+            {...noopHandlers}
+            {...props}
+          />,
+        );
+        fireEvent.click(rowLabel("shared.txt (Conflicted)"));
+        await waitFor(() => expect(onConflictFileOpenChange).toHaveBeenLastCalledWith(true));
+        unmount();
+        expect(onConflictFileOpenChange).toHaveBeenLastCalledWith(false);
+      });
+
+      describe("the collapsed list starts at the top, the current row in view", () => {
+        const original = Element.prototype.scrollIntoView;
+        afterEach(() => {
+          Element.prototype.scrollIntoView = original;
+        });
+
+        // Records each scrollIntoView: its element, options and the list's scrollTop at the time.
+        function spyScrolls(list: () => Element | null) {
+          const calls: { element: Element; options: unknown; listTop: number | undefined }[] = [];
+          Element.prototype.scrollIntoView = function (this: Element, options?: unknown) {
+            calls.push({ element: this, options, listTop: list()?.scrollTop });
+          } as Element["scrollIntoView"];
+          return calls;
+        }
+
+        it("when the list collapses", async () => {
+          renderUncommitted(conflictClient(), mixed, { mergeMessage: "Merge branch 'feature'\n" });
+          await screen.findByText("Save resolution");
+          fireEvent.click(screen.getByRole("button", { name: "Show all changes" }));
+          const groups = rowLabel("shared.txt (Conflicted)").closest("[data-collapsed]") as HTMLElement;
+          expect(groups).toHaveAttribute("data-collapsed", "false");
+          groups.scrollTop = 90;
+          const calls = spyScrolls(() => groups);
+
+          fireEvent.click(screen.getByRole("button", { name: "Show all changes" }));
+          expect(groups).toHaveAttribute("data-collapsed", "true");
+          expect(groups.scrollTop).toBe(0);
+          // The row's own element, inside its list item.
+          const row = rowLabel("shared.txt (Conflicted)").closest("li");
+          expect(calls.filter((call) => row?.contains(call.element) === true).at(-1)).toMatchObject({
+            options: { block: "nearest" },
+            listTop: 0,
+          });
+        });
+
+        it("when another conflicted file becomes current", async () => {
+          const twoConflicts: StatusEntry[] = [
+            { path: "one.txt", oldPath: null, staged: false, kind: "Conflicted" },
+            { path: "two.txt", oldPath: null, staged: false, kind: "Conflicted" },
+            { path: "README.md", oldPath: null, staged: false, kind: "Modified" },
+          ];
+          renderUncommitted(conflictClient(), twoConflicts, { mergeMessage: "Merge branch 'feature'\n" });
+          await screen.findByText("Save resolution");
+          const groups = rowLabel("one.txt (Conflicted)").closest("[data-collapsed]") as HTMLElement;
+          expect(groups).toHaveAttribute("data-collapsed", "true");
+          groups.scrollTop = 90;
+          const calls = spyScrolls(() => groups);
+
+          fireEvent.click(rowLabel("two.txt (Conflicted)"));
+          await waitFor(() => expect(groups.scrollTop).toBe(0));
+          const row = rowLabel("two.txt (Conflicted)").closest("li");
+          expect(calls.filter((call) => row?.contains(call.element) === true).at(-1)).toMatchObject({
+            options: { block: "nearest" },
+            listTop: 0,
+          });
+        });
+
+        it("and the browser doesn't move it by itself (no scroll anchoring)", () => {
+          const collapsed = rulesOf(diffPaneCss).filter(({ selector }) => selector === '.fileGroups[data-collapsed="true"]');
+          expect(cascadedValue(collapsed, "overflow-anchor")).toBe("none");
+        });
+      });
+    });
+
+    it("shows neither the commit box nor the rebase's step while a rebase is in progress: the strip has it (#995)", () => {
       renderUncommitted(fakeClient({}), status, { rebaseProgress: { currentStep: 1, totalSteps: 3 } });
 
-      expect(screen.getByText(/Step 1 of 3/)).toBeInTheDocument();
+      expect(screen.queryByText(/Step 1 of 3/)).toBeNull();
       expect(screen.queryByPlaceholderText("Commit message")).not.toBeInTheDocument();
     });
 
@@ -1456,7 +1678,7 @@ describe("DiffPane", () => {
       expect(getBlame).toHaveBeenCalledWith(TEST_REPO_PATH, "abc123", "src/main.rs");
     });
 
-    it("clicking a blame line calls onSelectRow with that line's commit id", async () => {
+    it("clicking a blame line's commit id calls onSelectRow with that commit", async () => {
       const blameLines: BlameLine[] = [
         { lineNumber: 1, content: "fn main() {}", commitId: "abc123", shortId: "abc1234", authorName: "Rene", timestamp: 1 },
       ];
@@ -1466,8 +1688,7 @@ describe("DiffPane", () => {
 
       await screen.findByText("src/main.rs");
       fireEvent.click(screen.getByText("Blame"));
-      const row = await screen.findByText("fn main() {}");
-      fireEvent.click(row.closest("tr")!);
+      fireEvent.click(await screen.findByRole("button", { name: "abc1234" }));
 
       expect(onSelectRow).toHaveBeenCalledWith({ commitId: "abc123" });
     });
@@ -1531,6 +1752,58 @@ describe("DiffPane", () => {
 
       expect(screen.getByRole("button", { name: "Collapse src/main.rs" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Collapse src/lib.rs" })).toBeInTheDocument();
+    });
+
+    describe("merge commit parent (#1009)", () => {
+      const first = "1".repeat(40);
+      const second = "2".repeat(40);
+      const merge = "3".repeat(40);
+      const graphCommit = (id: string, parentIds: string[]) => ({
+        id,
+        shortId: id.slice(0, 7),
+        summary: `commit ${id.slice(0, 1)}`,
+        authorName: "Me",
+        authorEmail: "me@x.org",
+        timestamp: 0,
+        parentIds,
+        branchRefs: [],
+        remoteBranchRefs: [],
+      });
+      const commits = [graphCommit(merge, [first, second]), graphCommit(first, []), graphCommit(second, [])];
+      const picker = () => screen.findByRole("combobox", { name: "Changes compared with" });
+
+      it("names the first parent it compares with", async () => {
+        renderCommit(fakeClient({ getCommitFiles, getCommitDiff }), merge, { commits });
+
+        const select = await picker();
+        expect(select).toHaveValue(first);
+        expect(within(select).getByRole("option", { name: "1111111 (first parent)" })).toBeInTheDocument();
+        expect(within(select).getByRole("option", { name: "2222222 (second parent)" })).toBeInTheDocument();
+        await waitFor(() => expect(getCommitDiff).toHaveBeenCalledWith(TEST_REPO_PATH, merge, "src/main.rs", DEFAULT_DIFF_OPTIONS));
+      });
+
+      it("diffs against the parent picked", async () => {
+        const getRangeFiles = vi.fn(async () => [{ path: "src/other.rs", oldPath: null }]);
+        const getRangeDiff = vi.fn(async () => hunks);
+        renderCommit(fakeClient({ getCommitFiles, getCommitDiff, getRangeFiles, getRangeDiff }), merge, { commits });
+
+        fireEvent.change(await picker(), { target: { value: second } });
+
+        await waitFor(() => expect(getRangeFiles).toHaveBeenCalledWith(TEST_REPO_PATH, second, merge));
+        expect(await screen.findByText("src/other.rs")).toBeInTheDocument();
+        await waitFor(() =>
+          expect(getRangeDiff).toHaveBeenCalledWith(TEST_REPO_PATH, second, merge, "src/other.rs", null, DEFAULT_DIFF_OPTIONS),
+        );
+      });
+
+      it("shows no picker for a commit with one parent", async () => {
+        renderCommit(fakeClient({ getCommitFiles, getCommitDiff }), first, {
+          commits: [graphCommit(first, [second]), graphCommit(second, [])],
+        });
+
+        expect(await screen.findByText("src/main.rs")).toBeInTheDocument();
+        expect(screen.queryByRole("combobox", { name: "Changes compared with" })).toBeNull();
+      });
     });
   });
 });
@@ -1662,7 +1935,7 @@ describe("DiffPane patch actions (#448)", () => {
       getCommitMessage: async () => "",
     });
     renderCommit(client, "abcdef1234567890", { patchActions });
-    fireEvent.click(await screen.findByRole("button", { name: "Revert hunk" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Revert hunk in working tree" }));
     expect(patchActions.onApplyCommitChange).toHaveBeenLastCalledWith({
       commitId: "abcdef1234567890",
       path: "src/f.txt",
@@ -1672,7 +1945,7 @@ describe("DiffPane patch actions (#448)", () => {
       stage: false,
     });
     fireEvent.click(screen.getByRole("button", { name: "Actions for src/f.txt" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Apply this file to the working tree" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Apply file to working tree" }));
     expect(patchActions.onApplyCommitChange).toHaveBeenLastCalledWith(
       expect.objectContaining({ hunk: null, reverse: false }),
     );
@@ -1772,7 +2045,7 @@ describe("DiffPane diff options contract", () => {
       pane(fakeClient({ getWorkingDiff }), { ignoreWhitespace: false, contextLines: 3 }, { onStageHunk, onStageLines }),
     );
     await screen.findByRole("button", { name: "Stage hunk" });
-    fireEvent.click(screen.getByRole("button", { name: "Show whole file" }));
+    chooseViewOption("Show whole file");
     await waitFor(() =>
       expect(getWorkingDiff).toHaveBeenLastCalledWith(TEST_REPO_PATH, "f.txt", false, {
         ignoreWhitespace: false,
@@ -1787,7 +2060,7 @@ describe("DiffPane diff options contract", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Stage lines (1)" }));
     await waitFor(() => expect(onStageLines).toHaveBeenCalledWith("f.txt", 1, 1, { contextLines: WHOLE_FILE_CONTEXT_LINES, algorithm: "Default" }, [2], shown));
 
-    fireEvent.click(screen.getByRole("button", { name: "Show whole file" }));
+    chooseViewOption("Show whole file");
     await waitFor(() =>
       expect(getWorkingDiff).toHaveBeenLastCalledWith(TEST_REPO_PATH, "f.txt", false, { ignoreWhitespace: false, contextLines: 3, algorithm: "Default" }),
     );
@@ -1806,7 +2079,7 @@ describe("DiffPane diff options contract", () => {
     );
     render(pane(fakeClient({ getWorkingDiff }), { ignoreWhitespace: false, contextLines: 3 }, {}));
     await screen.findByRole("button", { name: "Stage hunk" });
-    fireEvent.click(screen.getByRole("button", { name: "Show whole file" }));
+    chooseViewOption("Show whole file");
     expect(await screen.findByText(/too long to show whole \(10,001 lines\)/)).toBeInTheDocument();
     await waitFor(() =>
       expect(getWorkingDiff).toHaveBeenLastCalledWith(TEST_REPO_PATH, "f.txt", false, { ignoreWhitespace: false, contextLines: 3, algorithm: "Default" }),
@@ -2119,6 +2392,16 @@ describe("DiffPane stash view", () => {
     expect(await screen.findByText("This stash has no file changes.")).toBeInTheDocument();
   });
 
+  it("marks Drop… and its confirmation as a danger (#988)", async () => {
+    renderStash({ tracked: ["a.txt"], untracked: [], untrackedCommitId: null });
+    const section = await screen.findByRole("region", { name: "Stash details" });
+    const drop = within(section).getByRole("button", { name: "Drop…" });
+    expect(drop).toHaveAttribute("data-tone", "danger");
+    fireEvent.click(drop);
+    const dialog = screen.getByRole("dialog", { name: "Drop stash wip", hidden: true });
+    expect(within(dialog).getByRole("button", { name: "Drop stash", hidden: true })).toHaveAttribute("data-tone", "danger");
+  });
+
   it("applies, pops and drops (after confirming) from the toolbar", async () => {
     const { actions } = renderStash({ tracked: ["a.txt"], untracked: [], untrackedCommitId: null });
     const section = await screen.findByRole("region", { name: "Stash details" });
@@ -2131,7 +2414,7 @@ describe("DiffPane stash view", () => {
     fireEvent.click(within(section).getByRole("button", { name: "Drop…" }));
     expect(actions.onDrop).not.toHaveBeenCalled();
     const dialog = screen.getByRole("dialog", { name: "Drop stash wip", hidden: true });
-    expect(dialog).toHaveTextContent('Drop "wip"? This cannot be undone.');
+    expect(dialog).toHaveTextContent("Undo can't bring it back.");
     fireEvent.click(within(dialog).getByRole("button", { name: "Drop stash", hidden: true }));
     expect(actions.onDrop).toHaveBeenCalledWith(0);
   });
@@ -2606,6 +2889,7 @@ describe("DiffPane commit message settings", () => {
         />
       </CommitMessageSettingsContext.Provider>,
     );
+    fireEvent.focus(screen.getByLabelText("Commit message"));
     expect(screen.getByLabelText("Summary length")).toHaveTextContent("Summary 0/60");
     expect(screen.getByRole("textbox", { name: "Commit message" }).style.getPropertyValue("--ruler-column")).toBe("80");
   });
@@ -2670,7 +2954,7 @@ describe("DiffPane co-authors and amend author", () => {
       onCommit,
     });
     fireEvent.change(screen.getByLabelText("Commit message"), { target: { value: "Fix" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add co-author" }));
+    chooseCommitMenuItem("Add co-author…");
     fireEvent.click(await screen.findByRole("option", { name: "Ada <ada@x.org>" }));
     fireEvent.click(screen.getByRole("button", { name: "Commit 1 file" }));
     expect(listRecentAuthors).toHaveBeenCalledWith(TEST_REPO_PATH);
@@ -2901,5 +3185,13 @@ describe("DiffPane multi-select (#449)", () => {
     fireEvent.click(header("a.txt"), { ctrlKey: true });
 
     await waitFor(() => expect(onSelectionChange).toHaveBeenLastCalledWith({ staged: false, paths: ["b.txt", "c.txt"] }));
+  });
+});
+
+describe("commit dock height (#1003)", () => {
+  it("never takes more than half the column's height, scrolling its own content beyond that", () => {
+    const dock = rulesOf(diffPaneCss).filter(({ selector }) => subjectOf(selector) === ".commitDock");
+    expect(cascadedValue(dock, "max-height")).toBe("50vh");
+    expect(cascadedValue(dock, "overflow-y")).toBe("auto");
   });
 });

@@ -83,4 +83,38 @@ describe("useAppState pull requests", () => {
     expect(result.current.state.pullRequests["remote-b"]).toBeUndefined();
     expect(result.current.state.error).toContain("the provider rejected the request");
   });
+
+  // #1012: the Connect and New pull request dialogs show why they failed, so these resolve to it.
+  it("saveForgeToken and createPullRequest resolve to the failure, or null once done", async () => {
+    let fail = true;
+    const client = transferClient({
+      saveForgeToken: async () => {
+        if (fail) throw new Error("the keyring is locked");
+      },
+      createPullRequest: async () => {
+        if (fail) throw new Error("Validation failed");
+        return remoteBPullRequest;
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    const pullRequest = { title: "B", description: null, sourceBranch: "feature/b", targetBranch: "main" };
+
+    let saved: string | null | undefined;
+    let created: string | null | undefined;
+    await act(async () => {
+      saved = await result.current.saveForgeToken("GitHub", "rene", "token");
+      created = await result.current.createPullRequest("remote-b", "rene", pullRequest);
+    });
+    expect(saved).toBe("the keyring is locked");
+    expect(created).toBe("Validation failed");
+
+    fail = false;
+    await act(async () => {
+      saved = await result.current.saveForgeToken("GitHub", "rene", "token");
+      created = await result.current.createPullRequest("remote-b", "rene", pullRequest);
+    });
+    expect(saved).toBeNull();
+    expect(created).toBeNull();
+  });
 });

@@ -188,6 +188,7 @@ TerminalRebase/Am {"branch":"topic","currentStep":1,"kind":"Am","onto":"ffffffff
 TerminalRebase/unknown {"branch":"","currentStep":0,"kind":"Am","onto":"","totalSteps":0}
 HeadInfo/empty {"bisect":null,"commitHooks":[],"detachedAt":null,"headId":null,"headPushed":false,"operation":null,"operationLeftover":false,"rebase":null,"sequence":null,"squashMessage":null,"terminalRebase":null,"terminalSequence":null}
 HeadInfo/everything {"bisect":{"startedFrom":"main"},"commitHooks":["pre-commit","commit-msg"],"detachedAt":"v1.0.0","headId":"1212121212121212121212121212121212121212","headPushed":true,"operation":"Merge","operationLeftover":true,"rebase":{"branch":"topic","currentStep":1,"editing":null,"health":{"kind":"Paused"},"onto":"dddddddddddddddddddddddddddddddddddddddd","splitParts":0,"totalSteps":4},"sequence":{"currentCommit":"cccccccccccccccccccccccccccccccccccccccc","currentStep":2,"kind":"Revert","totalSteps":3},"squashMessage":"Squashed commit of the following:\n","terminalRebase":{"branch":"topic","currentStep":1,"kind":"Rebase","onto":"ffffffffffffffffffffffffffffffffffffffff","totalSteps":2},"terminalSequence":{"commitsToRemove":2,"kind":"CherryPick","pausedOnConflict":true,"rewinds":true,"startedAt":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","startedAtSummary":"Start here"}}
+HeadInfo/unborn {"bisect":null,"commitHooks":[],"detachedAt":null,"headId":null,"headPushed":false,"operation":null,"operationLeftover":false,"rebase":null,"sequence":null,"squashMessage":null,"terminalRebase":null,"terminalSequence":null,"unbornBranch":"main"}
 HeadInfo/operation-Merge {"bisect":null,"commitHooks":[],"detachedAt":null,"headId":null,"headPushed":false,"operation":"Merge","operationLeftover":false,"rebase":null,"sequence":null,"squashMessage":null,"terminalRebase":null,"terminalSequence":null}
 HeadInfo/operation-CherryPick {"bisect":null,"commitHooks":[],"detachedAt":null,"headId":null,"headPushed":false,"operation":"CherryPick","operationLeftover":false,"rebase":null,"sequence":null,"squashMessage":null,"terminalRebase":null,"terminalSequence":null}
 HeadInfo/operation-Revert {"bisect":null,"commitHooks":[],"detachedAt":null,"headId":null,"headPushed":false,"operation":"Revert","operationLeftover":false,"rebase":null,"sequence":null,"squashMessage":null,"terminalRebase":null,"terminalSequence":null}
@@ -251,7 +252,7 @@ MergeOptions/Only-squash-false {"fastForward":"Only","squash":false}
 ConflictSegment/Clean {"content":"same\n","kind":"Clean"}
 ConflictSegment/Conflict {"base":"base\n","kind":"Conflict","ours":"ours\n","theirs":"theirs\n"}
 ConflictSegment/Conflict-no-base {"base":"","kind":"Conflict","ours":"ours\n","theirs":"theirs\n"}
-RebasePlanCommit/plain {"authorName":"Ada Lovelace","id":"1818181818181818181818181818181818181818","shortId":"1818181","summary":"Add","timestamp":1700000400}
+RebasePlanCommit/plain {"authorName":"Ada Lovelace","id":"1818181818181818181818181818181818181818","merge":false,"shortId":"1818181","summary":"Add","timestamp":1700000400}
 RebaseStepResult/Conflicted {"files":["a.txt"],"kind":"Conflicted"}
 RebaseStepResult/PausedForEdit {"kind":"PausedForEdit"}
 RebaseStepResult/Advanced {"kind":"Advanced"}

@@ -1,6 +1,6 @@
 mod common;
 
-use git_core::commit::{amend_head, commit, CommitError};
+use git_core::commit::{amend_head, commit, reword_head, CommitError};
 
 fn repo_with_two_commits() -> (tempfile::TempDir, git2::Repository) {
     let (dir, repo) = common::init_repo();
@@ -56,6 +56,57 @@ fn message_only_amend_keeps_tree() {
     let head = repo.head().unwrap().peel_to_commit().unwrap();
     assert_eq!(head.tree_id(), old_tree);
     assert_eq!(head.message().unwrap(), "reworded");
+}
+
+/// Reword… on the latest commit changes only its message (#981): staged changes stay staged
+/// and out of the commit.
+#[test]
+fn reword_head_changes_only_the_message_and_leaves_staged_changes_staged() {
+    let (dir, repo) = repo_with_two_commits();
+    let old_head = repo.head().unwrap().peel_to_commit().unwrap();
+    common::write_file(dir.path(), "c.txt", "c\n");
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("c.txt")).unwrap();
+    index.write().unwrap();
+
+    let new_id = reword_head(
+        &repo,
+        "second, reworded",
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
+
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.id().to_string(), new_id);
+    assert_eq!(head.message().unwrap(), "second, reworded");
+    assert_eq!(
+        head.tree_id(),
+        old_head.tree_id(),
+        "the tree is the old commit's"
+    );
+    assert_eq!(
+        head.parent_ids().collect::<Vec<_>>(),
+        old_head.parent_ids().collect::<Vec<_>>()
+    );
+    assert_eq!(head.author().name(), old_head.author().name());
+    let staged = repo.statuses(None).unwrap();
+    let c = staged
+        .iter()
+        .find(|entry| entry.path().ok() == Some("c.txt"))
+        .unwrap();
+    assert!(
+        c.status().contains(git2::Status::INDEX_NEW),
+        "c.txt is still staged"
+    );
+}
+
+#[test]
+fn reword_head_refuses_unborn_head() {
+    let (_dir, repo) = common::init_repo();
+    assert!(matches!(
+        reword_head(&repo, "x", git_core::hooks::HookOptions::default()),
+        Err(CommitError::NothingToAmend)
+    ));
 }
 
 #[test]

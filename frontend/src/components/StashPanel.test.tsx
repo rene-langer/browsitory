@@ -65,6 +65,15 @@ describe("StashPanel", () => {
     expect(screen.getByText(/No stashes/)).toBeInTheDocument();
   });
 
+  it("points the empty state to Stash in the repository toolbar (#1026)", () => {
+    renderPanel({ stashes: [] });
+
+    expect(
+      screen.getByText("No stashes. Use Stash in the repository toolbar to set your changes aside."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/commit box/)).toBeNull();
+  });
+
   it("renders each stash's name without git's branch prefix, and its branch, age and file count", () => {
     renderPanel({
       stashes: [
@@ -277,6 +286,16 @@ describe("StashPanel", () => {
     expect(actionsFor("stash2fix")).toHaveFocus();
   });
 
+  it("says what Drop loses and that Undo can't bring it back, without repeating the title (#989)", () => {
+    renderPanel({ stashes: three });
+    openMenu(/stash1fix/);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Drop…" }));
+    const dialog = screen.getByRole("dialog", { name: /Drop stash/ });
+    expect(dialog).toHaveTextContent("Undo can't bring it back.");
+    expect(dialog).not.toHaveTextContent("cannot be undone");
+    expect(dialog).not.toHaveTextContent(/Drop "/);
+  });
+
   it("moves focus to the '…' now in that place when the stash of a focused drop dialog disappears", () => {
     const { rerender } = renderPanel({ stashes: three });
     openMenu(/stash1fix/);
@@ -366,7 +385,7 @@ describe("StashPanel", () => {
     expect(onSelectRow).not.toHaveBeenCalled();
 
     const dialog = screen.getByRole("dialog", { name: /Drop stash/ });
-    expect(within(dialog).getByText(/stash1fix earlier edit/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("heading", { name: /stash1fix earlier edit/ })).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Drop stash" }));
 
     expect(onDropStash).toHaveBeenCalledWith(1);

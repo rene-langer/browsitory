@@ -250,7 +250,7 @@ describe("Documentation screenshots", () => {
     await browser.execute((el) => {
       el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }));
     }, remote);
-    await clickInPage("[role='menu'] button", "Push current branch here");
+    await clickInPage("[role='menu'] button", "Push current branch to backup");
     // Push may first ask where to: confirm the suggestion.
     const pushDialog = 'dialog[aria-label="Push main"]';
     await browser.waitUntil(
@@ -258,16 +258,17 @@ describe("Documentation screenshots", () => {
         browser.execute(
           (dialogSelector: string) =>
             document.querySelector(dialogSelector) !== null ||
-            Array.from(document.querySelectorAll("[role='alert']")).some((el) =>
-              (el.textContent ?? "").includes("The pre-push hook failed."),
-            ),
+            document.querySelector("dialog[aria-label='pre-push hook failed']") !== null,
           pushDialog,
         ),
       { timeout: SLOW_UI_TIMEOUT, timeoutMsg: "expected the push to ask where to, or to fail" },
     );
     if (await (await $(pushDialog)).isExisting()) await clickInPage(`${pushDialog} button`, "Push");
+    // The error banner waits until the hook failure dialog is closed (#996).
+    await $("dialog[aria-label='pre-push hook failed']").waitForExist({ timeout: SLOW_UI_TIMEOUT });
+    await clickInPage("dialog[aria-label='pre-push hook failed'] button", "Close");
     await waitUntilInPage("[role='alert']", "The pre-push hook failed.", { contains: true, timeout: SLOW_UI_TIMEOUT });
-    await clickInPage("button", "Show details");
+    await clickInPage("[role='alert'] button", "Details");
     await waitUntilInPage("pre[aria-label='Output of pre-push']", PRE_PUSH_OUTPUT, {
       contains: true,
       timeout: SLOW_UI_TIMEOUT,
@@ -315,25 +316,22 @@ describe("Documentation screenshots", () => {
     await block.waitForExist();
     await waitUntilInPage('button[aria-pressed="true"]', "Three panes");
     // Scroll to the editor's toolbar ("0 of 1 resolved", Previous conflict), not to the block:
-    // the block at the top cut the toolbar off (#944). The block still fits below it. The pane's
-    // sticky "Diff view options" row covers the top of the scroll area: stop below it.
+    // the block at the top cut the toolbar off (#944). The block still fits below it. A
+    // conflicted file hides the pane's sticky "Diff view options" row (#980); if one is there,
+    // it covers the top of the scroll area: stop below it.
     const toolbar = await $('[role="group"][aria-label="Conflicts"]');
     await toolbar.waitForExist();
-    const options = await $('[role="group"][aria-label="Diff view options"]');
-    await browser.execute(
-      (el, sticky) => {
-        const target = el as HTMLElement;
-        target.scrollIntoView({ block: "start" });
-        let scroller = target.parentElement;
-        while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) {
-          scroller = scroller.parentElement;
-        }
-        const below = (sticky as HTMLElement).getBoundingClientRect().bottom + 2;
-        scroller?.scrollBy(0, target.getBoundingClientRect().top - below);
-      },
-      toolbar,
-      options,
-    );
+    await browser.execute((el) => {
+      const target = el as HTMLElement;
+      target.scrollIntoView({ block: "start" });
+      let scroller = target.parentElement;
+      while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) {
+        scroller = scroller.parentElement;
+      }
+      const sticky = document.querySelector('[role="group"][aria-label="Diff view options"]');
+      const below = (sticky ?? scroller)?.getBoundingClientRect()[sticky === null ? "top" : "bottom"] ?? 0;
+      scroller?.scrollBy(0, target.getBoundingClientRect().top - below - 2);
+    }, toolbar);
     await shoot("merge-editor");
     await browser.setWindowSize(WINDOW.width, WINDOW.height);
   });
