@@ -15,9 +15,12 @@ continue" until no conflict is left. Abort asks first when it would throw away y
 resolutions or unsaved edits in the merge editor, since Undo can't bring them back; when nothing
 was resolved yet it aborts at once, and a toast says **Aborted merge**.
 
-While a conflicted file is open, the merge editor gets the room: the file list shrinks to the
-conflicts (**Show all changes** brings the rest back) and the diff options are hidden. While any
-conflict is left, the commit box is one line: "Commit once every conflict is resolved."
+While a conflicted file is open, the merge editor gets the room: the history column narrows, the
+file list shrinks to the conflicts (**Show all changes** brings the rest back) and the diff
+options are hidden. The history column goes back to its width when you open another file, when
+the file is resolved, or when the merge, rebase or cherry-pick ends; if you drag its edge
+meanwhile, it keeps the width you chose. While any conflict is left, the commit box is one line:
+"Commit once every conflict is resolved."
 
 A conflicted file opens the **Resolve conflict** pane:
 

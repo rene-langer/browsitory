@@ -134,6 +134,9 @@ li.fileRow.current {
 .fileGroups[data-collapsed="true"] {
   max-height: 8.5rem;
   overflow-y: auto;
+  /* It starts at its top (UncommittedDiffPane); content changing above a row must not scroll
+     it down past the conflicts. */
+  overflow-anchor: none;
 }
 
 .fileGroups[data-collapsed="true"] .fileListBar {

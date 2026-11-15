@@ -4,7 +4,7 @@ import { UncommittedFileViewer } from "./UncommittedFileViewer";
 import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
 import { NO_HEAD_INFO, type DiscardRequest, type SelectionActionKind } from "./diffPaneShared";
 import { stashBlockReason } from "../lib/operationStatus";
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { useVirtualRows } from "./useVirtualRows";
 import type { GraphCommit, HeadInfo, HunkOptions, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
@@ -103,7 +103,13 @@ export function UncommittedDiffPane({
   initialCommitDraft,
   selectionBusyReason,
   discardBlockedReason,
+  onConflictFileOpenChange,
 }: {
+  /**
+   * True while a conflicted file is open in the merge editor, false once it isn't (another file,
+   * resolved, the pane gone): the workspace narrows the history column meanwhile (#980).
+   */
+  onConflictFileOpenChange?: (open: boolean) => void;
   selectionBusyReason: string | null;
   discardBlockedReason: string | null;
   repoPath: string;
@@ -398,22 +404,31 @@ export function UncommittedDiffPane({
   const conflictOpen = currentEntry !== undefined && currentEntry.kind === "Conflicted";
   const [fileListExpandedFor, setFileListExpandedFor] = useState<string | null>(null);
   const fileListCollapsed = conflictOpen && fileListExpandedFor !== currentKey;
+  const fileGroupsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!conflictOpen || onConflictFileOpenChange === undefined) return;
+    onConflictFileOpenChange(true);
+    return () => onConflictFileOpenChange(false);
+  }, [conflictOpen, onConflictFileOpenChange]);
 
   // A row the window leaves out is scrolled to by its place in the list.
   const scrollToCurrent = useRef<() => void>(() => {});
-  useEffect(() => {
+  useLayoutEffect(() => {
     scrollToCurrent.current = () => {
       if (currentEntry === undefined || treeLayout) return;
       if (currentEntry.staged) stagedWindow.scrollToIndex(stagedEntries.indexOf(currentEntry));
       else unstagedWindow.scrollToIndex(unstagedEntries.indexOf(currentEntry) - conflictEntries.length);
     };
   });
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (currentKey === null) return;
+    // The collapsed list (#980) starts at its top, where the conflicts are, whatever it was
+    // scrolled to before; then the current row comes into view.
+    if (fileListCollapsed && fileGroupsRef.current !== null) fileGroupsRef.current.scrollTop = 0;
     const row = rowRefs.current[currentKey];
     if (row) row.scrollIntoView?.({ block: "nearest" });
     else scrollToCurrent.current();
-  }, [currentKey]);
+  }, [currentKey, fileListCollapsed]);
 
   const isEntryCurrent = (entry: StatusEntry) => currentEntry === entry;
   const isEntrySelected = (entry: StatusEntry) =>
@@ -975,7 +990,7 @@ export function UncommittedDiffPane({
         </div>
       )}
       {status.length > 0 && (
-        <div className={styles.fileGroups} data-collapsed={conflictOpen ? String(fileListCollapsed) : undefined}>
+        <div ref={fileGroupsRef} className={styles.fileGroups} data-collapsed={conflictOpen ? String(fileListCollapsed) : undefined}>
           <div className={styles.fileListBar}>
             <input
               type="search"
