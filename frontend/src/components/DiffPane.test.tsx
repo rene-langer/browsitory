@@ -10,6 +10,8 @@ import { DiffPane as WorkspaceDiffPane, type DiscardRequest, type StashActions }
 import { WorkspaceActionsContext, type WorkspaceActions } from "../state/useWorkspaceActions";
 import { splitWorkspaceActions, testWorkspaceActions } from "../test/workspaceActions";
 import styles from "./DiffPane.module.css";
+import diffPaneCss from "./DiffPane.module.css?raw";
+import { cascadedValue, rulesOf, subjectOf } from "../test/cssCascade";
 import { fakeRepoClient } from "../test/fakeRepoClient";
 import { describedByText } from "../test/describedBy";
 
@@ -920,6 +922,17 @@ describe("DiffPane", () => {
       // Without anything pre-filled the user's own commit offers them too.
       renderUncommitted(fakeClient({}), status, { mergeMessage: null, headInfo });
       expect(screen.getByRole("button", { name: "Add co-author" })).toBeInTheDocument();
+    });
+
+    it("says Nothing to commit on a clean tree and Stage changes only with unstaged changes (#1005)", () => {
+      const clean = renderUncommitted(fakeClient({}), []);
+      expect(screen.getByText("Nothing to commit.")).toBeInTheDocument();
+      expect(screen.queryByText(/Stage changes to commit/)).toBeNull();
+      clean.unmount();
+
+      renderUncommitted(fakeClient({}), [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }]);
+      expect(screen.getByText("Stage changes to commit.")).toBeInTheDocument();
+      expect(screen.queryByText("Nothing to commit.")).toBeNull();
     });
 
     it("offers amend and an empty message box after a leftover cherry-pick (#240, #232)", () => {
@@ -3061,5 +3074,13 @@ describe("DiffPane multi-select (#449)", () => {
     fireEvent.click(header("a.txt"), { ctrlKey: true });
 
     await waitFor(() => expect(onSelectionChange).toHaveBeenLastCalledWith({ staged: false, paths: ["b.txt", "c.txt"] }));
+  });
+});
+
+describe("commit dock height (#1003)", () => {
+  it("never takes more than half the column's height, scrolling its own content beyond that", () => {
+    const dock = rulesOf(diffPaneCss).filter(({ selector }) => subjectOf(selector) === ".commitDock");
+    expect(cascadedValue(dock, "max-height")).toBe("50vh");
+    expect(cascadedValue(dock, "overflow-y")).toBe("auto");
   });
 });

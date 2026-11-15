@@ -4,6 +4,8 @@ import { within } from "@testing-library/react";
 import type { SignatureInput } from "../ipc/RepoClient";
 import type { MessageHistoryEntry } from "../lib/commitMessageHistory";
 import { CommitBox, type CommitDraft } from "./CommitBox";
+import boxStyles from "./CommitBox.module.css";
+import { chooseCommitMenuItem, commitMenuItems } from "../test/commitMenu";
 
 describe("CommitBox", () => {
   it("Commit button is disabled when disabled=true", () => {
@@ -1145,5 +1147,110 @@ describe("CommitBox target and Commit and push (#651)", () => {
     renderTarget({ amend: { ...amend, on: true, headMessage: "previous" } });
     expect(screen.getByRole("button", { name: "Amend" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "More commit options" })).toBeNull();
+  });
+});
+
+describe("compact commit box (#1003, #1005)", () => {
+  const recent = async (): Promise<SignatureInput[]> => [{ name: "Ada", email: "ada@x.org" }];
+  const amendProps = (overrides: Partial<NonNullable<React.ComponentProps<typeof CommitBox>["amend"]>> = {}) => ({
+    available: true,
+    on: false,
+    headMessage: "previous message",
+    pushed: false,
+    onToggle: vi.fn(),
+    onAmend: vi.fn(async () => true),
+    ...overrides,
+  });
+  function renderBox(props: Partial<React.ComponentProps<typeof CommitBox>> = {}) {
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    const utils = render(
+      <CommitBox
+        onCommit={vi.fn(async () => true)}
+        disabled={false}
+        loadRecentAuthors={recent}
+        loadMessageHistory={() => []}
+        amend={amendProps()}
+        {...props}
+      />,
+    );
+    return { ...utils, outside, box: screen.getByRole("textbox", { name: "Commit message" }) };
+  }
+
+  it("is a one-line message and Commit until it has focus", () => {
+    const { box, outside } = renderBox();
+    expect(box).toHaveAttribute("rows", "1");
+    expect(screen.queryByText("Summary 0/50")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Recent messages" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Commit" })).toBeInTheDocument();
+
+    fireEvent.focus(box);
+    expect(box).not.toHaveAttribute("rows", "1");
+    expect(screen.getByText("Summary 0/50")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Recent messages" })).toBeInTheDocument();
+
+    fireEvent.blur(box, { relatedTarget: outside });
+    expect(box).toHaveAttribute("rows", "1");
+    expect(screen.queryByText("Summary 0/50")).toBeNull();
+    outside.remove();
+  });
+
+  it("stays open while it holds a message", () => {
+    const { box, outside } = renderBox();
+    fireEvent.focus(box);
+    fireEvent.change(box, { target: { value: "feat: x" } });
+    fireEvent.blur(box, { relatedTarget: outside });
+    expect(box).not.toHaveAttribute("rows", "1");
+    expect(screen.getByText("Summary 7/50")).toBeInTheDocument();
+    outside.remove();
+  });
+
+  it("keeps Skip hooks on screen while collapsed", () => {
+    renderBox({
+      hooks: { installed: true, skip: false, onToggleSkip: vi.fn(), running: null, onCancel: vi.fn() },
+    });
+    expect(screen.getByRole("checkbox", { name: "Skip hooks" })).toBeInTheDocument();
+  });
+
+  it("offers Amend last commit and Add co-author… in the Commit menu, not as their own controls", () => {
+    renderBox();
+    expect(screen.queryByRole("checkbox", { name: "Amend last commit" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add co-author" })).toBeNull();
+    // The menu opens with an empty message too: amend and co-authors don't need one.
+    expect(screen.getByRole("button", { name: "More commit options" })).toBeEnabled();
+    expect(commitMenuItems()).toEqual(["Amend last commit", "Add co-author…"]);
+  });
+
+  it("adds a co-author from the menu and goes back to the message on Escape", async () => {
+    const onCommit = vi.fn(async () => true);
+    const { box } = renderBox({ onCommit });
+    fireEvent.change(box, { target: { value: "Fix" } });
+    chooseCommitMenuItem("Add co-author…");
+    fireEvent.click(await screen.findByRole("option", { name: "Ada <ada@x.org>" }));
+    expect(within(screen.getByRole("list", { name: "Co-authors" })).getByText("Ada <ada@x.org>")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Commit" }));
+    expect(onCommit).toHaveBeenCalledWith("Fix", [{ key: "Co-authored-by", value: "Ada <ada@x.org>" }]);
+
+    chooseCommitMenuItem("Add co-author…");
+    fireEvent.keyDown(await screen.findByRole("combobox", { name: "Filter authors" }), { key: "Escape" });
+    expect(screen.queryByRole("listbox", { name: "Recent authors" })).toBeNull();
+    expect(box).toHaveFocus();
+  });
+
+  it("stops amending with Cancel amend, and adds co-authors from the Amend menu", () => {
+    const amend = amendProps({ on: true });
+    renderBox({ amend });
+    expect(screen.getByRole("button", { name: "Amend" })).toBeInTheDocument();
+    expect(commitMenuItems()).toEqual(["Add co-author…"]);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel amend" }));
+    expect(amend.onToggle).toHaveBeenCalledWith(false);
+  });
+
+  it("says why Commit is disabled in muted text, not as a warning (#1005)", () => {
+    renderBox({ disabled: true, disabledReason: "Nothing to commit." });
+    const reason = screen.getByText("Nothing to commit.");
+    expect(reason).toHaveClass(boxStyles.hint);
+    expect(reason).not.toHaveClass(boxStyles.reason);
+    expect(screen.getByRole("button", { name: "Commit" })).toHaveAccessibleDescription("Nothing to commit.");
   });
 });
