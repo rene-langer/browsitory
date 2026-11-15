@@ -91,7 +91,7 @@ async function expandPullRequests() {
 }
 
 /**
- * Connects a section (#1012): "Connect to <provider>" opens a dialog for the account and the
+ * Connects a section (#1012): "Connect to <provider>…" opens a dialog for the account and the
  * token; the dialog closes once the token is saved. `check` looks at the open dialog first.
  */
 async function connect(
@@ -100,7 +100,7 @@ async function connect(
   token: string,
   check?: (dialog: WebdriverIO.Element) => Promise<void>,
 ) {
-  await (await section.$(`button=Connect to ${provider}`)).click();
+  await (await section.$(`button=Connect to ${provider}…`)).click();
   const dialog = await $(`dialog[aria-label='Connect to ${provider}']`);
   await dialog.waitForExist();
   if (check !== undefined) await check(dialog);

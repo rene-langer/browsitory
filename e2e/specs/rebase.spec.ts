@@ -279,7 +279,7 @@ describe("Browsitory interactive rebase", () => {
     await browser.execute((el) => (el as HTMLElement).click(), saveResolution);
 
     // Clicked once it is no longer unavailable (aria-disabled while the conflict remains).
-    await clickInPage(`${STRIP} button`, "Continue");
+    await clickInPage(`${STRIP} button`, "Continue rebase");
 
     await waitUntilGoneInPage(STRIP);
     const landedEntry = await $("li*=e2e: conflict-resume conflicting change");
