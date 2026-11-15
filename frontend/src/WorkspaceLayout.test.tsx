@@ -340,3 +340,11 @@ describe("the current-branch switcher (#638)", () => {
     await waitFor(() => expect(setCurrentUpstream).toHaveBeenCalledWith("/repos/a", "origin", "spike"));
   });
 });
+
+describe("the history column (#1004)", () => {
+  it("starts at 40% of the window", async () => {
+    setWindowWidth(1600);
+    await renderApp(layoutClient());
+    expect(screen.getByRole("separator", { name: "History and diff width" })).toHaveAttribute("aria-valuenow", "640");
+  });
+});

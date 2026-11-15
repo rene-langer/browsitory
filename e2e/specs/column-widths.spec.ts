@@ -3,8 +3,9 @@ import { waitForAppReady } from "../support/app";
 
 // #605: the sidebar and history columns keep their width when the window resizes; only the diff
 // column grows or shrinks. The widths are the defaults from RepoWorkspace.tsx (sidebar, 260px)
-// and WorkspaceMain.tsx (history, 420px); this spec file starts with empty storage
-// (wdio.conf.ts's `beforeSession`). Window widths stay within xvfb-run's default 1280px screen.
+// and WorkspaceMain.tsx (history, 40% of the window it opened in, #1004); this spec file starts
+// with empty storage (wdio.conf.ts's `beforeSession`). Window widths stay within xvfb-run's
+// default 1280px screen.
 
 type ColumnWidths = { sidebar: number | null; history: number; diff: number };
 
@@ -42,13 +43,17 @@ async function resizeWindowTo(width: number): Promise<void> {
 describe("Browsitory column widths", () => {
   it("keeps the sidebar and history widths when the window resizes; only the diff changes", async () => {
     await waitForAppReady();
+    // The history column's default: 40% of the window it first showed in (1200px wide by
+    // tauri.conf.json), kept from then on.
+    const opened = await browser.execute(() => window.innerWidth);
+    const history = Math.round(opened * 0.4);
 
     await resizeWindowTo(1250);
     await browser.waitUntil(async () => (await columnWidths()).sidebar === 260, {
       timeoutMsg: "expected the sidebar at its default 260px",
     });
     const wide = await columnWidths();
-    expect(wide.history).toBe(420);
+    expect(wide.history).toBe(history);
 
     await resizeWindowTo(1080);
     await browser.waitUntil(async () => (await columnWidths()).diff < wide.diff, {
@@ -56,20 +61,20 @@ describe("Browsitory column widths", () => {
     });
     const narrower = await columnWidths();
     expect(narrower.sidebar).toBe(260);
-    expect(narrower.history).toBe(420);
+    expect(narrower.history).toBe(history);
 
-    // Too narrow for 260 + 420 + the diff's 320px minimum: the sidebar collapses instead of
+    // Too narrow for 260 + the history + the diff's 320px minimum: the sidebar collapses instead of
     // squeezing the history column, and comes back at its width once there is room.
     await resizeWindowTo(960);
     await browser.waitUntil(async () => (await columnWidths()).sidebar === null, {
       timeoutMsg: "expected the sidebar to collapse in a narrow window",
     });
-    expect((await columnWidths()).history).toBe(420);
+    expect((await columnWidths()).history).toBe(history);
 
     await resizeWindowTo(1250);
     await browser.waitUntil(async () => (await columnWidths()).sidebar === 260, {
       timeoutMsg: "expected the sidebar back at 260px once the window is wide again",
     });
-    expect((await columnWidths()).history).toBe(420);
+    expect((await columnWidths()).history).toBe(history);
   });
 });
