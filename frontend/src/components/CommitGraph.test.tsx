@@ -2430,6 +2430,15 @@ describe("CommitGraph rows: compact date and collapsed badges (#1004)", () => {
     expect(date.getAttribute("title")).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
   });
 
+  it("says the compact age in words for screen readers, \"3 days ago\" rather than \"3d\"", () => {
+    const threeDaysAgo = Math.floor(Date.now() / 1000) - 3 * 86400 - 60;
+    render(<CommitGraph {...props} commits={[{ ...commits[0], timestamp: threeDaysAgo }, commits[1]]} />);
+    const [date] = screen.getAllByTestId("commit-date");
+    expect(date).toHaveAttribute("aria-hidden", "true");
+    const row = date.closest("li")!;
+    expect(within(row).getByText("3 days ago")).toBeInTheDocument();
+  });
+
   it("shows a row's first badge, the current branch first, and +N for the rest, named in its tooltip", () => {
     const crowded: GraphCommit = {
       ...commits[0],
