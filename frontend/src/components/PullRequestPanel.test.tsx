@@ -197,6 +197,37 @@ describe("PullRequestPanel", () => {
     expect(await within(githubSection()).findByRole("button", { name: "Connect to GitHub" })).toBeInTheDocument();
   });
 
+  // A11: a token that couldn't be forgotten is still saved, so the card stays connected; the
+  // error banner says why.
+  it("stays connected when the token couldn't be forgotten", async () => {
+    connect();
+    const onForgetForgeToken = vi.fn().mockResolvedValue("Couldn't forget the token: locked");
+    renderPanel({ onForgetForgeToken });
+
+    openSectionMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Disconnect" }));
+
+    await waitFor(() => expect(onForgetForgeToken).toHaveBeenCalledWith("GitHub", "rene"));
+    await Promise.resolve();
+    expect(within(githubSection()).getByRole("button", { name: "New pull request…" })).toBeInTheDocument();
+    expect(within(githubSection()).queryByRole("button", { name: /^Connect to/ })).toBeNull();
+    expect(localStorage.getItem("forge-account.GitHub")).toBe("rene");
+  });
+
+  // A12: a collapsed card lists nothing (and raises no failure banner) until it is opened.
+  it("lists a connected repository's pull requests only once its card is open", async () => {
+    connect();
+    localStorage.setItem("sidebar-pr-origin", "closed");
+    const onListPullRequests = vi.fn().mockResolvedValue(undefined);
+    renderPanel({ onListPullRequests });
+
+    await Promise.resolve();
+    expect(onListPullRequests).not.toHaveBeenCalled();
+    fireEvent.click(within(githubSection()).getByRole("button", { name: /github: acme\/widget \(origin\)/i }));
+    await waitFor(() => expect(onListPullRequests).toHaveBeenCalledWith("origin", "rene"));
+    expect(onListPullRequests).toHaveBeenCalledTimes(1);
+  });
+
   it("Cancel closes the Connect dialog without calling any callback", () => {
     const onSaveForgeToken = vi.fn();
     const onForgetForgeToken = vi.fn();
