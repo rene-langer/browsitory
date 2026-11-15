@@ -704,3 +704,70 @@ describe("OperationStatusStrip", () => {
     });
   });
 });
+
+describe("Continue names what it continues, as the palette does (#990)", () => {
+  const stored: RebaseInfo = {
+    branch: "topic",
+    onto: "o",
+    currentStep: 1,
+    totalSteps: 2,
+    health: { kind: "Paused" },
+    editing: null,
+    splitParts: 0,
+  };
+
+  it.each([
+    ["CherryPick", "Continue cherry-pick"],
+    ["Revert", "Continue revert"],
+  ] as const)("a %s sequence's Continue is %s", (kind, name) => {
+    const onContinueSequence = vi.fn();
+    render(
+      <OperationStatusStrip
+        merging={false}
+        operation={null}
+        rebaseProgress={null}
+        sequence={{ kind, currentStep: 1, totalSteps: 2, currentCommit: "c" }}
+        conflictCount={0}
+        onAbortMerge={noop}
+        onAbortRebase={noop}
+        onContinueSequence={onContinueSequence}
+        onAbortSequence={noop}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name }));
+    expect(onContinueSequence).toHaveBeenCalledOnce();
+  });
+
+  it("a rebase's Continue is Continue rebase, also at a planner's edit stop", () => {
+    const onContinueRebase = vi.fn();
+    const { rerender } = render(
+      <OperationStatusStrip
+        merging={false}
+        operation={null}
+        rebaseProgress={{ currentStep: 1, totalSteps: 2 }}
+        rebase={stored}
+        conflictCount={0}
+        onAbortMerge={noop}
+        onAbortRebase={noop}
+        onContinueRebase={onContinueRebase}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Continue rebase" }));
+    expect(onContinueRebase).toHaveBeenCalledOnce();
+
+    rerender(
+      <OperationStatusStrip
+        merging={false}
+        operation={null}
+        rebaseProgress={{ currentStep: 1, totalSteps: 2 }}
+        rebase={{ ...stored, editing: "1a2b3c4d5e6f7081" }}
+        conflictCount={0}
+        onAbortMerge={noop}
+        onAbortRebase={noop}
+        onContinueRebase={onContinueRebase}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Editing 1a2b3c4: change the files, then Continue rebase");
+    expect(screen.getByRole("button", { name: "Continue rebase" })).toBeInTheDocument();
+  });
+});

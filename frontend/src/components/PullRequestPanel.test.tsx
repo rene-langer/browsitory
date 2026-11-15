@@ -122,6 +122,12 @@ describe("PullRequestPanel", () => {
     expect(onListPullRequests).not.toHaveBeenCalled();
   });
 
+  it("names Connect with \"…\": it opens a dialog (#990)", () => {
+    renderPanel();
+    fireEvent.click(within(githubSection()).getByRole("button", { name: "Connect to GitHub…" }));
+    expect(screen.getByRole("dialog", { name: "Connect to GitHub", hidden: true })).toBeInTheDocument();
+  });
+
   it("shows the Bitbucket access-token warning only when connecting to Bitbucket", () => {
     renderPanel({ forgeRepositories: [githubRepo, bitbucketRepo] });
 
