@@ -207,7 +207,7 @@ export function RepoPicker({
   return (
     <div ref={rootRef} className={inDialog ? styles.inDialog : styles.picker}>
       <Panel
-        title={inDialog ? "Open repository" : "Open a repository"}
+        title="Open repository"
         actions={
           inDialog ? (
             <button type="button" className={styles.closeButton} aria-label="Close" title="Close" onClick={onClose}>
