@@ -73,11 +73,11 @@ describe("OperationLogDialog (#889)", () => {
     const list = await screen.findByRole("list", { name: "Operations" });
     const buttons = within(list).getAllByRole("button");
     expect(buttons).toHaveLength(3);
-    expect(buttons[0]).toHaveAccessibleName(/^Push origin, Failed/);
+    expect(buttons[0]).toHaveAccessibleName(/^Push to origin, Failed/);
     expect(buttons[0]).toHaveTextContent("1.5 s");
     expect(buttons[1]).toHaveAccessibleName(/^Commit Add a file, Succeeded/);
     expect(buttons[1]).toHaveTextContent("250 ms");
-    expect(buttons[2]).toHaveAccessibleName(/^Fetch origin, Running/);
+    expect(buttons[2]).toHaveAccessibleName(/^Fetch from origin, Running/);
   });
 
   it("says so when nothing was logged yet", async () => {
@@ -112,10 +112,10 @@ describe("OperationLogDialog (#889)", () => {
     ]);
     renderDialog(repoClient);
 
-    fireEvent.click(await screen.findByRole("button", { name: /^Push origin/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Push to origin/ }));
 
     const details = screen.getByRole("region", { name: "Operation details" });
-    expect(within(details).getByRole("heading", { name: "Push origin" })).toBeInTheDocument();
+    expect(within(details).getByRole("heading", { name: "Push to origin" })).toBeInTheDocument();
     expect(details).toHaveTextContent("Failed");
     expect(details).toHaveTextContent("The pre-push hook failed.");
     expect(details).toHaveTextContent("Skip hooks");
@@ -138,7 +138,7 @@ describe("OperationLogDialog (#889)", () => {
     renderDialog(repoClient, "latestFailed");
 
     const details = await screen.findByRole("region", { name: "Operation details" });
-    await waitFor(() => expect(within(details).getByRole("heading", { name: "Fetch origin" })).toBeInTheDocument());
+    await waitFor(() => expect(within(details).getByRole("heading", { name: "Fetch from origin" })).toBeInTheDocument());
     expect(details).toHaveTextContent("could not resolve host");
   });
 
@@ -250,7 +250,7 @@ describe("OperationLogDialog's Run again (#890)", () => {
       entry(2, "Commit", { outcome: "Failed" }),
       entry(1, "Fetch", { target: "backup", outcome: "Cancelled", rerun: fetchAgain }),
     ]);
-    for (const name of [/^Fetch origin/, /^Commit/, /^Fetch backup/]) {
+    for (const name of [/^Fetch from origin/, /^Commit/, /^Fetch from backup/]) {
       fireEvent.click(await screen.findByRole("button", { name }));
       const details = screen.getByRole("region", { name: "Operation details" });
       expect(within(details).queryByRole("button", { name: "Run again" })).toBeNull();

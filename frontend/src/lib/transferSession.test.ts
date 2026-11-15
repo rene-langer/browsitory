@@ -244,7 +244,7 @@ describe("transferSession failure", () => {
     expect(session).toEqual(IDLE_TRANSFER);
     expect(effect).toEqual({
       kind: "failed",
-      patch: { transfer: null, transferSubject: null, error: "Fetch failed", pending: false, forcePushOffer: null, hookFailure: null },
+      patch: { transfer: null, transferSubject: null, error: "Couldn't fetch. Check the remote's URL and your connection, then try again.", pending: false, forcePushOffer: null, hookFailure: null },
     });
   });
 
@@ -310,9 +310,9 @@ describe("transferFailureMessage", () => {
     ["PushTags", "SshAgentFailure", "Load a key into your SSH agent and try again."],
     ["ForcePushBranch", "StaleLease", "origin/main changed since your last fetch. Fetch and review before force pushing."],
     ["DeleteRemoteBranch", "RejectedRemoteRef", "The remote refused to delete the branch."],
-    ["DeleteRemoteBranch", "TransferFailed", "Deleting the remote branch failed"],
+    ["DeleteRemoteBranch", "TransferFailed", "Couldn't delete the remote branch. Check the remote and your connection, then try again."],
     ["DeleteRemoteTag", "RejectedRemoteRef", "The remote refused to delete the tag."],
-    ["DeleteRemoteTag", "NonFastForward", "Deleting the remote tag failed"],
+    ["DeleteRemoteTag", "NonFastForward", "Couldn't delete the remote tag. Check the remote and your connection, then try again."],
     ["ForcePushBranch", "NonFastForward", "The remote refused the force push."],
     [
       "PushBranch",
@@ -326,13 +326,13 @@ describe("transferFailureMessage", () => {
     ],
     ["PushBranch", "RejectedRemoteRef", "The remote rejected the pushed reference."],
     ["ForcePushBranch", "RejectedRemoteRef", "The remote rejected the pushed reference."],
-    ["PushTags", "TransferFailed", "Push failed"],
-    ["PushBranch", null, "Push failed"],
-    ["Pull", "TransferFailed", "Pull failed"],
-    ["Pull", "NonFastForward", "Pull failed"],
-    ["Fetch", "TransferFailed", "Fetch failed"],
-    ["FetchAll", "RejectedRemoteRef", "Fetch failed"],
-    ["Clone", "TransferFailed", "Transfer failed"],
+    ["PushTags", "TransferFailed", "Couldn't push. Check the remote and your connection, then try again."],
+    ["PushBranch", null, "Couldn't push. Check the remote and your connection, then try again."],
+    ["Pull", "TransferFailed", "Couldn't pull. Check the remote and your connection, then pull again."],
+    ["Pull", "NonFastForward", "Couldn't pull. Check the remote and your connection, then pull again."],
+    ["Fetch", "TransferFailed", "Couldn't fetch. Check the remote's URL and your connection, then try again."],
+    ["FetchAll", "RejectedRemoteRef", "Couldn't fetch. Check the remote's URL and your connection, then try again."],
+    ["Clone", "TransferFailed", "Couldn't finish the transfer. Try again."],
   ])("%s / %s → %s", (operation, errorKind, message) => {
     expect(transferFailureMessage(operation, errorKind, label)).toBe(message);
   });

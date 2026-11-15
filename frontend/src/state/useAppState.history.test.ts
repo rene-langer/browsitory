@@ -451,7 +451,7 @@ describe("history actions", () => {
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     await act(() => result.current.forcePushCurrentBranch("origin"));
     act(() => listener!({ operationId: "force-push-1", operation: "ForcePushBranch", phase: "Failed", errorKind: "TransferFailed", current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null }));
-    expect(result.current.state.error).toBe("Push failed");
+    expect(result.current.state.error).toBe("Couldn't force push HEAD to origin. Check the remote and your connection, then try again.");
   });
 
   describe("force push offer lifecycle", () => {

@@ -635,7 +635,7 @@ describe("App", () => {
     const commitButton = screen.getByRole("button", { name: "Commit 1 file" });
     await waitFor(() => expect(commitButton).toBeEnabled());
     fireEvent.click(commitButton);
-    fireEvent.click(await screen.findByRole("button", { name: "Show details" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Details" }));
 
     const dialog = await screen.findByRole("dialog", { name: "Operation log" });
     const details = await within(dialog).findByRole("region", { name: "Operation details" });
@@ -3260,9 +3260,9 @@ describe("App external tools", () => {
 
     it("shows a plain error's message alone", async () => {
       const alert = await stageAndFail(vi.fn().mockRejectedValue(new Error("boom")));
-      // The message with no hint; then the banner's own buttons (#663).
+      // The message with no hint; then the banner's own buttons (#663): Details opens the log (#984).
       expect(alert.querySelector("span")?.textContent).toBe("boom");
-      expect(within(alert).getByRole("button", { name: "Copy details" })).toBeInTheDocument();
+      expect(within(alert).getByRole("button", { name: "Details" })).toBeInTheDocument();
     });
 
     it("drops the hint when the next failure has none", async () => {

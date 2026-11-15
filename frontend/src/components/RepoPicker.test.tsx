@@ -141,7 +141,8 @@ describe("RepoPicker recent repositories (#690)", () => {
     expect(screen.getByText("/repo/a")).toBeInTheDocument();
   });
 
-  it("marks a recent repository whose folder is gone, and still opens it on click", async () => {
+  // #998: opening it could only fail, so the row doesn't open; Locate… takes Pin's place.
+  it("marks a recent repository whose folder is gone; it doesn't open, and offers Locate… instead of Pin", async () => {
     const onOpenRepo = vi.fn();
     const client = fakeClient({
       listRecentRepos: async () => ["/repo/a", "/repo/gone"],
@@ -149,11 +150,14 @@ describe("RepoPicker recent repositories (#690)", () => {
     });
     render(<RepoPicker client={client} onOpenRepo={onOpenRepo} {...workspaceProps()} />);
 
-    const gone = await screen.findByRole("button", { name: /^gone Folder not found/ });
+    expect(await screen.findByRole("button", { name: "Locate gone…" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^a\/repo\/a$/ })).toBeInTheDocument();
     expect(screen.getAllByText("Folder not found")).toHaveLength(1);
-    fireEvent.click(gone);
-    expect(onOpenRepo).toHaveBeenCalledWith("/repo/gone");
+    expect(screen.queryByRole("button", { name: /^gone Folder not found/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Pin gone" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Remove gone from recent repositories" })).toBeInTheDocument();
+    fireEvent.click(screen.getByText("/repo/gone"));
+    expect(onOpenRepo).not.toHaveBeenCalled();
   });
 
   it("lists every recent repository as present when the missing check fails", async () => {
@@ -295,8 +299,8 @@ describe("RepoPicker pinned repositories (#766)", () => {
     });
     render(<RepoPicker client={client} onOpenRepo={vi.fn()} {...workspaceProps()} />);
 
-    expect(await screen.findByRole("button", { name: /^gone Folder not found/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Unpin gone" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Locate gone…" })).toBeInTheDocument();
+    expect(screen.getAllByText("Folder not found")).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Remove gone from recent repositories" }));
 
     await waitFor(() => expect(screen.queryByText("/repo/gone")).toBeNull());
