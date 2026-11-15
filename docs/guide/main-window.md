@@ -8,6 +8,9 @@ window has three columns:
 - the **commit graph**: your history, newest first, with **Uncommitted changes** at the top.
 - the **diff pane** on the right: your working tree, or the commit you selected.
 
+The desktop app opens at 1280×800 pixels, wide enough for the three columns and for the merge
+editor's three panes (see [Resolving conflicts](conflicts.md)).
+
 **Repository toolbar.** From the left:
 
 - the sidebar button (**Ctrl+Alt+B**, **⌥⌘B** on macOS) hides or shows the sidebar;
