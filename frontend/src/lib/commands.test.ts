@@ -362,7 +362,7 @@ describe("buildPaletteCommands (#644)", () => {
       variables: ["paths" as const],
     };
     const diff = (currentFile: string | null, selection: { staged: boolean; paths: string[] } | null) =>
-      ({ currentFile, selection }) as unknown as NonNullable<CommandContext["diff"]>;
+      ({ currentFile, selection, settings: { ignoreWhitespace: false, showWhitespace: false, syntaxHighlight: true } }) as unknown as NonNullable<CommandContext["diff"]>;
     const palette = (d: NonNullable<CommandContext["diff"]>) =>
       buildPaletteCommands({ appState: makeAppState(), sidebar: sidebar(), tabs: tabs(), diff: d, userCommands: { commands: [lint], run } });
     palette(diff("a.txt", null)).find((command) => command.label === "Run: Lint")?.run();
@@ -1289,8 +1289,8 @@ describe("history commands", () => {
     const appState = makeAppState({ ...historyState, selectedRow: { commitId: "m1" }, commits: [merge, ...historyState.commits!] });
     const commitCommands = makeCommitCommands();
     const commands = buildWithCommitCommands(appState, commitCommands);
-    expect(commands.find((c) => c.id === "cherry-pick-selected")?.label).toBe("Cherry-pick m1…");
-    expect(commands.find((c) => c.id === "revert-selected")?.label).toBe("Revert m1…");
+    expect(commands.find((c) => c.id === "cherry-pick-selected")?.label).toBe("Cherry-pick m1 onto main…");
+    expect(commands.find((c) => c.id === "revert-selected")?.label).toBe("Revert m1 (new commit on main)…");
     commands.find((c) => c.id === "cherry-pick-selected")!.run();
     expect(commitCommands.onChooseParent).toHaveBeenLastCalledWith("Cherry-pick", "m1");
     commands.find((c) => c.id === "revert-selected")!.run();
@@ -1348,7 +1348,7 @@ describe("history commands", () => {
       const commands = commandsFor(makeAppState({ ...historyState, selectedRow: { commitId: "m9" } }), {
         commit: { ...commitCommands, listedCommits: [merge] },
       });
-      expect(commands.find((c) => c.id === "revert-selected")?.label).toBe("Revert m9…");
+      expect(commands.find((c) => c.id === "revert-selected")?.label).toBe("Revert m9 (new commit on main)…");
       commands.find((c) => c.id === "revert-selected")!.run();
       expect(commitCommands.onChooseParent).toHaveBeenCalledWith("Revert", "m9");
     });
