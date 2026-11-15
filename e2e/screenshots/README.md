@@ -66,3 +66,19 @@ script, and add the file to this table.
 
 The VSCode extension shows the same webview, so the user docs use these desktop shots for it
 too.
+
+## Screen inventory for design reviews
+
+`capture.inventory.ts` (with `../wdio.inventory.conf.ts` and `inventoryHelpers.ts`) drives the
+same E2E build through every screen, context menu, dialog and Preferences group it can reach,
+in light and dark and at several window sizes, for UX reviews (#978). It writes to
+`e2e/inventory-out/` (ignored by git) or to `INVENTORY_SHOTS`, never to `docs/guide/assets/`.
+Build as for `capture.sh`, then from `e2e/`:
+
+```bash
+TMPDIR=/tmp dbus-run-session -- xvfb-run -a -s "-screen 0 1920x1200x24" pnpm screenshots:inventory
+```
+
+`INVENTORY_PHASES=A,B,…` limits the run to some phases. Each shot is its own test, and a failing
+shot doesn't stop the run. The run resets the shared `/tmp/browsitory-e2e-*` fixture paths, so
+don't run it next to the E2E suite.
