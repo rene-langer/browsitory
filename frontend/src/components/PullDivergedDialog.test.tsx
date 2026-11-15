@@ -15,27 +15,27 @@ function renderDialog(props: Partial<Parameters<typeof PullDivergedDialog>[0]> =
       {...props}
     />,
   );
-  return { dialog: screen.getByRole("dialog", { name: "Pull has diverged" }), ...handlers };
+  return { dialog: screen.getByRole("dialog", { name: "main and origin/main have diverged" }), ...handlers };
 }
 
 describe("PullDivergedDialog", () => {
   it("names both branches by their short names and offers Merge, Rebase and Cancel, focusing Cancel", async () => {
     const { dialog, onMerge, onRebase, onCancel } = renderDialog();
-    expect(dialog).toHaveTextContent("main and origin/main have both changed.");
+    expect(dialog).toHaveTextContent("main and origin/main have diverged");
     expect(dialog).not.toHaveTextContent("refs/remotes");
     await waitFor(() => expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus());
-    fireEvent.click(within(dialog).getByRole("button", { name: "Merge" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Pull with merge" }));
     expect(onMerge).toHaveBeenCalledWith("refs/remotes/origin/main", false);
-    fireEvent.click(within(dialog).getByRole("button", { name: "Rebase" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Pull with rebase" }));
     expect(onRebase).toHaveBeenCalledWith("refs/remotes/origin/main", false);
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(onCancel).toHaveBeenCalled();
   });
 
-  it("passes Remember for this repository with the choice", () => {
+  it("passes Always do this with the choice", () => {
     const { dialog, onRebase } = renderDialog();
-    fireEvent.click(within(dialog).getByRole("checkbox", { name: "Remember for this repository" }));
-    fireEvent.click(within(dialog).getByRole("button", { name: "Rebase" }));
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: /^Always do this for / }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Pull with rebase" }));
     expect(onRebase).toHaveBeenCalledWith("refs/remotes/origin/main", true);
   });
 
@@ -46,7 +46,7 @@ describe("PullDivergedDialog", () => {
 
   it("disables Merge and Rebase, with the reason, while another operation runs", () => {
     const { dialog } = renderDialog({ operationDisabled: true, operationDisabledReason: "A rebase is in progress." });
-    for (const name of ["Merge", "Rebase"]) {
+    for (const name of ["Pull with merge", "Pull with rebase"]) {
       const button = within(dialog).getByRole("button", { name });
       expect(button).toBeDisabled();
       expect(button).toHaveAttribute("title", "A rebase is in progress.");

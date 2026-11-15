@@ -388,7 +388,7 @@ describe("ContextMenu focus and keys", () => {
           <Host items={[{ label: "Ask", onSelect: () => setDialog(true) }]} />
           {dialog && (
             <ConfirmDialog
-              ariaLabel="Sure"
+              title="Sure"
               message="Sure?"
               confirmLabel="Yes"
               onConfirm={() => setDialog(false)}

@@ -83,7 +83,7 @@ describe("RebasePlanner", () => {
     expect(onStartRebase).toHaveBeenCalledWith(onto, expect.any(Array));
   });
 
-  it("keeps its title for a commit id", async () => {
+  it("names a commit it rebases onto by its short id", async () => {
     render(
       <RebasePlanner
         repoPath={TEST_REPO_PATH}
@@ -94,7 +94,7 @@ describe("RebasePlanner", () => {
       />,
     );
     await screen.findByText(/add a/);
-    expect(screen.getByRole("heading", { name: "Rebase plan" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Rebase onto 0123456" })).toBeInTheDocument();
   });
 
   it("lists commits oldest-first with a default Pick action each", async () => {
@@ -123,7 +123,7 @@ describe("RebasePlanner", () => {
     );
     await screen.findByText(/add a/);
 
-    fireEvent.click(screen.getAllByText("Move down")[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /^Move down: / })[0]);
     fireEvent.click(screen.getByText("Start rebase"));
 
     expect(onStartRebase).toHaveBeenCalledWith(
@@ -349,7 +349,7 @@ describe("RebasePlanner", () => {
     fireEvent.change(combined, { target: { value: "hand-written message" } });
 
     // Reorder two rows outside the group — the group's membership is untouched.
-    fireEvent.click(screen.getAllByText("Move down")[2]);
+    fireEvent.click(screen.getAllByRole("button", { name: /^Move down: / })[2]);
 
     expect(screen.getByLabelText("Combined message")).toHaveValue("hand-written message");
   });
@@ -420,7 +420,7 @@ describe("RebasePlanner", () => {
         presetActions={new Map([["bbb", "Squash"]])}
       />,
     );
-    await screen.findAllByLabelText("Action");
+    await screen.findAllByLabelText(/^Action for /);
 
     // Row 0 = "add a" (Pick, the leader), row 1 = "add b" (preset Squash).
     expect(screen.getAllByLabelText(/^Action for /)[0]).toHaveValue("Pick");
@@ -444,7 +444,7 @@ describe("RebasePlanner", () => {
         presetActions={new Map([["aaa", "Drop"]])}
       />,
     );
-    await screen.findAllByLabelText("Action");
+    await screen.findAllByLabelText(/^Action for /);
 
     expect(screen.getAllByLabelText(/^Action for /)[0]).toHaveValue("Drop");
     expect(screen.getAllByLabelText(/^Action for /)[1]).toHaveValue("Pick");
