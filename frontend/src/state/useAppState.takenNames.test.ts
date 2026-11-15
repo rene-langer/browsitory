@@ -102,7 +102,7 @@ describe("taken names (#413)", () => {
       rejectCreate?.(new Error("tag refused"));
       outcome = await promise;
     });
-    expect(outcome).toBe("tag refused");
+    expect(outcome).toBe("Couldn't create tag v2: tag refused");
     expect(result.current.state.tags).toEqual([tag("v1")]);
   });
 
@@ -230,7 +230,7 @@ describe("taken names (#413)", () => {
     );
 
     expect(createWorktree).toHaveBeenCalledWith(TEST_REPO_PATH, "again", "../work/feature/", "again", "HEAD");
-    expect(outcome).toBe("worktree path already exists");
+    expect(outcome).toBe("Couldn't create worktree again: worktree path already exists");
     expect(result.current.state.worktrees).toEqual([mainWorktree, linked]);
   });
 
@@ -249,7 +249,7 @@ describe("taken names (#413)", () => {
       },
     );
 
-    expect(outcome).toBe("branch is checked out elsewhere");
+    expect(outcome).toBe("Couldn't create worktree wt: branch is checked out elsewhere");
     expect(result.current.state.worktrees).toEqual([mainWorktree]);
   });
 });

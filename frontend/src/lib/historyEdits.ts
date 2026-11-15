@@ -1,4 +1,5 @@
 import type { GraphCommit, HeadInfo, HistoryEditKind, RebasePlanCommit, RebasePlanEntry, StatusEntry } from "../ipc/RepoClient";
+import { FailureWithNextStep } from "./operationErrors";
 
 export type { HistoryEditKind };
 
@@ -147,7 +148,7 @@ export function buildHistoryEditPlan(edit: HistoryEdit, commitId: string, span: 
   const index = span.findIndex((commit) => commit.id === commitId);
   const fromGrandparent = edit.kind === "Squash" || edit.kind === "Fixup" || edit.kind === "MoveDown";
   if (index !== (fromGrandparent ? 1 : 0) || (edit.kind === "MoveUp" && index + 1 >= span.length)) {
-    throw new Error(HISTORY_CHANGED);
+    throw new FailureWithNextStep(HISTORY_CHANGED, null);
   }
   const plan: RebasePlanEntry[] = span.map((commit) => ({
     commitId: commit.id,

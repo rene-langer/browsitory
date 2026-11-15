@@ -95,7 +95,7 @@ describe("useAppState", () => {
     await act(() => result.current.dropStash(0));
 
     expect(result.current.state.stashes).toEqual([stashA]);
-    expect(result.current.state.error).toBe("drop failed");
+    expect(result.current.state.error).toBe("Couldn't drop stash@{0}: drop failed");
   });
 
   it("dropStash clears the selected row optimistically when dropping the currently-selected stash", async () => {
