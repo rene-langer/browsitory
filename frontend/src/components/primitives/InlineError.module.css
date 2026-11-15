@@ -32,7 +32,8 @@
   border: none;
 }
 
-.dismiss:hover {
+/* `:not(...)` as in `index.css`'s button hover, which this outranks only so (#984). */
+.dismiss:hover:not(:disabled):not([aria-disabled="true"]) {
   background: var(--color-danger-text);
   color: var(--color-danger);
 }
@@ -58,6 +59,14 @@
   color: var(--color-danger);
   border-color: var(--color-danger-text);
   font-weight: 600;
+}
+
+/* Keeps its fill on hover: `index.css`'s button hover would draw the control colour under the
+   banner-coloured text. */
+.action.primary:hover:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--color-danger-text);
+  color: var(--color-danger);
+  filter: brightness(0.9);
 }
 
 /* The errors this one replaced (#663), collapsed under it. */
