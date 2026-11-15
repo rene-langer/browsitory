@@ -16,11 +16,38 @@ function worthListing(path: string): boolean {
   return !name.startsWith(".") && name !== "node_modules";
 }
 
+/** `path`'s parent folder and `path` as its scan lists it, or `null` for a root. */
+function parentOf(path: string): { parent: string; child: string } | null {
+  const trimmed = path.replace(/[\\/]+$/, "");
+  const cut = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  if (cut < 0 || cut === trimmed.length - 1) return null;
+  // "/work" is in "/"; "C:\work" in "C:\" (a drive's root keeps its separator).
+  const parent = cut === 0 || trimmed[cut - 1] === ":" ? trimmed.slice(0, cut + 1) : trimmed.slice(0, cut);
+  return { parent, child: trimmed };
+}
+
+/** Separators and a trailing one aside, the same path. */
+const samePath = (a: string, b: string) => a.replace(/\\/g, "/").replace(/\/+$/, "") === b.replace(/\\/g, "/").replace(/\/+$/, "");
+
+/**
+ * Whether `path` holds a `.git` entry: its parent's scan (`scanReposInRoot`, one level deep)
+ * lists it then. `null` when that can't be told (a root, an unreadable parent).
+ */
+async function hasGitEntry(client: RepoClient, path: string): Promise<boolean | null> {
+  const where = parentOf(path);
+  if (where === null) return null;
+  return client.scanReposInRoot(where.parent).then(
+    (found) => found.some((repo) => samePath(repo, where.child)),
+    () => null,
+  );
+}
+
 /**
  * Tells why opening `path` failed. A recent repository whose folder is gone is `missing`. A
- * folder that exists but didn't open is `notRepository`, with the repositories its direct
- * subfolders hold (`scanReposInRoot`, which also lists a workspace's members). Any other
- * failure, or one the checks can't tell, stays `failed`.
+ * folder that exists but didn't open and holds no `.git` entry is `notRepository`, with the
+ * repositories its direct subfolders hold (`scanReposInRoot`, which also lists a workspace's
+ * members). A folder with a `.git` entry that Git refused (ownership, an unsupported format, a
+ * broken HEAD), any other failure, or one the checks can't tell, stays `failed`: Git's message.
  */
 export async function describeOpenFailure(client: RepoClient, path: string, error: unknown): Promise<OpenFailure> {
   const message = error instanceof Error ? error.message : String(error);
@@ -32,6 +59,7 @@ export async function describeOpenFailure(client: RepoClient, path: string, erro
     () => false,
   );
   if (missing) return { kind: "missing", path, message };
+  if ((await hasGitEntry(client, path)) !== false) return failed;
   const repos = await client.scanReposInRoot(path).then(
     (found) => found.filter(worthListing),
     () => null,
