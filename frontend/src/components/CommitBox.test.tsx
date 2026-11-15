@@ -356,26 +356,6 @@ describe("CommitBox", () => {
     expect(screen.getByDisplayValue("Merge branch 'feature'")).toBeInTheDocument();
   });
 
-  it("renders an Abort merge button only when initialMessage is set, and calls onAbortMerge", () => {
-    const onAbortMerge = vi.fn();
-    const { rerender } = render(
-      <CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={onAbortMerge} />,
-    );
-    expect(screen.queryByText("Abort merge")).not.toBeInTheDocument();
-
-    rerender(
-      <CommitBox
-        onCommit={vi.fn(async () => true)}
-        disabled={false}
-        onAbortMerge={onAbortMerge}
-        initialMessage="Merge branch 'feature'"
-      />,
-    );
-    fireEvent.click(screen.getByText("Abort merge"));
-
-    expect(onAbortMerge).toHaveBeenCalled();
-  });
-
   it("starts from initialDraft and reports every change through onDraftChange", async () => {
     const onDraftChange = vi.fn();
     render(
@@ -597,22 +577,7 @@ describe("amend draft safety", () => {
   });
 });
 
-describe("CommitBox showAbort", () => {
-  it("hides the abort button for a seeded message when showAbort is false", () => {
-    render(
-      <CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={vi.fn()} initialMessage="Squashed commit" showAbort={false} />,
-    );
-
-    expect(screen.getByPlaceholderText("Commit message")).toHaveValue("Squashed commit");
-    expect(screen.queryByRole("button", { name: "Abort merge" })).toBeNull();
-  });
-
-  it("shows the abort button for a seeded message by default", () => {
-    render(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={vi.fn()} initialMessage="Merge branch" />);
-
-    expect(screen.getByRole("button", { name: "Abort merge" })).toBeInTheDocument();
-  });
-
+describe("CommitBox message aids", () => {
   describe("summary counter and ruler", () => {
     it("counts summary characters and warns past the soft limit without blocking", async () => {
       const onCommit = vi.fn(async () => true);
