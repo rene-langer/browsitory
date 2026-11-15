@@ -31,6 +31,8 @@ export function RepoToolbar({
   branch: {
     current: string | null;
     detachedAt: string | null;
+    /** The branch of a repository with no commits yet (#983). */
+    unbornBranch?: string | null;
     upstream: UpstreamInfo | null;
     onOpenSwitcher: () => void;
   };
@@ -99,15 +101,23 @@ export function RepoToolbar({
 function BranchChip({
   current,
   detachedAt,
+  unbornBranch = null,
   upstream,
   onOpenSwitcher,
 }: {
   current: string | null;
   detachedAt: string | null;
+  unbornBranch?: string | null;
   upstream: UpstreamInfo | null;
   onOpenSwitcher: () => void;
 }) {
-  const name = current ?? (detachedAt !== null ? `detached at ${detachedAt}` : "no branch");
+  const name =
+    current ??
+    (detachedAt !== null
+      ? `detached at ${detachedAt}`
+      : unbornBranch !== null
+        ? `${unbornBranch} (no commits yet)`
+        : "no branch");
   const tracking = current !== null && upstream !== null ? `${upstream.remoteName}/${upstream.remoteBranch}` : null;
   const label = `Current branch ${name}${tracking === null ? "" : `, tracking ${tracking}`}. Switch branch…`;
   return (

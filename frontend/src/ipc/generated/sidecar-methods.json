@@ -23,6 +23,7 @@
   "commit",
   "commits_since",
   "continue_sequence",
+  "count_commits_only_on_branch",
   "create_branch",
   "create_pull_request",
   "create_root_file",

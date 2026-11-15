@@ -193,7 +193,12 @@ terminalSequence: TerminalSequence | null,
 /**
  * A `git rebase` or `git am` started in a terminal and not finished, or `null` (#263).
  */
-terminalRebase: TerminalRebase | null, };
+terminalRebase: TerminalRebase | null, 
+/**
+ * The branch HEAD names while it has no commit yet (a new repository, #983); absent
+ * otherwise.
+ */
+unbornBranch?: string, };
 
 export type HistoryEditKind = "Reword" | "Squash" | "Fixup" | "MoveUp" | "MoveDown" | "Drop" | "Edit" | "Split";
 

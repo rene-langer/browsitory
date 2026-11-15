@@ -211,12 +211,16 @@ export function useStagingActions(
       } catch (error) {
         return failureError(error).error;
       }
-      setState((prev) => ({ ...prev, identityRequired: null }));
+      // The dialog handled the error, so no banner is left behind (#996).
+      setState((prev) => ({ ...prev, identityRequired: null, error: null }));
       return null;
     },
     [client, repoPath, setState],
   );
-  const dismissIdentity = useCallback(() => setState((prev) => ({ ...prev, identityRequired: null })), [setState]);
+  const dismissIdentity = useCallback(
+    () => setState((prev) => ({ ...prev, identityRequired: null, error: null })),
+    [setState],
+  );
 
   return {
     setIdentity,

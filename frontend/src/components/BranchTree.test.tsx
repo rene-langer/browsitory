@@ -95,34 +95,35 @@ describe("BranchTree — local branches", () => {
     expect(screen.queryByRole("menuitem", { name: "Merge into current branch…" })).not.toBeInTheDocument();
   });
 
-  it("Delete calls onDeleteBranch with force=false, then confirming Force Delete calls it again with force=true", async () => {
-    const { props } = renderTree();
+  it("Delete counts the branch's own commits first, then one confirm deletes it with force=true (#996)", async () => {
+    const onCountCommitsOnlyOnBranch = vi.fn().mockResolvedValue(1);
+    const { props } = renderTree({ onCountCommitsOnlyOnBranch });
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
-    expect(props.onDeleteBranch).toHaveBeenCalledWith("feat/foo", false);
-    fireEvent.click(await screen.findByRole("button", { name: "Force delete" }));
+    expect(onCountCommitsOnlyOnBranch).toHaveBeenCalledWith("feat/foo");
+    const dialog = await screen.findByRole("dialog", { name: "Delete feat/foo" });
+    expect(dialog).toHaveTextContent(
+      "feat/foo has 1 commit on no other branch. Delete it anyway? Undo can bring it back.",
+    );
+    expect(props.onDeleteBranch).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    expect(props.onDeleteBranch).toHaveBeenCalledOnce();
     expect(props.onDeleteBranch).toHaveBeenCalledWith("feat/foo", true);
   });
 
-  // Regression test for a bug where the force-delete dialog fired after every *successful*
-  // delete too: `handleDeleteClick` unconditionally arms `pendingForceFor` after the soft
-  // delete, with no check for whether it actually failed. The app's real optimistic-update flow
-  // removes a deleted branch from `branches` immediately on success (only rolling back on
-  // failure), so a re-render with the branch gone from `branches` is what "the delete
-  // succeeded" looks like from BranchTree's point of view.
-  it("does not show the force-delete dialog after a successful delete (branch removed from branches)", async () => {
-    const { props, rerender } = renderTree();
+  // Before #996 a plain delete was tried first, and its "unmerged commits" failure showed as an
+  // error banner beside the Force delete confirm. A branch whose commits another branch still
+  // has loses nothing, so it goes without asking.
+  it("deletes a branch whose commits another branch has without asking (#996)", async () => {
+    const onCountCommitsOnlyOnBranch = vi.fn().mockResolvedValue(0);
+    const { props } = renderTree({ onCountCommitsOnlyOnBranch });
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
-    expect(props.onDeleteBranch).toHaveBeenCalledWith("feat/foo", false);
-    await Promise.resolve();
+    await waitFor(() => expect(props.onDeleteBranch).toHaveBeenCalledWith("feat/foo", true));
 
-    // Simulate the optimistic removal: re-render with the deleted branch gone from `branches`.
-    rerender(<BranchTreeWithDialogs {...props} branches={baseBranches.filter((b) => b.name !== "feat/foo")} />);
-
-    expect(screen.queryByRole("dialog", { name: "Force delete feat/foo" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Force delete" })).not.toBeInTheDocument();
+    expect(props.onDeleteBranch).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("dialog", { name: "Delete feat/foo" })).not.toBeInTheDocument();
   });
 
   it("Rename shows an inline input; Enter calls onRenameBranch", () => {
@@ -201,16 +202,16 @@ describe("BranchTree — local branches", () => {
     expect(props.onSwitchBranch).not.toHaveBeenCalled();
   });
 
-  it("blocks an open force-delete confirmation, saying why, once the repository is busy (#521)", async () => {
-    const { props, rerender } = renderTree();
+  it("blocks an open delete confirmation, saying why, once the repository is busy (#521)", async () => {
+    const { props, rerender } = renderTree({ onCountCommitsOnlyOnBranch: vi.fn().mockResolvedValue(1) });
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
-    await screen.findByRole("dialog", { name: "Force delete feat/foo" });
+    await screen.findByRole("dialog", { name: "Delete feat/foo" });
 
     rerender(<BranchTreeWithDialogs {...props} operationDisabled operationDisabledReason="A transfer is in progress." />);
-    const dialog = screen.getByRole("dialog", { name: "Force delete feat/foo" });
+    const dialog = screen.getByRole("dialog", { name: "Delete feat/foo" });
     expect(dialog).toHaveTextContent("A transfer is in progress.");
-    const confirm = within(dialog).getByRole("button", { name: "Force delete" });
+    const confirm = within(dialog).getByRole("button", { name: "Delete" });
     expect(confirm).toBeDisabled();
     expect(confirm).toHaveAttribute("title", "A transfer is in progress.");
     expect(describedByText(confirm)).toBe("A transfer is in progress.");
@@ -387,19 +388,19 @@ describe("BranchTree — local branches", () => {
   });
 
   // Transformation: open-popover-then-click-Delete-twice → right-click-then-click-Delete-menuitem.
-  it("Cancel in the force-delete dialog dismisses it without deleting, leaving Delete in place", async () => {
-    const { props } = renderTree();
+  it("Cancel in the delete dialog dismisses it without deleting, leaving Delete in place", async () => {
+    const { props } = renderTree({ onCountCommitsOnlyOnBranch: vi.fn().mockResolvedValue(2) });
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     await Promise.resolve();
 
-    const dialog = await screen.findByRole("dialog", { name: "Force delete feat/foo" });
+    const dialog = await screen.findByRole("dialog", { name: "Delete feat/foo" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
 
-    expect(props.onDeleteBranch).toHaveBeenCalledTimes(1);
-    expect(props.onDeleteBranch).not.toHaveBeenCalledWith("feat/foo", true);
-    expect(screen.queryByRole("dialog", { name: "Force delete feat/foo" })).not.toBeInTheDocument();
+    // No plain delete is tried first any more (#996): nothing was deleted at all.
+    expect(props.onDeleteBranch).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: "Delete feat/foo" })).not.toBeInTheDocument();
 
     // "leaving Delete in place": right-clicking again still offers Delete, not a stale
     // force-delete state.

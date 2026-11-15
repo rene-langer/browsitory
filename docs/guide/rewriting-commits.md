@@ -121,8 +121,8 @@ files have to be staged or stashed first (untracked files are fine). It runs no 
 
 ## Force push
 
-When a push is rejected because the remote has commits you don't, the error offers **Force push
-(with lease)…**. The command palette has it too, as **Force push current branch…** in the
+When a push is rejected because the remote has commits you don't, the error offers **Pull** first,
+then **Force push…** (with lease). The command palette has it too, as **Force push current branch…** in the
 Remotes group; it is hidden on a detached HEAD or when the branch has no upstream. It always
 asks for confirmation, which says how many commits the remote branch loses (when the counts are
 known) and that Undo can't take back a push.

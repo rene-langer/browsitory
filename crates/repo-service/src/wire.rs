@@ -1078,6 +1078,11 @@ pub struct HeadInfoDto {
     pub terminal_sequence: Option<TerminalSequenceDto>,
     /// A `git rebase` or `git am` started in a terminal and not finished, or `null` (#263).
     pub terminal_rebase: Option<TerminalRebaseDto>,
+    /// The branch HEAD names while it has no commit yet (a new repository, #983); absent
+    /// otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(any(test, feature = "ts"), ts(optional))]
+    pub unborn_branch: Option<String>,
 }
 
 /// `{ "kind": "Rebase" | "Am", "branch", "onto", "currentStep", "totalSteps" }`: `branch` and
@@ -1187,6 +1192,7 @@ impl From<git_core::repo::HeadInfo> for HeadInfoDto {
             }),
             terminal_sequence: info.terminal_sequence.map(TerminalSequenceDto::from),
             terminal_rebase: info.terminal_rebase.map(TerminalRebaseDto::from),
+            unborn_branch: info.unborn_branch,
         }
     }
 }

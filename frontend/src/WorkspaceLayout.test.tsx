@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { RepoError, type FileDropEvent, type RepoClient } from "./ipc/RepoClient";
-import { fakeRepoClient, graphPage } from "./test/fakeRepoClient";
+import { EMPTY_RESULTS, fakeRepoClient, graphPage } from "./test/fakeRepoClient";
 
 // Whole-App renders, like App.test.tsx (#217's slow-machine budget).
 vi.setConfig({ testTimeout: 20_000 });
@@ -256,6 +256,20 @@ describe("the current-branch switcher (#638)", () => {
     expect(options).not.toContain("fix/login");
     fireEvent.click(screen.getByRole("option", { name: "feature" }));
     await waitFor(() => expect(switchBranch).toHaveBeenCalledWith("/repos/a", "feature"));
+  });
+
+  it("names the branch of a repository with no commits yet (#983)", async () => {
+    const headInfo = await EMPTY_RESULTS.getHeadInfo!("/repos/a");
+    await renderApp(
+      layoutClient({
+        listBranches: async () => [],
+        getCurrentUpstream: async () => null,
+        getHeadInfo: async () => ({ ...headInfo, unbornBranch: "main" }),
+      }),
+    );
+    const chip = await within(toolbar()).findByRole("button", { name: /^Current branch main \(no commits yet\)/ });
+    expect(chip).toHaveTextContent("main (no commits yet)");
+    expect(chip).not.toHaveTextContent("no branch");
   });
 
   it("lists recently switched branches first", async () => {
