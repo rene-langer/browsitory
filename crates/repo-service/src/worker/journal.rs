@@ -262,11 +262,19 @@ pub(super) fn describe(command: &Command) -> Option<Described> {
             message,
             no_verify,
             author,
+            message_only,
             ..
-        } => on("Amend commit", first_line(message))
-            .flag("Skip hooks", *no_verify)
-            .flag("New author", author.is_some())
-            .reply(),
+        } => on(
+            if *message_only {
+                "Reword commit"
+            } else {
+                "Amend commit"
+            },
+            first_line(message),
+        )
+        .flag("Skip hooks", *no_verify)
+        .flag("New author", author.is_some())
+        .reply(),
         Command::SetIdentity {
             name,
             email,

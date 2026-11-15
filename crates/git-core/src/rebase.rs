@@ -303,7 +303,7 @@ pub fn commits_since(repo: &Repository, onto: &str) -> Result<Vec<RebasePlanComm
                 .to_string(),
             author_name: commit.author().name().ok().unwrap_or_default().to_string(),
             timestamp: commit.time().seconds(),
-            merge: false,
+            merge: commit.parent_count() > 1,
         });
     }
     // `revwalk` yields newest-first; the plan wants oldest-first, matching actual replay order.

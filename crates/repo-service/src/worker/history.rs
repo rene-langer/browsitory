@@ -220,6 +220,7 @@ pub(super) fn amend(
     no_verify: bool,
     author: Option<git_core::commit::SignatureInput>,
     trailers: Vec<git_core::commit::Trailer>,
+    message_only: bool,
     op: super::remote::TransferOp,
     events: Sender<super::HookEvent>,
     reply: Sender<Result<git_core::commit::CommitOutcome, ErrorDto>>,
@@ -232,17 +233,18 @@ pub(super) fn amend(
     };
     // Trailers before the hooks, as for a commit.
     let result = git_core::commit::append_trailers(&message, &trailers).and_then(|message| {
-        git_core::commit::amend_head(
-            repo,
-            &message,
-            author.as_ref(),
-            git_core::hooks::HookOptions {
-                no_verify,
-                cancel: Some(&cancel),
-                reporter: Some(&mut reporter),
-                ..Default::default()
-            },
-        )
+        let hooks = git_core::hooks::HookOptions {
+            no_verify,
+            cancel: Some(&cancel),
+            reporter: Some(&mut reporter),
+            ..Default::default()
+        };
+        // Reword… on HEAD (#981): the message only.
+        if message_only {
+            git_core::commit::reword_head(repo, &message, hooks)
+        } else {
+            git_core::commit::amend_head(repo, &message, author.as_ref(), hooks)
+        }
     });
     op.clear();
     let _ = reply.send(super::status::commit_reply(result));
@@ -330,19 +332,31 @@ impl WorkerHandle {
             no_verify,
             author,
             trailers,
+            message_only: false,
             operation_id,
             events,
             reply,
         })
     }
-    /// Reword… on HEAD (#981): its message only. Stub until the implementation commit.
+    /// Reword… on HEAD (#981): its message only, staged changes stay staged; hooks, events and
+    /// cancel as for `amend_commit`.
     pub fn reword_head(
         &self,
         message: String,
         no_verify: bool,
         events: Sender<super::HookEvent>,
     ) -> Result<git_core::commit::CommitOutcome, ErrorDto> {
-        self.amend_commit(message, no_verify, None, Vec::new(), events)
+        let operation_id = self.cancelled.allocate("amend");
+        self.request(|reply| Command::AmendCommit {
+            message,
+            no_verify,
+            author: None,
+            trailers: Vec::new(),
+            message_only: true,
+            operation_id,
+            events,
+            reply,
+        })
     }
     /// `mainline` (1-based parent) is required for a merge commit and refused otherwise. A clean
     /// pick runs `prepare-commit-msg` and `post-commit` (#183), reported on `events`

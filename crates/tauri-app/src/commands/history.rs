@@ -27,6 +27,7 @@ pub async fn amend_commit(
     no_verify: bool,
     author: Option<SignatureInputDto>,
     trailers: Option<Vec<TrailerDto>>,
+    message_only: Option<bool>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<CommitOutcomeDto, ErrorDto> {
@@ -35,13 +36,18 @@ pub async fn amend_commit(
     Ok(CommitOutcomeDto::from(
         repo_worker(&state, &repo_path)?
             .call(move |w| {
-                w.amend_commit(
-                    message,
-                    no_verify,
-                    author.map(Into::into),
-                    to_trailers(trailers.unwrap_or_default()),
-                    event_tx,
-                )
+                // Reword… on HEAD (#981): the message only, staged changes stay staged.
+                if message_only.unwrap_or(false) {
+                    w.reword_head(message, no_verify, event_tx)
+                } else {
+                    w.amend_commit(
+                        message,
+                        no_verify,
+                        author.map(Into::into),
+                        to_trailers(trailers.unwrap_or_default()),
+                        event_tx,
+                    )
+                }
             })
             .await?,
     ))

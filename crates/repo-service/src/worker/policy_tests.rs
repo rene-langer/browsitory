@@ -795,6 +795,7 @@ pub(super) fn table() -> Vec<((&'static str, Command), &'static str)> {
                 no_verify: false,
                 author: None,
                 trailers: vec![],
+                message_only: false,
                 operation_id: op(),
                 events: channel().0
             }),

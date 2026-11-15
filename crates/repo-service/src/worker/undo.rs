@@ -54,6 +54,15 @@ pub(super) fn amend_label(message: &str) -> String {
     }
 }
 
+/// Reword… on HEAD (#981): "Reword “<summary>”", or a fallback for an empty message.
+pub(super) fn reword_label(message: &str) -> String {
+    if message.trim().is_empty() {
+        "Reword last commit".to_string()
+    } else {
+        quoted("Reword ", message)
+    }
+}
+
 pub(super) fn reset_label(commit_id: &str, mode: ResetMode) -> String {
     let mode = match mode {
         ResetMode::Soft => "soft",
@@ -1285,6 +1294,7 @@ mod tests {
                 no_verify: false,
                 author: None,
                 trailers: Vec::new(),
+                message_only: false,
                 operation_id: "amend-1".into(),
                 events: channel().0,
                 reply: tx
