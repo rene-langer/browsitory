@@ -58,16 +58,16 @@ describe("PreferencesDialog", () => {
     const terminal = screen.getByLabelText("Terminal command");
     expect(terminal).toHaveAttribute("placeholder", "System default terminal");
     expect(screen.getByText("Placeholders: {file}, {line}, {dir}")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
 
     fireEvent.change(editor, { target: { value: "  " } });
+    fireEvent.blur(editor);
+    await waitFor(() => expect(setExternalToolSettings).toHaveBeenCalledWith({ editor: null, terminal: null }));
     fireEvent.change(terminal, { target: { value: " kitty --directory {dir} " } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.blur(terminal);
 
     await waitFor(() =>
-      expect(setExternalToolSettings).toHaveBeenCalledWith({ editor: null, terminal: "kitty --directory {dir}" }),
+      expect(setExternalToolSettings).toHaveBeenLastCalledWith({ editor: null, terminal: "kitty --directory {dir}" }),
     );
-    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeDisabled());
   });
 
   it("shows a failed save", async () => {
@@ -78,8 +78,10 @@ describe("PreferencesDialog", () => {
       },
       getGitTools: noTools,
     });
-    fireEvent.change(await screen.findByLabelText("Editor command"), { target: { value: "code" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    const editor = await screen.findByLabelText("Editor command");
+    await waitFor(() => expect(editor).toBeEnabled());
+    fireEvent.change(editor, { target: { value: "code" } });
+    fireEvent.blur(editor);
     expect(await screen.findByText("disk full")).toBeInTheDocument();
   });
 
@@ -407,7 +409,7 @@ describe("Fetch preferences", () => {
     fireEvent.change(app, { target: { value: "10" } });
 
     await waitFor(() => expect(setFetchSettings).toHaveBeenLastCalledWith({ autoFetchMinutes: 10 }));
-    expect(within(group).getByRole("combobox", { name: "In app" })).toHaveDisplayValue(
+    expect(within(group).getByRole("combobox", { name: "For this repository (app)" })).toHaveDisplayValue(
       "Use the app setting (every 10 minutes)",
     );
   });
@@ -421,7 +423,7 @@ describe("Fetch preferences", () => {
   it("overrides the interval for the active repository only", async () => {
     const setFetchSettings = vi.fn(async () => {});
     renderFetch({ getFetchSettings: async () => ({ autoFetchMinutes: 10 }), setFetchSettings });
-    const repo = await screen.findByRole("combobox", { name: "In app" });
+    const repo = await screen.findByRole("combobox", { name: "For this repository (app)" });
     expect(repo).toHaveValue("app");
 
     fireEvent.change(repo, { target: { value: "0" } });

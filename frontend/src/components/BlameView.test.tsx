@@ -34,11 +34,11 @@ describe("BlameView", () => {
     expect(screen.getByText("line two")).toBeInTheDocument();
   });
 
-  it("clicking a line calls onSelectRow with that line's commit id", () => {
+  it("clicking a line's commit id calls onSelectRow with that commit", () => {
     const onSelectRow = vi.fn();
     render(<BlameView lines={lines} onSelectRow={onSelectRow} />);
 
-    fireEvent.click(screen.getByText("line two").closest("tr")!);
+    fireEvent.click(screen.getByRole("button", { name: "bbb2222" }));
 
     expect(onSelectRow).toHaveBeenCalledWith({ commitId: "bbb222" });
   });

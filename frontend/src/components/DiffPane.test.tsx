@@ -1082,7 +1082,7 @@ describe("DiffPane", () => {
       expect(getBlame).toHaveBeenCalledWith(TEST_REPO_PATH, "HEAD", "a.txt");
     });
 
-    it("clicking a blame line calls onSelectRow with that line's commit id", async () => {
+    it("clicking a blame line's commit id calls onSelectRow with that commit", async () => {
       const blameLines: BlameLine[] = [
         { lineNumber: 1, content: "hello", commitId: "abc123", shortId: "abc1234", authorName: "Rene", timestamp: 1 },
       ];
@@ -1091,8 +1091,7 @@ describe("DiffPane", () => {
       renderUncommitted(fakeClient({ getBlame, getWorkingDiff: async () => [] }), status, { onSelectRow });
 
       fireEvent.click(screen.getAllByText("Blame")[0]);
-      const row = await screen.findByText("hello");
-      fireEvent.click(row.closest("tr")!);
+      fireEvent.click(await screen.findByRole("button", { name: "abc1234" }));
 
       expect(onSelectRow).toHaveBeenCalledWith({ commitId: "abc123" });
     });
@@ -1472,7 +1471,7 @@ describe("DiffPane", () => {
       expect(getBlame).toHaveBeenCalledWith(TEST_REPO_PATH, "abc123", "src/main.rs");
     });
 
-    it("clicking a blame line calls onSelectRow with that line's commit id", async () => {
+    it("clicking a blame line's commit id calls onSelectRow with that commit", async () => {
       const blameLines: BlameLine[] = [
         { lineNumber: 1, content: "fn main() {}", commitId: "abc123", shortId: "abc1234", authorName: "Rene", timestamp: 1 },
       ];
@@ -1482,8 +1481,7 @@ describe("DiffPane", () => {
 
       await screen.findByText("src/main.rs");
       fireEvent.click(screen.getByText("Blame"));
-      const row = await screen.findByText("fn main() {}");
-      fireEvent.click(row.closest("tr")!);
+      fireEvent.click(await screen.findByRole("button", { name: "abc1234" }));
 
       expect(onSelectRow).toHaveBeenCalledWith({ commitId: "abc123" });
     });
