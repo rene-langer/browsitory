@@ -144,7 +144,7 @@ describe("RepoTabs", () => {
 });
 
 describe("RepoTabs change marker", () => {
-  it("marks a tab whose repository has uncommitted changes, in words as well as a dot (#613)", () => {
+  it("marks a tab whose repository has uncommitted changes with ± and the file count, in its name too (#613, #1028)", () => {
     render(
       <RepoTabs
         openRepos={repos}
@@ -155,15 +155,33 @@ describe("RepoTabs change marker", () => {
         onClose={vi.fn()}
         onCloseGroup={vi.fn()}
         onAddTab={vi.fn()}
-        changedPaths={new Set(["/repos/widget"])}
+        changedCounts={new Map([["/repos/widget", 3]])}
       />,
     );
-    const dirty = screen.getByRole("tab", { name: "widget" });
-    expect(dirty).toHaveAccessibleDescription("Uncommitted changes");
-    expect(dirty.closest(`.${styles.tab}`)?.querySelector(`.${styles.changeMarker}`)).not.toBeNull();
+    const dirty = screen.getByRole("tab", { name: "widget, uncommitted changes in 3 files" });
+    const marker = dirty.closest(`.${styles.tab}`)?.querySelector(`.${styles.changeMarker}`);
+    expect(marker).toHaveTextContent("±3");
+    expect(marker).toHaveAttribute("title", "Uncommitted changes in 3 files");
     const clean = screen.getByRole("tab", { name: "gadget" });
     expect(clean).toHaveAccessibleDescription("/repos/gadget");
     expect(clean.closest(`.${styles.tab}`)?.querySelector(`.${styles.changeMarker}`)).toBeNull();
+  });
+
+  it("says one file in the singular", () => {
+    render(
+      <RepoTabs
+        openRepos={repos}
+        activePath="/repos/gadget"
+        busyPaths={noneBusy}
+        workspaceNames={{}}
+        onSwitchTo={vi.fn()}
+        onClose={vi.fn()}
+        onCloseGroup={vi.fn()}
+        onAddTab={vi.fn()}
+        changedCounts={new Map([["/repos/widget", 1]])}
+      />,
+    );
+    expect(screen.getByRole("tab", { name: "widget, uncommitted changes in 1 file" })).toBeInTheDocument();
   });
 });
 
@@ -404,7 +422,7 @@ describe("RepoTabs tab list (#625)", () => {
     { path: "/other/tools", displayName: "tools", alias: null, workspaceId: null },
   ];
 
-  function renderMany(overrides: { onSwitchTo?: (path: string) => void; changedPaths?: ReadonlySet<string> } = {}) {
+  function renderMany(overrides: { onSwitchTo?: (path: string) => void; changedCounts?: ReadonlyMap<string, number> } = {}) {
     render(
       <RepoTabs
         openRepos={many}
@@ -415,7 +433,7 @@ describe("RepoTabs tab list (#625)", () => {
         onClose={vi.fn()}
         onCloseGroup={vi.fn()}
         onAddTab={vi.fn()}
-        changedPaths={overrides.changedPaths}
+        changedCounts={overrides.changedCounts}
       />,
     );
   }
@@ -423,7 +441,7 @@ describe("RepoTabs tab list (#625)", () => {
   const optionPaths = () => screen.queryAllByRole("option").map((option) => option.getAttribute("title"));
 
   it("opens a list of every open tab, grouped by workspace, with the filter focused", () => {
-    renderMany({ changedPaths: new Set(["/other/tools"]) });
+    renderMany({ changedCounts: new Map([["/other/tools", 2]]) });
     const button = screen.getByRole("button", { name: "List open tabs" });
     expect(button).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(button);
