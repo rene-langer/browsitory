@@ -7,6 +7,7 @@ import { DiffViewOptionsProvider } from "../state/DiffViewOptionsProvider";
 import { useDiffViewOptions } from "../state/useDiffViewOptions";
 import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
 import { DiffView } from "./DiffView";
+import { chooseViewOption, viewOptionNames, viewOptionState } from "../test/viewMenu";
 
 const hunks: DiffHunk[] = [
   {
@@ -196,5 +197,48 @@ describe("DiffOptionsToolbar (#640)", () => {
     });
     expect(screen.getByRole("button", { name: "More context lines" })).toBeDisabled();
     cleanup();
+  });
+});
+
+describe("the View menu (#1007)", () => {
+  it("keeps the layout and the context lines in the row, and the rarely changed toggles in View, in words", () => {
+    render(
+      <DiffViewOptionsProvider>
+        <DiffOptionsToolbar />
+      </DiffViewOptionsProvider>,
+    );
+    for (const name of ["Unified view", "Split view", "Fewer context lines", "More context lines"]) {
+      expect(screen.getByRole("button", { name })).toBeInTheDocument();
+    }
+    for (const name of ["Wrap lines", "Show whole file", "Ignore whitespace", "Show whitespace", "Syntax highlighting"]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    }
+    expect(screen.getByRole("button", { name: "Diff view" })).toHaveTextContent("View");
+    expect(viewOptionNames()).toEqual(["Wrap lines", "Show whole file", "Ignore whitespace", "Show whitespace", "Show syntax highlighting"]);
+  });
+
+  it("marks Wrap lines on Auto as mixed (an A badge), and a choice turns it on", () => {
+    const onUpdate = vi.fn();
+    render(
+      <Settings onUpdate={onUpdate}>
+        <DiffOptionsToolbar />
+      </Settings>,
+    );
+    expect(viewOptionState("Wrap lines")).toBe("mixed");
+    chooseViewOption("Wrap lines");
+    expect(onUpdate).toHaveBeenLastCalledWith({ wordWrap: "On" });
+    expect(viewOptionState("Wrap lines")).toBe("true");
+  });
+
+  it("toggles syntax highlighting from the menu", () => {
+    const onUpdate = vi.fn();
+    render(
+      <Settings onUpdate={onUpdate}>
+        <DiffOptionsToolbar />
+      </Settings>,
+    );
+    expect(viewOptionState("Show syntax highlighting")).toBe("true");
+    chooseViewOption("Show syntax highlighting");
+    expect(onUpdate).toHaveBeenLastCalledWith({ syntaxHighlight: false });
   });
 });
