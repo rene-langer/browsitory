@@ -1368,7 +1368,8 @@ describe("DiffPane", () => {
         expect(await within(dock).findByRole("textbox", { name: "Commit message" })).toHaveValue("two\n");
         expect(within(dock).queryByText(/Step 1 of 1/)).toBeNull();
         expect(within(dock).queryByRole("button", { name: /Continue|Abort/ })).toBeNull();
-        expect(within(dock).queryByRole("button", { name: "Commit part" })).toBeNull();
+        // Commit part stays at any edit stop (#884): a part makes the edit a split.
+        expect(within(dock).getByRole("button", { name: "Commit part" })).toBeInTheDocument();
       });
 
       it("tells a split what to do, with Commit part", async () => {
