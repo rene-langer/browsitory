@@ -672,7 +672,7 @@ describe("DiffView word wrap", () => {
       </TestDiffSettings>,
     );
     expect(lines(container)).toHaveAttribute("data-wrap", "false");
-    expect(viewOptionState("Wrap lines")).toBe("mixed");
+    expect(viewOptionState("Wrap lines (automatic)")).toBe("mixed");
     fireEvent.click(screen.getByRole("button", { name: "Split view" }));
     expect(lines(container)).toHaveAttribute("data-wrap", "true");
   });

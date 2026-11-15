@@ -56,7 +56,7 @@ describe("ReadOnlyFileSection", () => {
       </DiffViewOptionsProvider>,
     );
     const props = { fetchDiff };
-    await screen.findByRole("button", { name: "Diff view" });
+    await screen.findByRole("button", { name: "View diff options" });
     chooseViewOption("Show whole file");
     await waitFor(() =>
       expect(props.fetchDiff).toHaveBeenLastCalledWith({

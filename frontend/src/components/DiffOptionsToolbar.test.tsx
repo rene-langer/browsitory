@@ -145,9 +145,9 @@ describe("DiffOptionsToolbar (#640)", () => {
         <DiffOptionsToolbar />
       </Settings>,
     );
-    expect(viewOptionState("Wrap lines")).toBe("mixed");
+    expect(viewOptionState("Wrap lines (automatic)")).toBe("mixed");
 
-    chooseViewOption("Wrap lines");
+    chooseViewOption("Wrap lines (automatic)");
     expect(onUpdate).toHaveBeenLastCalledWith({ wordWrap: "On" });
     expect(viewOptionState("Wrap lines")).toBe("true");
 
@@ -175,11 +175,11 @@ describe("DiffOptionsToolbar (#640)", () => {
         <DiffOptionsToolbar />
       </DiffViewOptionsProvider>,
     );
-    for (const name of ["Unified view", "Split view", "Diff view"]) {
+    for (const name of ["Unified view", "Split view", "View diff options"]) {
       expect(screen.getByRole("button", { name })).toHaveAttribute("title");
     }
-    fireEvent.click(screen.getByRole("button", { name: "Diff view" }));
-    for (const name of ["Wrap lines", "Show whole file", "Ignore whitespace", "Show whitespace", "Show syntax highlighting"]) {
+    fireEvent.click(screen.getByRole("button", { name: "View diff options" }));
+    for (const name of ["Wrap lines (automatic)", "Show whole file", "Ignore whitespace", "Show whitespace", "Show syntax highlighting"]) {
       expect(screen.getByRole("menuitemcheckbox", { name })).toHaveAttribute("title");
     }
   });
@@ -246,8 +246,8 @@ describe("the View menu (#1007)", () => {
     for (const name of ["Wrap lines", "Show whole file", "Ignore whitespace", "Show whitespace", "Syntax highlighting"]) {
       expect(screen.queryByRole("button", { name })).toBeNull();
     }
-    expect(screen.getByRole("button", { name: "Diff view" })).toHaveTextContent("View");
-    expect(viewOptionNames()).toEqual(["Wrap lines", "Show whole file", "Ignore whitespace", "Show whitespace", "Show syntax highlighting"]);
+    expect(screen.getByRole("button", { name: "View diff options" })).toHaveTextContent("View");
+    expect(viewOptionNames()).toEqual(["Wrap lines (automatic)", "Show whole file", "Ignore whitespace", "Show whitespace", "Show syntax highlighting"]);
   });
 
   it("marks Wrap lines on Auto as mixed (an A badge), and a choice turns it on", () => {
@@ -257,8 +257,8 @@ describe("the View menu (#1007)", () => {
         <DiffOptionsToolbar />
       </Settings>,
     );
-    expect(viewOptionState("Wrap lines")).toBe("mixed");
-    chooseViewOption("Wrap lines");
+    expect(viewOptionState("Wrap lines (automatic)")).toBe("mixed");
+    chooseViewOption("Wrap lines (automatic)");
     expect(onUpdate).toHaveBeenLastCalledWith({ wordWrap: "On" });
     expect(viewOptionState("Wrap lines")).toBe("true");
   });

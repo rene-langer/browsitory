@@ -65,7 +65,7 @@ describe("Browsitory diff word wrap and whole file", () => {
     expect(unwrapped.scrolls).toBe(true);
     expect(unwrapped.lineNumber).toBe("5");
 
-    await chooseViewOption("Diff view", "Wrap lines");
+    await chooseViewOption("View diff options", "Wrap lines");
     await browser.waitUntil(async () => (await state()).wrap === "true", { timeout: 5000 });
     const wrapped = await state();
     expect(wrapped.whiteSpace).toBe("pre-wrap");
@@ -144,7 +144,7 @@ describe("Browsitory diff word wrap and whole file", () => {
     const before = await state();
     expect(before.markers).toBe(0);
 
-    await chooseViewOption("Diff view", "Show whitespace");
+    await chooseViewOption("View diff options", "Show whitespace");
     await browser.waitUntil(async () => (await state()).markers > 0, { timeoutMsg: "no whitespace markers" });
     const shown = await state();
     expect(shown.marker).toBe('"·"');
@@ -155,13 +155,13 @@ describe("Browsitory diff word wrap and whole file", () => {
     });
 
     // Off again, for the specs after this one.
-    await chooseViewOption("Diff view", "Show whitespace");
+    await chooseViewOption("View diff options", "Show whitespace");
     await browser.waitUntil(async () => (await state()).markers === 0, { timeoutMsg: "markers stayed" });
     await browser.waitUntil(() => /show_whitespace = false/.test(fs.readFileSync(CONFIG_FILE, "utf8")));
   });
 
   it("shows the whole file and stages one selected change of it", async () => {
-    await chooseViewOption("Diff view", "Show whole file");
+    await chooseViewOption("View diff options", "Show whole file");
     // l20 is 15 lines from either change: only the whole file shows it.
     await waitUntilInPage(".diff-line-context", " l20", { contains: true });
     // By class: other spans (commit summaries, line labels) can start with "Lines 3" too.
@@ -183,8 +183,8 @@ describe("Browsitory diff word wrap and whole file", () => {
     expect(git("show", `:${FILE}`)).toBe(lines({ 45: "changed 45" }));
 
     // "Show whole file" is the pane's and persists (#640): off again for the specs after this one.
-    await chooseViewOption("Diff view", "Show whole file");
-    await clickInPage('button[aria-label="Diff view"]');
+    await chooseViewOption("View diff options", "Show whole file");
+    await clickInPage('button[aria-label="View diff options"]');
     await waitUntilInPage('[role="menuitemcheckbox"][aria-checked="false"]', "Show whole file");
     await browser.keys(["Escape"]);
   });

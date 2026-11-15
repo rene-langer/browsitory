@@ -1,21 +1,23 @@
 import { fireEvent, screen } from "@testing-library/react";
 
 /**
- * The View menus (#1007): the diff toolbar's "Diff view" and the graph search bar's "Graph view"
- * hold the rarely changed toggles as checkable items.
+ * The View menus (#1007): the diff toolbar's "View diff options" and the graph search bar's
+ * "View graph options" hold the rarely changed toggles as checkable items. A toggle keeps its
+ * menu open, so each helper closes it again.
  */
-export type ViewMenu = "Diff view" | "Graph view";
+export type ViewMenu = "View diff options" | "View graph options";
 
 const toggleMenu = (menu: ViewMenu) => fireEvent.click(screen.getByRole("button", { name: menu }));
 
-/** Opens `menu` and picks the toggle `name`. */
-export function chooseViewOption(name: string, menu: ViewMenu = "Diff view"): void {
+/** Opens `menu`, picks the toggle `name`, and closes the menu again. */
+export function chooseViewOption(name: string, menu: ViewMenu = "View diff options"): void {
   toggleMenu(menu);
   fireEvent.click(screen.getByRole("menuitemcheckbox", { name }));
+  if (screen.queryByRole("menu") !== null) toggleMenu(menu);
 }
 
 /** The toggle's `aria-checked` ("true", "false" or "mixed"), read with the menu opened and closed again. */
-export function viewOptionState(name: string, menu: ViewMenu = "Diff view"): string | null {
+export function viewOptionState(name: string, menu: ViewMenu = "View diff options"): string | null {
   toggleMenu(menu);
   const state = screen.getByRole("menuitemcheckbox", { name }).getAttribute("aria-checked");
   toggleMenu(menu);
@@ -23,7 +25,7 @@ export function viewOptionState(name: string, menu: ViewMenu = "Diff view"): str
 }
 
 /** The menu's toggles, in order. */
-export function viewOptionNames(menu: ViewMenu = "Diff view"): string[] {
+export function viewOptionNames(menu: ViewMenu = "View diff options"): string[] {
   toggleMenu(menu);
   const names = screen.queryAllByRole("menuitemcheckbox").map(visibleName);
   toggleMenu(menu);
