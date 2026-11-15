@@ -17,7 +17,7 @@ import type { TransferErrorKind, TransferOperation, TransferProgress, UpstreamIn
 import type { AppState } from "../state/useAppState";
 import { credentialRemediation } from "./errorMessages";
 import { hookFailedMessage, type PushRequest } from "./hookFailure";
-import type { TransferSubject } from "./transferCopy";
+import { tagsLabel, type TransferSubject } from "./transferCopy";
 
 /** One remote that failed during a Fetch all, as its `RemoteFailed` event reported it. */
 export interface FailedRemote {
@@ -192,7 +192,7 @@ function failurePatch(
   const error =
     progress.operation === "FetchAll" && progress.errorKind !== "Cancelled" && failedRemotes.length > 0
       ? fetchAllFailureMessage(failedRemotes, false)
-      : transferFailureMessage(progress.operation, progress.errorKind, upstreamLabel);
+      : transferFailureMessage(progress.operation, progress.errorKind, upstreamLabel, request.subject);
   const offerForcePush =
     progress.operation === "PushBranch" &&
     progress.errorKind === "NonFastForward" &&
@@ -225,16 +225,55 @@ const FAMILY: Record<TransferOperation, OperationFamily> = {
   Clone: "other",
 };
 
-/** The message for an error kind with no more specific text. */
-const GENERIC: Record<OperationFamily, string> = {
-  fetch: "Fetch failed",
-  pull: "Pull failed",
-  push: "Push failed",
-  forcePush: "Push failed",
-  deleteRemoteBranch: "Deleting the remote branch failed",
-  deleteRemoteTag: "Deleting the remote tag failed",
-  other: "Transfer failed",
+/**
+ * What failed, for an error kind with no more specific text (#997): the operation, and what it
+ * worked on when the transfer's subject is known ("Couldn't fetch from origin").
+ */
+function whatFailed(family: OperationFamily, subject: TransferSubject | null): string {
+  switch (family) {
+    case "fetch":
+      if (subject?.kind === "fetch") return `Couldn't fetch from ${subject.remoteName}`;
+      return subject?.kind === "fetchAll" ? "Couldn't fetch from the remotes" : "Couldn't fetch";
+    case "pull":
+      return subject?.kind === "pull" ? `Couldn't pull from ${subject.target}` : "Couldn't pull";
+    case "push":
+    case "forcePush": {
+      const verb = family === "forcePush" ? "force push" : "push";
+      if (subject?.kind === "push") return `Couldn't ${verb} ${subject.localBranch} to ${subject.target}`;
+      if (subject?.kind === "pushTags") return `Couldn't push ${tagsLabel(subject.names)} to ${subject.remoteName}`;
+      return `Couldn't ${verb}`;
+    }
+    case "deleteRemoteBranch":
+      return subject?.kind === "deleteRemoteBranch"
+        ? `Couldn't delete ${subject.remoteName}/${subject.branchName}`
+        : "Couldn't delete the remote branch";
+    case "deleteRemoteTag":
+      return subject?.kind === "deleteRemoteTag"
+        ? `Couldn't delete tag ${subject.tagName} from ${subject.remoteName}`
+        : "Couldn't delete the remote tag";
+    case "other":
+      return "Couldn't finish the transfer";
+  }
+}
+
+/**
+ * The next step after a failure with no more specific text. The cause is in the operation log
+ * (the banner's Details): the transfer event carries only the error kind, never the remote's
+ * text, which may hold credentials.
+ */
+const NEXT_STEP: Record<OperationFamily, string> = {
+  fetch: "Check the remote's URL and your connection, then try again.",
+  pull: "Check the remote and your connection, then pull again.",
+  push: "Check the remote and your connection, then try again.",
+  forcePush: "Check the remote and your connection, then try again.",
+  deleteRemoteBranch: "Check the remote and your connection, then try again.",
+  deleteRemoteTag: "Check the remote and your connection, then try again.",
+  other: "Try again.",
 };
+
+function generic(family: OperationFamily, subject: TransferSubject | null): string {
+  return `${whatFailed(family, subject)}. ${NEXT_STEP[family]}`;
+}
 
 // A cancellation reaches the UI as a `Failed` terminal event (the transfer really did stop
 // short), but the user pressed Cancel themselves, so it must not read as "Fetch failed".
@@ -271,16 +310,17 @@ const OVERRIDES: Partial<Record<OperationFamily, Partial<Record<TransferErrorKin
   deleteRemoteTag: { RejectedRemoteRef: "The remote refused to delete the tag." },
 };
 
-/** What a single-remote transfer's `Failed` event shows. */
+/** What a single-remote transfer's `Failed` event shows; `subject` is what it worked on. */
 export function transferFailureMessage(
   operation: TransferOperation,
   errorKind: TransferErrorKind | null,
   upstreamLabel: string,
+  subject: TransferSubject | null = null,
 ): string {
   const family = FAMILY[operation];
-  if (errorKind === null) return GENERIC[family];
+  if (errorKind === null) return generic(family, subject);
   if (errorKind === "Cancelled") return CANCELLED[family];
-  return BY_KIND[errorKind]?.(upstreamLabel) ?? OVERRIDES[family]?.[errorKind] ?? GENERIC[family];
+  return BY_KIND[errorKind]?.(upstreamLabel) ?? OVERRIDES[family]?.[errorKind] ?? generic(family, subject);
 }
 
 // The same fixed hints `transferFailureMessage` gives a single-remote transfer.

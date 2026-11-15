@@ -40,6 +40,17 @@ pub async fn get_switch_conflicts(
         .read(move |w| w.switch_conflicts(name))
         .await
 }
+/// How many commits of `name` no other branch has: Delete branch asks first when some (#996).
+#[tauri::command]
+pub async fn count_commits_only_on_branch(
+    repo_path: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<usize, ErrorDto> {
+    repo_worker(&state, &repo_path)?
+        .read(move |w| w.count_commits_only_on_branch(name))
+        .await
+}
 /// Stash and switch (#653); `post-checkout` is reported as for `switch_branch`.
 #[tauri::command]
 pub async fn stash_and_switch(

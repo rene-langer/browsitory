@@ -1,7 +1,7 @@
 # Troubleshooting
 
 An error stays at the top of the window until you dismiss it or start another change (stage,
-commit, checkout, …); refreshing doesn't clear it. **Show details** opens the
+commit, checkout, …); refreshing doesn't clear it. **Details** opens the
 [operation log](operation-log.md) on the failed operation: what it was given, its full error and
 the output of the hooks it ran.
 

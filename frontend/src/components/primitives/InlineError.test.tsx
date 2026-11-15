@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { InlineError } from "./InlineError";
+import styles from "./InlineError.module.css";
 
 describe("InlineError", () => {
   it("renders the message as an alert", () => {
@@ -50,6 +51,61 @@ describe("InlineError", () => {
   it("offers no Copy details by default", () => {
     render(<InlineError message="Boom" onDismiss={() => {}} />);
     expect(screen.queryByRole("button", { name: "Copy details" })).toBeNull();
+  });
+
+  it("hides libgit2's class and code from the message, but copies them (#997)", async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const raw = "failed to open repository: reference 'refs/heads/main' not found; class=Reference (4); code=UnbornBranch (-9)";
+    try {
+      render(<InlineError message={raw} copyDetails onDismiss={() => {}} />);
+      const alert = screen.getByRole("alert");
+      expect(alert).toHaveTextContent("failed to open repository: reference 'refs/heads/main' not found");
+      expect(alert).not.toHaveTextContent("class=");
+      expect(alert).not.toHaveTextContent("code=");
+      fireEvent.click(screen.getByRole("button", { name: "Copy details" }));
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith(raw));
+    } finally {
+      Reflect.deleteProperty(navigator, "clipboard");
+    }
+  });
+
+  it("puts its actions, then Details, then dismiss in one row; the first can be primary (#984)", () => {
+    const pull = vi.fn();
+    const forcePush = vi.fn();
+    const onDetails = vi.fn();
+    render(
+      <InlineError
+        message="Push was rejected."
+        actions={[
+          { label: "Pull", primary: true, onClick: pull },
+          { label: "Force push…", onClick: forcePush },
+        ]}
+        onDetails={onDetails}
+        onDismiss={() => {}}
+      />,
+    );
+    const alert = screen.getByRole("alert");
+    const row = alert.firstElementChild as HTMLElement;
+    expect([...row.querySelectorAll("button")].map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual([
+      "Pull",
+      "Force push…",
+      "Details",
+      "Dismiss error",
+    ]);
+    expect(screen.getByRole("button", { name: "Pull" })).toHaveClass(styles.primary!);
+    expect(screen.getByRole("button", { name: "Force push…" })).not.toHaveClass(styles.primary!);
+    fireEvent.click(screen.getByRole("button", { name: "Pull" }));
+    fireEvent.click(screen.getByRole("button", { name: "Force push…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    expect(pull).toHaveBeenCalledOnce();
+    expect(forcePush).toHaveBeenCalledOnce();
+    expect(onDetails).toHaveBeenCalledOnce();
+  });
+
+  it("offers no Details by default", () => {
+    render(<InlineError message="Boom" onDismiss={() => {}} />);
+    expect(screen.queryByRole("button", { name: "Details" })).toBeNull();
   });
 
   it("lists the earlier errors it replaced, collapsed (#663)", () => {

@@ -91,6 +91,9 @@ pub struct HeadInfo {
     /// A `git rebase` or `git am` started in a terminal and not finished (`.git/rebase-merge` or
     /// `.git/rebase-apply`, #263). Browsitory's own rebase never writes those folders.
     pub terminal_rebase: Option<TerminalRebase>,
+    /// The branch HEAD names while it has no commit yet (a new repository, #983): its first
+    /// commit creates it. `None` once HEAD points at a commit, and for a detached HEAD.
+    pub unborn_branch: Option<String>,
 }
 
 /// Which command a terminal rebase folder belongs to.
@@ -771,6 +774,7 @@ pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
                 bisect: bisect_info(repo),
                 terminal_sequence: crate::pick::terminal_sequence(repo),
                 terminal_rebase: terminal_rebase(repo),
+                unborn_branch: unborn_branch(repo),
             });
         }
         Err(error) => return Err(error.into()),
@@ -792,7 +796,15 @@ pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
         bisect: bisect_info(repo),
         terminal_sequence: crate::pick::terminal_sequence(repo),
         terminal_rebase: terminal_rebase(repo),
+        unborn_branch: None,
     })
+}
+
+/// The short name of the branch an unborn HEAD names (`refs/heads/main` → `main`).
+fn unborn_branch(repo: &git2::Repository) -> Option<String> {
+    let head = repo.find_reference("HEAD").ok()?;
+    let target = head.symbolic_target().ok()??;
+    target.strip_prefix("refs/heads/").map(str::to_string)
 }
 
 fn upstream_contains(

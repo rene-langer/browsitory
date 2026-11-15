@@ -457,7 +457,7 @@ describe("useAppState", () => {
     await act(() => result.current.fetchRemote("origin"));
 
     expect(result.current.state.transfer).toBeNull();
-    expect(result.current.state.error).toBe("Fetch failed");
+    expect(result.current.state.error).toBe("Couldn't fetch from origin. Check the remote's URL and your connection, then try again.");
     expect(result.current.state.pending).toBe(false);
 
     await act(() => result.current.fetchRemote("origin"));

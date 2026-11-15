@@ -14,7 +14,7 @@ const HOOK_OUTPUT = "e2e-oplog: push refused by pre-push";
 
 const git = gitIn(E2E_REPO_PATH);
 
-// The operation log (#887-#891): a push fails on its pre-push hook; the error's "Show details"
+// The operation log (#887-#891): a push fails on its pre-push hook; the error's "Details"
 // opens the log on that push, with the hook's output.
 describe("Browsitory operation log", () => {
   let hookPath = "";
@@ -43,7 +43,7 @@ describe("Browsitory operation log", () => {
     fs.rmSync(BARE_REMOTE_PATH, { recursive: true, force: true });
   });
 
-  it("shows a failed push and its hook's output from the error's Show details", async () => {
+  it("shows a failed push and its hook's output from the error's Details", async () => {
     await expandSidebarSection("Branches");
     const remoteHeader = await $(sidebarRemoteFolder(REMOTE_NAME));
     await remoteHeader.waitForExist({ timeout: SLOW_UI_TIMEOUT });
@@ -59,19 +59,20 @@ describe("Browsitory operation log", () => {
         browser.execute(
           (dialogSelector: string) =>
             document.querySelector(dialogSelector) !== null ||
-            Array.from(document.querySelectorAll("[role='alert']")).some((el) =>
-              (el.textContent ?? "").includes("The pre-push hook failed."),
-            ),
+            document.querySelector("dialog[aria-label='pre-push hook failed']") !== null,
           pushDialog,
         ),
       { timeout: SLOW_UI_TIMEOUT, timeoutMsg: "expected the push to ask where to, or to fail" },
     );
     if (await (await $(pushDialog)).isExisting()) await clickInPage(`${pushDialog} button`, "Push");
 
+    // The hook failure dialog shows the output; the error banner waits until it is closed (#996).
+    await $("dialog[aria-label='pre-push hook failed']").waitForExist({ timeout: SLOW_UI_TIMEOUT });
+    await clickInPage("dialog[aria-label='pre-push hook failed'] button", "Close");
     await waitUntilInPage("[role='alert']", "The pre-push hook failed.", { contains: true, timeout: SLOW_UI_TIMEOUT });
-    await clickInPage("button", "Show details");
+    await clickInPage("[role='alert'] button", "Details");
 
-    await waitUntilInPage("dialog[aria-label='Operation log'] section[aria-label='Operation details'] h3", `Push ${REMOTE_NAME}`, {
+    await waitUntilInPage("dialog[aria-label='Operation log'] section[aria-label='Operation details'] h3", `Push to ${REMOTE_NAME}`, {
       timeout: SLOW_UI_TIMEOUT,
     });
     await waitUntilInPage("pre[aria-label='Output of pre-push']", HOOK_OUTPUT, { contains: true });

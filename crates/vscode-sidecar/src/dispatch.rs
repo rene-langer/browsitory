@@ -255,6 +255,7 @@ methods!(|params, repos, stdout| {
     "create_branch" => create_branch(CreateBranchParams, repos),
     "switch_branch" => switch_branch(SwitchBranchParams, repos, stdout),
     "get_switch_conflicts" => get_switch_conflicts(SwitchBranchParams, repos),
+    "count_commits_only_on_branch" => count_commits_only_on_branch(SwitchBranchParams, repos),
     "stash_and_switch" => stash_and_switch(StashAndSwitchParams, repos, stdout),
     "delete_branch" => delete_branch(DeleteBranchParams, repos),
     "rename_branch" => rename_branch(RenameBranchParams, repos),

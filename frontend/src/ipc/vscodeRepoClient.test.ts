@@ -529,6 +529,18 @@ describe("vscodeRepoClient", () => {
     await expect(promise).resolves.toEqual(details);
   });
 
+  it("wires countCommitsOnlyOnBranch (#996)", async () => {
+    const count = vscodeRepoClient.countCommitsOnlyOnBranch("/repo", "feature");
+    expect(postMessage).toHaveBeenLastCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "count_commits_only_on_branch",
+      params: { repoPath: "/repo", name: "feature" },
+    });
+    respond(1, 2);
+    await expect(count).resolves.toBe(2);
+  });
+
   it("wires the compare methods", async () => {
     const opts = { ignoreWhitespace: true, contextLines: 5, algorithm: "Patience" as const };
     const files = vscodeRepoClient.getRangeFiles("/repo", "a", "b");

@@ -20,6 +20,8 @@ export function useOutcomeToasts(
   undoToastAction: () => ToastAction,
   /** Pulls the current branch: offered by a fetch that left it behind its upstream. */
   onPull?: () => void,
+  /** Pushes the current branch: offered by a fetch that left it only ahead (#999). */
+  onPush?: () => void,
 ) {
   const { pullOutcome, transferOutcome, upstream } = state;
   // The upstream as the outcome's refresh left it, read when the outcome arrives (not a trigger).
@@ -40,17 +42,25 @@ export function useOutcomeToasts(
   // A fetch or push that completed (#661). Neither is an undo step, so neither offers Undo; a
   // fetch that left the branch behind offers Pull instead.
   const latestPull = useRef(onPull);
+  const latestPush = useRef(onPush);
   useEffect(() => {
     latestPull.current = onPull;
+    latestPush.current = onPush;
   });
   useEffect(() => {
     if (transferOutcome === null) return;
     const toast = transferToast(transferOutcome.subject, latestUpstream.current);
     if (toast === null) return;
     const pull = latestPull.current;
+    const push = latestPush.current;
     pushToast(toast.message, {
       tone: toast.tone,
-      action: toast.offerPull && pull !== undefined ? { label: "Pull", run: pull } : undefined,
+      action:
+        toast.offerPull && pull !== undefined
+          ? { label: "Pull", run: pull }
+          : toast.offerPush === true && push !== undefined
+            ? { label: "Push", run: push }
+            : undefined,
     });
   }, [transferOutcome, pushToast]);
   const mergeOutcome = state.mergeOutcome;
