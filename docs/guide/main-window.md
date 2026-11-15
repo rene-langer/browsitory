@@ -124,7 +124,9 @@ the arrow keys. The groups are:
 - **Updates**, in the desktop app (see below).
 
 Type in **Filter settings** above the list to keep only the groups with a setting whose name
-contains the text, for example "font"; Escape clears the filter. Preferences opens on the group
+contains the text, for example "font", with those settings highlighted; Escape clears the
+filter. Every setting is saved as soon as you change it: a choice at once, a text field when
+you leave it or press Enter. Preferences opens on the group
 you looked at last, and the **Diff preferences** button next to an untracked file's **Show
 contents** opens it on **Diff**.
 

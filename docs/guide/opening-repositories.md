@@ -19,7 +19,9 @@ A repository whose folder is gone (moved, deleted, or on a drive that isn't conn
 show only the recent repositories and workspaces whose name or path contains the text.
 
 Browsitory reopens the tabs you had open last time. To open another repository next to them,
-click **+** at the end of the tab bar. In the desktop app you can also drag a repository's folder
+click **+** at the end of the tab bar: the picker opens as the **Open repository** dialog (**×**
+or Escape closes it). A repository that is already open in a tab is marked **Open in a tab**,
+and clicking it switches to that tab. In the desktop app you can also drag a repository's folder
 from your file manager onto the window.
 
 ## Cloning and creating repositories
