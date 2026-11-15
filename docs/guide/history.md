@@ -16,7 +16,7 @@ author's, as `2026-09-08 21:00` in your time zone (the graph's date tooltips use
 with "2 days ago" after it. When someone else committed it (a patch applied, a cherry-pick),
 **Committer** shows them and when they committed; when the author committed it later (a rebase,
 an amend), **Committed** shows that time. **Contained in** lists the local branches, remote
-branches (dashed) and tags (`#`) whose tip is the commit or comes after it, the first eight and
+branches (dashed) and tags (with a tag icon) whose tip is the commit or comes after it, the first eight and
 the rest under **Show N more**, or "No branch or tag". In a repository with very many branches
 and tags the check stops after a moment and says "Not every branch and tag was checked." Web links (`http://` and `https://`) in the message open in your browser
 when you click them or press Enter on them; the link's tooltip shows where it goes. When the
