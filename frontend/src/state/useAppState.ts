@@ -915,7 +915,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
 
   const undoActions = useUndoActions(client, repoPath, runMutationWithOutcome, setState, afterUndoStep);
 
-  const forge = useForgeActions(client, repoPath, runMutation, runMutationWithOutcome, setState, forgeError);
+  const forge = useForgeActions(client, repoPath, runMutation, mutationRunner.runMutationWithMessage, setState, forgeError);
   const dismissError = useCallback(() => {
     setState((prev) => ({
       ...prev,

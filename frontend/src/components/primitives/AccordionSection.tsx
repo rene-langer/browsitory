@@ -84,7 +84,8 @@ export function AccordionSection({
           <button
             ref={headerRef}
             type="button"
-            className={styles.header}
+            // A nested section's title is a name, kept as written (#1012).
+            className={headingLevel === 3 ? `${styles.header} ${styles.subHeader}` : styles.header}
             aria-expanded={open}
             aria-label={title}
             tabIndex={headerTabIndex}

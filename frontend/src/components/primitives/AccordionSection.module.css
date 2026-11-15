@@ -65,6 +65,14 @@
   cursor: pointer;
 }
 
+/* A nested section (headingLevel 3, e.g. a pull request card) is titled with a name such as
+   "GitHub: acme/widget (origin)": not uppercased (#1012). */
+.header.subHeader {
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: var(--text-sm);
+}
+
 /* Not --color-bg-subtle: that is exactly Sidebar's own background, so the
    hover would be invisible for a section nested inside a Sidebar. */
 .header:hover:not(:disabled) {
