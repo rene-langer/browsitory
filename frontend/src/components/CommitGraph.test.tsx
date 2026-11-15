@@ -123,6 +123,27 @@ describe("CommitGraph", () => {
     expect(screen.getByText("Uncommitted changes (2)")).toBeInTheDocument();
   });
 
+  // #985: an isolated branch's graph keeps the row, but says whose changes they are.
+  it("names the current branch on the Uncommitted changes row while the graph doesn't show it", () => {
+    render(
+      <CommitGraph
+        {...historyProps}
+        currentBranch="main"
+        currentBranchShown={false}
+        status={status}
+        commits={commits}
+        selectedRow="uncommitted"
+        operationsBlocked={false}
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
+      />,
+    );
+
+    const label = screen.getByText("Uncommitted changes on main (2)");
+    expect(label).toHaveAttribute("title", "Changes in your working tree, on main. The graph doesn't show main.");
+  });
+
   it("renders each commit's short id and summary", () => {
     render(
       <CommitGraph

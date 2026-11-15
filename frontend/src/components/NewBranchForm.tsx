@@ -42,6 +42,8 @@ export function NewBranchForm({
   const { containerRef: escapeRef, onKeyDown: onEscapeKeyDown, close: closeAndRefocus } = useEscapeToClose<HTMLFormElement>({
     open: draft !== null,
     initialFocus: nameRef,
+    // The whole form, buttons included, even in a scrolled Branches section (#1010).
+    reveal: true,
     onClose: () => {
       setCreateError(null);
       onClose();

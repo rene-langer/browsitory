@@ -89,7 +89,10 @@ sidebar (**Go to Tags**, **New branch…** and the like) open the drawer by them
 **Sidebar sections.** Click a section's header to open or close it. The buttons at the top of
 the sidebar open every section (**Expand all sections**) or close them all (**Collapse all
 sections**). The gear button there lists every section except Branches with a switch, so you can
-hide the ones a project doesn't use.
+hide the ones a project doesn't use. An open section keeps room for what it holds, up to about
+fifteen lines; a longer list scrolls inside its section, with the cut edge faded, and when the
+open sections don't fit at all, the sidebar scrolls. A form that opens in a section, such as **New
+branch…** or **Add remote…**, scrolls into view with its buttons.
 
 **Header.** The top row holds the repository tabs (see [Multiple repositories](tabs.md)) and, on
 the right:

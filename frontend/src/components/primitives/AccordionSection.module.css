@@ -1,4 +1,8 @@
 .section {
+  /* How tall an open section's content may hold its room before it scrolls (#1010). */
+  --section-cap: 15rem;
+  --section-header: 0px;
+  --section-content: 0px;
   border-top: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
@@ -6,9 +10,13 @@
   min-height: 0;
 }
 
+/* An open section takes its content's height while the sidebar has room, and gives way down to
+   its header and its content up to the cap (measured by AccordionSection, #1010): open
+   neighbours never squeeze each other to a sliver. When even that doesn't fit, the sidebar
+   scrolls. */
 .section[data-open="true"] {
-  flex: 1 1 0%;
-  min-height: 12rem;
+  flex: 0 1 auto;
+  min-height: calc(var(--section-header) + min(var(--section-content), var(--section-cap)));
 }
 
 .headerRow {
@@ -65,6 +73,14 @@
   cursor: pointer;
 }
 
+/* A nested section (headingLevel 3, e.g. a pull request card) is titled with a name such as
+   "GitHub: acme/widget (origin)": not uppercased (#1012). */
+.header.subHeader {
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: var(--text-sm);
+}
+
 /* Not --color-bg-subtle: that is exactly Sidebar's own background, so the
    hover would be invisible for a section nested inside a Sidebar. */
 .header:hover:not(:disabled) {
@@ -98,11 +114,34 @@
 }
 
 .body {
-  padding: 0 var(--space-3) var(--space-3);
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   animation: accordion-body-in 120ms ease;
+}
+
+/* The padding is the content's, so its measured height includes it. */
+.content {
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+/* The edge a scrolling body cuts fades out (#1010): a strip that sticks to the bottom of the
+   visible part, drawn only while there is more below. */
+.body::after {
+  content: "";
+  display: block;
+  position: sticky;
+  bottom: 0;
+  height: 1.5rem;
+  margin-top: -1.5rem;
+  background: linear-gradient(to bottom, transparent, var(--color-bg-subtle));
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.body[data-fade="true"]::after {
+  opacity: 1;
 }
 
 /* Opacity only, never `transform`: a transformed `.body` (even for one animation frame) becomes
@@ -124,5 +163,9 @@
 
   .body {
     animation: none;
+  }
+
+  .body::after {
+    transition: none;
   }
 }

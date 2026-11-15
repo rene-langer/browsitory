@@ -6,33 +6,81 @@
   list-style: none;
 }
 
-.form {
+.list li {
   display: flex;
-  flex-wrap: wrap;
-  align-items: end;
+  align-items: center;
   gap: var(--space-2);
-  margin: var(--space-2) 0;
-}
-
-/* Stacks the caption above its control, matching every other form in the panel stack. */
-.label {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: var(--text-sm);
 }
 
 .rowIcon {
-  vertical-align: text-bottom;
-  margin-right: var(--space-1);
+  flex: none;
   color: var(--color-text-muted);
 }
 
-.list li {
+/* Two lines (#1011): the worktree and its branch, then its path, cut short with the full path in
+   the tooltip. */
+.text {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.name,
+.path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.head {
+  margin-left: var(--space-2);
+  color: var(--color-text-muted);
+}
+
+.badge {
+  margin-left: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.path {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+/* The header's "+" (New worktree…), like the Branches section's. */
+.addButton {
+  display: inline-flex;
   align-items: center;
-  gap: var(--space-1) var(--space-2);
+  justify-content: center;
+  padding: 2px;
+}
+
+/* The row's "…" menu button, shown on hover, keyboard focus in the row or while its menu is
+   open, like the Stashes rows; `opacity` (not `display`) keeps it in the tab order. */
+.iconButton {
+  opacity: 0;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.iconButton:hover:not(:disabled),
+.iconButton[aria-expanded="true"] {
+  background: var(--color-control);
+  color: var(--color-text);
+}
+
+li:hover > .iconButton,
+li:focus-within > .iconButton,
+.iconButton[aria-expanded="true"] {
+  opacity: 1;
 }
 
 .empty {

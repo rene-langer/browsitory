@@ -50,3 +50,11 @@ li:focus-within > .iconButton,
   color: var(--color-text-muted);
   font-size: var(--text-sm);
 }
+
+/* The checkbox beside its caption, aligned with the rows below (#1026). */
+.recursive {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-1) 0 var(--space-2);
+}

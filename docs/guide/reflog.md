@@ -4,7 +4,8 @@
 branch to an earlier entry — useful for recovering from a bad reset or
 rebase. Restore moves only the branch: your files and staged changes stay as they are.
 
-Pick a reference (HEAD or a local branch) in **Reflog reference**. Each entry takes two lines:
+The reflog of HEAD shows first; pick another reference (a local branch) in **Reflog
+reference**. Each entry takes two lines:
 its message, then the short old and new commit IDs, who made the change and when ("1a2b3c4 →
 5d6e7f8 · Ada Lovelace · 2024-03-09"). Hover an entry for the full IDs, the email, the exact
 time and the commit's summary. **Restore** at the end of the row moves the reference back to

@@ -44,7 +44,13 @@ export function AddRemoteForm({
   const reasonId = useId();
   const nameRef = useRef<HTMLInputElement>(null);
   // Escape anywhere in the form closes it, focus back where it came from (#1001).
-  const { containerRef: escapeRef, onKeyDown: onEscapeKeyDown, close: closeAndRefocus } = useEscapeToClose<HTMLFormElement>({ open, onClose, initialFocus: nameRef });
+  const { containerRef: escapeRef, onKeyDown: onEscapeKeyDown, close: closeAndRefocus } = useEscapeToClose<HTMLFormElement>({
+    open,
+    onClose,
+    initialFocus: nameRef,
+    // Its buttons too, not only the name field (#1010).
+    reveal: true,
+  });
 
   if (!open) return null;
   const busyReason = operationDisabled ? operationDisabledReason : null;

@@ -1598,7 +1598,7 @@ describe("App", () => {
     expect(screen.queryByRole("status", { name: "Loading branches…" })).toBeNull();
   });
 
-  it("renames a branch inline with the name trimmed, and an unchanged name never reaches the client (#418)", async () => {
+  it("renames a branch in its dialog with the name trimmed, and an unchanged name never reaches the client (#418, #1002)", async () => {
     localStorage.clear();
     const renameBranch = vi.fn(async () => {});
     const client = fakeClient({
@@ -1617,17 +1617,54 @@ describe("App", () => {
     render(<App client={client} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Actions for topic" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
-    fireEvent.keyDown(screen.getByRole("textbox", { name: "Rename topic" }), { key: "Enter" });
-    expect(screen.queryByRole("textbox", { name: "Rename topic" })).toBeNull();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename…" }));
+    fireEvent.submit(screen.getByRole("textbox", { name: "New name", hidden: true }).closest("form")!);
+    expect(screen.queryByRole("dialog", { name: "Rename branch", hidden: true })).toBeNull();
     expect(renameBranch).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Actions for topic" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
-    const input = screen.getByRole("textbox", { name: "Rename topic" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename…" }));
+    const input = screen.getByRole("textbox", { name: "New name", hidden: true });
     fireEvent.change(input, { target: { value: " topic/old " } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.submit(input.closest("form")!);
     await waitFor(() => expect(renameBranch).toHaveBeenCalledWith("/repos/a", "topic", "topic/old"));
+    localStorage.clear();
+  });
+
+  it("says above the graph that it shows one branch, labels HEAD's changes, and Show all branches undoes it (#985)", async () => {
+    localStorage.clear();
+    let local: string[] | null = ["topic"];
+    const clearGraphBranchSelection = vi.fn(async () => {
+      local = null;
+    });
+    const clearGraphRemoteBranchSelection = vi.fn(async () => {});
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }],
+      getCommitGraph: async () => graphPage([]),
+      listBranches: async () => [
+        { name: "main", isCurrent: true },
+        { name: "topic", isCurrent: false },
+      ],
+      listStashes: async () => [],
+      getGraphBranchSelection: async () => local,
+      clearGraphBranchSelection,
+      clearGraphRemoteBranchSelection,
+    });
+    render(<App client={client} />);
+
+    const strip = await screen.findByRole("status", { name: "Graph filter" });
+    expect(strip).toHaveTextContent("Showing topic only");
+    const history = screen.getByRole("listbox", { name: "Commit history" });
+    expect(within(history).getByText("Uncommitted changes on main (1)")).toBeInTheDocument();
+
+    fireEvent.click(within(strip.parentElement!).getByRole("button", { name: "Show all branches" }));
+    await waitFor(() => expect(clearGraphBranchSelection).toHaveBeenCalledWith("/repos/a"));
+    expect(clearGraphRemoteBranchSelection).toHaveBeenCalledWith("/repos/a");
+    await waitFor(() => expect(screen.queryByRole("status", { name: "Graph filter" })).toBeNull());
+    expect(within(screen.getByRole("listbox", { name: "Commit history" })).getByText("Uncommitted changes (1)")).toBeInTheDocument();
     localStorage.clear();
   });
 
@@ -1699,11 +1736,12 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /^Worktrees/ }));
     await screen.findByText("/repos/a-feature");
-    const form = screen.getByRole("form", { name: "Create worktree" });
+    fireEvent.click(screen.getByRole("button", { name: "New worktree…" }));
+    const form = screen.getByRole("dialog", { name: "New worktree", hidden: true });
     fireEvent.change(within(form).getByLabelText("Worktree name"), { target: { value: "feature" } });
     fireEvent.change(within(form).getByLabelText("Worktree path"), { target: { value: "/repos/a-other" } });
     fireEvent.change(within(form).getByLabelText("Branch"), { target: { value: "other" } });
-    fireEvent.click(within(form).getByRole("button", { name: "Create worktree" }));
+    fireEvent.click(within(form).getByRole("button", { name: "Create worktree", hidden: true }));
 
     expect(await within(form).findByText('A worktree named "feature" already exists.')).toBeInTheDocument();
     expect(screen.queryByText("/repos/a-other")).toBeNull();

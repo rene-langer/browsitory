@@ -1,7 +1,8 @@
 # Branches and remotes
 
 **Branches** is a single tree: a **Local** folder holding your local branches, and one folder
-per remote holding that remote's branches (fetched lazily the first time you expand it).
+per remote holding that remote's branches (fetched lazily the first time you expand it). The
+branch you are on reads in bold, with "(current)" after its name.
 
 - **Switch to a branch:** double-click a local branch, or choose **Switch to** from its context
   menu.
@@ -14,17 +15,19 @@ per remote holding that remote's branches (fetched lazily the first time you exp
 
 The menus offer:
 
-- a local branch: **Switch to**, rename, delete, merge, **Rebase current branch onto
-  ⟨branch⟩…** (see [Rebase](rebase.md)), **Push to…**, **Isolate branch** (the graph then shows
-  only that branch's own commits and merges, see
-  [Which branches the graph shows](history.md#which-branches-the-graph-shows)), and for the
-  current branch **Set upstream…** and **Push to ⟨remote⟩**, and **Copy branch name**. Delete
-  goes at once when every commit of the branch is on another branch too (local or
-  remote-tracking); otherwise it asks first, saying how many commits would be on no branch
+- a local branch: **Switch to**, **Rename…** (a dialog asks for the new name and says there why
+  a name can't be used), delete, merge, **Rebase current branch onto ⟨branch⟩…** (see
+  [Rebase](rebase.md)), **Push to…**, **Isolate branch** (the graph then shows only that branch's
+  own commits and merges, see
+  [Which branches the graph shows](history.md#which-branches-the-graph-shows)), **Show all
+  branches**, and for the current branch **Set upstream…**, **Clear upstream…** and **Push to ⟨remote⟩**, and **Copy
+  branch name**. Delete goes at once when every commit of the branch is on another branch too
+  (local or remote-tracking); otherwise it asks first, saying how many commits would be on no branch
   ("feature has 1 commit on no other branch. Delete it anyway?"). **Undo** brings it back;
 - a remote branch: **Switch to** (to a local branch tracking it), **Set as upstream for current
   branch**, **Rebase current branch onto ⟨remote⟩/⟨branch⟩…**, **Isolate branch** (as for a
-  local branch), **Copy branch name** (as `remote/branch`), or **Delete ⟨remote⟩/⟨branch⟩…**;
+  local branch), **Show all branches**, **Copy branch name** (as `remote/branch`), or **Delete
+  ⟨remote⟩/⟨branch⟩…**;
 - a remote: **Fetch**, **Push current branch to ⟨remote⟩**, **Edit remote…**, **Manage
   credentials…**, **Copy fetch URL** (and **Copy push URL** when pushes go to a different URL),
   or **Remove remote…**.
@@ -106,11 +109,10 @@ without dragging.
 
 ## Pushing and upstreams
 
-**Push** in the repository toolbar pushes the current branch to its upstream. The bottom of the
-Branches section says which remote branch the current branch tracks ("main tracks
-origin/main."); **Pull** pulls from it (see [The main window](main-window.md) and
-[Pulling](#pulling)). **Clear upstream** removes the setting (after asking); the branches
-themselves don't change. To set an upstream, use **Set upstream…** in the current branch's menu
+**Push** in the repository toolbar pushes the current branch to its upstream, and **Pull** pulls
+from it (see [The main window](main-window.md) and [Pulling](#pulling)). Point at the current
+branch to see which remote branch it tracks ("Tracks origin/main"). **Clear upstream…** in its
+menu removes the setting (after asking); the branches themselves don't change. To set an upstream, use **Set upstream…** in the current branch's menu
 (it opens with the only remote, or `origin`, and the branch's own name filled in), or **Set as
 upstream for current branch** on a remote branch.
 

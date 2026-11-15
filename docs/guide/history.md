@@ -91,9 +91,13 @@ out. This works for remote branches too: a remote branch you turn on adds
 its commits to the graph, even ones no local branch has (a colleague's fetched branch, for
 example). Until you pick remote branches, the graph shows no remote-only commits, and the badge
 of every remote branch whose commit is already in the graph. A branch's menu, local or remote,
-has **Isolate branch**, which shows only that branch. **Show all branches** in the **+** menu of
-the Branches section goes back to the graph you started with: every local branch, also ones you
-create later, no remote-only commits, and every remote branch's badge. Turning dots back on until
+has **Isolate branch**, which shows only that branch.
+
+While the graph leaves out some local branch, a strip above it says so ("Showing
+feature/offline-tiles only", or how many branches it shows). **Show all branches**, there, in
+every branch's menu and in the **+** menu of the Branches section, goes back to the graph you
+started with: every local branch, also ones you create later, no remote-only commits, and every
+remote branch's badge. Turning dots back on until
 every local branch is on does the same for the local branches; the remote branches you picked
 stay. Browsitory remembers the choice per repository. Deleting a branch takes it out of the
 choice (deleting the isolated branch shows every branch again); **Undo** of the delete puts it
@@ -106,6 +110,10 @@ on this branch, and when?". A merge commit still lists all its parents in the co
 the graph it has a short dashed stub ("Merged from a branch not shown in this view") in place of
 the merged branch. With two or more branches, or all of them, the graph shows every commit they
 reach, merged branches included.
+
+The **Uncommitted changes** row stays at the top. When the graph doesn't show the branch you are
+on, it names that branch ("Uncommitted changes on main"): the changes belong to it, not to the
+branch shown.
 
 ## Collapse merges
 

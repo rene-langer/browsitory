@@ -162,6 +162,32 @@ describe("taken names (#413)", () => {
     expect(renameBranch).not.toHaveBeenCalled();
   });
 
+  // #422, #1002: the Rename branch dialog shows the reason a rename failed, so it resolves to it.
+  it("renameBranch resolves to the refusal, the backend's failure, or null once renamed", async () => {
+    const branches: BranchInfo[] = [{ name: "main", isCurrent: true }, { name: "topic", isCurrent: false }];
+    const renameBranch = vi.fn(async (_repoPath: string, _oldName: string, newName: string) => {
+      if (newName === "locked") throw new Error("the branch is locked");
+    });
+    const result = await loaded({ listBranches: async () => branches, renameBranch });
+
+    let outcome: string | null | undefined;
+    await act(async () => {
+      outcome = await result.current.renameBranch("topic", "main");
+    });
+    expect(outcome).toBe('A branch named "main" already exists.');
+
+    await act(async () => {
+      outcome = await result.current.renameBranch("topic", "locked");
+    });
+    // Named by the operation, as every failed mutation is (#1032).
+    expect(outcome).toBe("Couldn't rename branch topic to locked: the branch is locked");
+
+    await act(async () => {
+      outcome = await result.current.renameBranch("topic", "renamed");
+    });
+    expect(outcome).toBeNull();
+  });
+
   it("renameBranch may move a branch into a folder named after itself", async () => {
     const renameBranch = vi.fn(async () => {});
     const result = await loaded({ listBranches: async () => [{ name: "topic", isCurrent: false }], renameBranch });

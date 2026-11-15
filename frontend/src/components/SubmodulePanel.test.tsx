@@ -46,6 +46,15 @@ describe("SubmodulePanel", () => {
     expect(screen.getByText(/No submodules/)).toBeInTheDocument();
   });
 
+  it("hides Update recursively while there are no submodules, and names .gitmodules plainly (#1026)", () => {
+    renderPanel({ submodules: [] });
+
+    expect(screen.queryByRole("checkbox", { name: "Update recursively" })).toBeNull();
+    expect(
+      screen.getByText("No submodules. A submodule shows here once the repository's .gitmodules file records it."),
+    ).toBeInTheDocument();
+  });
+
   it("shows each submodule's URL, recorded gitlink, and initialization state", () => {
     renderPanel();
 

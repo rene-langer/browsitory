@@ -69,6 +69,7 @@ function CommitGraphContent({
   onRebaseSelection,
   headInfo,
   currentBranch,
+  currentBranchShown = true,
   userCommands: userCommandsProp,
   onRunUserCommand: onRunUserCommandProp,
   onCherryPick,
@@ -129,6 +130,11 @@ function CommitGraphContent({
   headInfo: HeadInfo;
   // Name of the checked-out branch; `null` on a detached HEAD (reset is then unavailable).
   currentBranch: string | null;
+  /**
+   * False while the saved graph selection hides `currentBranch` (an isolated other branch, #985):
+   * the Uncommitted changes row then names the branch its changes are on.
+   */
+  currentBranchShown?: boolean;
   /** The user commands (#895), else the workspace's; those set for commits close the commit menu. */
   userCommands?: UserCommand[];
   onRunUserCommand?: RunUserCommand;
@@ -924,9 +930,19 @@ function CommitGraphContent({
         <div className={styles.graphCell}>
           <WorkingTreeLaneGraphic lane={commitLayouts[0]?.lane ?? 0} totalLanes={laneCount} />
         </div>
-        <span className={styles.commitSummary}>
-          Uncommitted changes{status.length > 0 && ` (${status.length})`}
-        </span>
+        {currentBranchShown || currentBranch === null ? (
+          <span className={styles.commitSummary}>
+            Uncommitted changes{status.length > 0 && ` (${status.length})`}
+          </span>
+        ) : (
+          <span
+            className={styles.commitSummary}
+            title={`Changes in your working tree, on ${currentBranch}. The graph doesn't show ${currentBranch}.`}
+          >
+            Uncommitted changes on {currentBranch}
+            {status.length > 0 && ` (${status.length})`}
+          </span>
+        )}
       </ListRow>
       )}
       {commits.slice(Math.max(virtual.start - 1, 0), Math.max(virtual.end - 1, 0)).map((commit, offset) => {
