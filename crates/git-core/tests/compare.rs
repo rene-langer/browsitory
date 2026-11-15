@@ -379,6 +379,55 @@ fn an_unknown_branch_is_reported_by_its_short_name() {
 }
 
 #[test]
+fn an_annotated_tag_compares_from_the_commit_it_points_at() {
+    let (_dir, repo) = init_repo();
+    let (base, _main, feature) = diverged(&repo);
+    let target = repo.find_object(feature, None).unwrap();
+    let signature = git2::Signature::now("Tagger", "tagger@example.com").unwrap();
+    let tag = repo
+        .tag("v1.0", &target, &signature, "release", false)
+        .unwrap();
+    assert_ne!(tag, feature, "an annotated tag is its own object");
+
+    let range = branch_compare_range(&repo, "refs/tags/v1.0").unwrap();
+
+    assert_eq!(
+        range,
+        CompareRange {
+            from_id: base.to_string(),
+            to_id: feature.to_string()
+        }
+    );
+}
+
+#[test]
+fn a_deleted_tag_is_reported_as_a_tag_by_its_short_name() {
+    let (_dir, repo) = init_repo();
+    let (_base, _main, feature) = diverged(&repo);
+    let target = repo.find_object(feature, None).unwrap();
+    repo.tag_lightweight("v1.0", &target, false).unwrap();
+    repo.tag_delete("v1.0").unwrap();
+
+    let error = branch_compare_range(&repo, "refs/tags/v1.0").unwrap_err();
+
+    assert_eq!(error.to_string(), "No tag named \"v1.0\".");
+}
+
+#[test]
+fn a_tag_on_unrelated_history_is_named_by_its_short_name() {
+    let (_dir, repo) = init_repo();
+    diverged(&repo);
+    let orphan = commit_tree(&repo, &[("x.txt", "x\n", REGULAR)], &[], "orphan");
+    let target = repo.find_object(orphan, None).unwrap();
+    repo.tag_lightweight("v1.0", &target, false).unwrap();
+
+    let error = branch_compare_range(&repo, "refs/tags/v1.0").unwrap_err();
+
+    assert!(matches!(error, DiffError::NoMergeBase(_)));
+    assert_eq!(error.to_string(), "v1.0 and HEAD have no common ancestor.");
+}
+
+#[test]
 fn an_unborn_head_has_nothing_to_compare_with() {
     let (_dir, repo) = init_repo();
     let only = commit_tree(&repo, &[("x.txt", "x\n", REGULAR)], &[], "only");
