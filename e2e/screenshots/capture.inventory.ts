@@ -818,7 +818,8 @@ describe("UX inventory", () => {
       await selectWorkingTree();
       await browser.pause(600);
       await h.shoot("edit-commit-working-tree");
-      await h.clickInPage("button", "Abort rebase");
+      // Edit commit…'s Abort is "Cancel edit" (#994); nothing changed, so it asks nothing (#979).
+      await h.clickInPage("button", "Cancel edit");
       await browser.pause(800);
       h.note("abort-rebase", await h.dialogs());
       await h.shoot("toast-aborted-rebase");
@@ -836,7 +837,7 @@ describe("UX inventory", () => {
       await selectWorkingTree();
       await browser.pause(600);
       await h.shoot("split-commit-working-tree");
-      await h.clickInPage("button", "Abort rebase");
+      await h.clickInPage("button", "Cancel split");
       await browser.pause(1500);
     });
     it("rebase-conflict-progress", async () => {
