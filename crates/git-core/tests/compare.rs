@@ -428,6 +428,16 @@ fn a_tag_on_unrelated_history_is_named_by_its_short_name() {
 }
 
 #[test]
+fn an_invalid_ref_name_is_a_git_error_not_an_unknown_ref() {
+    let (_dir, repo) = init_repo();
+    diverged(&repo);
+
+    let error = branch_compare_range(&repo, "refs/heads/bad..name").unwrap_err();
+
+    assert!(matches!(error, DiffError::Diff(_)), "{error:?}");
+}
+
+#[test]
 fn an_unborn_head_has_nothing_to_compare_with() {
     let (_dir, repo) = init_repo();
     let only = commit_tree(&repo, &[("x.txt", "x\n", REGULAR)], &[], "only");
