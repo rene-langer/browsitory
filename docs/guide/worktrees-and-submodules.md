@@ -7,7 +7,7 @@ worktree**, which asks for:
 - **Branch**: an existing branch, or the name of a new one;
 - **Start point**: where a new branch starts, such as `HEAD` or `main` (an existing branch
   doesn't need one);
-- **Worktree path**: the folder to check the branch out in (a relative path starts at the
+- **Worktree path**: the folder the worktree's files go in (a relative path starts at the
   repository's folder);
 - **Worktree name**: git's name for the worktree, usually the folder's name.
 
