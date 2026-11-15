@@ -54,7 +54,9 @@ describe("Browsitory external tools", () => {
     await waitUntilInPage("dialog[aria-label='Preferences'] dd", FAKE_DIFF_TOOL_NAME, { contains: true });
 
     await setValueInPage("input[placeholder='System default app']", `${FAKE_TOOL} editor {file} {line}`);
-    await clickInPage("dialog[aria-label='Preferences'] button[type='submit']", "Save");
+    // The command saves on Enter (or blur), like every other setting (#1017): no Save button.
+    await $("input[placeholder='System default app']").click();
+    await browser.keys("Enter");
     await browser.waitUntil(() => fs.readFileSync(CONFIG_FILE, "utf8").includes(`editor = "${FAKE_TOOL} editor {file} {line}"`), {
       timeoutMsg: "the editor command did not reach config.toml",
     });
