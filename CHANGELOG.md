@@ -6,6 +6,319 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-15
+
+0.15.0 is the UI/UX review (#978): about fifty issues that make the app read and behave the
+same everywhere. Every dialog has the same frame, and confirmations say what is lost; error
+banners are one row that names the operation and the next step, with **Details** in the
+operation log; aborting a paused operation asks first when it would throw away work, and the
+status strip is the one place for its status. The commit box is one line until you use it,
+tabs show **±N** changed files, untracked files are marked **?**, the less used diff and graph
+options are in **View** menus, and the sidebar's branches, worktrees and pull requests use
+dialogs and menus instead of bare fields. The merge editor gets the room while a conflict is
+open, and the desktop app opens at 1280×800. Besides: "Interactive rebase from here…", Reword
+on the latest commit without folding in staged changes, opening a folder that isn't a
+repository, and tag compare errors that name the tag.
+
+### Dialogs
+
+Every dialog now has the same frame: a bold title, its buttons at the right of one row, and the
+button that does the work highlighted.
+
+- Changed: every dialog shows its title, and the dialog is named by it; Edit remote, Push, Set
+  upstream, Credentials, Stash, Identity and every confirmation had none. Screen readers read a
+  confirmation's message, or the line under a dialog's title, when it opens. Reflog's Restore
+  asks in the same confirmation as the others, with **Restore main** as its button (#987).
+- Changed: buttons sit at the right of one row in every dialog, the main one first and
+  highlighted like the Commit button, Cancel last (#987).
+- Changed: red marks only actions that lose data, in menus, panes and dialogs alike, with an
+  outline and bold text, not colour alone. Mark resolved, Run, Open, Restore and Commit without
+  hooks are no longer red; Reset to here, Discard all…, Delete untracked…, a stash's Drop… and
+  the Abort buttons now are. Reset's button names the mode ("Reset hard") (#988).
+- Changed: confirmations say what is lost and whether Undo brings it back. Force push says which
+  commits the remote branch loses, that the lease refuses it if the branch moved, and that Undo
+  can't take back a push; Remove remote says its remote-tracking branches go and Undo can't
+  bring it back (its button is "Remove remote"); Delete tag says a copy on a remote stays and
+  Undo brings the tag back; Drop stash says "Undo can't bring it back." instead of repeating its
+  title. Delete branch's confirm, which Undo can take back, is a plain **Delete branch** (#989,
+  #988).
+- Changed: Set upstream opens with the only remote (or origin) and the branch's own name filled
+  in. Identity, Create tag, Delete remote branch and Set upstream say under the form why their
+  button is off. Edit remote's Push URL says "Same as fetch URL" when empty and its copy buttons
+  read "Copy". Credentials offers Forget only for a saved credential, and Cancel is plain
+  "Cancel" (#1014).
+- Changed: the keyboard shortcut sheet has padding, key chips, a key column as wide as its
+  longest keys, and keeps Change shortcuts… and Close in view while the list scrolls (#1016).
+- Changed: Merge's options are under "How to merge", and the Squash hint sits under its checkbox
+  and says the choices above don't apply. Reset asks "What happens to your changes", with each
+  explanation on its own line (#1018).
+- Changed: a diverged pull's dialog is titled "main and origin/main have diverged" with the
+  commit counts, its buttons are "Pull with merge" and "Pull with rebase" as in the Pull menu,
+  and its checkbox reads "Always do this for ⟨repository⟩ (change it in the Pull menu)" (#1019).
+- Changed: the rebase planner's title names the branch and the target ("Rebase main onto
+  4c5beaf"), a line says how many commits it rewrites and that Undo restores the branch, the
+  rows line up under one "Action" header, and the move buttons are arrows (#1015).
+- Fixed: the Clone dialog's fields and Cancel button ran past its right edge (#974).
+
+### Errors
+
+- Changed: the error banner is one row: the message, its next steps, **Details** and ✕. A
+  rejected push offers **Pull** first and **Force push…** second; **Details** opens the operation
+  log on the failed operation, where its full text and **Copy details** are. An error with no
+  operation behind it (reading the repository failed) offers **Copy details** in the banner
+  instead, with the full text (#984).
+- Fixed: the banner's filled first step (**Pull**, **Remove**) and its ✕ no longer lose their
+  colours on hover, which hid their labels (#984).
+- Fixed: no error banner while a dialog handles the same error. A missing git identity showed two
+  near-identical lines beside the identity dialog and stayed after Cancel; a failed hook repeated
+  the dialog's first line. Rename branch, Connect to GitHub and New pull request show their
+  failure in the dialog only, also after Cancel (#996).
+- Changed: Delete branch counts the commits only that branch has before it deletes. With none, it
+  deletes at once; otherwise one confirm says "feature has 1 commit on no other branch. Delete it
+  anyway?", instead of a failed plain delete's error banner next to a Force delete confirm (#996).
+- Changed: errors name the operation, what it worked on and the next step: "Couldn't fetch from
+  origin. Check the remote's URL and your connection, then try again." instead of "Fetch failed",
+  and "Cherry-pick of 4c5beaf didn't start: …". libgit2's `class=…; code=…` is left out of the
+  banner; the operation log and **Copy details** keep it (#997).
+- Changed: the remaining error banners name the operation and what it worked on, then Git's
+  reason, then the next step: "Couldn't switch to feature/x: your local changes to src/map.js would
+  be overwritten" with "Commit or stash the changes to those files first, or use Stash and switch."
+  This covers switching branches and commits, creating, renaming and deleting branches and tags,
+  stash save, apply, pop and drop, reset, commit and amend (also when a hook fails), merge, rebase,
+  history edits, cherry-picks and reverts of several commits, worktrees, submodules, patches and
+  restoring a reflog entry. The create forms show the same text. The operation log keeps Git's
+  full message (#1032).
+
+### Notifications
+
+- Fixed: after a fetch, a branch both ahead of and behind its upstream was reported as only
+  behind. The notification now says "main and origin/main have diverged: 1 commit ahead, 1
+  behind."; a branch only ahead says so and offers **Push** (#999).
+- Changed: notifications and the desktop app's update notice share one place, the bottom-left
+  corner, so they stack instead of covering each other, and none covers the **Commit** button.
+  Screen readers announce the update notice once (#1000).
+- Changed: the operation log shows why an operation failed first, in the app's words, then git's
+  own text, then the facts and **Run again**; **Copy details** copies them. Rows read "Fetch from
+  origin" and "Push to origin" (#1022).
+
+### Main window
+
+- Changed: an untracked file is marked **?**, as in `git status --short`, instead of **U**, which
+  git uses for unmerged files. Above the diff, a file's state reads **Untracked**, **Modified, not
+  staged** or **Added, staged** (#1027).
+- Changed: a tab with uncommitted changes shows **±** and the number of changed files instead of a
+  dot that looked like an unsaved-file marker; the tooltip and the tab's accessible name say it in
+  words. The list of open tabs (**⌄**) shows the same (#1028).
+- Changed: the start page puts the keyboard focus in the filter (or on **Open repository…**), and
+  a dialog starts on its first control, a radio group on its chosen option, never on its frame.
+  The focus ring is blue with a small gap, so a focused button no longer looks like a pressed
+  toggle (#1029).
+- Changed: the commit box is one line with **Commit** beside it until you click into the message,
+  so the diff above gets the room; it stays open while it has the focus or holds anything, and it
+  never takes more than half the column. **Add co-author…** and **Amend last commit** moved into
+  the menu of the arrow next to **Commit**, which now opens without a message; **Cancel amend**
+  ends amend mode (#1003).
+- Changed: a clean working tree's commit box no longer says "Stage changes to commit" in amber: it
+  says "Nothing to commit.", and "Stage changes to commit." only when there are changes to
+  stage, both in muted text (#1005).
+- Changed: the commit graph starts at about 40% of the window, so a wide window shows longer
+  subjects. Its date column is compact ("3h", "2d", "4mo"; the date in the tooltip; "3 hours ago"
+  for screen readers), and a row
+  with several branches and tags shows the first and "+N" for the rest (#1004).
+- Changed: the toolbar keeps a place for "Fetched …", so Fetch, Pull and Push no longer move when it
+  appears. The counts sit on the buttons, `↓n` on **Pull** and `↑n` on **Push**, and only when
+  they aren't zero, and screen readers hear "2 ahead, 1 behind origin/main" when they change. In a
+  narrow window the "Fetched …" place shrinks to its text. **Apply patch…** moved from an icon
+  button into the **Stash** menu, where it stays available when there is nothing to stash (#1006).
+- Changed: the diff options you change less often (**Wrap lines**, **Show whole file**, **Ignore
+  whitespace**, **Show whitespace**, **Show syntax highlighting**) and the graph's **Show lines
+  changed** and **Collapse merges** moved from icon buttons into **View** menus with their names
+  and check marks; a menu stays open while you turn its options on and off. Word wrap on **Auto**
+  reads **Wrap lines (automatic)** with a small **A** instead of a dashed outline that looked like
+  keyboard focus (#1007).
+- Changed: Escape closes the compare, the commit search (and a `path:` filter), the new branch
+  form and the add remote form wherever the focus is inside them, not only in their text field,
+  and the focus goes back to where it was before. The search's syntax help closes first (#1001).
+
+### Menus and command palette
+
+Each action now has one name, the same in its menu, the command palette and the shortcut list.
+
+- Changed: an item ends in "…" exactly when a dialog or confirmation follows ("Edit remote…",
+  "Manage credentials…", "Remove remote…", "Add remote…", "Discard all unstaged changes…", a
+  worktree's "Remove…"). The palette's name is the menu's plus what it acts on ("Push
+  current branch to origin" in both, "Push current branch to…", "Reset main to 1a2b3c4…"). The
+  palette's diff options name what they will do ("Show whitespace" or "Hide whitespace", "Wrap
+  lines" or "Stop wrapping lines", "More context lines"), and the shortcut list uses the
+  palette's names ("Pull", "Go to commit message", "Close tab"). The toolbar's stash menu reads
+  "Stash all changes". The status strip's Continue says what it continues, as the palette does:
+  "Continue rebase", "Continue cherry-pick", "Continue revert" (#990).
+- Changed: the palette's "Delete tag ⟨name⟩…", "Drop stash: ⟨name⟩…" and "Remove worktree
+  ⟨name⟩…" open the same confirmation as the Tags, Stashes and Worktrees sections, instead of
+  only opening the section. Tag commands have their own "Tags" group (#993, #990).
+- Changed: the commit menu's Cherry-pick and Revert say where the result lands: "Cherry-pick onto
+  main" and "Revert (new commit on main)" (#1020).
+- Changed: a commit's hunk buttons and file menu name the working tree: "Revert hunk in working
+  tree", "Apply hunk to working tree", "Revert file in working tree", "Apply file to working
+  tree and stage" (#1008).
+- Changed: the commit menu's "Rebase onto here" is "Rebase current branch onto here…", and a new
+  "Interactive rebase from here…" opens the rebase planner from that commit's parent, so the
+  commit is the first one listed. Both are in the command palette for the selected commit (#991).
+- Changed: the commit menu scrolls when it is taller than the window, a reason that applies to
+  a whole group of items shows once under the group, and the copy items are in a "Copy" submenu
+  (#992).
+- Changed: the empty command palette lists "Recent", then "Suggested": Continue or Abort while
+  an operation is paused, Pull while the branch is behind its upstream, Go to commit message
+  while changes are staged. Letters scattered over several words no longer match, so "stash"
+  no longer finds "Save staged changes as patch…" (#1021).
+- Changed: "Line history" says why it can't run yet ("Select lines first.") and can be focused;
+  in a commit's or comparison's file, "History of folder ⟨folder⟩" moved into the file's "…"
+  menu (#1023).
+- Changed: a commit's details mark tags with the graph's tag icon instead of "#" (#1024).
+
+### Sidebar
+
+- Added: while the graph leaves out some local branch ("Isolate branch", or the branch dots in
+  the sidebar), a strip above it says so ("Showing feature/offline-tiles only") with a Show all
+  branches button (#985).
+- Added: while the graph is filtered, Show all branches is in every branch's menu, local and
+  remote, not only in the Branches "+" menu (#985).
+- Fixed: the strip's Show all branches no longer loses its colours on hover (#985).
+- Changed: when the graph doesn't show the branch you are on, the Uncommitted changes row names
+  it ("Uncommitted changes on main") (#985).
+- Changed: renaming a branch opens a "Rename branch" dialog ("Rename…" in the branch's menu) in
+  place of a bare field in the row. A name that can't be used, or a rename that fails, is
+  explained in the dialog, which keeps what you typed, and not again in a banner (#1002, #422).
+- Changed: the current branch is marked once, in bold with "(current)", without the extra dot
+  (#1025).
+- Changed: the Upstream block at the bottom of Branches is gone. Point at the current branch to
+  see what it tracks, and use "Clear upstream…" in its menu (#1025).
+- Fixed: open sidebar sections no longer squeeze each other: each keeps room for its content up
+  to a cap, a longer list scrolls inside its section with the cut edge faded, and the sidebar
+  scrolls when the open sections don't fit (#1010).
+- Fixed: the New branch and Add remote forms scroll into view with their buttons when they open
+  (#1010).
+- Changed: the Worktrees section lists the worktrees first, each with its name, branch and
+  folder and a "…" menu (Open in new tab, Remove…). "+" in the section header opens a "New
+  worktree" dialog whose fields say what they are for ("The folder the worktree's files go in."),
+  in place of the four empty fields above the list (#1011).
+- Changed: the main worktree, which can't be removed, no longer shows a Remove action (#1011).
+- Changed: a pull request card shows "Connect to GitHub…" (or Bitbucket) until you connect; a
+  dialog asks for the account and the access token and says why if saving fails. The token
+  form with Save, Forget and Cancel is gone from the card (#1012).
+- Changed: a connected card lists its pull requests by itself when you open it, without a List
+  button. "New pull request…" opens a dialog that keeps what you typed and says why if creating
+  fails; the card's "…" menu has Refresh and Disconnect (#1012).
+- Changed: each pull request reads "#7 Title" over its branches, author and state, with a
+  button to open it in your browser in place of its full address (#1012).
+- Fixed: a card's title, such as "GitHub: acme/widget (origin)", is no longer shown in
+  uppercase (#1012).
+- Changed: with no stashes, the Stashes section points to Stash in the repository toolbar, not
+  the commit box (#1026).
+- Changed: Submodules shows Update recursively only once the repository has a submodule (#1026).
+- Changed: Reflog shows the reflog of HEAD at once, without picking a reference first, and its
+  reference picker fits the sidebar (#1026).
+
+### Opening repositories
+
+- Fixed: a new repository with no commits opened with a false "git remote operation failed:
+  reference 'refs/heads/main' not found" error, and the toolbar said "no branch". It now opens
+  cleanly, and the branch button reads "main (no commits yet)" (#983).
+- Added: opening a folder that isn't a Git repository says so and lists the repositories in its
+  direct subfolders, each with **Open**; hidden folders and `node_modules` are left out. A folder
+  with a `.git` that Git refuses (owned by another user, an unsupported format, a broken HEAD)
+  shows Git's message with **Retry** instead, and **Copy details** includes Git's message (#973).
+- Changed: a recent repository whose folder is gone no longer opens from the start page;
+  **Locate…** in place of the pin picks the folder's new place and replaces the entry. Opened
+  another way, the error asks to remove it from the recent repositories, without a Retry that
+  couldn't help (#998).
+- Changed: the picker opened from the tab bar's **+** is an **Open repository** dialog with a
+  **×**, without the empty band at the top or the card inside the dialog (#1013).
+- Added: in that dialog, repositories already open in a tab are marked **Open in a tab**, and a
+  click switches to their tab (#1013).
+- Changed: the command palette tip shows only on the start page, below the lists. The start
+  page's picker is titled **Open repository** too (#1013).
+
+### History edits
+
+- Changed: Abort merge, cherry-pick, revert or rebase asks first when it would throw away
+  conflict resolutions, unsaved edits in the merge editor, files changed at an edit stop, a new
+  commit message or a split's committed parts, which Undo can't bring back. When nothing was
+  touched it still aborts at once (#979).
+- Added: a toast says "Aborted merge" (or cherry-pick, revert) once the abort worked (#979).
+- Fixed: Reword… on the latest commit no longer folds staged changes into it. It opens the same
+  Reword dialog as for older commits and changes only the message; staged changes stay staged.
+  The command palette offers **Reword ⟨commit⟩…** for it too (#981).
+- Fixed: a commit below a merge commit said to use "Rebase onto here…", which can't edit it. Its
+  edits now say "Can't edit: a merge commit comes after this one." (#982).
+- Fixed: the rebase planner marks a merge commit's row ("Merge commit: can't be replayed"),
+  offers it no action, and Start rebase is unavailable with the reason, instead of failing once
+  started (#982).
+- Changed: the status strip is the only place for a paused merge's, cherry-pick's, revert's or
+  rebase's status, Continue and Abort. The commit area no longer repeats them; at an edit stop
+  it keeps the commit message (#995).
+- Changed: the rebase strip names the branch and what it is rebased onto ("Rebasing main onto
+  feature/x, step 1 of 2"), and the toolbar says "Rebasing main" instead of a detached HEAD
+  (#995).
+- Changed: Edit commit… and Split commit… name their controls and toasts after the edit:
+  "Finish editing" / "Cancel edit", "Finish split" / "Cancel split", "Edited 1a2b3c4". "Step 1
+  of 1" is gone, and Split says what to do with the parts (#994).
+
+### Merge editor
+
+- Changed: while a conflicted file is open, the merge editor gets the room: the history column
+  narrows (it comes back afterwards, and a drag meanwhile is kept), the file list shrinks to
+  the conflicts ("Show all changes" brings the rest back), the diff options are hidden, and the
+  commit box is one line until every conflict is resolved. The app now opens at 1280×800
+  (was 1200×800), so the three panes show on a first launch (#980).
+- Fixed: the shrunk file list opens at its top, with the conflicts in view (#980).
+- Added: a pane too narrow for three panes shows two: ours and theirs side by side, each
+  block's result under them (#980).
+- Fixed: why the panes aren't available in a narrow pane is visible text next to the layout
+  buttons, not only a tooltip (#980).
+- Fixed: in the three panes, and in four with Show base, a long unchanged line wrapped onto more
+  rows in ours and theirs than in the base and the result, so the lines after it drifted apart
+  across the panes in a narrow window or VS Code editor group. Every pane's lines are now
+  equally wide and stay level (#931).
+
+### Diffs, blame and compare
+
+- Fixed: "Compare with current branch" on a tag that was deleted meanwhile said
+  `No branch named "refs/tags/v1.0".`; it now says `No tag named "v1.0".`, and a tag on
+  unrelated history is named `v1.0` instead of `refs/tags/v1.0` (#872).
+- Fixed: the blame view keeps each line's indentation, and its columns no longer run together:
+  the short SHA, author and the new date column have padded, fixed widths, and a long author
+  name ends in "…" (#986).
+- Changed: blame shows the short SHA, author and date once for each run of lines from the same
+  commit, and only the SHA is a link to that commit; a click elsewhere on a line does nothing
+  (#986).
+- Added: blame colors the code like the diff, with the same Syntax highlighting setting (#986).
+- Changed: **Back to diff** sits in the file's header, in place of **Blame**, instead of below
+  the blame (#986).
+- Added: a merge commit's diff says which parent it compares with, "Changes compared with
+  4c5beaf (first parent)", and that picker shows the changes against another parent instead
+  (#1009).
+
+### Preferences
+
+- Changed: every Appearance setting has its help under its own field, as in the other groups
+  (#1017).
+- Changed: the editor and terminal commands under External tools save when you leave the field
+  or press Enter, like every other setting; the Save button is gone. A refused command stays in
+  the field with the reason (#1017).
+- Added: a diff or merge tool that isn't configured says which git config key to set, with a
+  link to the user guide (#1017).
+- Changed: the repository's own fetch interval is labelled "For this repository (name)" instead
+  of "In name" (#1017).
+- Fixed: in a narrow window the fields no longer slide under the scrollbar, and the code font
+  size field has room for "Default" (#1017).
+- Added: the settings filter highlights the matching settings (#1017).
+
+### Internal
+
+- Added: `pnpm screenshots:inventory` in `e2e/` captures every reachable screen, menu and dialog
+  of the desktop app for UX reviews (#978).
+
 ## [0.14.0] - 2026-11-14
 
 0.14.0 brings the operation log (#892): what the app ran in a repository, with its hooks'
