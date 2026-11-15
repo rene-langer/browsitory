@@ -179,7 +179,8 @@ describe("taken names (#413)", () => {
     await act(async () => {
       outcome = await result.current.renameBranch("topic", "locked");
     });
-    expect(outcome).toBe("the branch is locked");
+    // Named by the operation, as every failed mutation is (#1032).
+    expect(outcome).toBe("Couldn't rename branch topic to locked: the branch is locked");
 
     await act(async () => {
       outcome = await result.current.renameBranch("topic", "renamed");
