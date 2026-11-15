@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useState, type ReactNode } from "react";
 import { DEFAULT_DIFF_SETTINGS, type DiffHunk, type DiffSettings } from "../ipc/RepoClient";
@@ -199,6 +199,37 @@ describe("DiffOptionsToolbar (#640)", () => {
     chooseViewOption("Show whole file");
     expect(screen.getByRole("button", { name: "More context lines" })).toBeDisabled();
     cleanup();
+  });
+});
+
+describe("the View menu's name, Auto and toggling (#1007)", () => {
+  const viewButton = () => screen.getByText("View").closest("button")!;
+
+  it("is named starting with its visible text", () => {
+    render(
+      <DiffViewOptionsProvider>
+        <DiffOptionsToolbar />
+      </DiffViewOptionsProvider>,
+    );
+    expect(screen.getByRole("button", { name: "View diff options" })).toBe(viewButton());
+  });
+
+  it("says Wrap lines is automatic while on Auto, and stays open, focus in place, after a toggle", () => {
+    const onUpdate = vi.fn();
+    render(
+      <Settings onUpdate={onUpdate}>
+        <DiffOptionsToolbar />
+      </Settings>,
+    );
+    fireEvent.click(viewButton());
+    const wrap = screen.getByRole("menuitemcheckbox", { name: "Wrap lines (automatic)" });
+    wrap.focus();
+    fireEvent.click(wrap);
+    expect(onUpdate).toHaveBeenLastCalledWith({ wordWrap: "On" });
+
+    const on = within(screen.getByRole("menu")).getByRole("menuitemcheckbox", { name: "Wrap lines" });
+    expect(on).toHaveAttribute("aria-checked", "true");
+    expect(on).toHaveFocus();
   });
 });
 

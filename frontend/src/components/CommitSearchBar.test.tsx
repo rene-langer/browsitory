@@ -271,6 +271,11 @@ describe("match keys", () => {
   });
 });
 
+it("names the graph's View menu starting with its visible text (#1007)", () => {
+  renderBar({ showLineStats: true, onToggleLineStats: vi.fn(), collapseMerges: false, onToggleCollapseMerges: vi.fn() });
+  expect(screen.getByRole("button", { name: "View graph options" })).toHaveTextContent("View");
+});
+
 // #1007: the graph's rarely changed toggles are in a View menu, in words.
 it("puts Show lines changed and Collapse merges in the Graph view menu", () => {
   const onToggleLineStats = vi.fn();
