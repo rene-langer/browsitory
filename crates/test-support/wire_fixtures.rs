@@ -1719,6 +1719,14 @@ pub fn head_infos() -> Cases<git_core::repo::HeadInfo> {
                 unborn_branch: None,
             },
         ),
+        // A new repository (#983): HEAD names a branch with no commit yet.
+        case(
+            "unborn",
+            git_core::repo::HeadInfo {
+                unborn_branch: some("main"),
+                ..empty_head()
+            },
+        ),
     ];
     cases.extend(operation_kinds().into_iter().map(|kind| {
         case(

@@ -44,6 +44,16 @@ pub(super) fn get_switch_conflicts(
     serde_json::to_value(paths).map_err(ErrorDto::from_error)
 }
 
+/// How many commits of `name` no other branch has: Delete branch asks first when some (#996).
+pub(super) fn count_commits_only_on_branch(
+    params: SwitchBranchParams,
+    repos: &Repos,
+) -> Result<Value, ErrorDto> {
+    let count =
+        worker_handle(repos, &params.repo_path)?.count_commits_only_on_branch(params.name)?;
+    serde_json::to_value(count).map_err(ErrorDto::from_error)
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct StashAndSwitchParams {

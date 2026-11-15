@@ -344,9 +344,31 @@ pub fn rename_branch(repo: &Repository, old_name: &str, new_name: &str) -> Resul
     Ok(())
 }
 
-/// How many commits of local branch `name` no other local or remote-tracking branch has (#996).
-pub fn commits_only_on_branch(_repo: &Repository, _name: &str) -> Result<usize, BranchError> {
-    todo!("#996")
+/// How many commits of local branch `name` no other local or remote-tracking branch has (#996):
+/// what deleting it would leave on no branch. Delete branch asks first when there are some.
+pub fn commits_only_on_branch(repo: &Repository, name: &str) -> Result<usize, BranchError> {
+    let branch = repo.find_branch(name, BranchType::Local)?;
+    let own = branch.get().name()?.to_string();
+    let mut walk = repo.revwalk()?;
+    walk.push(branch.get().peel_to_commit()?.id())?;
+    for reference in repo.references()? {
+        let reference = reference?;
+        if !(reference.is_branch() || reference.is_remote())
+            || reference.name().ok() == Some(own.as_str())
+        {
+            continue;
+        }
+        // A symbolic one (`refs/remotes/origin/HEAD`) peels to its target's commit.
+        if let Ok(commit) = reference.peel_to_commit() {
+            walk.hide(commit.id())?;
+        }
+    }
+    let mut count = 0;
+    for oid in walk {
+        oid?;
+        count += 1;
+    }
+    Ok(count)
 }
 
 pub fn delete_branch(repo: &Repository, name: &str, force: bool) -> Result<(), BranchError> {

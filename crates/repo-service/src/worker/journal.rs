@@ -162,6 +162,7 @@ pub(super) fn describe(command: &Command) -> Option<Described> {
         | Command::PreviewPatch { .. }
         | Command::ListBranches { .. }
         | Command::GetSwitchConflicts { .. }
+        | Command::CountCommitsOnlyOnBranch { .. }
         | Command::GetPullDefaults { .. }
         | Command::ListWorktrees { .. }
         | Command::ListSubmodules { .. }

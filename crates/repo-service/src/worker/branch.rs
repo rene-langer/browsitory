@@ -24,6 +24,14 @@ pub(super) fn create(
     };
     let _ = reply.send(result.map_err(ErrorDto::from_error));
 }
+pub(super) fn count_commits_only_on_branch(
+    repo: &git2::Repository,
+    name: String,
+    reply: Sender<Result<usize, ErrorDto>>,
+) {
+    let _ = reply
+        .send(git_core::branch::commits_only_on_branch(repo, &name).map_err(ErrorDto::from_error));
+}
 pub(super) fn switch_conflicts(
     repo: &git2::Repository,
     name: String,
@@ -155,7 +163,7 @@ impl ReadHandle {
         self.read(|reply| Command::GetSwitchConflicts { name, reply })
     }
     /// How many commits of local branch `name` no other branch has (#996).
-    pub fn count_commits_only_on_branch(&self, _name: String) -> Result<usize, ErrorDto> {
-        todo!("#996")
+    pub fn count_commits_only_on_branch(&self, name: String) -> Result<usize, ErrorDto> {
+        self.read(|reply| Command::CountCommitsOnlyOnBranch { name, reply })
     }
 }

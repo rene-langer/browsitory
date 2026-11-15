@@ -217,6 +217,9 @@ pub(super) fn dispatch(
         Command::PreviewPatch { content, reply } => patch::preview_patch(repo, content, reply),
         Command::ListBranches { reply } => branch::list(repo, state.ahead_behind, reply),
         Command::GetSwitchConflicts { name, reply } => branch::switch_conflicts(repo, name, reply),
+        Command::CountCommitsOnlyOnBranch { name, reply } => {
+            branch::count_commits_only_on_branch(repo, name, reply)
+        }
         Command::GetPullDefaults { reply } => remote::pull_defaults(repo, reply),
         Command::ListWorktrees { reply } => worktree::list(repo, reply),
         Command::ListSubmodules { reply } => submodule::list(repo, reply),

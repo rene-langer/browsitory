@@ -774,7 +774,7 @@ pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
                 bisect: bisect_info(repo),
                 terminal_sequence: crate::pick::terminal_sequence(repo),
                 terminal_rebase: terminal_rebase(repo),
-                unborn_branch: None,
+                unborn_branch: unborn_branch(repo),
             });
         }
         Err(error) => return Err(error.into()),
@@ -798,6 +798,13 @@ pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
         terminal_rebase: terminal_rebase(repo),
         unborn_branch: None,
     })
+}
+
+/// The short name of the branch an unborn HEAD names (`refs/heads/main` → `main`).
+fn unborn_branch(repo: &git2::Repository) -> Option<String> {
+    let head = repo.find_reference("HEAD").ok()?;
+    let target = head.symbolic_target().ok()??;
+    target.strip_prefix("refs/heads/").map(str::to_string)
 }
 
 fn upstream_contains(

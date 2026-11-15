@@ -594,6 +594,7 @@ fn head_info_dto_serializes_a_terminal_rebase() {
             bisect: None,
             terminal_sequence: None,
             terminal_rebase,
+            unborn_branch: None,
         }))
         .unwrap()
     };
