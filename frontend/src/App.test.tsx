@@ -1591,7 +1591,7 @@ describe("App", () => {
     expect(screen.queryByRole("status", { name: "Loading branches…" })).toBeNull();
   });
 
-  it("renames a branch inline with the name trimmed, and an unchanged name never reaches the client (#418)", async () => {
+  it("renames a branch in its dialog with the name trimmed, and an unchanged name never reaches the client (#418, #1002)", async () => {
     localStorage.clear();
     const renameBranch = vi.fn(async () => {});
     const client = fakeClient({
@@ -1610,16 +1610,16 @@ describe("App", () => {
     render(<App client={client} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Actions for topic" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
-    fireEvent.keyDown(screen.getByRole("textbox", { name: "Rename topic" }), { key: "Enter" });
-    expect(screen.queryByRole("textbox", { name: "Rename topic" })).toBeNull();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename…" }));
+    fireEvent.submit(screen.getByRole("textbox", { name: "New name", hidden: true }).closest("form")!);
+    expect(screen.queryByRole("dialog", { name: "Rename branch", hidden: true })).toBeNull();
     expect(renameBranch).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Actions for topic" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
-    const input = screen.getByRole("textbox", { name: "Rename topic" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename…" }));
+    const input = screen.getByRole("textbox", { name: "New name", hidden: true });
     fireEvent.change(input, { target: { value: " topic/old " } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.submit(input.closest("form")!);
     await waitFor(() => expect(renameBranch).toHaveBeenCalledWith("/repos/a", "topic", "topic/old"));
     localStorage.clear();
   });

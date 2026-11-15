@@ -57,7 +57,7 @@ describe("BranchTree — local branches", () => {
   it("right-clicking a branch opens a context menu with Rename/Delete, and Merge for non-current branches", () => {
     renderTree();
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
-    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Rename…" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Merge into current branch…" })).toBeInTheDocument();
   });
@@ -126,14 +126,17 @@ describe("BranchTree — local branches", () => {
     expect(screen.queryByRole("dialog", { name: "Delete feat/foo" })).not.toBeInTheDocument();
   });
 
-  it("Rename shows an inline input; Enter calls onRenameBranch", () => {
+  it("Rename… opens the Rename branch dialog; Rename calls onRenameBranch (#1002)", async () => {
     const { props } = renderTree();
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
-    const input = screen.getByDisplayValue("feat/foo");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename…" }));
+    const dialog = screen.getByRole("dialog", { name: "Rename branch", hidden: true });
+    const input = within(dialog).getByRole("textbox", { name: "New name", hidden: true });
+    expect(input).toHaveValue("feat/foo");
     fireEvent.change(input, { target: { value: "feat/bar" } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Rename", hidden: true }));
     expect(props.onRenameBranch).toHaveBeenCalledWith("feat/foo", "feat/bar");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Rename branch", hidden: true })).toBeNull());
   });
 
   it("Merge into current branch calls onMergeBranch with that branch's name", () => {
@@ -175,7 +178,7 @@ describe("BranchTree — local branches", () => {
   it("disables Rename/Delete/Merge menu items while a rebase is in progress", () => {
     renderTree({ operationDisabled: true, operationDisabledReason: "A rebase is in progress." });
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
-    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Rename…" })).toBeDisabled();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeDisabled();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toHaveAttribute("title", "A rebase is in progress.");
     expect(screen.getByRole("menuitem", { name: "Merge into current branch…" })).toBeDisabled();
@@ -193,7 +196,7 @@ describe("BranchTree — local branches", () => {
   it("disables Switch to and Rename, and ignores a double-click, during a merge, like the palette", () => {
     const { props } = renderTree({ operationDisabled: true, operationDisabledReason: "A merge is in progress." });
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
-    for (const name of ["Switch to", "Rename"]) {
+    for (const name of ["Switch to", "Rename…"]) {
       const item = screen.getByRole("menuitem", { name });
       expect(item).toBeDisabled();
       expect(item).toHaveAttribute("title", "A merge is in progress.");
@@ -408,62 +411,60 @@ describe("BranchTree — local branches", () => {
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
   });
 
-  it("Enter on an empty/whitespace-only rename value does not call onRenameBranch", () => {
-    const { props } = renderTree();
-
+  /** Opens the Rename branch dialog on feat/foo; returns the dialog and its name field. */
+  function openRenameDialog() {
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
-    const input = screen.getByDisplayValue("feat/foo");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename…" }));
+    const dialog = screen.getByRole("dialog", { name: "Rename branch", hidden: true });
+    return { dialog, input: within(dialog).getByRole("textbox", { name: "New name", hidden: true }) };
+  }
+
+  it("an empty/whitespace-only name never reaches onRenameBranch", () => {
+    const { props } = renderTree();
+    const { dialog, input } = openRenameDialog();
     fireEvent.change(input, { target: { value: "   " } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.submit(input.closest("form")!);
 
     expect(props.onRenameBranch).not.toHaveBeenCalled();
+    expect(within(dialog).getByRole("button", { name: "Rename", hidden: true })).toBeDisabled();
   });
 
-  // #418: the inline rename follows the New branch form's rules.
+  // #418: the rename follows the New branch form's rules.
   it("trims the new branch name before renaming", () => {
     const { props } = renderTree();
-    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
-    const input = screen.getByDisplayValue("feat/foo");
+    const { input } = openRenameDialog();
     fireEvent.change(input, { target: { value: "  feat/bar " } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.submit(input.closest("form")!);
     expect(props.onRenameBranch).toHaveBeenCalledWith("feat/foo", "feat/bar");
   });
 
-  it("Enter on an unchanged name (spaces aside) closes the input without renaming", () => {
+  it("an unchanged name (spaces aside) closes the dialog without renaming", () => {
     const { props } = renderTree();
-    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
-    const input = screen.getByDisplayValue("feat/foo");
-    fireEvent.keyDown(input, { key: "Enter" });
-    expect(screen.queryByRole("textbox", { name: "Rename feat/foo" })).not.toBeInTheDocument();
+    let { input } = openRenameDialog();
+    fireEvent.submit(input.closest("form")!);
+    expect(screen.queryByRole("dialog", { name: "Rename branch", hidden: true })).toBeNull();
 
-    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
-    const again = screen.getByDisplayValue("feat/foo");
-    fireEvent.change(again, { target: { value: "feat/foo  " } });
-    fireEvent.keyDown(again, { key: "Enter" });
-    expect(screen.queryByRole("textbox", { name: "Rename feat/foo" })).not.toBeInTheDocument();
+    ({ input } = openRenameDialog());
+    fireEvent.change(input, { target: { value: "feat/foo  " } });
+    fireEvent.submit(input.closest("form")!);
+    expect(screen.queryByRole("dialog", { name: "Rename branch", hidden: true })).toBeNull();
     expect(props.onRenameBranch).not.toHaveBeenCalled();
   });
 
-  it("shows the New branch form's message for an invalid name and keeps the input open on Enter", () => {
+  it("shows the New branch form's message for an invalid name in the dialog and keeps it open", () => {
     const { props } = renderTree();
-    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
-    const input = screen.getByDisplayValue("feat/foo");
+    const { dialog, input } = openRenameDialog();
     fireEvent.change(input, { target: { value: "feat bar" } });
 
-    expect(screen.getByText("Branch names can't contain spaces.")).toBeInTheDocument();
+    expect(within(dialog).getByText("Branch names can't contain spaces.")).toBeInTheDocument();
     expect(input).toHaveAttribute("aria-invalid", "true");
     expect(input).toHaveAccessibleDescription("Branch names can't contain spaces.");
-    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.submit(input.closest("form")!);
     expect(props.onRenameBranch).not.toHaveBeenCalled();
-    expect(screen.getByRole("textbox", { name: "Rename feat/foo" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Rename branch", hidden: true })).toBeInTheDocument();
 
     fireEvent.change(input, { target: { value: "feat/bar" } });
-    expect(screen.queryByText("Branch names can't contain spaces.")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("Branch names can't contain spaces.")).not.toBeInTheDocument();
   });
 
   it("disables the merge action while a merge is already in progress", () => {
@@ -506,13 +507,12 @@ describe("BranchTree — local branches", () => {
   // "...clears an in-progress rename..." — there is no popover to close in this interaction model.
   // The equivalent guard here is that starting a fresh interaction on another branch clears any
   // stale per-branch edit state rather than leaving it attached to the wrong row.
-  it("right-clicking a different branch after starting a rename on one clears that rename's input", () => {
+  it("the rename is a dialog, so the row keeps its name while renaming (#1002)", () => {
     renderTree();
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
-    expect(screen.getByDisplayValue("feat/foo")).toBeInTheDocument();
-    fireEvent.contextMenu(screen.getByText(/main.*\(current\)/));
-    expect(screen.queryByDisplayValue("feat/foo")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename…" }));
+    expect(screen.getByRole("dialog", { name: "Rename branch", hidden: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "foo" })).toBeInTheDocument();
   });
 });
 
@@ -855,9 +855,10 @@ describe("BranchTree — remotes", () => {
     expect(onOpenAddRemoteDraft).toHaveBeenCalledOnce();
   });
 
-  it("shows the current branch's upstream status, with no Pull of its own (#637)", () => {
+  it("shows the current branch's upstream in its tooltip, with no Pull of its own (#637, #1025)", () => {
     renderTree({ upstream: { localBranch: "main", remoteName: "origin", remoteBranch: "main" } });
-    expect(screen.getByText(/main tracks origin\/main/)).toBeInTheDocument();
+    expect(screen.getByTitle("main\nTracks origin/main", { normalizer: (text) => text })).toHaveTextContent(/^main \(current\)$/);
+    expect(screen.queryByRole("heading", { name: "Upstream" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Pull" })).toBeNull();
   });
 
@@ -1038,14 +1039,14 @@ describe("BranchTree — local row actions button", () => {
     const actions = screen.getByRole("button", { name: "Actions for feat/foo" });
     expect(actions).toHaveAttribute("aria-haspopup", "menu");
     fireEvent.click(actions);
-    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Rename…" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
   });
 
-  it("the current branch is marked with a bold weight and a marker", () => {
+  it("the current branch is marked once, by its (current) suffix, with no extra dot (#1025)", () => {
     renderTree();
-    const marker = screen.getByLabelText("current branch");
-    expect(marker.closest("span[title='main']")).not.toBeNull();
+    expect(screen.queryByLabelText("current branch")).toBeNull();
+    expect(screen.getByTitle("main")).toHaveTextContent(/^main \(current\)$/);
   });
 });
 
@@ -1057,27 +1058,27 @@ describe("BranchTree — inline forms focus and Escape", () => {
   function startRename() {
     const utils = renderTree();
     fireEvent.click(screen.getByRole("button", { name: "Actions for feat/foo" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename…" }));
     return utils;
   }
 
-  it("the rename input is labelled, focused, and Escape cancels", () => {
-    startRename();
-    const input = screen.getByRole("textbox", { name: "Rename feat/foo" });
+  it("the rename field is labelled and focused; Escape and Cancel close the dialog (#1002)", () => {
+    const { props } = startRename();
+    const dialog = screen.getByRole("dialog", { name: "Rename branch", hidden: true });
+    const input = within(dialog).getByRole("textbox", { name: "New name", hidden: true });
     expect(input).toHaveFocus();
-    fireEvent.keyDown(input, { key: "Escape" });
-    expect(screen.queryByRole("textbox", { name: "Rename feat/foo" })).not.toBeInTheDocument();
-  });
+    fireEvent(dialog, new Event("cancel", { cancelable: true }));
+    expect(screen.queryByRole("dialog", { name: "Rename branch", hidden: true })).toBeNull();
 
-  it("blurring the rename input with an unchanged value cancels, a changed value stays", () => {
-    startRename();
-    const input = screen.getByRole("textbox", { name: "Rename feat/foo" });
-    fireEvent.change(input, { target: { value: "feat/bar" } });
-    fireEvent.blur(input);
-    expect(screen.getByRole("textbox", { name: "Rename feat/foo" })).toBeInTheDocument();
-    fireEvent.change(input, { target: { value: "feat/foo" } });
-    fireEvent.blur(input);
-    expect(screen.queryByRole("textbox", { name: "Rename feat/foo" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Actions for feat/foo" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename…" }));
+    const again = screen.getByRole("dialog", { name: "Rename branch", hidden: true });
+    fireEvent.change(within(again).getByRole("textbox", { name: "New name", hidden: true }), {
+      target: { value: "feat/bar" },
+    });
+    fireEvent.click(within(again).getByRole("button", { name: "Cancel", hidden: true }));
+    expect(screen.queryByRole("dialog", { name: "Rename branch", hidden: true })).toBeNull();
+    expect(props.onRenameBranch).not.toHaveBeenCalled();
   });
 });
 
@@ -1087,9 +1088,15 @@ describe("BranchTree — remote list states and upstream block", () => {
   });
   const up = { localBranch: "main", remoteName: "origin", remoteBranch: "main" };
 
+  /** Opens the current branch's menu and chooses Clear upstream… (#1025). */
+  function chooseClearUpstream() {
+    fireEvent.click(screen.getByRole("button", { name: "Actions for main" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Clear upstream…" }));
+  }
+
   it("asks for confirmation before clearing the upstream", async () => {
     const { props } = renderTree({ upstream: up });
-    fireEvent.click(screen.getByRole("button", { name: "Clear upstream" }));
+    chooseClearUpstream();
     expect(props.onClearUpstream).not.toHaveBeenCalled();
     const dialog = await screen.findByRole("dialog", { name: "Clear upstream of main", hidden: true });
     fireEvent.click(within(dialog).getByRole("button", { name: "Clear upstream", hidden: true }));
@@ -1098,7 +1105,7 @@ describe("BranchTree — remote list states and upstream block", () => {
 
   it("says why Clear upstream can't run while the repository is busy, there and in its confirmation (#748)", async () => {
     const { props, rerender } = renderTree({ upstream: up });
-    fireEvent.click(screen.getByRole("button", { name: "Clear upstream" }));
+    chooseClearUpstream();
     await screen.findByRole("dialog", { name: "Clear upstream of main", hidden: true });
     rerender(<BranchTreeWithDialogs {...props} operationDisabled operationDisabledReason="A merge is in progress." />);
     const dialog = screen.getByRole("dialog", { name: "Clear upstream of main", hidden: true });
@@ -1107,10 +1114,11 @@ describe("BranchTree — remote list states and upstream block", () => {
     expect(describedByText(confirm)).toBe("A merge is in progress.");
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel", hidden: true }));
 
-    const button = screen.getByRole("button", { name: "Clear upstream" });
-    expect(button).toHaveAttribute("aria-disabled", "true");
-    expect(describedByText(button)).toBe("A merge is in progress.");
-    fireEvent.click(button);
+    fireEvent.click(screen.getByRole("button", { name: "Actions for main" }));
+    const item = screen.getByRole("menuitem", { name: "Clear upstream…" });
+    expect(item).toBeDisabled();
+    expect(item).toHaveAttribute("title", "A merge is in progress.");
+    fireEvent.click(item);
     expect(screen.queryByRole("dialog", { name: "Clear upstream of main", hidden: true })).toBeNull();
     expect(props.onClearUpstream).not.toHaveBeenCalled();
   });
@@ -1241,7 +1249,7 @@ describe("BranchTree — keyboard menus", () => {
     const row = screen.getByTitle("main").closest('[role="button"]') as HTMLElement;
     row.focus();
     fireEvent.keyDown(row, { key: "ContextMenu" });
-    expect(screen.getByRole("menuitem", { name: "Rename" })).toHaveFocus();
+    expect(screen.getByRole("menuitem", { name: "Rename…" })).toHaveFocus();
   });
 
   it("the Menu key on a row's '…' button opens the row's menu and Escape returns to the button", () => {
@@ -1258,8 +1266,8 @@ describe("BranchTree — keyboard menus", () => {
     const row = screen.getByTitle("feat/foo").closest('[role="button"]') as HTMLElement;
     row.focus();
     fireEvent.keyDown(row, { key: "ContextMenu" });
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
-    fireEvent.keyDown(screen.getByRole("textbox", { name: "Rename feat/foo" }), { key: "F10", shiftKey: true });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename…" }));
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "New name", hidden: true }), { key: "F10", shiftKey: true });
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
