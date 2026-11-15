@@ -82,9 +82,6 @@ const noopHandlers = {
   onDiscardFile: vi.fn(),
   onDiscardAllUnstaged: vi.fn(),
   onIgnorePath: vi.fn(),
-  onAbortMerge: vi.fn(),
-  onRebaseContinue: vi.fn(),
-  onRebaseAbort: vi.fn(),
 };
 
 function renderUncommitted(
@@ -984,7 +981,6 @@ describe("DiffPane", () => {
     });
 
     it("leaves an interrupted rebase's reason and Abort to the strip (#995)", () => {
-      const onRebaseAbort = vi.fn();
       renderUncommitted(fakeClient({}), status, {
         rebaseProgress: { currentStep: 1, totalSteps: 3 },
         headInfo: {
@@ -992,7 +988,6 @@ describe("DiffPane", () => {
           rebase: { branch: "topic", onto: "o", currentStep: 1, totalSteps: 3, editing: null, splitParts: 0, health: { kind: "Diverged", reason: "BranchMoved" } },
           bisect: null, terminalSequence: null, terminalRebase: null,
         },
-        onRebaseAbort,
       });
 
       const dock = screen.getByRole("group", { name: "Commit actions" });
@@ -1031,14 +1026,12 @@ describe("DiffPane", () => {
     });
 
     it("keeps a paused cherry-pick sequence's status and controls out of the dock: the strip has them (#995)", () => {
-      const onSequenceContinue = vi.fn();
-      const onSequenceAbort = vi.fn();
       const sequence = { kind: "CherryPick" as const, currentStep: 2, totalSteps: 5, currentCommit: "c" };
       const headInfo = { headId: "abc", detachedAt: null, headPushed: false, operation: "CherryPick" as const, operationLeftover: false, squashMessage: null, commitHooks: [], sequence, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null };
       const { unmount } = renderUncommitted(
         fakeClient({ getConflictHunks: async () => [] }),
         [...status, { path: "c.txt", oldPath: null, staged: false, kind: "Conflicted" }],
-        { headInfo, onSequenceContinue, onSequenceAbort },
+        { headInfo },
       );
 
       const dock = screen.getByRole("group", { name: "Commit actions" });
@@ -1051,14 +1044,10 @@ describe("DiffPane", () => {
       // Stopped by an error: the same.
       renderUncommitted(fakeClient({}), status, {
         headInfo: { ...headInfo, operation: null, sequence: { ...sequence, kind: "Revert" }, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null },
-        onSequenceContinue,
-        onSequenceAbort,
       });
       const revertDock = screen.getByRole("group", { name: "Commit actions" });
       expect(within(revertDock).queryByText("Revert in progress")).toBeNull();
       expect(within(revertDock).queryByRole("button", { name: /revert/ })).toBeNull();
-      expect(onSequenceContinue).not.toHaveBeenCalled();
-      expect(onSequenceAbort).not.toHaveBeenCalled();
     });
 
     it("keeps the commit box in the pinned commit-actions group", () => {
