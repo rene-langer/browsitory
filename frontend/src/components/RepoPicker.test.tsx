@@ -126,6 +126,45 @@ describe("RepoPicker recent repositories (#690)", () => {
     expect(onOpenRepo).not.toHaveBeenCalled();
   });
 
+  it("Locate… picks the folder's new place, replaces the entry and opens it (#998)", async () => {
+    const onOpenRepo = vi.fn();
+    const removeRecentRepo = vi.fn(async () => {});
+    const pickRepoFolder = vi.fn(async () => "/moved/gone");
+    const client = fakeClient({
+      listRecentRepos: async () => ["/repo/a", "/repo/gone"],
+      listMissingRecentRepos: async () => ["/repo/gone"],
+      removeRecentRepo,
+      pickRepoFolder,
+    });
+    render(<RepoPicker client={client} onOpenRepo={onOpenRepo} {...workspaceProps()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Locate gone…" }));
+
+    await waitFor(() => expect(onOpenRepo).toHaveBeenCalledWith("/moved/gone"));
+    expect(removeRecentRepo).toHaveBeenCalledWith("/repo/gone");
+    await waitFor(() => expect(screen.queryByText("/repo/gone")).toBeNull());
+  });
+
+  it("Locate… keeps the entry when the folder dialog is cancelled (#998)", async () => {
+    const onOpenRepo = vi.fn();
+    const removeRecentRepo = vi.fn(async () => {});
+    const pickRepoFolder = vi.fn(async () => null);
+    const client = fakeClient({
+      listRecentRepos: async () => ["/repo/gone"],
+      listMissingRecentRepos: async () => ["/repo/gone"],
+      removeRecentRepo,
+      pickRepoFolder,
+    });
+    render(<RepoPicker client={client} onOpenRepo={onOpenRepo} {...workspaceProps()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Locate gone…" }));
+
+    await waitFor(() => expect(pickRepoFolder).toHaveBeenCalled());
+    expect(removeRecentRepo).not.toHaveBeenCalled();
+    expect(onOpenRepo).not.toHaveBeenCalled();
+    expect(screen.getByText("/repo/gone")).toBeInTheDocument();
+  });
+
   it("keeps the entry and shows the error when removing fails", async () => {
     const client = fakeClient({
       listRecentRepos: async () => ["/repo/a"],
