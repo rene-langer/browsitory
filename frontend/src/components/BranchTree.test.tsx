@@ -330,6 +330,20 @@ describe("BranchTree — local branches", () => {
     expect(props.onShowAllGraphBranches).toHaveBeenCalledTimes(2);
   });
 
+  it("leaves Show all branches out of the branch menus while the graph shows every branch (#985)", async () => {
+    const remotes = [{ name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null }];
+    renderTree({ remotes, onListRemoteBranches: vi.fn().mockResolvedValue(["topic"]) });
+    fireEvent.click(screen.getByRole("button", { name: "Actions for main" }));
+    expect(screen.getByRole("menuitem", { name: "Isolate branch" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Show all branches" })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Actions for origin/topic" }));
+    expect(screen.getByRole("menuitem", { name: "Isolate branch" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Show all branches" })).toBeNull();
+  });
+
   it("Show all branches is enabled when only a remote selection is saved", () => {
     const { props } = renderTree({ graphRemoteBranchSelection: [] });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
