@@ -39,10 +39,11 @@ changes aside; see [Stashes](stashes.md).
 ## The file list
 
 Both groups are always on screen: each scrolls on its own when it holds many files, and an empty
-one says so. Each row shows a status letter (**M** modified, **A** added, **U** untracked, **D**
-deleted, **R** renamed, **T** type changed, **C** conflicted; hover it for the word), the path, a
-**⋯** menu and a stage or unstage button. The two buttons are always there, dimmed until you
-point at the row or select it.
+one says so. Each row shows a status letter (**M** modified, **A** added, **?** untracked, as in
+`git status --short`, **D** deleted, **R** renamed, **T** type changed, **C** conflicted; hover it
+for the word), the path, a **⋯** menu and a stage or unstage button. The two buttons are always
+there, dimmed until you point at the row or select it. Above the diff, the file's state reads
+**Untracked**, **Modified, not staged** or **Added, staged**.
 
 A new folder with more than 500 files that git doesn't ignore (a `node_modules` or build output
 not yet in `.gitignore`) is one row, **untracked folder, more than 500 files**, instead of one row

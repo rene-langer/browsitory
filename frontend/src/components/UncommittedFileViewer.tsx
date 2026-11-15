@@ -226,8 +226,9 @@ export function UncommittedFileViewer({
     >
       <div className={styles.viewerHeader}>
         <span className={styles.path}>{entry.path}</span>
+        {/* "Untracked" says it all; the rest name the side plainly (#1027). */}
         <span className={styles.viewerKind}>
-          {kind}, {side}
+          {kind === "Untracked" ? kind : `${kind}, ${entry.staged ? "staged" : "not staged"}`}
         </span>
         {renamedFrom !== null && <span className={styles.renamedFrom}>Renamed from {renamedFrom}</span>}
         <div className={styles.rowActions}>
