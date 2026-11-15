@@ -37,6 +37,63 @@ describe("AccordionSection's nested heading", () => {
   });
 });
 
+// #1010: an open section keeps room for its content, up to a cap, instead of being squeezed by
+// the sections next to it; beyond the cap it scrolls, with a fade at the cut edge.
+describe("AccordionSection's room for its content", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Lays the section out: its header row is 28px, its content `content`px, its body `visible`px. */
+  function layOut(content: number, visible: number) {
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) {
+      if (this.dataset.part === "header") return 28;
+      if (this.dataset.part === "content") return content;
+      return 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.dataset.part === "body" ? visible : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.dataset.part === "body" ? content : 0;
+    });
+  }
+
+  it("gives an open section a minimum height of its header and its content, up to the cap", () => {
+    layOut(120, 120);
+    render(
+      <AccordionSection title="Stashes" storageKey="test-room" defaultOpen>
+        <div>stash list</div>
+      </AccordionSection>,
+    );
+    const section = screen.getByRole("region", { name: "Stashes" });
+    expect(section.style.getPropertyValue("--section-header")).toBe("28px");
+    expect(section.style.getPropertyValue("--section-content")).toBe("120px");
+
+    const open = rulesOf(accordionCss).find(({ selector }) => selector === '.section[data-open="true"]');
+    expect(open?.body).toMatch(
+      /min-height:\s*calc\(var\(--section-header\)\s*\+\s*min\(var\(--section-content\),\s*var\(--section-cap\)\)\)/,
+    );
+  });
+
+  it("fades the cut edge while the content scrolls, and not once the end is in view", () => {
+    layOut(600, 200);
+    render(
+      <AccordionSection title="Branches" storageKey="test-fade" defaultOpen>
+        <div>branch list</div>
+      </AccordionSection>,
+    );
+    const body = screen.getByText("branch list").closest("[data-part='body']") as HTMLElement;
+    expect(body).toHaveAttribute("data-fade", "true");
+
+    vi.spyOn(HTMLElement.prototype, "scrollTop", "get").mockImplementation(function (this: HTMLElement) {
+      return this.dataset.part === "body" ? 400 : 0;
+    });
+    fireEvent.scroll(body);
+    expect(body).toHaveAttribute("data-fade", "false");
+  });
+});
+
 describe("AccordionSection", () => {
   beforeEach(() => {
     localStorage.clear();

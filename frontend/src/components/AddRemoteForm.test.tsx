@@ -10,6 +10,18 @@ describe("AddRemoteForm (in BranchTree)", () => {
     localStorage.clear();
   });
 
+  it("scrolls the whole form into view when it opens, its buttons included (#1010)", () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView as unknown as Element["scrollIntoView"];
+    try {
+      renderTree({ addRemoteDraftOpen: true });
+      expect(scrollIntoView.mock.contexts).toContain(screen.getByRole("form", { name: "Add remote" }));
+      expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ block: "nearest" }));
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+    }
+  });
+
   it("Add remote shows a remote-name problem inline and keeps Add remote disabled", () => {
     const onAddRemote = vi.fn().mockResolvedValue(null);
     renderTree({ addRemoteDraftOpen: true, onAddRemote });

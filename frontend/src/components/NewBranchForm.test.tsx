@@ -2,11 +2,27 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BranchTree } from "./BranchTree";
 import { renderTree, treeProps } from "../test/branchTreeProps";
+import { BranchTreeWithDialogs } from "../test/BranchTreeWithDialogs";
 import { describedByText } from "../test/describedBy";
 
 describe("NewBranchForm (in BranchTree)", () => {
   beforeEach(() => {
     localStorage.clear();
+  });
+
+  it("scrolls the whole form into view when it opens (#1010)", () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView as unknown as Element["scrollIntoView"];
+    try {
+      const { props, rerender } = renderTree();
+      expect(scrollIntoView.mock.contexts.some((element) => (element as Element).tagName === "FORM")).toBe(false);
+      rerender(<BranchTreeWithDialogs {...props} createBranchDraft={{ startPoint: "HEAD" }} />);
+      const form = screen.getByRole("form", { name: "New branch" });
+      expect(scrollIntoView.mock.contexts).toContain(form);
+      expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ block: "nearest" }));
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+    }
   });
 
   it("a non-null createBranchDraft shows the create form; submitting calls onCreateBranch with its startPoint", async () => {
