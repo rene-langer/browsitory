@@ -47,7 +47,7 @@ describe("Browsitory files at a commit", () => {
     await waitUntilInPage(`[role="region"][aria-label="Content of ${FILE}"]`, "version one", { contains: true });
 
     await clickInPage("button", "Restore…");
-    await clickInPage('dialog[aria-label="Confirm restore"] button', "Restore");
+    await clickInPage(`dialog[aria-label="Restore ${FILE}"] button`, "Restore");
     await browser.waitUntil(() => fileContents() === "version one\n", {
       timeout: UI_TIMEOUT,
       timeoutMsg: "restore did not write the older version",
