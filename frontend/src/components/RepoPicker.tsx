@@ -27,6 +27,9 @@ export function RepoPicker({
   onCloneRepository,
   onNewRepository,
   welcome,
+  onClose,
+  openPaths,
+  onSwitchToTab,
 }: {
   client: RepoClient;
   onOpenRepo: (path: string) => void;
@@ -44,6 +47,14 @@ export function RepoPicker({
   onNewRepository?: () => void;
   /** Shows the welcome on top (#688): the first launch, until dismissed or a repository opens. */
   welcome?: { onDismiss: () => void; onOpenUserGuide: () => void };
+  /**
+   * Opened over a repository (the tab bar's "+", #1013): an "Open repository" dialog header with
+   * a close button, and no palette tip.
+   */
+  onClose?: () => void;
+  /** Repositories open as tabs (#1013): marked, and a click switches to their tab. */
+  openPaths?: ReadonlySet<string>;
+  onSwitchToTab?: (path: string) => void;
 }) {
   useKeymap();
   const [recentRepos, setRecentRepos] = useState<string[]>([]);
@@ -154,9 +165,22 @@ export function RepoPicker({
   // Without a key for it (#898) the header's Commands button opens the palette.
   const paletteKey = paletteLabel === "" ? "Commands" : <kbd>{paletteLabel}</kbd>;
 
+  // Over a repository the picker is a dialog (#1013): its own header with ×, no card around it.
+  // Kept to this header so it can move onto the shared dialog header later.
+  const inDialog = onClose !== undefined;
+
   return (
-    <div className={styles.picker}>
-      <Panel title="Open a repository">
+    <div className={inDialog ? styles.inDialog : styles.picker}>
+      <Panel
+        title={inDialog ? "Open repository" : "Open a repository"}
+        actions={
+          inDialog ? (
+            <button type="button" className={styles.closeButton} aria-label="Close" title="Close" onClick={onClose}>
+              <X size={16} aria-hidden="true" />
+            </button>
+          ) : undefined
+        }
+      >
         {welcome !== undefined ? (
           <section className={styles.welcome} aria-labelledby="repo-picker-welcome">
             <h3 id="repo-picker-welcome" className={styles.welcomeTitle}>
@@ -176,12 +200,7 @@ export function RepoPicker({
             </Toolbar>
           </section>
         ) : (
-          <>
-            <Toolbar>{openButtons}</Toolbar>
-            <p className={styles.hint}>
-              Tip: press {paletteKey} once a repository is open to search every command.
-            </p>
-          </>
+          <Toolbar>{openButtons}</Toolbar>
         )}
         {error !== null && <InlineError message={error} onDismiss={() => setError(null)} />}
         {(recentRepos.length > 0 || workspaces.length > 0) && (
@@ -212,12 +231,13 @@ export function RepoPicker({
                 const name = nameOf(path);
                 const missing = missingRepos.has(path);
                 const pinned = pinnedRepos.has(path);
+                const openInTab = openPaths?.has(path) === true && onSwitchToTab !== undefined;
                 return (
                   <ListRow key={path} className={styles.recentRow}>
                     <button
                       type="button"
                       className={missing ? `${styles.repoRow} ${styles.missing}` : styles.repoRow}
-                      onClick={() => onOpenRepo(path)}
+                      onClick={() => (openInTab ? onSwitchToTab(path) : onOpenRepo(path))}
                     >
                       <span className={styles.repoName}>
                         {name}
@@ -229,6 +249,7 @@ export function RepoPicker({
                         )}
                       </span>
                       <span className={styles.repoPath}>{path}</span>
+                      {openInTab && <span className={styles.openBadge}>Open in a tab</span>}
                     </button>
                     <button
                       type="button"
@@ -309,6 +330,10 @@ export function RepoPicker({
             )}
           </div>
         </section>
+        {/* Below the lists (#1013): the welcome has its own, and over a repository it's moot. */}
+        {!inDialog && welcome === undefined && (
+          <p className={styles.hint}>Tip: press {paletteKey} once a repository is open to search every command.</p>
+        )}
         {deleteConfirmation !== null && (
           <ConfirmDialog
             ariaLabel={`Delete workspace ${deleteConfirmation.name}`}
