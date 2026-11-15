@@ -2,7 +2,6 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderTree } from "../test/branchTreeProps";
 import { BranchTreeWithDialogs } from "../test/BranchTreeWithDialogs";
-import { describedByText } from "../test/describedBy";
 
 const oneRemote = [{ name: "origin", fetchUrl: "git@github.com:user/repo.git", pushUrl: null, authMode: null, authUsername: null }];
 const up = { localBranch: "main", remoteName: "origin", remoteBranch: "main" };
@@ -46,7 +45,8 @@ describe("SetUpstreamDialog (in BranchTree)", () => {
   it("blocks clearing and setting the upstream, saying why, while the repository is busy (#521)", async () => {
     const reason = "A transfer is in progress.";
     const { props, rerender } = renderTree({ upstream: up });
-    fireEvent.click(screen.getByRole("button", { name: "Clear upstream" }));
+    fireEvent.click(screen.getByRole("button", { name: "Actions for main" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Clear upstream…" }));
     await screen.findByRole("dialog", { name: "Clear upstream of main", hidden: true });
 
     rerender(<BranchTreeWithDialogs {...props} operationDisabled operationDisabledReason={reason} />);
@@ -58,9 +58,10 @@ describe("SetUpstreamDialog (in BranchTree)", () => {
     expect(props.onClearUpstream).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel", hidden: true }));
 
-    expect(screen.getByRole("button", { name: "Clear upstream" })).toHaveAttribute("aria-disabled", "true");
-    expect(describedByText(screen.getByRole("button", { name: "Clear upstream" }))).toBe(reason);
     fireEvent.contextMenu(screen.getByText(/main.*\(current\)/));
+    const clearItem = screen.getByRole("menuitem", { name: "Clear upstream…" });
+    expect(clearItem).toBeDisabled();
+    expect(clearItem).toHaveAttribute("title", reason);
     const setItem = screen.getByRole("menuitem", { name: "Set upstream…" });
     expect(setItem).toBeDisabled();
     expect(setItem).toHaveAttribute("title", reason);

@@ -65,6 +65,15 @@ describe("StashPanel", () => {
     expect(screen.getByText(/No stashes/)).toBeInTheDocument();
   });
 
+  it("points the empty state to Stash in the repository toolbar (#1026)", () => {
+    renderPanel({ stashes: [] });
+
+    expect(
+      screen.getByText("No stashes. Use Stash in the repository toolbar to set your changes aside."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/commit box/)).toBeNull();
+  });
+
   it("renders each stash's name without git's branch prefix, and its branch, age and file count", () => {
     renderPanel({
       stashes: [

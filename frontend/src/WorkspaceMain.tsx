@@ -5,6 +5,7 @@ import type { CommitGraphLayout } from "./lib/useCommitGraphLayout";
 import { useCallback, useMemo, useRef } from "react";
 import type { CommitDraft } from "./components/CommitBox";
 import { CommitGraph } from "./components/CommitGraph";
+import { GraphFilterStrip } from "./components/GraphFilterStrip";
 import { CommitSearchBar } from "./components/CommitSearchBar";
 import { CommitSearchResults } from "./components/CommitSearchResults";
 import { CompareDiffPane } from "./components/CompareDiffPane";
@@ -151,6 +152,7 @@ export function WorkspaceMain({
     () => issueForgeRepository(appState.state.forgeRepositories, upstreamRemote),
     [appState.state.forgeRepositories, upstreamRemote],
   );
+  const currentBranch = appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null;
   // #448: "Save as patch…" for commits (oldest first).
   const savePatchOfCommits = (commitIds: string[]) =>
     void appState.savePatch({ kind: "Commits", commitIds }, commitsPatchName(commitIds, appState.state.commits));
@@ -200,6 +202,10 @@ export function WorkspaceMain({
                 onToggleList={() => writeSearchView(searchView === "list" ? "graph" : "list")}
               />
             )}
+            <GraphFilterStrip
+              selection={appState.state.graphSelection}
+              onShowAll={() => void appState.showAllGraphBranches()}
+            />
             {commitSearch.results !== null && !searchInGraph ? (
               <CommitSearchResults
                 results={commitSearch.results}
@@ -235,7 +241,12 @@ export function WorkspaceMain({
                 onRebaseFromCommit={appState.openRebasePlanner}
                 onRebaseSelection={appState.openRebaseSelection}
                 headInfo={appState.state.headInfo}
-                currentBranch={appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null}
+                currentBranch={currentBranch}
+                currentBranchShown={
+                  currentBranch === null ||
+                  appState.state.graphSelection.local === null ||
+                  appState.state.graphSelection.local.includes(currentBranch)
+                }
                 onCherryPick={cherryPickCommit}
                 onRevert={revertCommit}
                 onCherryPickMany={(ids) =>

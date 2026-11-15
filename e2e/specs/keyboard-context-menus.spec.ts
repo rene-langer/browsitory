@@ -65,12 +65,12 @@ describe("Browsitory keyboard context menus", () => {
     // not open a second one. Give it a moment to arrive before counting.
     await browser.pause(300);
     expect(await $$("[role='menu']")).toHaveLength(1);
-    // Switch to is disabled on the current branch, so Rename is the first focusable item.
-    expect(await browser.execute(() => document.activeElement?.textContent)).toBe("Rename");
+    // Switch to is disabled on the current branch, so Rename… is the first focusable item.
+    expect(await browser.execute(() => document.activeElement?.textContent)).toBe("Rename…");
 
     await browser.keys(["ArrowDown"]);
     expect(await browser.execute(() => document.activeElement?.getAttribute("role"))).toBe("menuitem");
-    expect(await browser.execute(() => document.activeElement?.textContent)).not.toBe("Rename");
+    expect(await browser.execute(() => document.activeElement?.textContent)).not.toBe("Rename…");
 
     await browser.keys(["Escape"]);
     await waitUntilGoneInPage("[role='menu']");

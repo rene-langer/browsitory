@@ -113,18 +113,22 @@ export function SubmodulePanel({
       count={submodules.length}
       revealRequest={revealRequest}
     >
-      <label>
-        <input
-          type="checkbox"
-          checked={recursive}
-          disabled={operationDisabled}
-          onChange={(event) => setRecursive(event.target.checked)}
-        />
-        Update recursively
-      </label>
       {submodules.length === 0 ? (
-        <p className={styles.empty}>No submodules. They show up here once the repo's .gitmodules records one.</p>
+        // No Update recursively without anything to update (#1026).
+        <p className={styles.empty}>
+          No submodules. A submodule shows here once the repository&apos;s .gitmodules file records it.
+        </p>
       ) : (
+        <>
+        <label className={styles.recursive}>
+          <input
+            type="checkbox"
+            checked={recursive}
+            disabled={operationDisabled}
+            onChange={(event) => setRecursive(event.target.checked)}
+          />
+          Update recursively
+        </label>
         <ul className={styles.list} aria-label="Submodules">
           {submodules.map((submodule) => {
             const rowDisabled = operationDisabled || pendingPath === submodule.path;
@@ -192,6 +196,7 @@ export function SubmodulePanel({
             );
           })}
         </ul>
+        </>
       )}
       {menu !== null && menuSubmodule !== undefined && (
         <ContextMenu

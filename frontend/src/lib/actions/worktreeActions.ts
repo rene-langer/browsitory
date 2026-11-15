@@ -7,7 +7,7 @@ export const MAIN_WORKTREE = "The main worktree can't be removed.";
 export interface WorktreeActions {
   /** Opens the worktree in a tab of its own. */
   open: PaletteAction;
-  /** Opens the confirmation, in the panel and the palette alike (#990). */
+  /** Opens the confirmation, in the panel and the palette alike (#990); the panel leaves it out for the main worktree. */
   remove: PaletteAction;
 }
 
@@ -19,14 +19,15 @@ export interface WorktreeActions {
  */
 export function worktreeActions(blockers: OperationBlockers, worktree: WorktreeInfo): WorktreeActions {
   return {
+    // The row menu's labels don't repeat the path the row shows (#1011).
     open: {
-      label: `Open ${worktree.path}`,
+      label: "Open in new tab",
       // The main worktree is named "main" (`list_worktrees`), which would read as a branch.
       paletteLabel: worktree.isMain ? "Open main worktree" : `Open worktree ${worktree.name}`,
       ...gate(blockers),
     },
     remove: {
-      label: `Remove ${worktree.path}…`,
+      label: "Remove…",
       paletteLabel: `Remove worktree ${worktree.name}…`,
       ...gate(blockers, worktree.isMain ? MAIN_WORKTREE : undefined),
     },
