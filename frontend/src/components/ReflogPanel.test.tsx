@@ -114,7 +114,7 @@ describe("ReflogPanel", () => {
     expect(onRestore).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: `Restore main to ${entry.newId}` }));
-    fireEvent.click(within(screen.getByRole("dialog", { name: "Restore main" })).getByRole("button", { name: "Restore reflog entry" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Restore main" })).getByRole("button", { name: "Restore main" }));
     expect(onRestore).toHaveBeenCalledWith("refs/heads/main", entry.newId);
   });
 
@@ -253,7 +253,7 @@ describe("ReflogPanel — windowed rows", () => {
       fireEvent.click(screen.getByRole("button", { name: `Restore main to ${many[505].newId}` }));
       fireEvent.click(
         within(screen.getByRole("dialog", { name: "Restore main" })).getByRole("button", {
-          name: "Restore reflog entry",
+          name: "Restore main",
         }),
       );
       expect(onRestore).toHaveBeenCalledWith("refs/heads/main", many[505].newId);
