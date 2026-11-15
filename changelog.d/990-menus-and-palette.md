@@ -4,7 +4,7 @@ Each action now has one name, the same in its menu, the command palette and the 
 
 - Changed: an item ends in "…" exactly when a dialog or confirmation follows ("Edit remote…",
   "Manage credentials…", "Remove remote…", "Add remote…", "Discard all unstaged changes…", a
-  worktree's "Remove ⟨path⟩…"). The palette's name is the menu's plus what it acts on ("Push
+  worktree's "Remove…"). The palette's name is the menu's plus what it acts on ("Push
   current branch to origin" in both, "Push current branch to…", "Reset main to 1a2b3c4…"). The
   palette's diff options name what they will do ("Show whitespace" or "Hide whitespace", "Wrap
   lines" or "Stop wrapping lines", "More context lines"), and the shortcut list uses the
