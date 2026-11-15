@@ -1,6 +1,5 @@
-import { ReasonButton } from "./primitives/ReasonButton";
 import type { ComponentProps } from "react";
-import { FileDiff, GitBranch, PanelLeft, RefreshCw } from "lucide-react";
+import { GitBranch, PanelLeft, RefreshCw } from "lucide-react";
 import type { UpstreamInfo } from "../ipc/RepoClient";
 import type { SplitViewLeftState } from "./primitives/SplitView";
 import { ariaKeyShortcuts, shortcutLabel, withShortcutLabel } from "../lib/keybindings";
@@ -15,7 +14,8 @@ import styles from "./RepoToolbar.module.css";
  * The one repository toolbar above the sidebar, graph and diff (#637): the sidebar toggle (a
  * drawer in a narrow layout, #635), the current branch, which opens the branch switcher (#638),
  * Back/Forward, Fetch/Pull/Push with the ahead/behind counts, what is running (a transfer's
- * progress and Cancel, #659), Stash, Apply patch… (#649), Undo/Redo and Refresh.
+ * progress and Cancel, #659), Stash (with Apply patch… in its menu, #649, #1006), Undo/Redo and
+ * Refresh.
  */
 export function RepoToolbar({
   sidebar,
@@ -40,7 +40,7 @@ export function RepoToolbar({
   };
   navigation: ComponentProps<typeof NavigationButtons>;
   /** Includes `activity`, the running transfer or action (#659, #660). */
-  sync: Omit<ComponentProps<typeof SyncBar>, "leading" | "trailing" | "ariaLabel" | "pane">;
+  sync: Omit<ComponentProps<typeof SyncBar>, "leading" | "trailing" | "ariaLabel" | "pane" | "applyPatch">;
   undo: ComponentProps<typeof UndoRedoButtons>;
   /** "Apply patch…" (#649), disabled with `disabledReason` while repository actions can't run. */
   applyPatch: { disabledReason: string | null; onApplyPatch: () => void };
@@ -55,6 +55,7 @@ export function RepoToolbar({
       detachedAt={branch.rebasing == null ? sync.detachedAt : null}
       ariaLabel="Repository"
       pane
+      applyPatch={{ reason: applyPatch.disabledReason, onApplyPatch: applyPatch.onApplyPatch }}
       leading={
         <>
           <button
@@ -75,15 +76,6 @@ export function RepoToolbar({
       }
       trailing={
         <>
-          <ReasonButton
-            className={styles.iconButton}
-            aria-label="Apply patch…"
-            title="Apply a patch file to the working tree"
-            reason={applyPatch.disabledReason}
-            onClick={applyPatch.onApplyPatch}
-          >
-            <FileDiff size={14} aria-hidden="true" />
-          </ReasonButton>
           <UndoRedoButtons {...undo} />
           <button
             type="button"

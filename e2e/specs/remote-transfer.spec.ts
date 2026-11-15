@@ -233,8 +233,9 @@ describe("Browsitory remote transfer", () => {
     await upstreamBranch.setValue("main");
     await (await upstreamDialog.$("button=Set upstream")).click();
 
-    // The repository toolbar's Pull (#637): the sidebar no longer has one of its own.
-    const pullButton = await $("div[aria-label='Repository']").$("button=Pull");
+    // The repository toolbar's Pull (#637): the sidebar no longer has one of its own. Its text may
+    // end in the commits to pull, "Pull↓1" (#1006).
+    const pullButton = await $("div[aria-label='Repository']").$("button*=Pull");
     // A busy Pull is `aria-disabled` with its reason (#664), not `disabled`.
     await browser.waitUntil(async () => (await pullButton.getAttribute("aria-disabled")) !== "true", {
       timeoutMsg: "expected Pull to become available",

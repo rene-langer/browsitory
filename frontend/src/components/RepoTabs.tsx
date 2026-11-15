@@ -38,7 +38,7 @@ export function RepoTabs({
   onAddTab,
   tabMenuItems,
   onTabMenuOpen,
-  changedPaths,
+  changedCounts,
   onRenameTab,
 }: {
   openRepos: OpenRepo[];
@@ -53,8 +53,11 @@ export function RepoTabs({
   tabMenuItems?: (path: string) => ContextMenuItem[];
   /** Called as a tab's context menu opens, so items that depend on the disk can be read again. */
   onTabMenuOpen?: (path: string) => void;
-  /** Repositories with uncommitted changes: their tabs show a marker (#613). */
-  changedPaths?: ReadonlySet<string>;
+  /**
+   * Repositories with uncommitted changes and how many files changed: their tabs show "±N" (#613,
+   * #1028).
+   */
+  changedCounts?: ReadonlyMap<string, number>;
   /** Opens the rename dialog of a tab (F2 on the focused tab, #625); omitted, F2 does nothing. */
   onRenameTab?: (path: string) => void;
 }) {
@@ -63,6 +66,7 @@ export function RepoTabs({
   const [menu, setMenu] = useState<{ path: string; x: number; y: number } | null>(null);
   const [tabList, setTabList] = useState<{ x: number; y: number } | null>(null);
   if (openRepos.length === 0) return null;
+  const changedPaths = changedCounts === undefined ? undefined : new Set(changedCounts.keys());
 
   // Roving tabindex: only the selected tab (or the first, when none is) is a tab stop; arrow keys
   // move the focus between tabs, and Enter or Space (the tab is a button) shows the focused one
@@ -112,8 +116,9 @@ export function RepoTabs({
   const renderTab = (repo: OpenRepo) => {
     const selected = repo.path === activePath;
     const busy = busyPaths.has(repo.path);
-    const changed = changedPaths?.has(repo.path) ?? false;
-    const changesId = `${repoTabId(repo.path)}-changes`;
+    const changedFiles = changedCounts?.get(repo.path) ?? 0;
+    const files = `${changedFiles} ${changedFiles === 1 ? "file" : "files"}`;
+    const changes = changedFiles > 0 ? `uncommitted changes in ${files}` : null;
     return (
       <div key={repo.path} role="presentation" className={selected ? `${styles.tab} ${styles.active}` : styles.tab}>
         <button
@@ -124,7 +129,8 @@ export function RepoTabs({
           aria-controls={repoPanelId(repo.path)}
           tabIndex={repo.path === tabStopPath ? 0 : -1}
           aria-keyshortcuts={onRenameTab !== undefined ? "Delete F2" : "Delete"}
-          aria-describedby={changed ? changesId : undefined}
+          // The change count is part of the tab's name (#1028), not only a mark beside it.
+          aria-label={changes === null ? undefined : `${repo.displayName}, ${changes}`}
           aria-haspopup={tabMenuItems !== undefined ? "menu" : undefined}
           onKeyDown={(event) => handleTabKeyDown(event, repo.path, busy)}
           onContextMenu={
@@ -142,14 +148,11 @@ export function RepoTabs({
         >
           {repo.displayName}
         </button>
-        {/* The dot is decoration; the tab's description carries the meaning (not only colour). */}
-        {changed && (
-          <>
-            <span className={styles.changeMarker} aria-hidden="true" title="Uncommitted changes" />
-            <span id={changesId} hidden>
-              Uncommitted changes
-            </span>
-          </>
+        {/* "±N" rather than a dot, which reads as "unsaved" (#1028); the tab's name says it too. */}
+        {changes !== null && (
+          <span className={styles.changeMarker} aria-hidden="true" title={`Uncommitted changes in ${files}`}>
+            ±{changedFiles}
+          </span>
         )}
         {/* `aria-hidden`/`tabIndex={-1}` pull this out of the tablist's accessible children (a
             tablist may only own `role="tab"` elements per WAI-ARIA — axe's `aria-required-children`

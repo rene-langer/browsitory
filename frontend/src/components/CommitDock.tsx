@@ -2,7 +2,7 @@ import { IdentityDialog } from "./IdentityDialog";
 import { useCallback, useEffect, useState } from "react";
 import type { GraphCommit, HeadInfo, RepoClient } from "../ipc/RepoClient";
 import { messageHistoryEntries, readCommitMessages, recentBranchCommits } from "../lib/commitMessageHistory";
-import { conflictReason, isSplitting, rebaseInterruption } from "../lib/operationStatus";
+import { isSplitting, rebaseInterruption } from "../lib/operationStatus";
 import { useCommitMessageSettingsContext } from "../state/useCommitMessageSettings";
 import { useWorkspaceActions } from "../state/useWorkspaceActions";
 import { CommitBox, type CommitDraft } from "./CommitBox";
@@ -27,6 +27,7 @@ export function CommitDock({
   headInfo,
   rebaseProgress,
   stagedCount,
+  unstagedCount = 0,
   conflictCount,
   initialCommitDraft,
   focusCommitMessage,
@@ -44,6 +45,8 @@ export function CommitDock({
   headInfo: HeadInfo;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   stagedCount: number;
+  /** Unstaged and untracked files: with none, there is nothing to stage either (#1005). */
+  unstagedCount?: number;
   conflictCount: number;
   initialCommitDraft?: CommitDraft;
   focusCommitMessage: boolean;
@@ -173,8 +176,9 @@ export function CommitDock({
               ? undefined
               : { onCommitAndPush: commitFlow.onCommitAndPush, disabledReason: commitFlow.commitAndPushReason }
           }
-          disabled={stagedCount === 0 || conflictCount > 0}
-          disabledReason={conflictCount > 0 ? conflictReason(conflictCount) : "Stage changes to commit"}
+          disabled={stagedCount === 0}
+          // Nothing to stage on a clean tree, so it doesn't ask for that (#1005).
+          disabledReason={unstagedCount > 0 ? "Stage changes to commit." : "Nothing to commit."}
           // A pending squash merge pre-fills the message too, but there is no merge to abort.
           initialMessage={seededMergeMessage ?? headInfo.squashMessage ?? undefined}
           // Co-authors for a squash message, not for git's merge/pick/revert message (#142).

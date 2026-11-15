@@ -7,6 +7,8 @@ import type { OpenRepo } from "./useOpenRepos";
 export interface TabChangeMarkers {
   /** Open repositories known to have uncommitted changes (staged, unstaged or untracked). */
   changedPaths: ReadonlySet<string>;
+  /** How many files each of those has changed, a file staged and unstaged counted once (#1028). */
+  changedCounts: ReadonlyMap<string, number>;
   /** A mounted workspace's live status (the shown tab, and tabs kept in the background, #642). */
   onLiveStatus: (repoPath: string, status: StatusEntry[]) => void;
 }
@@ -25,7 +27,8 @@ function bump(generations: Map<string, number>, path: string): number {
 }
 
 export function useTabChangeMarkers(client: RepoClient, openRepos: OpenRepo[], activePath: string | null): TabChangeMarkers {
-  const [changed, setChanged] = useState<ReadonlyMap<string, boolean>>(new Map());
+  // Per path, the number of changed files (0: clean).
+  const [changed, setChanged] = useState<ReadonlyMap<string, number>>(new Map());
   // Per path, the newest check or live update: an older answer never overwrites a newer one.
   const generation = useRef(new Map<string, number>());
   const current = useRef({ openRepos, activePath });
@@ -33,11 +36,12 @@ export function useTabChangeMarkers(client: RepoClient, openRepos: OpenRepo[], a
     current.current = { openRepos, activePath };
   });
 
-  const record = useCallback((path: string, dirty: boolean) => {
+  const record = useCallback((path: string, status: StatusEntry[]) => {
+    const count = new Set(status.map((entry) => entry.path)).size;
     setChanged((prev) => {
-      if (prev.get(path) === dirty) return prev;
+      if (prev.get(path) === count) return prev;
       const next = new Map(prev);
-      next.set(path, dirty);
+      next.set(path, count);
       return next;
     });
   }, []);
@@ -50,7 +54,7 @@ export function useTabChangeMarkers(client: RepoClient, openRepos: OpenRepo[], a
           (status) => {
             if (generation.current.get(path) !== ticket) return;
             if (!current.current.openRepos.some((repo) => repo.path === path)) return;
-            record(path, status.length > 0);
+            record(path, status);
           },
           () => {},
         );
@@ -97,15 +101,16 @@ export function useTabChangeMarkers(client: RepoClient, openRepos: OpenRepo[], a
   const onLiveStatus = useCallback(
     (repoPath: string, status: StatusEntry[]) => {
       bump(generation.current, repoPath);
-      record(repoPath, status.length > 0);
+      record(repoPath, status);
     },
     [record],
   );
 
-  const changedPaths = useMemo(() => {
+  const changedCounts = useMemo(() => {
     const open = new Set(openRepos.map((repo) => repo.path));
-    return new Set([...changed].filter(([path, dirty]) => dirty && open.has(path)).map(([path]) => path));
+    return new Map([...changed].filter(([path, count]) => count > 0 && open.has(path)));
   }, [changed, openRepos]);
+  const changedPaths = useMemo(() => new Set(changedCounts.keys()), [changedCounts]);
 
-  return { changedPaths, onLiveStatus };
+  return { changedPaths, changedCounts, onLiveStatus };
 }

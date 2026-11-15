@@ -17,8 +17,8 @@ The clock button at the end of a folder's row opens its
 ## Viewing a file
 
 Click a file to see its content at that commit, read-only, with line numbers and the same syntax
-highlighting as the diffs (the **Syntax highlighting** toggle in a diff's toolbar turns it off
-for both). A PNG, JPEG, GIF or WebP image is shown as an image. Binary files, files over 2 MB and
+highlighting as the diffs (**Show syntax highlighting** in the **View** menu of a diff's toolbar
+turns it off for both). A PNG, JPEG, GIF or WebP image is shown as an image. Binary files, files over 2 MB and
 submodules are not shown; a notice says so. A symbolic link shows its target.
 
 The file's header has these actions:

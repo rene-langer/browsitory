@@ -7,6 +7,7 @@ import { credentialRemediation } from "./lib/errorMessages";
 import { publishTransportStatus } from "./ipc/transportStatus";
 import type { ReleaseNotesEntry } from "./components/ReleaseNotesModal";
 import { fakeRepoClient, graphPage } from "./test/fakeRepoClient";
+import { chooseCommitMenuItem, commitMenuItems } from "./test/commitMenu";
 import { STALE_UNDO_MESSAGE } from "./state/useUndoRedoActions";
 import { writeSearchView } from "./lib/searchViewPreference";
 
@@ -341,8 +342,8 @@ describe("App", () => {
     });
     render(<App client={client} />);
 
-    await waitFor(() => expect(screen.getByRole("tab", { name: "b" })).toHaveAccessibleDescription("Uncommitted changes"));
-    expect(screen.getByRole("tab", { name: "a" })).not.toHaveAccessibleDescription("Uncommitted changes");
+    await waitFor(() => expect(screen.getByRole("tab", { name: "b, uncommitted changes in 1 file" })).toBeInTheDocument());
+    expect(screen.getByRole("tab", { name: "a" })).toBeInTheDocument();
   });
 
   it("opens the user guide site from the palette through the client (#320)", async () => {
@@ -831,7 +832,7 @@ describe("App", () => {
     });
 
     render(<App client={client} />);
-    const tabA = await screen.findByRole("tab", { name: "a" });
+    const tabA = await screen.findByRole("tab", { name: /^a(,|$)/ });
     // The per-tab close button is `aria-hidden` (mouse-only), so it's found by position: the
     // tab's sibling inside its `role="presentation"` wrapper.
     const closeA = () => tabA.parentElement!.querySelector<HTMLButtonElement>("button:not([role='tab'])")!;
@@ -842,12 +843,14 @@ describe("App", () => {
     await waitFor(() => expect(closeA()).toBeDisabled());
 
     // Still mounted in the background, still stashing.
-    fireEvent.click(screen.getByRole("tab", { name: "b" }));
-    await waitFor(() => expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true"));
+    fireEvent.click(screen.getByRole("tab", { name: /^b(,|$)/ }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: /^b(,|$)/ })).toHaveAttribute("aria-selected", "true"));
     expect(closeA()).toBeDisabled();
 
     // Four other tabs shown since: a's workspace unloads, and with it the busy report.
-    for (const name of ["c", "d", "e"]) {
+    for (const repo of ["c", "d", "e"]) {
+      // By the repository's name, whatever its changes (#1028).
+      const name = new RegExp(`^${repo}(,|$)`);
       fireEvent.click(screen.getByRole("tab", { name }));
       await waitFor(() => expect(screen.getByRole("tab", { name })).toHaveAttribute("aria-selected", "true"));
     }
@@ -913,13 +916,13 @@ describe("App", () => {
     });
 
     render(<App client={client} />);
-    const tabA = await screen.findByRole("tab", { name: "a" });
+    const tabA = await screen.findByRole("tab", { name: /^a(,|$)/ });
     const closeA = () => tabA.parentElement!.querySelector<HTMLButtonElement>("button:not([role='tab'])")!;
 
     await waitFor(() => expect(closeA()).toBeDisabled());
 
-    fireEvent.click(screen.getByRole("tab", { name: "b" }));
-    await waitFor(() => expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true"));
+    fireEvent.click(screen.getByRole("tab", { name: /^b(,|$)/ }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: /^b(,|$)/ })).toHaveAttribute("aria-selected", "true"));
 
     // Like the plain pending/transfer case above: reopening the tab restores the rebase.
     await waitFor(() => expect(closeA()).toBeEnabled());
@@ -1109,6 +1112,8 @@ describe("App", () => {
     try {
       render(<App client={client} />);
       const box = await screen.findByRole("textbox", { name: "Commit message" });
+      // The box opens fully (Recent messages and all) once its field has focus (#1003).
+      fireEvent.focus(box);
       fireEvent.change(box, { target: { value: "feat: remembered\n\nwith a body" } });
       const commitButton = screen.getByRole("button", { name: "Commit 1 file" });
       await waitFor(() => expect(commitButton).toBeEnabled());
@@ -1215,7 +1220,7 @@ describe("App", () => {
 
     const box = await screen.findByRole("textbox", { name: "Commit message" });
     fireEvent.change(box, { target: { value: "feat: pair" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add co-author" }));
+    chooseCommitMenuItem("Add co-author…");
     fireEvent.click(await screen.findByRole("option", { name: "Ada <ada@x.org>" }));
     const commitButton = screen.getByRole("button", { name: "Commit 1 file" });
     await waitFor(() => expect(commitButton).toBeEnabled());
@@ -1227,7 +1232,7 @@ describe("App", () => {
     // A chip added after the failure goes into the retry too.
     fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "commit-msg hook failed" })).toBeNull());
-    fireEvent.click(screen.getByRole("button", { name: "Add co-author" }));
+    chooseCommitMenuItem("Add co-author…");
     fireEvent.click(await screen.findByRole("option", { name: "Bob <bob@x.org>" }));
     fireEvent.click(screen.getByRole("button", { name: "Show hook output…" }));
     const reopened = await screen.findByRole("dialog", { name: "commit-msg hook failed" });
@@ -1267,13 +1272,14 @@ describe("App", () => {
     });
     render(<App client={client} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Add co-author" }));
+    await screen.findByRole("textbox", { name: "Commit message" });
+    chooseCommitMenuItem("Add co-author…");
     fireEvent.click(await screen.findByRole("option", { name: "Ada <ada@x.org>" }));
     mergeMessage = "Merge branch 'x'";
     fireEvent.click(screen.getByRole("button", { name: "Stage a.txt" }));
     const box = screen.getByRole("textbox", { name: "Commit message" });
     await waitFor(() => expect(box).toHaveValue("Merge branch 'x'"));
-    expect(screen.queryByRole("button", { name: "Add co-author" })).toBeNull();
+    expect(commitMenuItems()).not.toContain("Add co-author…");
     const commitButton = screen.getByRole("button", { name: "Commit 1 file" });
     await waitFor(() => expect(commitButton).toBeEnabled());
     fireEvent.click(commitButton);
@@ -1304,7 +1310,7 @@ describe("App", () => {
       commit,
     });
     render(<App client={client} />);
-    await screen.findByRole("tab", { name: "a" });
+    await screen.findByRole("tab", { name: /^a(,|$)/ });
     fireEvent.change(await screen.findByRole("textbox", { name: "Commit message" }), {
       target: { value: "feat: in flight" },
     });
@@ -1313,11 +1319,11 @@ describe("App", () => {
     fireEvent.click(commitButton);
     await waitFor(() => expect(commit).toHaveBeenCalled());
 
-    fireEvent.click(screen.getByRole("tab", { name: "b" }));
-    await waitFor(() => expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true"));
+    fireEvent.click(screen.getByRole("tab", { name: /^b(,|$)/ }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: /^b(,|$)/ })).toHaveAttribute("aria-selected", "true"));
     await act(async () => finish({ kind: "Committed", commitId: "c1" }));
-    fireEvent.click(screen.getByRole("tab", { name: "a" }));
-    await waitFor(() => expect(screen.getByRole("tab", { name: "a" })).toHaveAttribute("aria-selected", "true"));
+    fireEvent.click(screen.getByRole("tab", { name: /^a(,|$)/ }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: /^a(,|$)/ })).toHaveAttribute("aria-selected", "true"));
 
     expect(await screen.findByRole("textbox", { name: "Commit message" })).toHaveValue("");
   });
@@ -1383,7 +1389,7 @@ describe("App", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "pre-commit hook failed" })).toBeNull());
 
-    fireEvent.click(screen.getByLabelText("Amend last commit"));
+    chooseCommitMenuItem("Amend last commit");
     await waitFor(() => expect(box).toHaveValue("HEAD's message"));
     fireEvent.click(screen.getByRole("button", { name: "Show hook output…" }));
     const reopened = await screen.findByRole("dialog", { name: "pre-commit hook failed" });
@@ -1415,11 +1421,12 @@ describe("App", () => {
     });
     render(<App client={client} />);
     const box = await screen.findByRole("textbox", { name: "Commit message" });
-    fireEvent.click(await screen.findByLabelText("Amend last commit"));
+    await screen.findByRole("button", { name: "More commit options" });
+    chooseCommitMenuItem("Amend last commit");
     await waitFor(() => expect(box).toHaveValue("HEAD's message"));
     const author = screen.getByRole("textbox", { name: "Author" });
     fireEvent.change(author, { target: { value: "Grace <grace@x.org>" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add co-author" }));
+    chooseCommitMenuItem("Add co-author…");
     fireEvent.click(await screen.findByRole("option", { name: "Ada <ada@x.org>" }));
     const amendButton = screen.getByRole("button", { name: "Amend" });
     await waitFor(() => expect(amendButton).toBeEnabled());
@@ -1435,7 +1442,7 @@ describe("App", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "commit-msg hook failed" })).toBeNull());
     fireEvent.change(author, { target: { value: "Hopper <hopper@x.org>" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add co-author" }));
+    chooseCommitMenuItem("Add co-author…");
     fireEvent.click(await screen.findByRole("option", { name: "Bob <bob@x.org>" }));
     fireEvent.click(screen.getByRole("button", { name: "Show hook output…" }));
     const reopened = await screen.findByRole("dialog", { name: "commit-msg hook failed" });

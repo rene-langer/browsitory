@@ -114,6 +114,16 @@ export async function clickInPage(
 }
 
 /**
+ * Picks the toggle `item` from a View menu (#1007): `menu` is the menu button's accessible name,
+ * "Diff view" (the diff toolbar's) or "Graph view" (the graph search bar's). The item's text may
+ * start with an "A" badge (Wrap lines on Auto), so it is matched by containment.
+ */
+export async function chooseViewOption(menu: string, item: string): Promise<void> {
+  await clickInPage(`button[aria-label="${menu}"]`);
+  await clickInPage("[role='menuitemcheckbox']", item, { contains: true });
+}
+
+/**
  * Sets the text field matching `selector` to `value` the way typing does, inside the page: the
  * native value setter, then an `input` event, so React's `onChange` sees it (#783, #791).
  *

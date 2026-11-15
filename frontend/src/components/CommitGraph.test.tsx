@@ -522,7 +522,9 @@ describe("CommitGraph", () => {
     expect(screen.getByText("origin/main")).toBeInTheDocument();
   });
 
-  it("renders both a local and a remote badge for a commit that is both tips, each with its own CSS class", () => {
+  // #1004: the graph shows a row's first badge and "+N" for the rest; RefBadges.test.tsx checks
+  // each badge's class where all of them show.
+  it("renders the local badge of a commit that is both tips, and +1 naming the remote one", () => {
     const commitsWithBothBadges: GraphCommit[] = [
       { ...commits[0], branchRefs: ["main"], remoteBranchRefs: ["origin/main"] },
       commits[1],
@@ -541,9 +543,8 @@ describe("CommitGraph", () => {
     );
 
     const localBadge = screen.getByText("main");
-    const remoteBadge = screen.getByText("origin/main");
     expect(localBadge).toHaveClass(styles.branchBadge);
-    expect(remoteBadge).toHaveClass(styles.remoteBranchBadge);
+    expect(screen.getByText("+1")).toHaveAttribute("title", "origin/main");
   });
 
   it("renders a lane graphic for every commit row", () => {
@@ -2407,5 +2408,47 @@ describe("CommitGraph — search matches", () => {
     fireEvent.keyDown(list, { key: "F3" });
     fireEvent.keyDown(list, { key: "F3", shiftKey: true });
     expect(onStepMatch.mock.calls).toEqual([[1], [-1]]);
+  });
+});
+
+describe("CommitGraph rows: compact date and collapsed badges (#1004)", () => {
+  const props = {
+    ...historyProps,
+    status,
+    selectedRow: "uncommitted" as const,
+    operationsBlocked: false,
+    onSelectRow: vi.fn(),
+    onBranchFromCommit: vi.fn(),
+    onRebaseFromCommit: vi.fn(),
+  };
+
+  it("shows how long ago each commit was, with the full date in its tooltip", () => {
+    const threeDaysAgo = Math.floor(Date.now() / 1000) - 3 * 86400 - 60;
+    render(<CommitGraph {...props} commits={[{ ...commits[0], timestamp: threeDaysAgo }, commits[1]]} />);
+    const [date] = screen.getAllByTestId("commit-date");
+    expect(date).toHaveTextContent(/^3d$/);
+    expect(date.getAttribute("title")).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+  });
+
+  it("shows a row's first badge, the current branch first, and +N for the rest, named in its tooltip", () => {
+    const crowded: GraphCommit = {
+      ...commits[0],
+      branchRefs: ["topic", "main"],
+      remoteBranchRefs: ["origin/main"],
+      tags: ["v1.0"],
+    };
+    render(<CommitGraph {...props} commits={[crowded, commits[1]]} />);
+    const row = screen.getByText(/second commit/).closest("li")!;
+    expect(within(row).getByText("main")).toBeInTheDocument();
+    expect(within(row).queryByText("topic")).toBeNull();
+    expect(within(row).queryByText("origin/main")).toBeNull();
+    const more = within(row).getByText("+3");
+    expect(more).toHaveAttribute("title", "topic, origin/main, v1.0");
+  });
+
+  it("shows a lone badge as it is", () => {
+    render(<CommitGraph {...props} commits={[{ ...commits[0], branchRefs: ["main"] }, commits[1]]} />);
+    expect(screen.getByText("main")).toBeInTheDocument();
+    expect(screen.queryByText(/^\+\d+$/)).toBeNull();
   });
 });

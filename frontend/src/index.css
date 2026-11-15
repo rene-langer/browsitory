@@ -68,16 +68,11 @@ button:hover:not(:disabled):not([aria-disabled="true"]) {
    not by colour alone. The outline is an inset shadow: it adds no size, and buttons drawn without
    a border get it too. `[aria-pressed]` is repeated to outrank a module's quiet-button rule
    (`.rowActions button { background: transparent }`); the forced-colours block below fills it
-   with the system highlight instead. "mixed" (Wrap lines on Auto) gets a dashed outline. */
+   with the system highlight instead. */
 button[aria-pressed][aria-pressed="true"] {
   color: var(--color-accent-fg);
   background: var(--color-accent-tint);
   box-shadow: inset 0 0 0 1px var(--color-accent);
-}
-
-button[aria-pressed][aria-pressed="mixed"]:not(:focus-visible) {
-  outline: 1px dashed var(--color-accent);
-  outline-offset: -1px;
 }
 
 /* A dialog's primary action (#987): the accent fill the Commit button uses, so the button that
@@ -106,9 +101,17 @@ button[data-tone][data-tone="danger"]:hover:not(:disabled):not([aria-disabled="t
   background: var(--color-danger-bg);
 }
 
+/* The focus ring (#1029): its own colour (`--color-focus-ring`, not the accent) and a gap, so a
+   focused button never reads as a pressed toggle, whose outline is the accent drawn inside it. */
 button:focus-visible {
   outline: 2px solid var(--color-focus-ring);
-  outline-offset: 1px;
+  outline-offset: 2px;
+}
+
+/* A dialog's frame is not a control: when the browser focuses it (nothing else to focus yet), it
+   draws no ring. `FormDialog` starts focus on the first control (#1029). */
+dialog:focus {
+  outline: none;
 }
 
 /* `aria-disabled` (#664): a control that stays focusable so its visible reason can be read. */

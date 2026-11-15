@@ -2,11 +2,11 @@ import type { StatusEntry } from "../ipc/RepoClient";
 
 const isUntracked = (entry: StatusEntry) => !entry.staged && entry.kind === "New";
 
-/** A status letter and the kind it stands for, as a row shows them (#639). */
+/** A status letter and the kind it stands for, as a row shows them (#639); untracked is "?", as in `git status --short` (#1027). */
 export function statusLetter(entry: StatusEntry): { letter: string; kind: string } {
   switch (entry.kind) {
     case "New":
-      return isUntracked(entry) ? { letter: "U", kind: "Untracked" } : { letter: "A", kind: "Added" };
+      return isUntracked(entry) ? { letter: "?", kind: "Untracked" } : { letter: "A", kind: "Added" };
     case "Modified":
       return { letter: "M", kind: "Modified" };
     case "Deleted":

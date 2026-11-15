@@ -1254,6 +1254,7 @@ export function UncommittedDiffPane({
         headInfo={headInfo}
         rebaseProgress={rebaseProgress}
         stagedCount={stagedCount}
+        unstagedCount={allUnstagedCount}
         conflictCount={conflictCount}
         initialCommitDraft={initialCommitDraft}
         focusCommitMessage={focusCommitMessage}

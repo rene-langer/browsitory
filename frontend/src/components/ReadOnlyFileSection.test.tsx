@@ -8,6 +8,7 @@ import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
 import { DiffViewOptionsProvider } from "../state/DiffViewOptionsProvider";
 import { fakeRepoClient } from "../test/fakeRepoClient";
 import { UserCommandsContext } from "../state/userCommandsContext";
+import { chooseViewOption, viewOptionState } from "../test/viewMenu";
 
 function renderSection(overrides: Partial<Parameters<typeof ReadOnlyFileSection>[0]> = {}) {
   const props: Parameters<typeof ReadOnlyFileSection>[0] = {
@@ -55,7 +56,8 @@ describe("ReadOnlyFileSection", () => {
       </DiffViewOptionsProvider>,
     );
     const props = { fetchDiff };
-    fireEvent.click(await screen.findByRole("button", { name: "Show whole file" }));
+    await screen.findByRole("button", { name: "Diff view" });
+    chooseViewOption("Show whole file");
     await waitFor(() =>
       expect(props.fetchDiff).toHaveBeenLastCalledWith({
         ignoreWhitespace: false,
@@ -63,7 +65,7 @@ describe("ReadOnlyFileSection", () => {
         algorithm: "Default",
       }),
     );
-    expect(screen.getByRole("button", { name: "Show whole file" })).toHaveAttribute("aria-pressed", "true");
+    expect(viewOptionState("Show whole file")).toBe("true");
     localStorage.clear();
   });
 

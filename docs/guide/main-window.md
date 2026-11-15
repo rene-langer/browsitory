@@ -20,17 +20,20 @@ window has three columns:
   **Undo** takes it back); with nothing typed, **Create branch…** opens the New branch form. The
   command palette's **Switch branch…** opens the same list;
 - **Back** and **Forward** through the commits you selected (see [History](history.md));
-- **Fetch**, **Pull** and **Push**, with `↑n` (commits to push) and `↓m` (commits to pull) for
-  the current branch (see [Branches and remotes](branches-and-remotes.md)). Pull's menu chooses
+- **Fetch**, **Pull** and **Push**, with `↓m` on **Pull** (commits to pull) and `↑n` on **Push**
+  (commits to push) for the current branch when they aren't zero (see
+  [Branches and remotes](branches-and-remotes.md)). Pull's menu chooses
   how a pull combines diverged branches: **Pull with merge**, **Pull with rebase** or **Pull,
   fast-forward only** (see [Pulling](branches-and-remotes.md#pulling));
 - what is running: a fetch, pull or push by name ("Pushing main to origin/main") with a progress
   bar and **Cancel**, or, when another action takes more than a moment, "Working…";
-- **Stash** (see [Stashes](stashes.md)), **Apply patch…** (see [Patches](patches.md#apply-a-patch-file)),
-  **Undo** and **Redo** (see [Undo and redo](undo-redo.md)), and **Refresh**, which reloads the
+- **Stash** (see [Stashes](stashes.md)), with **Apply patch…** in its menu (see
+  [Patches](patches.md#apply-a-patch-file)), **Undo** and **Redo** (see
+  [Undo and redo](undo-redo.md); hover them for the step they undo or redo), and **Refresh**, which reloads the
   repository's state (changes made outside Browsitory also show by themselves, see
   [Changes made outside Browsitory](tabs.md#changes-made-outside-browsitory));
-- when the repository was last fetched.
+- when the repository was last fetched, in a place kept for it, so the buttons don't move when
+  it appears.
 
 While a repository opens, or when you switch to a tab you haven't looked at for a while (see
 [Multiple repositories](tabs.md)), the graph and the Branches section show grey placeholder rows
@@ -67,8 +70,8 @@ first one that doesn't apply.
 
 Drag the dividers between the columns to resize them. Double-click a divider to collapse the
 sidebar, and again to bring it back at its width. With a divider focused, the arrow keys resize
-too. The sidebar and the commit graph keep their width when you resize the window; only the
-diff pane grows or shrinks.
+too. The commit graph starts at about 40% of the window's width. The sidebar and the commit graph
+keep their width when you resize the window; only the diff pane grows or shrinks.
 
 **From the keyboard.** **F6** moves the focus from pane to pane (the repository toolbar, the
 sidebar, the commit graph, the diff pane) and **Shift+F6** back, returning to where the focus
@@ -160,8 +163,8 @@ Each change shows at once, without a restart:
   conflicts, from 10 to 24 pixels. Empty keeps each view's built-in size.
 - **Interface size**: Small, Normal or Large text for the rest of the window.
 - **Date format**: **ISO** (2026-11-11 14:05, the default) or **System**, your operating
-  system's short date and time. Every date follows it: the history, search results, file
-  history, the Reflog, stashes and commit details. "3 days ago" labels stay in English.
+  system's short date and time. Every date follows it: the history's date tooltips, search
+  results, file history, the Reflog, stashes and commit details. "3 days ago" labels stay in English.
 - **Tab size**: how many columns a tab character takes in file content, from 1 to 16 (4 at
   first).
 

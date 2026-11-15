@@ -33,7 +33,7 @@ import { useCopyToClipboard } from "../state/useCopyToClipboard";
 import { useCommitDrag } from "../state/useCommitDrag";
 import { CommitLaneGraphic, WorkingTreeLaneGraphic } from "./CommitLaneGraphic";
 import { createLaneHover } from "../lib/laneHover";
-import { formatAbsoluteDate, formatShortDate } from "../lib/formatDate";
+import { formatAbsoluteDate, formatCompactAge } from "../lib/formatDate";
 import { useDateFormat } from "../state/useDateFormat";
 import { ListRow } from "./primitives/ListRow";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
@@ -977,6 +977,7 @@ function CommitGraphContent({
           </div>
           <RefBadges
             commit={commit}
+            collapse
             laneColor={laneColor(commitLayouts[index].lane)}
             currentBranch={currentBranch}
             detachedHead={headInfo.detachedAt !== null && headInfo.headId === commit.id}
@@ -1008,7 +1009,7 @@ function CommitGraphContent({
             data-testid="commit-date"
             title={formatAbsoluteDate(commit.timestamp, dateFormat)}
           >
-            {formatShortDate(commit.timestamp, dateFormat)}
+            {formatCompactAge(commit.timestamp)}
           </span>
         </ListRow>
         );

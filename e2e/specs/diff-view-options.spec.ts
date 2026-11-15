@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
-import { clickInPage, waitUntilInPage } from "../support/dom";
+import { chooseViewOption, clickInPage, waitUntilInPage } from "../support/dom";
 import { gitIn } from "../support/git";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
@@ -65,7 +65,7 @@ describe("Browsitory diff word wrap and whole file", () => {
     expect(unwrapped.scrolls).toBe(true);
     expect(unwrapped.lineNumber).toBe("5");
 
-    await clickInPage(`button[aria-label="Wrap lines"]`);
+    await chooseViewOption("Diff view", "Wrap lines");
     await browser.waitUntil(async () => (await state()).wrap === "true", { timeout: 5000 });
     const wrapped = await state();
     expect(wrapped.whiteSpace).toBe("pre-wrap");
@@ -73,7 +73,7 @@ describe("Browsitory diff word wrap and whole file", () => {
     expect(wrapped.lineNumber).toBe("5");
     expect(wrapped.height).toBeGreaterThan(unwrapped.height);
 
-    // The toolbar's Wrap lines persists as the setting (#640): On, then back to Auto (only
+    // The View menu's Wrap lines persists as the setting (#640, #1007): On, then back to Auto (only
     // Preferences offers it) for the specs after this one.
     await browser.waitUntil(() => /word_wrap = "on"/.test(fs.readFileSync(CONFIG_FILE, "utf8")), {
       timeoutMsg: "Wrap lines did not reach config.toml",
@@ -144,7 +144,7 @@ describe("Browsitory diff word wrap and whole file", () => {
     const before = await state();
     expect(before.markers).toBe(0);
 
-    await clickInPage(`button[aria-label="Show whitespace"]`);
+    await chooseViewOption("Diff view", "Show whitespace");
     await browser.waitUntil(async () => (await state()).markers > 0, { timeoutMsg: "no whitespace markers" });
     const shown = await state();
     expect(shown.marker).toBe('"·"');
@@ -155,13 +155,13 @@ describe("Browsitory diff word wrap and whole file", () => {
     });
 
     // Off again, for the specs after this one.
-    await clickInPage(`button[aria-label="Show whitespace"]`);
+    await chooseViewOption("Diff view", "Show whitespace");
     await browser.waitUntil(async () => (await state()).markers === 0, { timeoutMsg: "markers stayed" });
     await browser.waitUntil(() => /show_whitespace = false/.test(fs.readFileSync(CONFIG_FILE, "utf8")));
   });
 
   it("shows the whole file and stages one selected change of it", async () => {
-    await clickInPage(`button[aria-label="Show whole file"]`);
+    await chooseViewOption("Diff view", "Show whole file");
     // l20 is 15 lines from either change: only the whole file shows it.
     await waitUntilInPage(".diff-line-context", " l20", { contains: true });
     // By class: other spans (commit summaries, line labels) can start with "Lines 3" too.
@@ -183,7 +183,9 @@ describe("Browsitory diff word wrap and whole file", () => {
     expect(git("show", `:${FILE}`)).toBe(lines({ 45: "changed 45" }));
 
     // "Show whole file" is the pane's and persists (#640): off again for the specs after this one.
-    await clickInPage(`button[aria-label="Show whole file"]`);
-    await waitUntilInPage('button[aria-label="Show whole file"][aria-pressed="false"]');
+    await chooseViewOption("Diff view", "Show whole file");
+    await clickInPage('button[aria-label="Diff view"]');
+    await waitUntilInPage('[role="menuitemcheckbox"][aria-checked="false"]', "Show whole file");
+    await browser.keys(["Escape"]);
   });
 });

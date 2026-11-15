@@ -1,5 +1,5 @@
 import { Pin, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { RepoClient, Workspace } from "../ipc/RepoClient";
 import { shortcutLabel } from "../lib/keybindings";
 import { useKeymap } from "../lib/keymap";
@@ -58,6 +58,8 @@ export function RepoPicker({
 }) {
   useKeymap();
   const [recentRepos, setRecentRepos] = useState<string[]>([]);
+  // The first list came in (or failed): the picker's controls are all there.
+  const [loaded, setLoaded] = useState(false);
   // Recent repositories whose folder is gone (#690): marked, still listed, and removable.
   const [missingRepos, setMissingRepos] = useState<ReadonlySet<string>>(new Set());
   // Pinned repositories (#766): listed first by `listRecentRepos`, marked here.
@@ -82,7 +84,8 @@ export function RepoPicker({
     client
       .listRecentRepos()
       .then(setRecentRepos)
-      .catch((err: unknown) => setError(String(err)));
+      .catch((err: unknown) => setError(String(err)))
+      .finally(() => setLoaded(true));
     void loadPinned();
     // Only a mark: if the check fails, every folder just looks present.
     client.listMissingRecentRepos().then(
@@ -120,6 +123,21 @@ export function RepoPicker({
       })
       .catch((err: unknown) => setError(String(err)));
   };
+
+  // Keyboard focus starts in the filter, or on Open repository… when there is nothing to filter
+  // (#1029), not in the title bar. Once, and only if focus is nowhere yet or on the picker's own
+  // first control (the dialog's ×): never taken from something the user moved it to.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const filterRef = useRef<HTMLInputElement>(null);
+  const openButtonRef = useRef<HTMLButtonElement>(null);
+  const focusedOnce = useRef(false);
+  useEffect(() => {
+    if (!loaded || focusedOnce.current) return;
+    focusedOnce.current = true;
+    const active = document.activeElement;
+    const unclaimed = active === null || active === document.body || rootRef.current?.contains(active) === true;
+    if (unclaimed) (filterRef.current ?? openButtonRef.current)?.focus();
+  }, [loaded]);
 
   const nameOf = (path: string) => aliases?.get(path) ?? repoNameOf(path);
   const query = filter.trim().toLowerCase();
@@ -171,7 +189,9 @@ export function RepoPicker({
 
   const openButtons = (
     <>
-      <button onClick={handleOpenFolder}>Open repository…</button>
+      <button ref={openButtonRef} onClick={handleOpenFolder}>
+        Open repository…
+      </button>
       {onCloneRepository !== undefined && <button onClick={onCloneRepository}>Clone…</button>}
       {onNewRepository !== undefined && <button onClick={onNewRepository}>New repository…</button>}
     </>
@@ -185,7 +205,7 @@ export function RepoPicker({
   const inDialog = onClose !== undefined;
 
   return (
-    <div className={inDialog ? styles.inDialog : styles.picker}>
+    <div ref={rootRef} className={inDialog ? styles.inDialog : styles.picker}>
       <Panel
         title={inDialog ? "Open repository" : "Open a repository"}
         actions={
@@ -222,6 +242,7 @@ export function RepoPicker({
           <label className={styles.filter}>
             <span className={styles.srOnly}>Filter repositories and workspaces</span>
             <input
+              ref={filterRef}
               type="search"
               placeholder="Filter repositories and workspaces"
               value={filter}
@@ -234,10 +255,13 @@ export function RepoPicker({
         <section className={styles.recent} aria-label="Recent repositories">
           <h3 className={styles.sectionTitle}>Recent repositories</h3>
           {recentRepos.length === 0 ? (
-            <>
-              <p className={styles.empty}>No recent repositories</p>
-              <p className={styles.hint}>Open a folder that contains a Git repository to get started.</p>
-            </>
+            // Said once the list is read, not while it loads.
+            loaded && (
+              <>
+                <p className={styles.empty}>No recent repositories</p>
+                <p className={styles.hint}>Open a folder that contains a Git repository to get started.</p>
+              </>
+            )
           ) : shownRepos.length === 0 ? (
             noMatch
           ) : (

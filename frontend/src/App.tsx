@@ -475,7 +475,7 @@ function AppContent({
             onAddTab={() => setPickingRepo(true)}
             tabMenuItems={tabMenuItems}
             onTabMenuOpen={onTabMenuOpen}
-            changedPaths={tabChangeMarkers.changedPaths}
+            changedCounts={tabChangeMarkers.changedCounts}
             onRenameTab={setRenamingTab}
           />
           {openRepos.openRepos.length === 0 && <div className={styles.headerSpacer} />}

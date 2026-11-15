@@ -7,11 +7,13 @@ diff** in the file's header returns to the diff. A merge commit's diff is agains
 parent: **Changes compared with** above the diff names that parent and lets you pick another
 one. **All files** above the list browses every file of the commit
 instead (see [Files at a commit](files-at-a-commit.md)). Each row shows the branches and tags that point at the commit,
-and the author and date (they hide when the pane is narrow). Selecting a commit shows its full
+the author and how long ago it was made (**3h**, **2d**, **4mo**; hover it for the date). They
+hide when the pane is narrow. A commit with several branches and tags shows the first (the
+checked-out branch when it is one of them) and **+N** for the others; hover it for their names. Selecting a commit shows its full
 message, author, date, full SHA (**Copy** copies it), parents and children (the loaded commits
 it is a parent of) above the file list; click a parent or child to jump to it. The date is the
-author's, as `2026-09-08 21:00` in your time zone (the graph's dates use the same form) with
-"2 days ago" after it. When someone else committed it (a patch applied, a cherry-pick),
+author's, as `2026-09-08 21:00` in your time zone (the graph's date tooltips use the same form)
+with "2 days ago" after it. When someone else committed it (a patch applied, a cherry-pick),
 **Committer** shows them and when they committed; when the author committed it later (a rebase,
 an amend), **Committed** shows that time. **Contained in** lists the local branches, remote
 branches (dashed) and tags (`#`) whose tip is the commit or comes after it, the first eight and
@@ -48,8 +50,8 @@ commit's details show the totals ("4 files changed, +120 −37") under **Size**,
 header its own `+/−` (or **Binary**: a binary file counts as a changed file, with no lines).
 A commit is counted against its first parent (a merge too, like its file list; the first commit
 against nothing), and a renamed file counts as removed and added, as the file list shows it.
-The ± button in the search bar above the graph hides the row numbers or shows them again; the
-choice applies to every tab and is kept after a restart.
+**Show lines changed** in the **View** menu of the search bar above the graph hides the row
+numbers or shows them again; the choice applies to every tab and is kept after a restart.
 
 The bar above the graph has **Fetch**, **Pull** and **Push** buttons for the
 current branch's upstream, with ahead/behind counts (for example `↑2 ↓1`)
@@ -116,10 +118,10 @@ branch shown.
 ## Collapse merges
 
 In a repository that merges feature branches, the graph can show just the line of each branch:
-turn on **Collapse merges** with the fold button in the search bar above the graph, or the
+turn on **Collapse merges** in the **View** menu of the search bar above the graph, or the
 **Collapse merges** command in the command palette. The graph then follows only the first
 parents of every branch it shows, as for a single branch above, whichever branches you picked.
-Browsitory remembers the choice per repository; turning it off (the same button, or **Show
+Browsitory remembers the choice per repository; turning it off (the same menu item, or **Show
 every commit of merged branches** in the palette) brings back every commit.
 
 Each merge commit in such a graph (also with a single isolated branch) has a **+N** button after
@@ -159,10 +161,13 @@ image**). A conflicted image opens the conflict pane, like any conflict.
 ## Diff options
 
 Each pane has one diff toolbar, above its files: the working tree, a commit, a stash and a
-compare. Its buttons are icons; hover one for its name. Everything on it applies to every diff in
-the pane and is remembered across sessions. **Unified view** shows old and new lines in one
-column; **Split view** shows the old and new version side by side. **Ignore whitespace**,
-**Context lines** (− and +, 0 to 20) and **Syntax highlighting** are kept in your settings. While whitespace is ignored, partial staging (lines and hunks) is unavailable in
+compare. It shows **Unified** / **Split** and the context lines; the options you change less
+often are in its **View** menu, each with a check mark when it is on: **Wrap lines**, **Show
+whole file**, **Ignore whitespace**, **Show whitespace** and **Show syntax highlighting**.
+Everything on it applies to every diff in the pane and is remembered across sessions. **Unified
+view** shows old and new lines in one column; **Split view** shows the old and new version side
+by side. **Ignore whitespace**, **Context lines** (− and +, 0 to 20) and **Show syntax
+highlighting** are kept in your settings. While whitespace is ignored, partial staging (lines and hunks) is unavailable in
 the working tree and a hint says so; staging and unstaging whole files still works. Right after
 you change an option, hunk and line actions return once the diff has reloaded with it.
 Highlighting covers common languages and is skipped when a file's diff has more than 2,000 lines
@@ -178,14 +183,14 @@ whitespace**.
 
 **Wrap lines** wraps long lines at the pane's width, or turns wrapping off so each line stays on
 one row and the diff scrolls sideways. Line numbers stay next to their line either way, and
-selecting and staging lines works the same. The button sets **Preferences → Diff → Word wrap**
-to **On** or **Off** for every diff; the setting also has **Auto** (the default, shown with a
-dashed outline instead of the pressed button's tint and solid outline). Auto wraps the split view, prose files (Markdown, plain text, reStructuredText,
+selecting and staging lines works the same. The menu item sets **Preferences → Diff → Word wrap**
+to **On** or **Off** for every diff; the setting also has **Auto** (the default, marked with a
+small **A** where the check mark goes). Auto wraps the split view, prose files (Markdown, plain text, reStructuredText,
 AsciiDoc and the like) and any diff with a line longer than 300 characters, such as minified or
 generated files; code in the unified view scrolls sideways so its indentation stays readable.
 
 **Show whole file** shows every line of each file, with the changes highlighted where they are,
-in the unified and the split view; press it again for the changes with context. Like **Split
+in the unified and the split view; choose it again for the changes with context. Like **Split
 view**, it is remembered on this computer. It works in the
 working tree, commits, stashes and compares. In the working tree the whole file is one hunk:
 **Stage hunk** then stages every change in the file, and selected lines stage just those lines.

@@ -179,7 +179,8 @@ describe("the repository toolbar (#637)", () => {
   });
 });
 
-describe("Apply patch… in the toolbar (#649)", () => {
+// #1006: Apply patch… moved from an icon button in the toolbar into Stash's menu.
+describe("Apply patch… in the toolbar's Stash menu (#649, #1006)", () => {
   it("asks for a patch file, previews it and applies it to the working tree (#658)", async () => {
     const content = { base64: "ZGlmZg==" };
     const openPatchFile = vi.fn(async () => content);
@@ -190,9 +191,11 @@ describe("Apply patch… in the toolbar (#649)", () => {
     const previewPatch = vi.fn(async () => preview);
     const applyPatch = vi.fn(async () => ({ kind: "Applied" as const }));
     await renderApp(layoutClient({ openPatchFile, previewPatch, applyPatch }));
-    const button = within(toolbar()).getByRole("button", { name: "Apply patch…" });
-    await waitFor(() => expect(button).not.toHaveAttribute("aria-disabled"));
-    fireEvent.click(button);
+    expect(within(toolbar()).queryByRole("button", { name: "Apply patch…" })).toBeNull();
+    const menuButton = within(toolbar()).getByRole("button", { name: "More stash options" });
+    await waitFor(() => expect(menuButton).not.toHaveAttribute("aria-disabled"));
+    fireEvent.click(menuButton);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Apply patch…" }));
     const dialog = await screen.findByRole("dialog", { name: "Apply patch" });
     expect(previewPatch).toHaveBeenCalledWith("/repos/a", content);
     expect(applyPatch).not.toHaveBeenCalled();
@@ -338,5 +341,13 @@ describe("the current-branch switcher (#638)", () => {
     fireEvent.click(await screen.findByRole("option", { name: "origin/spike" }));
     await waitFor(() => expect(createBranch).toHaveBeenCalledWith("/repos/a", "spike", "origin/spike", true));
     await waitFor(() => expect(setCurrentUpstream).toHaveBeenCalledWith("/repos/a", "origin", "spike"));
+  });
+});
+
+describe("the history column (#1004)", () => {
+  it("starts at 40% of the window", async () => {
+    setWindowWidth(1600);
+    await renderApp(layoutClient());
+    expect(screen.getByRole("separator", { name: "History and diff width" })).toHaveAttribute("aria-valuenow", "640");
   });
 });

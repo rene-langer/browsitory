@@ -5,6 +5,20 @@ import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 describe("ContextMenu", () => {
+  it("marks a mixed checkbox item (Wrap lines on Auto) with an A badge, not a check (#1007)", () => {
+    render(
+      <ContextMenu
+        x={0}
+        y={0}
+        items={[{ label: "Wrap lines", checked: "mixed", title: "Automatic", onSelect: () => {} }]}
+        onClose={() => {}}
+      />,
+    );
+    const item = screen.getByRole("menuitemcheckbox", { name: "Wrap lines" });
+    expect(item).toHaveAttribute("aria-checked", "mixed");
+    expect(within(item).getByText("A")).toHaveAttribute("aria-hidden", "true");
+  });
+
   it("renders checked items as menuitemcheckbox with aria-checked", () => {
     const onSelect = vi.fn();
     render(

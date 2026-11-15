@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
-import { clickInPage, waitUntilInPage } from "../support/dom";
+import { chooseViewOption, clickInPage, waitUntilInPage } from "../support/dom";
 import { git } from "../support/git";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
@@ -134,9 +134,8 @@ describe("Browsitory commit graph", () => {
 
     const topicRow = "li.commit-row*=e2e: commit graph merged topic";
     await $(topicRow).waitForExist({ timeoutMsg: "the merged commit is not in the full graph" });
-    const collapse = await $('button[aria-label="Collapse merges"]');
-    await collapse.waitForExist();
-    await browser.execute((el) => (el as HTMLElement).click(), collapse);
+    // In the graph's View menu (#1007).
+    await chooseViewOption("Graph view", "Collapse merges");
     await $(topicRow).waitForExist({ reverse: true, timeoutMsg: "Collapse merges left the merged commit in" });
 
     const mergeRow = await $("li.commit-row*=e2e: commit graph merge topic");
@@ -151,7 +150,7 @@ describe("Browsitory commit graph", () => {
     await $(topicRow).waitForExist({ reverse: true, timeoutMsg: "collapsing the merge left its commit in" });
 
     // Back to the full graph for the cases after this one.
-    await browser.execute((el) => (el as HTMLElement).click(), collapse);
+    await chooseViewOption("Graph view", "Collapse merges");
     await $(topicRow).waitForExist({ timeoutMsg: "turning Collapse merges off did not bring it back" });
   });
 

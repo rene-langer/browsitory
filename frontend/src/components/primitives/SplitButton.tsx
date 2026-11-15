@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { DisabledReasonTip } from "./ReasonButton";
@@ -16,6 +16,7 @@ export function SplitButton({
   label,
   onClick,
   disabled = false,
+  menuDisabled = disabled,
   title,
   menuLabel,
   menuTitle,
@@ -25,10 +26,15 @@ export function SplitButton({
   describedBy,
   action,
   reason = null,
+  menuReason = reason,
+  badge,
 }: {
   label: string;
   onClick: () => void;
   disabled?: boolean;
+  /** Disables the chevron; defaults to `disabled`. The commit box's menu stays open to amend
+   * and co-authors while Commit waits for a message (#1003). */
+  menuDisabled?: boolean;
   title?: string;
   menuLabel: string;
   menuTitle?: string;
@@ -43,13 +49,20 @@ export function SplitButton({
   action?: string;
   /** Why neither part can run now (#664); `null` leaves them to `disabled`. */
   reason?: string | null;
+  /**
+   * Why the menu can't open; defaults to `reason`. `null` keeps the menu open to items that can
+   * still run while the main action is blocked (Stash's Apply patch…, #1006).
+   */
+  menuReason?: string | null;
+  /** Shown after the label, hidden from assistive tech (Pull's "↓2", #1006). */
+  badge?: ReactNode;
 }) {
   const [menu, setMenu] = useState<{ x: number; y: number; returnFocusTo: HTMLElement } | null>(null);
   const reasonId = useId();
   const blocked = reason !== null;
-  const blockedProps = blocked
-    ? { "aria-disabled": true as const, "aria-describedby": [describedBy, reasonId].filter(Boolean).join(" ") }
-    : {};
+  const menuBlocked = menuReason !== null;
+  const blockedProps = (on: boolean) =>
+    on ? { "aria-disabled": true as const, "aria-describedby": [describedBy, reasonId].filter(Boolean).join(" ") } : {};
   return (
     <span className={`${styles.group} ${reasonStyles.wrap}`}>
       <button
@@ -59,12 +72,13 @@ export function SplitButton({
         title={blocked ? undefined : title}
         aria-describedby={describedBy}
         data-action={action}
-        {...blockedProps}
+        {...blockedProps(blocked)}
         onClick={() => {
           if (!blocked) onClick();
         }}
       >
         {label}
+        {badge}
       </button>
       <button
         type="button"
@@ -72,11 +86,11 @@ export function SplitButton({
         aria-label={menuLabel}
         aria-haspopup="menu"
         aria-expanded={menu !== null}
-        disabled={disabled}
-        title={blocked ? undefined : (menuTitle ?? title)}
-        {...blockedProps}
+        disabled={menuDisabled}
+        title={menuBlocked ? undefined : (menuTitle ?? title)}
+        {...blockedProps(menuBlocked)}
         onClick={(event) => {
-          if (blocked) return;
+          if (menuBlocked) return;
           const chevron = event.currentTarget;
           if (menu !== null) {
             // A second click closes the menu; focus stays on the chevron (WebKit may not have

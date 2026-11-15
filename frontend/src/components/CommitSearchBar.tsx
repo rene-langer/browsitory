@@ -1,8 +1,10 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
-import { CircleHelp, Diff, FoldVertical, Search, X } from "lucide-react";
+import { CircleHelp, Search, X } from "lucide-react";
 import { useEscapeToClose } from "../lib/escapeToClose";
 import { SEARCH_SYNTAX, SEARCH_SYNTAX_FOOTER } from "../lib/searchSyntax";
+import type { ContextMenuItem } from "./primitives/ContextMenu";
+import { ViewMenuButton } from "./ViewMenuButton";
 import styles from "./CommitSearchBar.module.css";
 
 const NO_RECENT_SEARCHES: string[] = [];
@@ -157,6 +159,22 @@ export function CommitSearchBar({
     }
   };
 
+  const graphViewItems: ContextMenuItem[] = [
+    ...(onToggleLineStats === undefined
+      ? []
+      : [{ label: "Show lines changed", checked: showLineStats === true, title: "The lines added and removed by each commit", onSelect: onToggleLineStats }]),
+    ...(onToggleCollapseMerges === undefined
+      ? []
+      : [
+          {
+            label: "Collapse merges",
+            checked: collapseMerges === true,
+            title: "Follow first parents; expand a merge on demand",
+            onSelect: onToggleCollapseMerges,
+          },
+        ]),
+  ];
+
   return (
     <div ref={escapeRef} className={styles.bar} role="search" onKeyDown={handleBarKeyDown}>
       <Search size={14} aria-hidden="true" className={styles.icon} />
@@ -195,29 +213,14 @@ export function CommitSearchBar({
           <X size={14} aria-hidden="true" />
         </button>
       )}
-      {onToggleLineStats !== undefined && (
-        <button
-          type="button"
-          className={styles.iconButton}
-          aria-label="Show lines changed"
-          aria-pressed={showLineStats === true}
-          title="Show lines changed per commit"
-          onClick={onToggleLineStats}
-        >
-          <Diff size={14} aria-hidden="true" />
-        </button>
-      )}
-      {onToggleCollapseMerges !== undefined && (
-        <button
-          type="button"
-          className={styles.iconButton}
-          aria-label="Collapse merges"
-          aria-pressed={collapseMerges === true}
-          title="Collapse merges: follow first parents, expand a merge on demand"
-          onClick={onToggleCollapseMerges}
-        >
-          <FoldVertical size={14} aria-hidden="true" />
-        </button>
+      {graphViewItems.length > 0 && (
+        // The graph's rarely changed toggles, in words (#1007).
+        <ViewMenuButton
+          label="Graph view"
+          title="Lines changed per commit, collapsed merges"
+          items={graphViewItems}
+          className={styles.viewButton}
+        />
       )}
       <button
         type="button"

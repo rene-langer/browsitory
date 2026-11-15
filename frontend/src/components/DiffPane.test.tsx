@@ -10,8 +10,12 @@ import { DiffPane as WorkspaceDiffPane, type DiscardRequest, type StashActions }
 import { WorkspaceActionsContext, type WorkspaceActions } from "../state/useWorkspaceActions";
 import { splitWorkspaceActions, testWorkspaceActions } from "../test/workspaceActions";
 import styles from "./DiffPane.module.css";
+import diffPaneCss from "./DiffPane.module.css?raw";
+import { cascadedValue, rulesOf, subjectOf } from "../test/cssCascade";
 import { fakeRepoClient } from "../test/fakeRepoClient";
 import { describedByText } from "../test/describedBy";
+import { chooseCommitMenuItem, commitMenuItems } from "../test/commitMenu";
+import { chooseViewOption } from "../test/viewMenu";
 
 const TEST_REPO_PATH = "/repo";
 
@@ -904,7 +908,7 @@ describe("DiffPane", () => {
         mergeMessage: null,
         headInfo: { ...headInfo, squashMessage: "Squashed commit of the following:\n" },
       });
-      expect(screen.getByRole("button", { name: "Add co-author" })).toBeInTheDocument();
+      expect(commitMenuItems()).toContain("Add co-author…");
       squash.unmount();
 
       for (const operation of [null, "CherryPick", "Revert"] as const) {
@@ -913,13 +917,24 @@ describe("DiffPane", () => {
           headInfo: { ...headInfo, operation },
         });
         expect(screen.getByPlaceholderText("Commit message")).toHaveValue("git's message\n");
-        expect(screen.queryByRole("button", { name: "Add co-author" }), String(operation)).toBeNull();
+        expect(commitMenuItems(), String(operation)).not.toContain("Add co-author…");
         paused.unmount();
       }
 
       // Without anything pre-filled the user's own commit offers them too.
       renderUncommitted(fakeClient({}), status, { mergeMessage: null, headInfo });
-      expect(screen.getByRole("button", { name: "Add co-author" })).toBeInTheDocument();
+      expect(commitMenuItems()).toContain("Add co-author…");
+    });
+
+    it("says Nothing to commit on a clean tree and Stage changes only with unstaged changes (#1005)", () => {
+      const clean = renderUncommitted(fakeClient({}), []);
+      expect(screen.getByText("Nothing to commit.")).toBeInTheDocument();
+      expect(screen.queryByText(/Stage changes to commit/)).toBeNull();
+      clean.unmount();
+
+      renderUncommitted(fakeClient({}), [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }]);
+      expect(screen.getByText("Stage changes to commit.")).toBeInTheDocument();
+      expect(screen.queryByText("Nothing to commit.")).toBeNull();
     });
 
     it("offers amend and an empty message box after a leftover cherry-pick (#240, #232)", () => {
@@ -930,13 +945,13 @@ describe("DiffPane", () => {
       const { unmount } = renderUncommitted(fakeClient({}), status, { mergeMessage: "picked message\n", headInfo });
 
       expect(screen.getByPlaceholderText("Commit message")).toHaveValue("");
-      expect(screen.getByLabelText("Amend last commit")).toBeInTheDocument();
+      expect(commitMenuItems()).toContain("Amend last commit");
       unmount();
 
       // A cherry-pick still in progress keeps its message and blocks amend.
       renderUncommitted(fakeClient({}), status, { mergeMessage: "picked message\n", headInfo: { ...headInfo, operationLeftover: false } });
       expect(screen.getByPlaceholderText("Commit message")).toHaveValue("picked message\n");
-      expect(screen.queryByLabelText("Amend last commit")).toBeNull();
+      expect(commitMenuItems()).not.toContain("Amend last commit");
     });
 
     it("offers no Abort merge or amend during a rebase started in a terminal (#263)", () => {
@@ -1922,7 +1937,7 @@ describe("DiffPane diff options contract", () => {
       pane(fakeClient({ getWorkingDiff }), { ignoreWhitespace: false, contextLines: 3 }, { onStageHunk, onStageLines }),
     );
     await screen.findByRole("button", { name: "Stage hunk" });
-    fireEvent.click(screen.getByRole("button", { name: "Show whole file" }));
+    chooseViewOption("Show whole file");
     await waitFor(() =>
       expect(getWorkingDiff).toHaveBeenLastCalledWith(TEST_REPO_PATH, "f.txt", false, {
         ignoreWhitespace: false,
@@ -1937,7 +1952,7 @@ describe("DiffPane diff options contract", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Stage lines (1)" }));
     await waitFor(() => expect(onStageLines).toHaveBeenCalledWith("f.txt", 1, 1, { contextLines: WHOLE_FILE_CONTEXT_LINES, algorithm: "Default" }, [2], shown));
 
-    fireEvent.click(screen.getByRole("button", { name: "Show whole file" }));
+    chooseViewOption("Show whole file");
     await waitFor(() =>
       expect(getWorkingDiff).toHaveBeenLastCalledWith(TEST_REPO_PATH, "f.txt", false, { ignoreWhitespace: false, contextLines: 3, algorithm: "Default" }),
     );
@@ -1956,7 +1971,7 @@ describe("DiffPane diff options contract", () => {
     );
     render(pane(fakeClient({ getWorkingDiff }), { ignoreWhitespace: false, contextLines: 3 }, {}));
     await screen.findByRole("button", { name: "Stage hunk" });
-    fireEvent.click(screen.getByRole("button", { name: "Show whole file" }));
+    chooseViewOption("Show whole file");
     expect(await screen.findByText(/too long to show whole \(10,001 lines\)/)).toBeInTheDocument();
     await waitFor(() =>
       expect(getWorkingDiff).toHaveBeenLastCalledWith(TEST_REPO_PATH, "f.txt", false, { ignoreWhitespace: false, contextLines: 3, algorithm: "Default" }),
@@ -2766,6 +2781,7 @@ describe("DiffPane commit message settings", () => {
         />
       </CommitMessageSettingsContext.Provider>,
     );
+    fireEvent.focus(screen.getByLabelText("Commit message"));
     expect(screen.getByLabelText("Summary length")).toHaveTextContent("Summary 0/60");
     expect(screen.getByRole("textbox", { name: "Commit message" }).style.getPropertyValue("--ruler-column")).toBe("80");
   });
@@ -2830,7 +2846,7 @@ describe("DiffPane co-authors and amend author", () => {
       onCommit,
     });
     fireEvent.change(screen.getByLabelText("Commit message"), { target: { value: "Fix" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add co-author" }));
+    chooseCommitMenuItem("Add co-author…");
     fireEvent.click(await screen.findByRole("option", { name: "Ada <ada@x.org>" }));
     fireEvent.click(screen.getByRole("button", { name: "Commit 1 file" }));
     expect(listRecentAuthors).toHaveBeenCalledWith(TEST_REPO_PATH);
@@ -3061,5 +3077,13 @@ describe("DiffPane multi-select (#449)", () => {
     fireEvent.click(header("a.txt"), { ctrlKey: true });
 
     await waitFor(() => expect(onSelectionChange).toHaveBeenLastCalledWith({ staged: false, paths: ["b.txt", "c.txt"] }));
+  });
+});
+
+describe("commit dock height (#1003)", () => {
+  it("never takes more than half the column's height, scrolling its own content beyond that", () => {
+    const dock = rulesOf(diffPaneCss).filter(({ selector }) => subjectOf(selector) === ".commitDock");
+    expect(cascadedValue(dock, "max-height")).toBe("50vh");
+    expect(cascadedValue(dock, "overflow-y")).toBe("auto");
   });
 });

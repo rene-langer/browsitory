@@ -70,6 +70,27 @@
   color: var(--color-text);
 }
 
+/* "View ▾" (#1007): the graph's toggles, in words. */
+.viewButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  min-height: var(--size-target-min);
+  padding: 0 var(--space-1);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.viewButton:hover,
+.viewButton[aria-expanded="true"] {
+  background: var(--color-control-hover);
+  color: var(--color-text);
+}
+
 .help {
   position: absolute;
   top: 100%;

@@ -41,6 +41,8 @@ describe("Browsitory commit message history (#443)", () => {
       timeoutMsg: "expected the commit to clear the message box",
     });
 
+    // Recent messages shows once the message field has focus (#1003): the box is one line until then.
+    await browser.execute((el) => (el as HTMLElement).focus(), box);
     // Keyboard: the menu opens with its first item focused; Enter picks it.
     await clickInPage("button", "Recent messages");
     await $("[role='menu']").waitForExist();
