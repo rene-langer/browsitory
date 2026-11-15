@@ -54,11 +54,8 @@ export function CommitBox({
   onCommit,
   disabled,
   disabledReason,
-  onAbortMerge,
-  abortLabel = "Abort merge",
   initialMessage,
   initialMessageIsSquash = false,
-  showAbort = initialMessage !== undefined && onAbortMerge !== undefined,
   initialDraft,
   onDraftChange,
   amend,
@@ -91,17 +88,12 @@ export function CommitBox({
   disabled: boolean;
   /** Visible explanation shown while `disabled` blocks Commit. */
   disabledReason?: string;
-  /** Abort merge / cherry-pick / revert; the commit dock leaves it to the status strip (#995). */
-  onAbortMerge?: () => void;
-  abortLabel?: string;
   initialMessage?: string;
   /**
    * `initialMessage` is a pending squash merge's message (#142): co-authors can still be added
    * to it. A merge's or a paused cherry-pick's or revert's message hides them.
    */
   initialMessageIsSquash?: boolean;
-  /** Whether to offer `abortLabel`; defaults to "a message was seeded" (a merge/pick/revert). */
-  showAbort?: boolean;
   /**
    * Draft to start from on mount (read once, like `useState`'s initial value). `App` keeps one per
    * repo so switching tabs — which unmounts the inactive tab's whole workspace (PERF-001) — or
@@ -604,11 +596,6 @@ export function CommitBox({
           {amendOn && amend !== undefined && (
             <button type="button" onClick={() => amend.onToggle(false)}>
               Cancel amend
-            </button>
-          )}
-          {showAbort && (
-            <button data-tone="danger" onClick={onAbortMerge}>
-              {abortLabel}
             </button>
           )}
         </Toolbar>
