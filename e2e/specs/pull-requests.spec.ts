@@ -110,6 +110,15 @@ async function connect(
   await waitUntilGoneInPage(`dialog[aria-label='Connect to ${provider}']`);
 }
 
+/**
+ * A pull request row's text from the DOM. Not getText(): WebKitWebDriver's visible text leaves
+ * out text in the row's ellipsis-truncated lines (#1012), so it returned "" for a row that shows
+ * "#7 Add pull request support".
+ */
+async function rowText(row: WebdriverIO.Element): Promise<string> {
+  return String(await row.getProperty("textContent"));
+}
+
 /** Creates "Add feature" from feature/pr into main in the section's New pull request dialog. */
 async function createPullRequest(section: WebdriverIO.Element) {
   await (await section.$("button=New pull request…")).click();
@@ -159,7 +168,7 @@ describe("Browsitory pull requests", () => {
     // itself: nothing is listed until a section is connected (#1012), and gl-origin has no
     // section to connect.
     expect(await server.requestCount()).toBe(0);
-    await expect(await githubSection.$("button=Connect to GitHub")).toBeExisting();
+    await expect(await githubSection.$("button=Connect to GitHub…")).toBeExisting();
   });
 
   // `PullRequestPanel` keys `state.pullRequests` per remote (see `useAppState.ts`), so each
@@ -179,8 +188,8 @@ describe("Browsitory pull requests", () => {
     // Connected, the section lists the pull requests by itself (#1012).
     const listedRow = await section.$("li*=Add pull request support");
     await listedRow.waitForExist();
-    expect(await listedRow.getText()).toContain("#7");
-    expect(await listedRow.getText()).toContain("feature/pr");
+    expect(await rowText(listedRow)).toContain("#7");
+    expect(await rowText(listedRow)).toContain("feature/pr");
 
     const listRequest = await server.lastRequestFor("github-list");
     expect(listRequest?.authorization).toBe("Bearer gh-test-token");
@@ -189,7 +198,7 @@ describe("Browsitory pull requests", () => {
 
     const createdRow = await section.$("li*=Add feature");
     await createdRow.waitForExist();
-    expect(await createdRow.getText()).toContain("#8");
+    expect(await rowText(createdRow)).toContain("#8");
     // The row above renders as soon as `createPullRequest`'s own state update lands, but the
     // dialog only closes once that call's trailing `refresh()` has finished too: polled.
     await waitUntilGoneInPage("dialog[aria-label='New pull request']");
@@ -222,7 +231,7 @@ describe("Browsitory pull requests", () => {
 
     const listedRow = await section.$("li*=Add pull request support");
     await listedRow.waitForExist();
-    expect(await listedRow.getText()).toContain("#12");
+    expect(await rowText(listedRow)).toContain("#12");
 
     const listRequest = await server.lastRequestFor("bitbucket-list");
     expect(listRequest?.authorization).toBe("Bearer bb-test-token");
@@ -231,7 +240,7 @@ describe("Browsitory pull requests", () => {
 
     const createdRow = await section.$("li*=Add feature");
     await createdRow.waitForExist();
-    expect(await createdRow.getText()).toContain("#13");
+    expect(await rowText(createdRow)).toContain("#13");
 
     const createRequest = await server.lastRequestFor("bitbucket-create");
     expect(createRequest?.authorization).toBe("Bearer bb-test-token");
