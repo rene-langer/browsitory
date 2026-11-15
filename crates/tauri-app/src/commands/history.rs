@@ -19,7 +19,9 @@ pub async fn get_head_info(
 }
 
 /// `author` replaces HEAD's author name and email (keeping its time); `trailers` (absent: none)
-/// are appended before the hooks run.
+/// are appended before the hooks run. `message_only` (Reword… on HEAD, #981) keeps HEAD's tree and
+/// ignores `author` and `trailers`.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn amend_commit(
     repo_path: String,
