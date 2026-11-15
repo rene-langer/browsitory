@@ -2306,7 +2306,7 @@ describe("DiffPane stash view", () => {
     fireEvent.click(within(section).getByRole("button", { name: "Drop…" }));
     expect(actions.onDrop).not.toHaveBeenCalled();
     const dialog = screen.getByRole("dialog", { name: "Drop stash wip", hidden: true });
-    expect(dialog).toHaveTextContent('Drop "wip"? This cannot be undone.');
+    expect(dialog).toHaveTextContent("Undo can't bring it back.");
     fireEvent.click(within(dialog).getByRole("button", { name: "Drop stash", hidden: true }));
     expect(actions.onDrop).toHaveBeenCalledWith(0);
   });

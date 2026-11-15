@@ -75,6 +75,47 @@ describe("FormDialog's title (#987)", () => {
   );
 });
 
+describe("a dialog's name and description come from its heading and text (#987)", () => {
+  it("FormDialog: labelled by its heading, described by the line under it", () => {
+    render(
+      <FormDialog title="Set upstream for main" description="Choose a remote branch." onCancel={vi.fn()}>
+        <input aria-label="first" />
+      </FormDialog>,
+    );
+    const dialog = screen.getByRole("dialog", { name: "Set upstream for main", hidden: true });
+    const heading = within(dialog).getByRole("heading", { level: 2, hidden: true });
+    expect(heading.id).not.toBe("");
+    expect(dialog).toHaveAttribute("aria-labelledby", heading.id);
+    expect(dialog).toHaveAccessibleDescription("Choose a remote branch.");
+  });
+
+  it("FormDialog without a description has none", () => {
+    render(
+      <FormDialog title="Rename tab" onCancel={vi.fn()}>
+        <input aria-label="first" />
+      </FormDialog>,
+    );
+    expect(screen.getByRole("dialog", { name: "Rename tab", hidden: true })).not.toHaveAttribute("aria-describedby");
+  });
+
+  it("ConfirmDialog: labelled by its heading, described by its message", () => {
+    render(
+      <ConfirmDialog
+        title="Delete tag v1"
+        message={<p>Undo brings it back.</p>}
+        confirmLabel="Delete tag"
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    const dialog = screen.getByRole("dialog", { name: "Delete tag v1" });
+    const heading = within(dialog).getByRole("heading", { level: 2 });
+    expect(heading.id).not.toBe("");
+    expect(dialog).toHaveAttribute("aria-labelledby", heading.id);
+    expect(dialog).toHaveAccessibleDescription("Undo brings it back.");
+  });
+});
+
 describe("ConfirmDialog's title and tone (#987, #988)", () => {
   it("shows the title as a visible heading", () => {
     render(<ConfirmDialog title="Delete tag v1" message="Undo brings it back." confirmLabel="Delete tag" onConfirm={vi.fn()} onCancel={vi.fn()} />);
@@ -94,6 +135,14 @@ describe("ConfirmDialog's title and tone (#987, #988)", () => {
     );
     expect(screen.getByRole("button", { name: "Drop stash" })).toHaveAttribute("data-tone", "danger");
   });
+
+  it.each(confirmDialogFiles.map(([path, source]) => ({ path, source })))(
+    "$path words every drop-stash confirmation alike (#989)",
+    ({ source }) => {
+      const drops = source.split("<ConfirmDialog").slice(1).filter((dialog) => /confirmLabel="Drop stash"/.test(dialog));
+      for (const dialog of drops) expect(dialog).toMatch(/message=\{<DropStashMessage\b/);
+    },
+  );
 
   it.each(confirmDialogFiles.map(([path, source]) => ({ path, source })))("$path gives each confirmation a title", ({ source }) => {
     expect(source).not.toMatch(/<ConfirmDialog[^>]*ariaLabel=/);

@@ -5,6 +5,7 @@ import type { StashEntry } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
+import { DropStashMessage } from "./DropStashMessage";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { ListRow } from "./primitives/ListRow";
 import styles from "./StashPanel.module.css";
@@ -212,7 +213,7 @@ export function StashPanel({
       {dropStash !== undefined && (
         <ConfirmDialog
           title={`Drop stash ${stashTitle(dropStash)}`}
-          message={<p>Drop "{stashTitle(dropStash)}"? This cannot be undone.</p>}
+          message={<DropStashMessage />}
           confirmLabel="Drop stash"
           tone="danger"
           // #521: the repository can become busy while the confirmation is open.

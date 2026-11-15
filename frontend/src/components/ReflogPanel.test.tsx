@@ -114,7 +114,19 @@ describe("ReflogPanel", () => {
     expect(onRestore).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: `Restore main to ${entry.newId}` }));
-    fireEvent.click(within(screen.getByRole("dialog", { name: "Restore main" })).getByRole("button", { name: "Restore reflog entry" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Restore main" })).getByRole("button", { name: "Restore main" }));
+    expect(onRestore).toHaveBeenCalledWith("refs/heads/main", entry.newId);
+  });
+
+  it("confirms with the shared dialog: a title, the consequence, Undo, and Restore main (#987)", () => {
+    const onRestore = vi.fn().mockResolvedValue(undefined);
+    renderPanel({ onRestore });
+    fireEvent.click(screen.getByRole("button", { name: `Restore main to ${entry.newId}` }));
+
+    const dialog = screen.getByRole("dialog", { name: "Restore main" });
+    expect(within(dialog).getByRole("heading", { level: 2, name: "Restore main" })).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("Undo can bring it back.");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Restore main" }));
     expect(onRestore).toHaveBeenCalledWith("refs/heads/main", entry.newId);
   });
 
@@ -241,7 +253,7 @@ describe("ReflogPanel — windowed rows", () => {
       fireEvent.click(screen.getByRole("button", { name: `Restore main to ${many[505].newId}` }));
       fireEvent.click(
         within(screen.getByRole("dialog", { name: "Restore main" })).getByRole("button", {
-          name: "Restore reflog entry",
+          name: "Restore main",
         }),
       );
       expect(onRestore).toHaveBeenCalledWith("refs/heads/main", many[505].newId);

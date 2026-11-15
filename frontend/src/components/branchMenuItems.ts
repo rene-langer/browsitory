@@ -84,6 +84,11 @@ function showAllBranchesItem({ active, onShowAll }: GraphFilter): ContextMenuIte
   return { label: "Show all branches", disabled: !active, onSelect: onShowAll, group: "view" };
 }
 
+/** A branch menu's "Show all branches": only while the graph is filtered, never a disabled one. */
+function showAllBranchesItems(filter: GraphFilter): ContextMenuItem[] {
+  return filter.active ? [showAllBranchesItem(filter)] : [];
+}
+
 /** The menu of a local branch row. */
 export function localBranchMenuItems({
   branch,
@@ -166,7 +171,7 @@ export function localBranchMenuItems({
     onSelect: () => onIsolateGraphBranch("local", branch.name),
     group: "view",
   });
-  items.push(showAllBranchesItem(graphFilter));
+  items.push(...showAllBranchesItems(graphFilter));
   items.push({ label: "Copy branch name", onSelect: () => onCopy(branch.name, "branch name"), group: "view" });
   items.push({ ...menuItem(actions.delete, () => onDelete(branch.name)), destructive: true, group: "delete" });
   return items;
@@ -261,7 +266,7 @@ export function remoteBranchMenuItems({
       onSelect: () => onIsolateGraphBranch("remote", `${remoteName}/${branchName}`),
       group: "view",
     },
-    showAllBranchesItem(graphFilter),
+    ...showAllBranchesItems(graphFilter),
     { label: "Copy branch name", onSelect: () => onCopy(`${remoteName}/${branchName}`, "branch name"), group: "view" },
     {
       ...menuItem(actions.delete, () => onOpenDeleteRemoteBranch(remoteName, branchName)),

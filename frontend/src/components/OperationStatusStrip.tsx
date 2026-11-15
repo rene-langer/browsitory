@@ -126,7 +126,7 @@ export function OperationStatusStrip({
         <span className={styles.spacer} />
         {goToConflict}
         <ReasonButton reason={pendingReason ?? reason ?? null} onClick={onContinueSequence}>
-          Continue
+          Continue {sequenceNoun(sequence.kind)}
         </ReasonButton>
         <ReasonButton reason={pendingReason} onClick={onAbortSequence}>
           Abort {sequenceNoun(sequence.kind)}
@@ -240,8 +240,8 @@ export function OperationStatusStrip({
       <span>
         {editing !== null
           ? splitting
-            ? `commit each part, then ${editKind === "Split" ? "Finish split" : "Continue"}`
-            : `change the files, then ${editKind === "Edit" ? "Finish editing" : "Continue"}`
+            ? `commit each part, then ${editKind === "Split" ? "Finish split" : "Continue rebase"}`
+            : `change the files, then ${editKind === "Edit" ? "Finish editing" : "Continue rebase"}`
           : leftover
             ? leftoverText(operation)
             : (reason ?? "No conflicts remaining")}
@@ -249,13 +249,13 @@ export function OperationStatusStrip({
       <span className={styles.spacer} />
       {!leftover && goToConflict}
       {rebaseProgress !== null && onContinueRebase !== undefined && (
-        // Continue next to Abort (#665), as the sequence's and the rebase panel's "Continue
-        // rebase": once no conflict is left.
+        // Continue next to Abort (#665), once no conflict is left: "Continue rebase", the
+        // palette's name for it (#990).
         <ReasonButton
           reason={pendingReason ?? reason ?? continueBlockedReason ?? null}
           onClick={onContinueRebase}
         >
-          {editKind === "Edit" ? "Finish editing" : editKind === "Split" ? "Finish split" : "Continue"}
+          {editKind === "Edit" ? "Finish editing" : editKind === "Split" ? "Finish split" : "Continue rebase"}
         </ReasonButton>
       )}
       <button

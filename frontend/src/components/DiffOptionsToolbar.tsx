@@ -28,7 +28,8 @@ export function DiffOptionsToolbar({ wholeFile = true, sticky = false }: { whole
         : "Off. Choose to wrap long lines.";
   const viewItems: ContextMenuItem[] = [
     {
-      label: "Wrap lines",
+      // On Auto it says so in words too (#1007), not only with the "A" badge.
+      label: settings.wordWrap === "Auto" ? "Wrap lines (automatic)" : "Wrap lines",
       checked: wrapChecked,
       title: wrapTitle,
       onSelect: () => update({ wordWrap: settings.wordWrap === "On" ? "Off" : "On" }),
@@ -110,7 +111,7 @@ export function DiffOptionsToolbar({ wholeFile = true, sticky = false }: { whole
         </button>
       </span>
       <ViewMenuButton
-        label="Diff view"
+        label="View diff options"
         title="Wrapping, whitespace, the whole file and syntax highlighting"
         items={viewItems}
         className={styles.viewButton}

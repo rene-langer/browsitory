@@ -5,8 +5,8 @@ import { useDateFormat } from "../state/useDateFormat";
 import { History } from "lucide-react";
 import type { ReflogEntry } from "../ipc/RepoClient";
 import { AccordionSection } from "./primitives/AccordionSection";
+import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { ListRow } from "./primitives/ListRow";
-import { Toolbar } from "./primitives/Toolbar";
 import styles from "./ReflogPanel.module.css";
 import { useVirtualRows } from "./useVirtualRows";
 
@@ -113,23 +113,27 @@ export function ReflogPanel({
         </ul>
       )}
       {restoreConfirmation !== null && (
-        <dialog open aria-label={`Restore ${shortRefName(restoreConfirmation.reference)}`}>
-          <p>Restore {shortRefName(restoreConfirmation.reference)} to {restoreConfirmation.newId}?</p>
-          <p>Your files and staged changes stay as they are.</p>
-          <Toolbar>
-            <button
-              type="button"
-              disabled={operationDisabled}
-              onClick={() => {
-                void onRestore(restoreConfirmation.reference, restoreConfirmation.newId)
-                  .then(() => setRestoreConfirmation(null));
-              }}
-            >
-              Restore reflog entry
-            </button>
-            <button type="button" onClick={() => setRestoreConfirmation(null)}>Cancel</button>
-          </Toolbar>
-        </dialog>
+        // The shared confirmation (#987): the title, what moves and what doesn't, and Undo.
+        <ConfirmDialog
+          title={`Restore ${shortRefName(restoreConfirmation.reference)}`}
+          message={
+            <>
+              <p>
+                Restore {shortRefName(restoreConfirmation.reference)} to {restoreConfirmation.newId}?
+              </p>
+              <p>Your files and staged changes stay as they are.</p>
+              <p>Undo can bring it back.</p>
+            </>
+          }
+          confirmLabel={`Restore ${shortRefName(restoreConfirmation.reference)}`}
+          confirmDisabled={operationDisabled}
+          onConfirm={() => {
+            void onRestore(restoreConfirmation.reference, restoreConfirmation.newId).then(() =>
+              setRestoreConfirmation(null),
+            );
+          }}
+          onCancel={() => setRestoreConfirmation(null)}
+        />
       )}
     </AccordionSection>
   );

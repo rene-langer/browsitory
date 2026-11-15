@@ -4,6 +4,7 @@ import { removeShortcutChord, resetAllShortcuts } from "../lib/keymap";
 import type { RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { SyncBar } from "./SyncBar";
 import styles from "./SyncBar.module.css";
+import syncBarCss from "./SyncBar.module.css?raw";
 
 const remote: RemoteInfo = { name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null };
 const upstream: UpstreamInfo = {
@@ -50,7 +51,14 @@ describe("SyncBar", () => {
     expect(pull).toHaveTextContent(/^Pull$/);
     expect(screen.queryByText("↓0")).toBeNull();
     // Said in words for assistive tech, as before.
-    expect(screen.getByRole("status", { name: "2 ahead, 0 behind origin/main" })).toBeInTheDocument();
+    expect(screen.getByText("2 ahead, 0 behind origin/main").closest('[role="status"]')).not.toBeNull();
+  });
+
+  it("says ahead and behind in words as the status's text, which a live region announces (#1006)", () => {
+    renderBar();
+    const words = screen.getByText("2 ahead, 1 behind origin/main");
+    expect(words.closest('[role="status"]')).not.toBeNull();
+    expect(words.closest('[role="status"]')).not.toHaveAttribute("aria-label");
   });
 
   it("puts ↓n on Pull when it has a menu too (#1006)", () => {
@@ -201,6 +209,14 @@ describe("SyncBar", () => {
 });
 
 describe("SyncBar last fetch", () => {
+  it("lets the last fetch's slot shrink to its text in a narrow window (#1006)", () => {
+    const narrow = [...syncBarCss.matchAll(/@media\s*\(max-width:\s*([\d.]+)rem\)\s*\{([\s\S]*?)\n\}/g)];
+    const slot = narrow.find(([, , body]) => /\.lastFetch\s*\{[^}]*min-width:\s*0\b/.test(body));
+    expect(slot).toBeDefined();
+    // At 900 px and in a narrow VS Code panel the fixed slot gives way.
+    expect(Number(slot![1]) * 16).toBeGreaterThan(900);
+  });
+
   it("shows nothing before the first fetch of the session", () => {
     renderBar({ lastFetchedAt: null });
 

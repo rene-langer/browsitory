@@ -34,7 +34,8 @@
   font-size: var(--text-xs);
 }
 
-.showAll:hover {
+/* `:not(...)` as in `index.css`'s button hover, which this outranks only so (#985). */
+.showAll:hover:not(:disabled):not([aria-disabled="true"]) {
   background: var(--color-info-text);
   color: var(--color-info-bg);
 }

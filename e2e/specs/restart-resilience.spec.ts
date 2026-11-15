@@ -37,7 +37,7 @@ async function alertTexts(): Promise<string> {
 }
 
 /**
- * Clicks the status strip's **Continue** (the rebase's only one since #995) once the restarted
+ * Clicks the status strip's **Continue rebase** (its only Continue since #995) once the restarted
  * app has settled: the same button element has been
  * in the page, enabled and rendered, for a full second. The strip shows the paused rebase as soon
  * as the restarted app's first refresh lands, but the workspace can still re-render or remount
@@ -53,7 +53,7 @@ async function clickContinueRebaseWhenSettled(): Promise<void> {
       browser.execute(() => {
         const button = Array.from(
           document.querySelectorAll<HTMLButtonElement>("[role='status'][aria-label='Operation status'] button"),
-        ).find((el) => (el.textContent ?? "").trim() === "Continue");
+        ).find((el) => (el.textContent ?? "").trim() === "Continue rebase");
         if (
           button === undefined ||
           button.disabled ||

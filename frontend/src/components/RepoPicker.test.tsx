@@ -417,6 +417,14 @@ describe("RepoPicker welcome (#688)", () => {
   });
 });
 
+describe("RepoPicker's title (#1013)", () => {
+  it("is Open repository on the start page too, as in the dialog", async () => {
+    render(<RepoPicker client={fakeClient()} onOpenRepo={vi.fn()} {...workspaceProps()} />);
+    await screen.findByText("No recent repositories");
+    expect(screen.getByRole("heading", { name: "Open repository" })).toBeInTheDocument();
+  });
+});
+
 describe("RepoPicker opened over a repository (#1013)", () => {
   it("has an Open repository header with a close button, and no palette tip", async () => {
     const onClose = vi.fn();

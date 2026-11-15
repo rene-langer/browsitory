@@ -45,7 +45,7 @@ export function useForgeActions(
         setState((prev) => {
           const rest = { ...prev.pullRequests };
           delete rest[remoteName];
-          return { ...prev, pullRequests: rest, ...failure };
+          return { ...prev, pullRequests: rest, ...failure, errorSource: { error: failure.error, source: "read" } };
         });
       }
     },
@@ -53,7 +53,10 @@ export function useForgeActions(
   );
   const saveForgeToken = useCallback(
     (provider: ForgeProvider, account: string, token: string) =>
-      runMutationWithMessage(() => client.saveForgeToken(repoPath, provider, account, token)),
+      // Connect's dialog shows the failure (#996).
+      runMutationWithMessage(() => client.saveForgeToken(repoPath, provider, account, token), undefined, {
+        inDialog: true,
+      }),
     [client, runMutationWithMessage, repoPath],
   );
   const forgetForgeToken = useCallback(
@@ -76,7 +79,8 @@ export function useForgeActions(
             pullRequests: { ...prev.pullRequests, [remoteName]: updated },
           };
         });
-      }),
+        // New pull request's dialog shows the failure (#996).
+      }, undefined, { inDialog: true }),
     [client, runMutationWithMessage, repoPath, setState],
   );
   const openExternalUrl = useCallback(

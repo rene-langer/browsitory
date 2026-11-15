@@ -233,21 +233,21 @@ describe("recent searches (#540)", () => {
 it("toggles the commit list's lines-changed badges (#620)", () => {
   const onToggleLineStats = vi.fn();
   const props = renderBar({ showLineStats: true, onToggleLineStats });
-  expect(viewOptionState("Show lines changed", "Graph view")).toBe("true");
-  chooseViewOption("Show lines changed", "Graph view");
+  expect(viewOptionState("Show lines changed", "View graph options")).toBe("true");
+  chooseViewOption("Show lines changed", "View graph options");
   expect(onToggleLineStats).toHaveBeenCalledTimes(1);
   props.rerender({ showLineStats: false });
-  expect(viewOptionState("Show lines changed", "Graph view")).toBe("false");
+  expect(viewOptionState("Show lines changed", "View graph options")).toBe("false");
 });
 
 it("toggles Collapse merges (#617)", () => {
   const onToggleCollapseMerges = vi.fn();
   const props = renderBar({ collapseMerges: false, onToggleCollapseMerges });
-  expect(viewOptionState("Collapse merges", "Graph view")).toBe("false");
-  chooseViewOption("Collapse merges", "Graph view");
+  expect(viewOptionState("Collapse merges", "View graph options")).toBe("false");
+  chooseViewOption("Collapse merges", "View graph options");
   expect(onToggleCollapseMerges).toHaveBeenCalledTimes(1);
   props.rerender({ collapseMerges: true });
-  expect(viewOptionState("Collapse merges", "Graph view")).toBe("true");
+  expect(viewOptionState("Collapse merges", "View graph options")).toBe("true");
 });
 
 // #687: with a search open, Enter / F3 go to the next match, with Shift to the previous one.
@@ -271,6 +271,11 @@ describe("match keys", () => {
   });
 });
 
+it("names the graph's View menu starting with its visible text (#1007)", () => {
+  renderBar({ showLineStats: true, onToggleLineStats: vi.fn(), collapseMerges: false, onToggleCollapseMerges: vi.fn() });
+  expect(screen.getByRole("button", { name: "View graph options" })).toHaveTextContent("View");
+});
+
 // #1007: the graph's rarely changed toggles are in a View menu, in words.
 it("puts Show lines changed and Collapse merges in the Graph view menu", () => {
   const onToggleLineStats = vi.fn();
@@ -278,9 +283,9 @@ it("puts Show lines changed and Collapse merges in the Graph view menu", () => {
   renderBar({ showLineStats: true, onToggleLineStats, collapseMerges: false, onToggleCollapseMerges });
   expect(screen.queryByRole("button", { name: "Show lines changed" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Collapse merges" })).toBeNull();
-  expect(screen.getByRole("button", { name: "Graph view" })).toHaveTextContent("View");
-  expect(viewOptionNames("Graph view")).toEqual(["Show lines changed", "Collapse merges"]);
-  expect(viewOptionState("Show lines changed", "Graph view")).toBe("true");
-  chooseViewOption("Collapse merges", "Graph view");
+  expect(screen.getByRole("button", { name: "View graph options" })).toHaveTextContent("View");
+  expect(viewOptionNames("View graph options")).toEqual(["Show lines changed", "Collapse merges"]);
+  expect(viewOptionState("Show lines changed", "View graph options")).toBe("true");
+  chooseViewOption("Collapse merges", "View graph options");
   expect(onToggleCollapseMerges).toHaveBeenCalledTimes(1);
 });

@@ -109,7 +109,7 @@ describe("OperationStatusStrip", () => {
     );
     const strip = screen.getByRole("status", { name: "Operation status" });
     expect(strip).toHaveTextContent("Cherry-picking 2/5");
-    const cont = within(strip).getByRole("button", { name: "Continue" });
+    const cont = within(strip).getByRole("button", { name: "Continue cherry-pick" });
     expect(cont).toHaveAttribute("aria-disabled", "true");
     expect(cont).toHaveAccessibleDescription("Resolve 1 conflict to continue");
     fireEvent.click(within(strip).getByRole("button", { name: "Abort cherry-pick" }));
@@ -134,7 +134,7 @@ describe("OperationStatusStrip", () => {
       />,
     );
     expect(screen.getByRole("status", { name: "Operation status" })).toHaveTextContent("Reverting 3/3");
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue revert" }));
     expect(onContinueSequence).toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Abort revert" })).toBeInTheDocument();
   });
@@ -154,7 +154,7 @@ describe("OperationStatusStrip", () => {
         onAbortSequence={noop}
       />,
     );
-    expect(screen.getByRole("button", { name: "Continue" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "Continue cherry-pick" })).toHaveAttribute("aria-disabled", "true");
     expect(screen.getByRole("button", { name: "Abort cherry-pick" })).toHaveAttribute("aria-disabled", "true");
   });
 
@@ -175,7 +175,7 @@ describe("OperationStatusStrip", () => {
         onAbortSequence={onAbortSequence}
       />,
     );
-    for (const name of ["Continue", "Abort cherry-pick"]) {
+    for (const name of ["Continue cherry-pick", "Abort cherry-pick"]) {
       const button = screen.getByRole("button", { name });
       expect(describedByText(button)).toBe("Another action is in progress.");
       fireEvent.click(button);
@@ -260,9 +260,9 @@ describe("OperationStatusStrip", () => {
         />,
       );
       const strip = screen.getByRole("status");
-      expect(strip).toHaveTextContent("Editing 1a2b3c4: change the files, then Continue");
+      expect(strip).toHaveTextContent("Editing 1a2b3c4: change the files, then Continue rebase");
       expect(strip).not.toHaveTextContent("Rebasing");
-      fireEvent.click(within(strip).getByRole("button", { name: "Continue" }));
+      fireEvent.click(within(strip).getByRole("button", { name: "Continue rebase" }));
       fireEvent.click(within(strip).getByRole("button", { name: "Abort rebase" }));
       expect(onContinueRebase).toHaveBeenCalledTimes(1);
       expect(onAbortRebase).toHaveBeenCalledTimes(1);
@@ -317,7 +317,7 @@ describe("OperationStatusStrip", () => {
       );
       const strip = screen.getByRole("status");
       expect(strip).toHaveTextContent("Editing 1a2b3c4: change the files, then Finish editing");
-      expect(within(strip).queryByRole("button", { name: "Continue" })).toBeNull();
+      expect(within(strip).queryByRole("button", { name: /^Continue/ })).toBeNull();
       expect(within(strip).queryByRole("button", { name: "Abort rebase" })).toBeNull();
       fireEvent.click(within(strip).getByRole("button", { name: "Finish editing" }));
       fireEvent.click(within(strip).getByRole("button", { name: "Cancel edit" }));
@@ -557,7 +557,7 @@ describe("OperationStatusStrip", () => {
       const strip = screen.getByRole("status");
       expect(within(strip).getByText("Cherry-pick paused in a terminal")).toBeInTheDocument();
       expect(strip).toHaveTextContent("Run git cherry-pick --continue there to apply the remaining commits.");
-      expect(within(strip).queryByRole("button", { name: "Continue" })).toBeNull();
+      expect(within(strip).queryByRole("button", { name: /^Continue/ })).toBeNull();
       fireEvent.click(within(strip).getByRole("button", { name: "Abort cherry-pick" }));
       expect(onAbortTerminalSequence).toHaveBeenCalledTimes(1);
     });
@@ -691,16 +691,83 @@ describe("OperationStatusStrip", () => {
         onAbortRebase: noop,
       };
       const { rerender } = render(<OperationStatusStrip {...props} conflictCount={1} />);
-      const blocked = screen.getByRole("button", { name: "Continue" });
+      const blocked = screen.getByRole("button", { name: "Continue rebase" });
       expect(blocked).toHaveAttribute("aria-disabled", "true");
       expect(blocked).toHaveAccessibleDescription("Resolve 1 conflict to continue");
       fireEvent.click(blocked);
       expect(onContinueRebase).not.toHaveBeenCalled();
 
       rerender(<OperationStatusStrip {...props} conflictCount={0} />);
-      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+      fireEvent.click(screen.getByRole("button", { name: "Continue rebase" }));
       expect(onContinueRebase).toHaveBeenCalledOnce();
       expect(screen.getByRole("button", { name: "Abort rebase" })).toBeInTheDocument();
     });
+  });
+});
+
+describe("Continue names what it continues, as the palette does (#990)", () => {
+  const stored: RebaseInfo = {
+    branch: "topic",
+    onto: "o",
+    currentStep: 1,
+    totalSteps: 2,
+    health: { kind: "Paused" },
+    editing: null,
+    splitParts: 0,
+  };
+
+  it.each([
+    ["CherryPick", "Continue cherry-pick"],
+    ["Revert", "Continue revert"],
+  ] as const)("a %s sequence's Continue is %s", (kind, name) => {
+    const onContinueSequence = vi.fn();
+    render(
+      <OperationStatusStrip
+        merging={false}
+        operation={null}
+        rebaseProgress={null}
+        sequence={{ kind, currentStep: 1, totalSteps: 2, currentCommit: "c" }}
+        conflictCount={0}
+        onAbortMerge={noop}
+        onAbortRebase={noop}
+        onContinueSequence={onContinueSequence}
+        onAbortSequence={noop}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name }));
+    expect(onContinueSequence).toHaveBeenCalledOnce();
+  });
+
+  it("a rebase's Continue is Continue rebase, also at a planner's edit stop", () => {
+    const onContinueRebase = vi.fn();
+    const { rerender } = render(
+      <OperationStatusStrip
+        merging={false}
+        operation={null}
+        rebaseProgress={{ currentStep: 1, totalSteps: 2 }}
+        rebase={stored}
+        conflictCount={0}
+        onAbortMerge={noop}
+        onAbortRebase={noop}
+        onContinueRebase={onContinueRebase}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Continue rebase" }));
+    expect(onContinueRebase).toHaveBeenCalledOnce();
+
+    rerender(
+      <OperationStatusStrip
+        merging={false}
+        operation={null}
+        rebaseProgress={{ currentStep: 1, totalSteps: 2 }}
+        rebase={{ ...stored, editing: "1a2b3c4d5e6f7081" }}
+        conflictCount={0}
+        onAbortMerge={noop}
+        onAbortRebase={noop}
+        onContinueRebase={onContinueRebase}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Editing 1a2b3c4: change the files, then Continue rebase");
+    expect(screen.getByRole("button", { name: "Continue rebase" })).toBeInTheDocument();
   });
 });

@@ -207,6 +207,9 @@ function BranchTreeContent({
   const [deleteConfirm, setDeleteConfirm] = useState<{ name: string; count: number | null } | null>(null);
   // The branch the Rename branch dialog renames (#1002), `null` while it's closed.
   const [renaming, setRenaming] = useState<string | null>(null);
+  // The new name while a rename runs: the list already shows it (optimistically), and the dialog
+  // must stay open to show a failure (#996).
+  const [renamingTo, setRenamingTo] = useState<string | null>(null);
   const [rowMenu, setRowMenu] = useState<RowContextMenu | null>(null);
   const [upstreamDialogOpen, setUpstreamDialogOpen] = useState(false);
   const [clearUpstreamConfirm, setClearUpstreamConfirm] = useState(false);
@@ -533,8 +536,8 @@ function BranchTreeContent({
                 Undo can bring it back.
               </p>
             }
-            confirmLabel="Delete"
-            tone="danger"
+            // Plain, not a danger (#988): Undo brings the branch back.
+            confirmLabel="Delete branch"
             confirmDisabled={operationDisabled}
             // #521: the repository can become busy while the confirmation is open.
             confirmReason={busyReason}
@@ -690,15 +693,18 @@ function BranchTreeContent({
         )}
 
         {/* Guarded like Delete's confirmation: a branch that went meanwhile has nothing to rename. */}
-        {renaming !== null && branches.some((b) => b.name === renaming) && (
+        {renaming !== null && branches.some((b) => b.name === renaming || b.name === renamingTo) && (
           <RenameBranchDialog
             key={renaming}
             name={renaming}
-            branchNames={branches.map((b) => b.name)}
+            // Not the name being given: the running rename put it in the list already.
+            branchNames={branches.map((b) => b.name).filter((name) => name !== renamingTo)}
             disabled={operationDisabled}
             disabledReason={busyReason}
             onRename={async (newName) => {
+              setRenamingTo(newName);
               const failure = await onRenameBranch(renaming, newName);
+              setRenamingTo(null);
               if (failure === null) setRenaming(null);
               return failure;
             }}

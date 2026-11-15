@@ -253,6 +253,8 @@ export function useBranchActions(
           if (next !== null) await updateSelection(next, "a branch rename");
         },
         failedOperation.renameBranch(oldName, newName),
+        // The Rename branch dialog shows the failure (#996).
+        { inDialog: true },
       );
     },
     [client, refuseTaken, runOptimisticMutationWithMessage, repoPath, updateSelection],

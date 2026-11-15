@@ -9,7 +9,8 @@ Each action now has one name, the same in its menu, the command palette and the 
   palette's diff options name what they will do ("Show whitespace" or "Hide whitespace", "Wrap
   lines" or "Stop wrapping lines", "More context lines"), and the shortcut list uses the
   palette's names ("Pull", "Go to commit message", "Close tab"). The toolbar's stash menu reads
-  "Stash all changes" (#990).
+  "Stash all changes". The status strip's Continue says what it continues, as the palette does:
+  "Continue rebase", "Continue cherry-pick", "Continue revert" (#990).
 - Changed: the palette's "Delete tag ⟨name⟩…", "Drop stash: ⟨name⟩…" and "Remove worktree
   ⟨name⟩…" open the same confirmation as the Tags, Stashes and Worktrees sections, instead of
   only opening the section. Tag commands have their own "Tags" group (#993, #990).

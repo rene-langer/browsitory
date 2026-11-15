@@ -38,6 +38,8 @@ export function OpenErrorBanner({
               : "These folders in it are repositories:"
           }
           copyDetails
+          // Git's own words: why it didn't open, for a bug report.
+          details={failure.message}
           onDismiss={onDismiss}
         >
           {failure.repos.length > 0 && (

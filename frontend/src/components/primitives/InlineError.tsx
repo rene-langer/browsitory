@@ -35,6 +35,7 @@ export function InlineError({
   hint,
   className,
   copyDetails = false,
+  details,
   earlier = [],
   actions = [],
   onDetails,
@@ -49,6 +50,8 @@ export function InlineError({
   className?: string;
   /** Renders a "Copy details" button that copies the message and hint (#663). */
   copyDetails?: boolean;
+  /** What Copy details adds after them: Git's own message where `message` rephrases it. */
+  details?: string;
   /** Earlier errors, newest first, that this one replaced (#663). */
   earlier?: readonly string[];
   /** Next steps, in order, before Retry and Details (#984). */
@@ -84,7 +87,7 @@ export function InlineError({
             Details
           </button>
         )}
-        {copyDetails && <CopyDetailsButton text={errorDetails(message, hint, earlier)} />}
+        {copyDetails && <CopyDetailsButton text={errorDetails(message, hint, earlier, details)} />}
         <button type="button" className={styles.dismiss} aria-label="Dismiss error" onClick={onDismiss}>
           <X size={12} aria-hidden="true" />
         </button>
@@ -106,10 +109,16 @@ export function InlineError({
   );
 }
 
-/** What "Copy details" copies: the message, its hint, then the earlier errors. */
-function errorDetails(message: string, hint: string | undefined, earlier: readonly string[] = []): string {
+/** What "Copy details" copies: the message, its hint, the details, then the earlier errors. */
+function errorDetails(
+  message: string,
+  hint: string | undefined,
+  earlier: readonly string[] = [],
+  details?: string,
+): string {
   const lines = [message];
   if (hint !== undefined) lines.push(hint);
+  if (details !== undefined) lines.push(details);
   if (earlier.length > 0) lines.push("", "Earlier errors:", ...earlier.map((text) => `- ${text}`));
   return lines.join("\n");
 }

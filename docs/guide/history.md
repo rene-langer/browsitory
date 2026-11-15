@@ -16,7 +16,7 @@ author's, as `2026-09-08 21:00` in your time zone (the graph's date tooltips use
 with "2 days ago" after it. When someone else committed it (a patch applied, a cherry-pick),
 **Committer** shows them and when they committed; when the author committed it later (a rebase,
 an amend), **Committed** shows that time. **Contained in** lists the local branches, remote
-branches (dashed) and tags (`#`) whose tip is the commit or comes after it, the first eight and
+branches (dashed) and tags (with a tag icon) whose tip is the commit or comes after it, the first eight and
 the rest under **Show N more**, or "No branch or tag". In a repository with very many branches
 and tags the check stops after a moment and says "Not every branch and tag was checked." Web links (`http://` and `https://`) in the message open in your browser
 when you click them or press Enter on them; the link's tooltip shows where it goes. When the
@@ -95,7 +95,8 @@ has **Isolate branch**, which shows only that branch.
 
 While the graph leaves out some local branch, a strip above it says so ("Showing
 feature/offline-tiles only", or how many branches it shows). **Show all branches**, there, in
-every branch's menu and in the **+** menu of the Branches section, goes back to the graph you
+every branch's menu (while some branch is left out) and in the **+** menu of the Branches
+section, goes back to the graph you
 started with: every local branch, also ones you create later, no remote-only commits, and every
 remote branch's badge. Turning dots back on until
 every local branch is on does the same for the local branches; the remote branches you picked
@@ -163,8 +164,9 @@ image**). A conflicted image opens the conflict pane, like any conflict.
 Each pane has one diff toolbar, above its files: the working tree, a commit, a stash and a
 compare. It shows **Unified** / **Split** and the context lines; the options you change less
 often are in its **View** menu, each with a check mark when it is on: **Wrap lines**, **Show
-whole file**, **Ignore whitespace**, **Show whitespace** and **Show syntax highlighting**.
-Everything on it applies to every diff in the pane and is remembered across sessions. **Unified
+whole file**, **Ignore whitespace**, **Show whitespace** and **Show syntax highlighting**. The
+menu stays open when you turn one on or off, so you can set several; Esc or a click outside
+closes it. Everything on it applies to every diff in the pane and is remembered across sessions. **Unified
 view** shows old and new lines in one column; **Split view** shows the old and new version side
 by side. **Ignore whitespace**, **Context lines** (− and +, 0 to 20) and **Show syntax
 highlighting** are kept in your settings. While whitespace is ignored, partial staging (lines and hunks) is unavailable in
@@ -184,8 +186,8 @@ whitespace**.
 **Wrap lines** wraps long lines at the pane's width, or turns wrapping off so each line stays on
 one row and the diff scrolls sideways. Line numbers stay next to their line either way, and
 selecting and staging lines works the same. The menu item sets **Preferences → Diff → Word wrap**
-to **On** or **Off** for every diff; the setting also has **Auto** (the default, marked with a
-small **A** where the check mark goes). Auto wraps the split view, prose files (Markdown, plain text, reStructuredText,
+to **On** or **Off** for every diff; the setting also has **Auto** (the default, where the item
+reads **Wrap lines (automatic)** with a small **A** where the check mark goes). Auto wraps the split view, prose files (Markdown, plain text, reStructuredText,
 AsciiDoc and the like) and any diff with a line longer than 300 characters, such as minified or
 generated files; code in the unified view scrolls sideways so its indentation stays readable.
 

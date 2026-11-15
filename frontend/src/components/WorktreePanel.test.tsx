@@ -197,7 +197,7 @@ describe("WorktreePanel", () => {
       "Where a new branch starts, such as HEAD or main. An existing branch doesn't need one.",
     );
     expect(within(dialog).getByLabelText("Worktree path")).toHaveAccessibleDescription(
-      "The folder to check the branch out in. A relative path starts at this repository's folder.",
+      "The folder the worktree's files go in. A relative path starts at this repository's folder.",
     );
     expect(within(dialog).getByLabelText("Worktree name")).toHaveAccessibleDescription(
       "Git's name for the worktree, usually the folder's name.",

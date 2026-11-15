@@ -6,6 +6,7 @@ import { useWorkspaceActions } from "../state/useWorkspaceActions";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./DiffPane.module.css";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
+import { DropStashMessage } from "./DropStashMessage";
 import { ReasonButton } from "./primitives/ReasonButton";
 import { disabledReason } from "../lib/actions/action";
 import { InlineError } from "./primitives/InlineError";
@@ -180,7 +181,7 @@ export function StashDiffPane({
       {confirmingDrop && (
         <ConfirmDialog
           title={`Drop stash ${stashTitle(stash)}`}
-          message={<p>Drop "{stashTitle(stash)}"? This cannot be undone.</p>}
+          message={<DropStashMessage />}
           confirmLabel="Drop stash"
           tone="danger"
           // #521: the repository can become busy while the confirmation is open.

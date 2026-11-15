@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { RepoError, type HeadInfo, type RepoClient, type TransferProgress } from "./ipc/RepoClient";
 import { EMPTY_RESULTS, fakeRepoClient, graphPage } from "./test/fakeRepoClient";
@@ -63,7 +63,7 @@ function transferEvents() {
 
 /** The error banners outside any dialog. */
 function banners(): HTMLElement[] {
-  return screen.queryAllByRole("alert", { hidden: true }).filter((element) => element.closest('[role="dialog"]') === null);
+  return screen.queryAllByRole("alert", { hidden: true }).filter((element) => element.closest('dialog, [role="dialog"]') === null);
 }
 
 const buttonNames = (element: HTMLElement) =>
@@ -163,6 +163,127 @@ describe("no banner while a dialog handles the error (#996)", () => {
   });
 });
 
+describe("no banner beside a dialog that shows the failure itself (#996)", () => {
+  const RAW = "failed to rename branch; class=Reference (4); code=Exists (-4)";
+
+  it("Rename branch's failure shows in its dialog only, and Cancel leaves no banner", async () => {
+    const renameBranch = vi.fn(async () => {
+      throw new RepoError("Other", RAW);
+    });
+    render(
+      <App
+        client={repoClient({
+          listBranches: async () => [
+            { name: "main", isCurrent: true, upstream: "origin/main", ahead: 1, behind: 1 },
+            { name: "topic", isCurrent: false },
+          ],
+          renameBranch,
+        })}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Actions for topic" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename…" }));
+    const input = screen.getByRole("textbox", { name: "New name", hidden: true });
+    fireEvent.change(input, { target: { value: "feature" } });
+    fireEvent.submit(input.closest("form")!);
+
+    const dialog = screen.getByRole("dialog", { name: "Rename branch", hidden: true });
+    await waitFor(() =>
+      expect(within(dialog).getByRole("alert", { hidden: true })).toHaveTextContent("Couldn't rename branch topic"),
+    );
+    expect(banners()).toEqual([]);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel", hidden: true }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Rename branch", hidden: true })).toBeNull());
+    expect(banners()).toEqual([]);
+  });
+
+  describe("the pull request dialogs", () => {
+    const forge = [{ provider: "GitHub" as const, host: "github.com", owner: "acme", name: "widget", remoteName: "origin" }];
+    beforeEach(() => localStorage.clear());
+    afterEach(() => localStorage.clear());
+
+    async function pullRequestsSection() {
+      const toggle = await screen.findByRole("button", { name: /^Pull requests/ });
+      if (toggle.getAttribute("aria-expanded") === "false") fireEvent.click(toggle);
+      return await screen.findByRole("region", { name: /github: acme\/widget \(origin\)/i });
+    }
+
+    it("Connect to GitHub's failure shows in its dialog only", async () => {
+      const saveForgeToken = vi.fn(async () => {
+        throw new RepoError("Other", "the keyring is locked");
+      });
+      render(<App client={repoClient({ detectForgeRepository: async () => forge, saveForgeToken })} />);
+      const section = await pullRequestsSection();
+      fireEvent.click(within(section).getByRole("button", { name: /^Connect to GitHub/ }));
+      const dialog = screen.getByRole("dialog", { name: "Connect to GitHub", hidden: true });
+      fireEvent.change(within(dialog).getByLabelText("Account"), { target: { value: "rene" } });
+      fireEvent.change(within(dialog).getByLabelText("Access token"), { target: { value: "secret" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Connect", hidden: true }));
+
+      await waitFor(() =>
+        expect(within(dialog).getByRole("alert", { hidden: true })).toHaveTextContent("the keyring is locked"),
+      );
+      expect(banners()).toEqual([]);
+    });
+
+    it("New pull request's failure shows in its dialog only", async () => {
+      localStorage.setItem("forge-account.GitHub", "rene");
+      const createPullRequest = vi.fn(async () => {
+        throw new RepoError("Other", "Validation failed");
+      });
+      render(
+        <App
+          client={repoClient({
+            detectForgeRepository: async () => forge,
+            listPullRequests: async () => ({ pullRequests: [], truncated: false }),
+            listRemoteBranches: async () => ["main", "topic"],
+            createPullRequest,
+          })}
+        />,
+      );
+      const section = await pullRequestsSection();
+      fireEvent.click(await within(section).findByRole("button", { name: "New pull request…" }));
+      const dialog = screen.getByRole("dialog", { name: "New pull request", hidden: true });
+      const title = within(dialog).getByLabelText("Title");
+      fireEvent.change(title, { target: { value: "Add topic" } });
+      fireEvent.submit(title.closest("form")!);
+
+      await waitFor(() => expect(createPullRequest).toHaveBeenCalled());
+      await waitFor(() =>
+        expect(within(dialog).getByRole("alert", { hidden: true })).toHaveTextContent("Validation failed"),
+      );
+      expect(banners()).toEqual([]);
+    });
+  });
+});
+
+describe("a banner whose error isn't in the operation log (#984)", () => {
+  const RAW = "failed to read the stash list; class=Odb (9); code=NotFound (-3)";
+
+  it("offers Copy details, with Git's full text, instead of Details for a failed refresh", async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    render(
+      <App
+        client={repoClient({
+          listStashes: async () => {
+            throw new RepoError("Other", RAW);
+          },
+        })}
+      />,
+    );
+    const banner = await waitFor(() => {
+      const [found] = banners();
+      expect(found).toHaveTextContent("failed to read the stash list");
+      return found!;
+    });
+    expect(banner).not.toHaveTextContent("class=");
+    expect(buttonNames(banner)).toEqual(["Copy details", "Dismiss error"]);
+    fireEvent.click(within(banner).getByRole("button", { name: "Copy details" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringContaining(RAW)));
+  });
+});
+
 describe("opening a folder that isn't a repository (#973)", () => {
   const notARepository = new RepoError(
     "Other",
@@ -209,6 +330,48 @@ describe("opening a folder that isn't a repository (#973)", () => {
     });
     expect(within(banner).queryByRole("list")).toBeNull();
     expect(within(banner).queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+});
+
+describe("opening a folder that is a repository Git can't open (#973)", () => {
+  it("keeps Git's message and offers Retry when the folder has a .git entry", async () => {
+    const openRepo = vi.fn(async () => {
+      throw new RepoError(
+        "Other",
+        "failed to open repository: unsupported repository format version 2; class=Repository (6); code=NotFound (-3)",
+      );
+    });
+    // Only the parent's scan finds /work: it holds a .git entry.
+    const scanReposInRoot = vi.fn(async (root: string) => (root === "/" ? ["/work"] : []));
+    render(<App client={startPageClient("/work", { openRepo, scanReposInRoot })} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open repository…" }));
+
+    const banner = await waitFor(() => {
+      const [found] = banners();
+      expect(found).toHaveTextContent("unsupported repository format version 2");
+      return found!;
+    });
+    expect(banner).not.toHaveTextContent("isn't a Git repository");
+    expect(within(banner).getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
+  it("copies Git's message with a not-a-repository banner's details", async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const raw = "failed to open repository: could not find repository at '/work'; class=Repository (6); code=NotFound (-3)";
+    const openRepo = vi.fn(async () => {
+      throw new RepoError("Other", raw);
+    });
+    render(<App client={startPageClient("/work", { openRepo, scanReposInRoot: async () => [] })} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open repository…" }));
+
+    const banner = await waitFor(() => {
+      const [found] = banners();
+      expect(found).toHaveTextContent("This folder isn't a Git repository: /work");
+      return found!;
+    });
+    fireEvent.click(within(banner).getByRole("button", { name: "Copy details" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringContaining(raw)));
   });
 });
 

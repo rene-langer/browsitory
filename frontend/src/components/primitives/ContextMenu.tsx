@@ -69,6 +69,7 @@ export function ContextMenu({
   returnFocusTo,
   isTrigger,
   submenuOf,
+  keepOpenOnToggle = false,
 }: {
   x: number;
   y: number;
@@ -90,6 +91,8 @@ export function ContextMenu({
    * which Tab does. Keys stay in the submenu; Escape and ArrowLeft go back to the item.
    */
   submenuOf?: { label: string; closeAll: () => void };
+  /** Choosing a checkable item leaves the menu open (the View menus, #1007). */
+  keepOpenOnToggle?: boolean;
 }) {
   const isSubmenu = submenuOf !== undefined;
   const menuRef = useRef<HTMLUListElement>(null);
@@ -235,6 +238,11 @@ export function ContextMenu({
     if (item === undefined || item.disabled === true) return;
     if (item.submenu !== undefined) {
       openSubmenu(index);
+      return;
+    }
+    // A View menu's toggle (#1007): the menu stays open, focus on the item, to set another.
+    if (keepOpenOnToggle && item.checked !== undefined) {
+      item.onSelect();
       return;
     }
     restoreFocus();
@@ -388,9 +396,11 @@ export function ContextMenu({
         const submenuOpen = openSubmenuHere !== null;
         return [
           index > 0 && items[index - 1].group !== item.group && (
-            <li key={`separator:${item.label}`} role="separator" className={styles.separator} />
+            <li key={`separator:${index}`} role="separator" className={styles.separator} />
           ),
-          <li key={item.label} role="none">
+          // By place, not label: a toggle that renames itself (Wrap lines on Auto) keeps its
+          // button, and the focus on it.
+          <li key={index} role="none">
             <button
               ref={(element) => {
                 itemRefs.current[index] = element;

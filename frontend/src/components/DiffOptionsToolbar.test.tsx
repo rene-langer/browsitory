@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useState, type ReactNode } from "react";
 import { DEFAULT_DIFF_SETTINGS, type DiffHunk, type DiffSettings } from "../ipc/RepoClient";
@@ -145,9 +145,9 @@ describe("DiffOptionsToolbar (#640)", () => {
         <DiffOptionsToolbar />
       </Settings>,
     );
-    expect(viewOptionState("Wrap lines")).toBe("mixed");
+    expect(viewOptionState("Wrap lines (automatic)")).toBe("mixed");
 
-    chooseViewOption("Wrap lines");
+    chooseViewOption("Wrap lines (automatic)");
     expect(onUpdate).toHaveBeenLastCalledWith({ wordWrap: "On" });
     expect(viewOptionState("Wrap lines")).toBe("true");
 
@@ -175,11 +175,11 @@ describe("DiffOptionsToolbar (#640)", () => {
         <DiffOptionsToolbar />
       </DiffViewOptionsProvider>,
     );
-    for (const name of ["Unified view", "Split view", "Diff view"]) {
+    for (const name of ["Unified view", "Split view", "View diff options"]) {
       expect(screen.getByRole("button", { name })).toHaveAttribute("title");
     }
-    fireEvent.click(screen.getByRole("button", { name: "Diff view" }));
-    for (const name of ["Wrap lines", "Show whole file", "Ignore whitespace", "Show whitespace", "Show syntax highlighting"]) {
+    fireEvent.click(screen.getByRole("button", { name: "View diff options" }));
+    for (const name of ["Wrap lines (automatic)", "Show whole file", "Ignore whitespace", "Show whitespace", "Show syntax highlighting"]) {
       expect(screen.getByRole("menuitemcheckbox", { name })).toHaveAttribute("title");
     }
   });
@@ -202,6 +202,37 @@ describe("DiffOptionsToolbar (#640)", () => {
   });
 });
 
+describe("the View menu's name, Auto and toggling (#1007)", () => {
+  const viewButton = () => screen.getByText("View").closest("button")!;
+
+  it("is named starting with its visible text", () => {
+    render(
+      <DiffViewOptionsProvider>
+        <DiffOptionsToolbar />
+      </DiffViewOptionsProvider>,
+    );
+    expect(screen.getByRole("button", { name: "View diff options" })).toBe(viewButton());
+  });
+
+  it("says Wrap lines is automatic while on Auto, and stays open, focus in place, after a toggle", () => {
+    const onUpdate = vi.fn();
+    render(
+      <Settings onUpdate={onUpdate}>
+        <DiffOptionsToolbar />
+      </Settings>,
+    );
+    fireEvent.click(viewButton());
+    const wrap = screen.getByRole("menuitemcheckbox", { name: "Wrap lines (automatic)" });
+    wrap.focus();
+    fireEvent.click(wrap);
+    expect(onUpdate).toHaveBeenLastCalledWith({ wordWrap: "On" });
+
+    const on = within(screen.getByRole("menu")).getByRole("menuitemcheckbox", { name: "Wrap lines" });
+    expect(on).toHaveAttribute("aria-checked", "true");
+    expect(on).toHaveFocus();
+  });
+});
+
 describe("the View menu (#1007)", () => {
   it("keeps the layout and the context lines in the row, and the rarely changed toggles in View, in words", () => {
     render(
@@ -215,8 +246,8 @@ describe("the View menu (#1007)", () => {
     for (const name of ["Wrap lines", "Show whole file", "Ignore whitespace", "Show whitespace", "Syntax highlighting"]) {
       expect(screen.queryByRole("button", { name })).toBeNull();
     }
-    expect(screen.getByRole("button", { name: "Diff view" })).toHaveTextContent("View");
-    expect(viewOptionNames()).toEqual(["Wrap lines", "Show whole file", "Ignore whitespace", "Show whitespace", "Show syntax highlighting"]);
+    expect(screen.getByRole("button", { name: "View diff options" })).toHaveTextContent("View");
+    expect(viewOptionNames()).toEqual(["Wrap lines (automatic)", "Show whole file", "Ignore whitespace", "Show whitespace", "Show syntax highlighting"]);
   });
 
   it("marks Wrap lines on Auto as mixed (an A badge), and a choice turns it on", () => {
@@ -226,8 +257,8 @@ describe("the View menu (#1007)", () => {
         <DiffOptionsToolbar />
       </Settings>,
     );
-    expect(viewOptionState("Wrap lines")).toBe("mixed");
-    chooseViewOption("Wrap lines");
+    expect(viewOptionState("Wrap lines (automatic)")).toBe("mixed");
+    chooseViewOption("Wrap lines (automatic)");
     expect(onUpdate).toHaveBeenLastCalledWith({ wordWrap: "On" });
     expect(viewOptionState("Wrap lines")).toBe("true");
   });

@@ -64,7 +64,7 @@ const githubSection = () => screen.getByRole("region", { name: /github: acme\/wi
 
 /** Opens the Connect to GitHub dialog of the GitHub section. */
 function openConnectDialog() {
-  fireEvent.click(within(githubSection()).getByRole("button", { name: "Connect to GitHub" }));
+  fireEvent.click(within(githubSection()).getByRole("button", { name: "Connect to GitHub…" }));
   const dialog = screen.getByRole("dialog", { name: "Connect to GitHub", hidden: true });
   return {
     dialog,
@@ -116,10 +116,16 @@ describe("PullRequestPanel", () => {
     expect(
       within(section).getByRole("heading", { level: 3, name: /github: acme\/widget \(origin\)/i }),
     ).toBeInTheDocument();
-    expect(within(section).getByRole("button", { name: "Connect to GitHub" })).toBeInTheDocument();
+    expect(within(section).getByRole("button", { name: "Connect to GitHub…" })).toBeInTheDocument();
     expect(within(section).queryByRole("textbox")).toBeNull();
     expect(within(section).queryByRole("button", { name: "New pull request…" })).toBeNull();
     expect(onListPullRequests).not.toHaveBeenCalled();
+  });
+
+  it("names Connect with \"…\": it opens a dialog (#990)", () => {
+    renderPanel();
+    fireEvent.click(within(githubSection()).getByRole("button", { name: "Connect to GitHub…" }));
+    expect(screen.getByRole("dialog", { name: "Connect to GitHub", hidden: true })).toBeInTheDocument();
   });
 
   it("shows the Bitbucket access-token warning only when connecting to Bitbucket", () => {
@@ -130,7 +136,7 @@ describe("PullRequestPanel", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel", hidden: true }));
 
     const bitbucketSection = screen.getByRole("region", { name: /bitbucket: acme\/widget \(bb-origin\)/i });
-    fireEvent.click(within(bitbucketSection).getByRole("button", { name: "Connect to Bitbucket" }));
+    fireEvent.click(within(bitbucketSection).getByRole("button", { name: "Connect to Bitbucket…" }));
     const bitbucketDialog = screen.getByRole("dialog", { name: "Connect to Bitbucket", hidden: true });
     expect(
       within(bitbucketDialog).getByText(/repository or workspace access token \(not an app password\)/i),
@@ -194,7 +200,7 @@ describe("PullRequestPanel", () => {
     await waitFor(() => {
       expect(onForgetForgeToken).toHaveBeenCalledWith("GitHub", "rene");
     });
-    expect(await within(githubSection()).findByRole("button", { name: "Connect to GitHub" })).toBeInTheDocument();
+    expect(await within(githubSection()).findByRole("button", { name: "Connect to GitHub…" })).toBeInTheDocument();
   });
 
   it("Cancel closes the Connect dialog without calling any callback", () => {
@@ -468,10 +474,10 @@ describe("PullRequestPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /github: acme\/widget \(origin\)/i }));
 
     // The GitHub card's own content collapses...
-    expect(within(githubSection()).queryByRole("button", { name: "Connect to GitHub" })).not.toBeInTheDocument();
+    expect(within(githubSection()).queryByRole("button", { name: "Connect to GitHub…" })).not.toBeInTheDocument();
     // ...while the Bitbucket card, untouched, stays open.
     const bitbucketSection = screen.getByRole("region", { name: /bitbucket: acme\/widget \(bb-origin\)/i });
-    expect(within(bitbucketSection).getByRole("button", { name: "Connect to Bitbucket" })).toBeInTheDocument();
+    expect(within(bitbucketSection).getByRole("button", { name: "Connect to Bitbucket…" })).toBeInTheDocument();
   });
 
   it("defaults source to the current branch, target to main, and suggests known branches", () => {

@@ -106,9 +106,17 @@ describe("BranchTree — local branches", () => {
       "feat/foo has 1 commit on no other branch. Delete it anyway? Undo can bring it back.",
     );
     expect(props.onDeleteBranch).not.toHaveBeenCalled();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete branch" }));
     expect(props.onDeleteBranch).toHaveBeenCalledOnce();
     expect(props.onDeleteBranch).toHaveBeenCalledWith("feat/foo", true);
+  });
+
+  it("confirms a delete Undo can take back with a plain \"Delete branch\" button, not a danger one (#988)", async () => {
+    renderTree({ onCountCommitsOnlyOnBranch: vi.fn().mockResolvedValue(2) });
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete feat/foo" });
+    expect(within(dialog).getByRole("button", { name: "Delete branch" })).toHaveAttribute("data-tone", "primary");
   });
 
   // Before #996 a plain delete was tried first, and its "unmerged commits" failure showed as an
@@ -214,7 +222,7 @@ describe("BranchTree — local branches", () => {
     rerender(<BranchTreeWithDialogs {...props} operationDisabled operationDisabledReason="A transfer is in progress." />);
     const dialog = screen.getByRole("dialog", { name: "Delete feat/foo" });
     expect(dialog).toHaveTextContent("A transfer is in progress.");
-    const confirm = within(dialog).getByRole("button", { name: "Delete" });
+    const confirm = within(dialog).getByRole("button", { name: "Delete branch" });
     expect(confirm).toBeDisabled();
     expect(confirm).toHaveAttribute("title", "A transfer is in progress.");
     expect(describedByText(confirm)).toBe("A transfer is in progress.");
@@ -312,12 +320,12 @@ describe("BranchTree — local branches", () => {
     expect(props.onSetGraphBranchSelection).not.toHaveBeenCalled();
   });
 
-  it("offers Show all branches in every branch menu, enabled only while the graph is filtered (#985)", async () => {
+  it("offers Show all branches in every branch menu while the graph is filtered, and only then (#985)", async () => {
     const remotes = [{ name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null }];
     const onListRemoteBranches = vi.fn().mockResolvedValue(["topic"]);
     const { props, rerender } = renderTree({ remotes, onListRemoteBranches });
     fireEvent.click(screen.getByRole("button", { name: "Actions for main" }));
-    expect(screen.getByRole("menuitem", { name: "Show all branches" })).toBeDisabled();
+    expect(screen.queryByRole("menuitem", { name: "Show all branches" })).toBeNull();
 
     rerender(<BranchTreeWithDialogs {...props} graphBranchSelection={["feat/foo"]} />);
     fireEvent.click(screen.getByRole("button", { name: "Actions for feat/foo" }));
@@ -328,6 +336,20 @@ describe("BranchTree — local branches", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Actions for origin/topic" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Show all branches" }));
     expect(props.onShowAllGraphBranches).toHaveBeenCalledTimes(2);
+  });
+
+  it("leaves Show all branches out of the branch menus while the graph shows every branch (#985)", async () => {
+    const remotes = [{ name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null }];
+    renderTree({ remotes, onListRemoteBranches: vi.fn().mockResolvedValue(["topic"]) });
+    fireEvent.click(screen.getByRole("button", { name: "Actions for main" }));
+    expect(screen.getByRole("menuitem", { name: "Isolate branch" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Show all branches" })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Actions for origin/topic" }));
+    expect(screen.getByRole("menuitem", { name: "Isolate branch" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Show all branches" })).toBeNull();
   });
 
   it("Show all branches is enabled when only a remote selection is saved", () => {

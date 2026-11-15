@@ -92,7 +92,7 @@ export function NewWorktreeDialog({
         </Field>
         <Field
           label="Worktree path"
-          hint="The folder to check the branch out in. A relative path starts at this repository's folder."
+          hint="The folder the worktree's files go in. A relative path starts at this repository's folder."
         >
           {(props) => (
             <input

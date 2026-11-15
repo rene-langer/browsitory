@@ -25,7 +25,7 @@ import type {
   WorktreeInfo,
 } from "../ipc/RepoClient";
 import { type SavedGraphSelection, toGraphSelection } from "./graphSelection";
-import { failureError, useMutationRunner, withoutStaleErrorHint } from "./useMutationRunner";
+import { failureError, useMutationRunner, withoutStaleErrorHint, withoutStaleErrorSource } from "./useMutationRunner";
 import { errorAfterOwnSuccess, forgettingStaleOwnErrors, useOwnError } from "./ownError";
 import { readFetchPrune } from "../lib/fetchPrune";
 import { MERGE_PAGE_SIZE, type MergeExpansion, withExpandedMerges } from "../lib/mergeExpansion";
@@ -70,6 +70,12 @@ export function rowsEqual(a: SelectedRow, b: SelectedRow): boolean {
     return a === b;
   }
   return a.commitId === b.commitId;
+}
+
+/** `AppState.errorSource`: the error it marks, and what showed or set it. */
+export interface ErrorSource {
+  error: string;
+  source: "dialog" | "read";
 }
 
 export interface AppState {
@@ -201,6 +207,11 @@ export interface AppState {
   // A plain-language next step for `error`, from its kind (`failureError`, #573); shown under it in
   // the banner. Dropped whenever `error` changes without a new one (`withoutStaleErrorHint`).
   errorHint: string | null;
+  // Where `error` comes from when the banner treats it differently (`withoutStaleErrorSource`
+  // drops it once `error` changes): a dialog that shows the failure itself, so no banner repeats
+  // it (#996); a read, which has no operation log entry, so the banner offers Copy details
+  // rather than Details (#984).
+  errorSource?: ErrorSource | null;
   // True only while a `runMutation` call is in flight (from just before its `mutate()` call
   // through the trailing `refresh()`). Lets callers (e.g. `HistoryList`'s Apply/Drop buttons)
   // disable themselves so a rapid double-click can't fire the same index-based mutation twice
@@ -363,6 +374,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     transferOutcome: null,
     error: null,
     errorHint: null,
+    errorSource: null,
     pending: false,
     refreshGeneration: 0,
     loaded: false,
@@ -383,7 +395,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
   // Every update goes through this, so a read's remembered error never outlives it on screen.
   const setState = useMemo(() => {
     const set = forgettingStaleOwnErrors(setRawState, [refreshError, reflogError, forgeError]);
-    return (updater: (prev: AppState) => AppState) => set((prev) => withoutStaleErrorHint(prev, updater(prev)));
+    return (updater: (prev: AppState) => AppState) =>
+      set((prev) => withoutStaleErrorSource(prev, withoutStaleErrorHint(prev, updater(prev))));
   }, [refreshError, reflogError, forgeError]);
   // Replies don't arrive in the order their requests were sent: the VSCode sidecar answers each
   // request on its own thread, Tauri runs commands concurrently. So a read sent before a
@@ -622,6 +635,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       setState((prev) => ({
         ...prev,
         ...failure,
+        errorSource: { error: failure.error, source: "read" },
         refreshGeneration: prev.refreshGeneration + 1,
         loaded: true,
       }));

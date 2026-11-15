@@ -135,7 +135,7 @@ describe("Browsitory commit graph", () => {
     const topicRow = "li.commit-row*=e2e: commit graph merged topic";
     await $(topicRow).waitForExist({ timeoutMsg: "the merged commit is not in the full graph" });
     // In the graph's View menu (#1007).
-    await chooseViewOption("Graph view", "Collapse merges");
+    await chooseViewOption("View graph options", "Collapse merges");
     await $(topicRow).waitForExist({ reverse: true, timeoutMsg: "Collapse merges left the merged commit in" });
 
     const mergeRow = await $("li.commit-row*=e2e: commit graph merge topic");
@@ -150,7 +150,7 @@ describe("Browsitory commit graph", () => {
     await $(topicRow).waitForExist({ reverse: true, timeoutMsg: "collapsing the merge left its commit in" });
 
     // Back to the full graph for the cases after this one.
-    await chooseViewOption("Graph view", "Collapse merges");
+    await chooseViewOption("View graph options", "Collapse merges");
     await $(topicRow).waitForExist({ timeoutMsg: "turning Collapse merges off did not bring it back" });
   });
 

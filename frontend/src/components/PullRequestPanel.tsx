@@ -145,7 +145,7 @@ function ForgeRepositorySection({
           </p>
           <Toolbar>
             <button type="button" onClick={() => setDialog("connect")}>
-              Connect to {repository.provider}
+              Connect to {repository.provider}…
             </button>
           </Toolbar>
         </>

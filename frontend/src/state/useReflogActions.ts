@@ -51,7 +51,7 @@ export function useReflogActions(
           selectedReflogReference.current === reference
         ) {
           ownError.set(String(err));
-          setState((prev) => ({ ...prev, error: String(err) }));
+          setState((prev) => ({ ...prev, error: String(err), errorSource: { error: String(err), source: "read" } }));
         }
       }
     },

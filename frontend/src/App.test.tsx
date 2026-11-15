@@ -1179,7 +1179,7 @@ describe("App", () => {
 
     // The status strip's Continue: the dock has none since #995.
     const strip = await screen.findByRole("status", { name: "Operation status" });
-    const continueButton = within(strip).getByRole("button", { name: "Continue" });
+    const continueButton = within(strip).getByRole("button", { name: "Continue cherry-pick" });
     await waitFor(() => expect(continueButton).not.toHaveAttribute("aria-disabled", "true"));
     fireEvent.click(continueButton);
 
@@ -2391,7 +2391,7 @@ describe("App", () => {
       expect(screen.getByRole("menuitem", { name: "Cherry-pick onto main" })).toBeDisabled();
       fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
 
-      fireEvent.click(within(strip).getByRole("button", { name: "Continue" }));
+      fireEvent.click(within(strip).getByRole("button", { name: "Continue cherry-pick" }));
       await waitFor(() => expect(continueSequence).toHaveBeenCalledWith("/repos/a", false));
       expect(await screen.findByText("Cherry-picked 2 commits")).toBeInTheDocument();
       await waitFor(() => expect(screen.queryByRole("status", { name: "Operation status" })).toBeNull());
@@ -2830,7 +2830,7 @@ describe("App", () => {
       expect(strip).toHaveTextContent("Rebasing main onto c1, step 1 of 2");
       const dock = await screen.findByRole("group", { name: "Commit actions" });
       expect(within(dock).queryByRole("button", { name: "Continue rebase" })).toBeNull();
-      expect(within(strip).getByRole("button", { name: "Continue" })).not.toHaveAttribute("aria-disabled", "true");
+      expect(within(strip).getByRole("button", { name: "Continue rebase" })).not.toHaveAttribute("aria-disabled", "true");
       fireEvent.click(within(strip).getByRole("button", { name: "Abort rebase" }));
       expect(await screen.findByText("Aborted rebase")).toBeInTheDocument();
     });
@@ -2850,19 +2850,19 @@ describe("App", () => {
         />,
       );
       const strip = await screen.findByRole("status", { name: "Operation status" });
-      expect(strip).toHaveTextContent("Editing c2: change the files, then Continue");
+      expect(strip).toHaveTextContent("Editing c2: change the files, then Continue rebase");
       const dock = await screen.findByRole("group", { name: "Commit actions" });
       const message = await within(dock).findByRole("textbox", { name: "Commit message" });
       await waitFor(() => expect(message).toHaveValue("two\n\nbody\n"));
       expect(getCommitMessage).toHaveBeenCalledWith("/repos/a", "c2");
 
       fireEvent.change(message, { target: { value: "two, edited\n" } });
-      fireEvent.click(within(strip).getByRole("button", { name: "Continue" }));
+      fireEvent.click(within(strip).getByRole("button", { name: "Continue rebase" }));
       await waitFor(() => expect(rebaseContinue).toHaveBeenCalledWith("/repos/a", "two, edited\n"));
 
       // An empty message can't be continued with: the strip's Continue says why (#995).
       fireEvent.change(message, { target: { value: "  " } });
-      const blocked = within(strip).getByRole("button", { name: "Continue" });
+      const blocked = within(strip).getByRole("button", { name: "Continue rebase" });
       await waitFor(() => expect(blocked).toHaveAttribute("aria-disabled", "true"));
       expect(blocked).toHaveAccessibleDescription("Write a commit message.");
     });
