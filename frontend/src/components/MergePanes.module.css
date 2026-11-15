@@ -1,16 +1,20 @@
-/* The three-pane merge editor (#875), four with the base (#877). Every row uses the same columns, one per pane, so the
-   panes line up from row to row; `--merge-panes` is their number, `--merge-gutter` the width of
-   the line numbers. */
+/* The three-pane merge editor (#875), four with the base (#877). Every row uses the same columns,
+   so the panes line up from row to row; `--merge-columns` is set by MergePanes.tsx, an equal
+   share for each pane plus a track for the take-side arrows next to the result (#931), and
+   `--merge-gutter` is the width of the line numbers. */
 .panes {
   --merge-line-height: 1.5;
   --merge-arrow: 26px;
+  --merge-gap: var(--space-2);
+  /* With the gap before it, as wide as the arrow's room in the ours and theirs cells. */
+  --merge-arrow-track: calc(var(--merge-arrow) - var(--merge-gap));
   font-size: var(--code-font-size, var(--text-sm));
 }
 
 .row {
   display: grid;
-  grid-template-columns: repeat(var(--merge-panes), minmax(0, 1fr));
-  gap: var(--space-2);
+  grid-template-columns: var(--merge-columns);
+  gap: var(--merge-gap);
 }
 
 /* The panes' names stay in view while the file scrolls. */
@@ -43,8 +47,17 @@
   grid-column: 1 / -1;
 }
 
+/* Ours and theirs span their share and the arrow track (#931). */
+.cell[data-pane="ours"],
+.cell[data-pane="theirs"],
+[data-pane-header="ours"],
+[data-pane-header="theirs"] {
+  grid-column: span 2;
+}
+
 /* Room for a block's take-side arrow (#876) on the edge next to the result, in every row so the
-   lines stay level. */
+   lines stay level. The arrow track pays for it, so these panes' lines are as wide as the
+   others' (#931). */
 .cell[data-pane="ours"] {
   padding-right: var(--merge-arrow);
 }
