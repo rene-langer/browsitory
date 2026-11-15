@@ -153,7 +153,7 @@ export interface AppState {
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   rebaseOnto: string | null;
   // Per-commit actions to default to in the rebase planner, set only when it was opened via a
-  // CommitGraph multi-select action (as opposed to "Rebase onto here").
+  // CommitGraph multi-select action (as opposed to "Rebase current branch onto here…").
   rebasePreset: ReadonlyMap<string, PresetAction> | null;
   // The last one-click history edit that finished, for its toast (#442).
   historyEditOutcome: { message: string } | null;
