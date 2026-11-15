@@ -165,7 +165,7 @@ describe("useAppState", () => {
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     await act(() => result.current.refresh());
 
-    let renamePromise!: Promise<void>;
+    let renamePromise!: Promise<string | null>;
     act(() => {
       renamePromise = result.current.renameBranch("old-name", "new-name");
     });

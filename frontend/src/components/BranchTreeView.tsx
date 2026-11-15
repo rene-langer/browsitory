@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type PointerEvent, type RefObject } from "react";
 import { ChevronRight, Cloud, MoreHorizontal } from "lucide-react";
 import type { BranchInfo, RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { branchActions, remoteBranchActions, type RebaseTarget } from "../lib/actions/branchActions";
@@ -42,18 +42,6 @@ function aheadBehind(branch: BranchInfo): { ahead: number; behind: number; label
   if (branch.upstream == null || ahead === null || behind === null || (ahead === 0 && behind === 0)) return null;
   return { ahead, behind, label: `${ahead} ahead, ${behind} behind ${branch.upstream}` };
 }
-
-/** The inline rename of a local branch row, owned by `BranchTree` (its menu starts it). */
-export type BranchRename = {
-  /** The branch being renamed, `null` when none. */
-  name: string | null;
-  value: string;
-  /** `branchNameProblem` of the trimmed value, `null` when valid. */
-  problem: string | null;
-  onChange: (value: string) => void;
-  onCancel: () => void;
-  onKeyDown: (event: KeyboardEvent<HTMLInputElement>, oldName: string) => void;
-};
 
 /**
  * A branch swatch's colour, look and title (#673): the colour of the lane its tip sits on in the
@@ -105,7 +93,6 @@ type RowContext = {
   shownRemote: ReadonlySet<string>;
   branchColors: BranchLaneColors;
   selectedRow: string | null;
-  rename: BranchRename;
   rowMenu: RowContextMenu | null;
   isSubfolderOpen: (folderPath: string) => boolean;
   onSelectRow: (rowKey: string) => void;
@@ -193,37 +180,34 @@ function LocalBranchNodes({ nodes, ctx }: { nodes: BranchTreeNode<BranchInfo>[];
   });
 }
 
+/**
+ * A local branch's tooltip: its full name and, for the current branch, what it tracks (#1025, in
+ * place of the Upstream block the section had).
+ */
+function branchTitle(branch: BranchInfo, upstream: UpstreamInfo | null): string {
+  if (!branch.isCurrent || upstream === null) return branch.name;
+  return `${branch.name}\nTracks ${upstream.remoteName}/${upstream.remoteBranch}`;
+}
+
 function LocalBranchRow({ branch, label, ctx }: { branch: BranchInfo; label: string; ctx: RowContext }) {
-  const { rename, rowMenu } = ctx;
+  const { rowMenu } = ctx;
   const rowKey = `local:${branch.name}`;
   const shownInGraph = ctx.shownLocal.has(branch.name);
-  const isRenaming = rename.name === branch.name;
   const counts = aheadBehind(branch);
   return (
     <ListRow
-      {...rowDragProps(ctx, { kind: "local", name: branch.name }, isRenaming)}
+      {...rowDragProps(ctx, { kind: "local", name: branch.name }, false)}
       className={ctx.selectedRow === rowKey ? `${styles.treeRow} ${styles.selectedRow}` : styles.treeRow}
-      onClick={
-        isRenaming
-          ? undefined
-          : () => {
-              ctx.onSelectRow(rowKey);
-              ctx.onGoToBranch?.("local", branch.name);
-            }
-      }
-      onDoubleClick={
-        isRenaming
-          ? undefined
-          : () => {
-              const context = { blockers: ctx.blockers, remoteCount: ctx.remoteCount, upstream: ctx.upstream };
-              if (branchActions(context, branch).checkout.enabled) ctx.onSwitchBranch(branch.name);
-            }
-      }
-      onOpenMenu={
-        isRenaming
-          ? undefined
-          : (anchor, trigger) =>
-              ctx.onOpenRowMenu({ kind: "local-branch", name: branch.name, ...anchor, returnFocusTo: trigger })
+      onClick={() => {
+        ctx.onSelectRow(rowKey);
+        ctx.onGoToBranch?.("local", branch.name);
+      }}
+      onDoubleClick={() => {
+        const context = { blockers: ctx.blockers, remoteCount: ctx.remoteCount, upstream: ctx.upstream };
+        if (branchActions(context, branch).checkout.enabled) ctx.onSwitchBranch(branch.name);
+      }}
+      onOpenMenu={(anchor, trigger) =>
+        ctx.onOpenRowMenu({ kind: "local-branch", name: branch.name, ...anchor, returnFocusTo: trigger })
       }
     >
       <div className={styles.rowInner}>
@@ -238,31 +222,15 @@ function LocalBranchRow({ branch, label, ctx }: { branch: BranchInfo; label: str
           }}
           onDoubleClick={(event) => event.stopPropagation()}
         />
-        {isRenaming ? (
-          <input
-            autoFocus
-            aria-label={`Rename ${branch.name}`}
-            value={rename.value}
-            aria-invalid={rename.problem !== null}
-            aria-describedby={rename.problem !== null ? "rename-branch-problem" : undefined}
-            onChange={(event) => rename.onChange(event.target.value)}
-            onFocus={(event) => event.currentTarget.select()}
-            onBlur={() => {
-              if (rename.value.trim() === branch.name) rename.onCancel();
-            }}
-            onKeyDown={(event) => rename.onKeyDown(event, branch.name)}
-          />
-        ) : (
-          <span
-            className={branch.isCurrent ? `${styles.name} ${styles.currentName}` : styles.name}
-            title={branch.name}
-          >
-            {branch.isCurrent && <span className={styles.currentMarker} role="img" aria-label="current branch" />}
-            {label}
-            {branch.isCurrent && " (current)"}
-          </span>
-        )}
-        {!isRenaming && counts !== null && (
+        {/* One marker for the current branch (#1025): the bold name and its "(current)". */}
+        <span
+          className={branch.isCurrent ? `${styles.name} ${styles.currentName}` : styles.name}
+          title={branchTitle(branch, ctx.upstream)}
+        >
+          {label}
+          {branch.isCurrent && " (current)"}
+        </span>
+        {counts !== null && (
           // role="img": a plain span's aria-label is ignored by screen readers; the arrows
           // themselves are hidden so they are not read as "up arrow 2".
           <span className={styles.aheadBehind} role="img" aria-label={counts.label} title={counts.label}>
@@ -270,34 +238,27 @@ function LocalBranchRow({ branch, label, ctx }: { branch: BranchInfo; label: str
             {counts.behind > 0 && <span aria-hidden="true">↓{counts.behind}</span>}
           </span>
         )}
-        {!isRenaming && (
-          <button
-            type="button"
-            className={styles.iconButton}
-            aria-label={`Actions for ${branch.name}`}
-            aria-haspopup="menu"
-            data-menu-key={`local-branch:${branch.name}`}
-            aria-expanded={rowMenu?.kind === "local-branch" && rowMenu.name === branch.name}
-            onClick={(event) => {
-              // Opening the menu doesn't also go to the branch (the row's click).
-              event.stopPropagation();
-              ctx.onToggleRowMenu({
-                kind: "local-branch",
-                name: branch.name,
-                ...rectAnchor(event.currentTarget),
-                returnFocusTo: event.currentTarget,
-              });
-            }}
-          >
-            <MoreHorizontal size={12} aria-hidden="true" />
-          </button>
-        )}
+        <button
+          type="button"
+          className={styles.iconButton}
+          aria-label={`Actions for ${branch.name}`}
+          aria-haspopup="menu"
+          data-menu-key={`local-branch:${branch.name}`}
+          aria-expanded={rowMenu?.kind === "local-branch" && rowMenu.name === branch.name}
+          onClick={(event) => {
+            // Opening the menu doesn't also go to the branch (the row's click).
+            event.stopPropagation();
+            ctx.onToggleRowMenu({
+              kind: "local-branch",
+              name: branch.name,
+              ...rectAnchor(event.currentTarget),
+              returnFocusTo: event.currentTarget,
+            });
+          }}
+        >
+          <MoreHorizontal size={12} aria-hidden="true" />
+        </button>
       </div>
-      {isRenaming && rename.problem !== null && (
-        <p id="rename-branch-problem" className={styles.draftProblem}>
-          {rename.problem}
-        </p>
-      )}
     </ListRow>
   );
 }
@@ -416,7 +377,7 @@ function RemoteBranchRow({
 /**
  * The Local folder and one folder per remote, each split into "/" subfolders: the rows, their
  * graph swatches, selection, double-click checkout and the menu keys and buttons. The menus
- * themselves and the inline rename's state belong to `BranchTree`; the remote branch lists to
+ * themselves and the Rename branch dialog belong to `BranchTree`; the remote branch lists to
  * `useRemoteBranchCache`.
  */
 export function BranchTreeView({
@@ -433,7 +394,6 @@ export function BranchTreeView({
   branchColors = NO_BRANCH_LANE_COLORS,
   remoteCache,
   remoteHeaders,
-  rename,
   rowMenu,
   onOpenRowMenu,
   onToggleRowMenu,
@@ -459,7 +419,6 @@ export function BranchTreeView({
   remoteCache: RemoteBranchCache;
   /** Each remote folder's header button by remote name, for `BranchTree`'s reveal request (#494). */
   remoteHeaders?: RefObject<Map<string, HTMLButtonElement>>;
-  rename: BranchRename;
   rowMenu: RowContextMenu | null;
   onOpenRowMenu: (menu: RowContextMenu) => void;
   onToggleRowMenu: (menu: RowContextMenu) => void;
@@ -547,7 +506,6 @@ export function BranchTreeView({
     shownRemote,
     branchColors,
     selectedRow,
-    rename,
     rowMenu,
     isSubfolderOpen,
     onSelectRow: setSelectedRow,

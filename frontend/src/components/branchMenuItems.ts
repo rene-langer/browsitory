@@ -86,6 +86,7 @@ export function localBranchMenuItems({
   onCompareBranch,
   onPushCurrentBranch,
   onOpenSetUpstream,
+  onClearUpstream,
   onOpenPushDialog,
   onIsolateGraphBranch,
   onCopy,
@@ -104,6 +105,8 @@ export function localBranchMenuItems({
   onCompareBranch?: (refName: string, label: string) => void;
   onPushCurrentBranch: (remoteName: string) => Promise<void>;
   onOpenSetUpstream: () => void;
+  /** Asks to stop the current branch tracking its upstream (#1025). */
+  onClearUpstream: () => void;
   onOpenPushDialog: (localBranch: string) => void;
   onIsolateGraphBranch: (kind: "local" | "remote", name: string) => void;
   onCopy: CopyToClipboard;
@@ -138,6 +141,9 @@ export function localBranchMenuItems({
   }
   if (actions.setUpstream !== null) {
     items.push({ ...menuItem(actions.setUpstream, onOpenSetUpstream), group: "remote" });
+  }
+  if (actions.clearUpstream !== null) {
+    items.push({ ...menuItem(actions.clearUpstream, onClearUpstream), group: "remote" });
   }
   items.push({ ...menuItem(actions.pushTo, () => onOpenPushDialog(branch.name)), group: "remote" });
   items.push({

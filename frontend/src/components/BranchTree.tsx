@@ -1,22 +1,18 @@
 import { stableMemo } from "../lib/stableMemo";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { BranchLaneColors } from "../lib/laneColors";
 import { GitBranch, Plus } from "lucide-react";
 import type { BranchInfo, RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { rectAnchor } from "../lib/menuKeys";
 import type { OperationBlockers } from "../lib/operationStatus";
-import { branchNameProblem } from "../lib/refName";
 import { scrollBehavior } from "../lib/scrollBehavior";
 import { useCopyToClipboard } from "../state/useCopyToClipboard";
 import type { SidebarRevealRequest } from "../state/useSidebarReveal";
 import type { RemoteDialog } from "../state/workspaceDialog";
 import { AccordionSection } from "./primitives/AccordionSection";
-import { ReasonButton } from "./primitives/ReasonButton";
-import { UNAVAILABLE_REASON } from "../lib/actions/action";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { ContextMenu } from "./primitives/ContextMenu";
 import { InlineError } from "./primitives/InlineError";
-import { Toolbar } from "./primitives/Toolbar";
 import { AddRemoteForm } from "./AddRemoteForm";
 import {
   branchDropActions,
@@ -43,13 +39,9 @@ import {
   rowMenuKey,
   type RowContextMenu,
 } from "./branchMenuItems";
-import {
-  BRANCH_DROP_SCOPE,
-  BranchTreeView,
-  type BranchRename,
-  type BranchTreeDrag,
-} from "./BranchTreeView";
+import { BRANCH_DROP_SCOPE, BranchTreeView, type BranchTreeDrag } from "./BranchTreeView";
 import { NewBranchForm } from "./NewBranchForm";
+import { RenameBranchDialog } from "./RenameBranchDialog";
 import { SetUpstreamDialog } from "./SetUpstreamDialog";
 import { useRemoteBranchCache } from "./useRemoteBranchCache";
 import styles from "./BranchTree.module.css";
@@ -59,8 +51,8 @@ import { useUserCommandsContext } from "../state/userCommandsContext";
 
 /**
  * The sidebar's Branches section: the local and remote branch tree (`BranchTreeView`), its
- * context menus (`branchMenuItems.ts`), the inline New branch and Add remote forms, inline rename,
- * and the upstream block and its dialogs. Pull lives in the repository toolbar, and its diverged
+ * context menus (`branchMenuItems.ts`), the inline New branch and Add remote forms, the Rename
+ * branch dialog (#1002) and the upstream dialogs (the current branch's menu opens them, #1025). Pull lives in the repository toolbar, and its diverged
  * prompt in `WorkspaceDialogs` (#636, #637). A remote's Edit / Credentials / Remove dialog is opened
  * through `onOpenRemoteDialog` and rendered by its owner (`WorkspaceDialogs`' `RemoteDialogs`).
  */
@@ -121,7 +113,8 @@ function BranchTreeContent({
   onDeleteBranch: (name: string, force: boolean) => Promise<void>;
   /** How many commits of a branch no other branch has: Delete asks first when some (#996). */
   onCountCommitsOnlyOnBranch: (name: string) => Promise<number>;
-  onRenameBranch: (oldName: string, newName: string) => void;
+  /** Resolves to `null` once renamed, else the failure the Rename branch dialog shows (#422). */
+  onRenameBranch: (oldName: string, newName: string) => Promise<string | null>;
   onOpenCreateBranchDraft: (startPoint: string) => void;
   onCloseCreateBranchDraft: () => void;
   onMergeBranch: (name: string) => void;
@@ -212,8 +205,8 @@ function BranchTreeContent({
   const onRunUserCommand = onRunUserCommandProp ?? userCommandsApi?.run;
   // The branch Delete asks about, with the commits only it has (`null`: couldn't count them).
   const [deleteConfirm, setDeleteConfirm] = useState<{ name: string; count: number | null } | null>(null);
+  // The branch the Rename branch dialog renames (#1002), `null` while it's closed.
   const [renaming, setRenaming] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState("");
   const [rowMenu, setRowMenu] = useState<RowContextMenu | null>(null);
   const [upstreamDialogOpen, setUpstreamDialogOpen] = useState(false);
   const [clearUpstreamConfirm, setClearUpstreamConfirm] = useState(false);
@@ -262,15 +255,7 @@ function BranchTreeContent({
     await onSetUpstream(remoteName, branchName);
   };
 
-  // Opening a context menu starts a fresh interaction with whatever row triggered it, so any
-  // pending rename on a *different* row is dropped rather than staying attached to it — the same
-  // guard BranchSwitcher's popover close used to provide (see BranchTree.test.tsx's "right-clicking
-  // a different branch after starting a rename on one clears that rename's input").
-  const openRowMenu = (menu: RowContextMenu) => {
-    setRenaming(null);
-    setRenameValue("");
-    setRowMenu(menu);
-  };
+  const openRowMenu = (menu: RowContextMenu) => setRowMenu(menu);
   // For the menu buttons ("…", "Add"): a second click on the button of the open menu closes it.
   const isRowMenuTrigger = (button: Element) =>
     rowMenu !== null && button.getAttribute("data-menu-key") === rowMenuKey(rowMenu);
@@ -424,8 +409,6 @@ function BranchTreeContent({
         : null;
   const labelAt = drag ?? commitDragState;
 
-  const renameProblem = renaming !== null ? branchNameProblem(renameValue.trim()) : null;
-
   const handleDeleteClick = async (name: string) => {
     // Counted first (#996): a branch whose commits another branch has loses nothing and goes at
     // once; otherwise one confirm says what would be left on no branch. Either way it is deleted
@@ -438,29 +421,6 @@ function BranchTreeContent({
     }
     if (count === 0) void onDeleteBranch(name, true);
     else setDeleteConfirm({ name, count });
-  };
-
-  // Like the New branch form (#418): the name is trimmed, an unchanged one just closes the input
-  // without a backend call, and a name `branchNameProblem` rejects stays open with its message.
-  const handleRenameKeyDown = (event: KeyboardEvent<HTMLInputElement>, oldName: string) => {
-    if (event.key === "Enter") {
-      const newName = renameValue.trim();
-      if (newName === "" || renameProblem !== null) return;
-      setRenaming(null);
-      if (newName !== oldName) onRenameBranch(oldName, newName);
-    } else if (event.key === "Escape") {
-      event.stopPropagation();
-      setRenaming(null);
-    }
-  };
-
-  const rename: BranchRename = {
-    name: renaming,
-    value: renameValue,
-    problem: renameProblem,
-    onChange: setRenameValue,
-    onCancel: () => setRenaming(null),
-    onKeyDown: handleRenameKeyDown,
   };
 
   // Why the force delete and upstream dialogs (#521), the New branch form and the remote dialogs
@@ -535,7 +495,6 @@ function BranchTreeContent({
             branchColors={branchColors}
             remoteCache={remoteCache}
             remoteHeaders={remoteHeaders}
-            rename={rename}
             rowMenu={rowMenu}
             onOpenRowMenu={openRowMenu}
             onToggleRowMenu={toggleRowMenu}
@@ -600,15 +559,13 @@ function BranchTreeContent({
                   remoteCount: remotes.length,
                   upstream,
                   onSwitchBranch,
-                  onStartRename: (name) => {
-                    setRenaming(name);
-                    setRenameValue(name);
-                  },
+                  onStartRename: setRenaming,
                   onMergeBranch,
                   onRebaseOnto,
                   onCompareBranch,
                   onPushCurrentBranch,
                   onOpenSetUpstream: () => setUpstreamDialogOpen(true),
+                  onClearUpstream: () => setClearUpstreamConfirm(true),
                   onOpenPushDialog,
                   onIsolateGraphBranch,
                   onCopy: copyToClipboard,
@@ -724,26 +681,22 @@ function BranchTreeContent({
           />
         )}
 
-        <section className={styles.upstreamBlock}>
-          <h3 className={styles.upstreamHeading}>Upstream</h3>
-          {upstream === null ? (
-            <p className={styles.helperText}>No upstream for the current branch.</p>
-          ) : (
-            <p className={styles.helperText}>
-              {upstream.localBranch} tracks {upstream.remoteName}/{upstream.remoteBranch}.
-            </p>
-          )}
-          {upstream !== null && (
-            <Toolbar aria-label="Upstream actions">
-              <ReasonButton
-                reason={operationDisabled ? (busyReason ?? UNAVAILABLE_REASON) : null}
-                onClick={() => setClearUpstreamConfirm(true)}
-              >
-                Clear upstream
-              </ReasonButton>
-            </Toolbar>
-          )}
-        </section>
+        {/* Guarded like Delete's confirmation: a branch that went meanwhile has nothing to rename. */}
+        {renaming !== null && branches.some((b) => b.name === renaming) && (
+          <RenameBranchDialog
+            key={renaming}
+            name={renaming}
+            branchNames={branches.map((b) => b.name)}
+            disabled={operationDisabled}
+            disabledReason={busyReason}
+            onRename={async (newName) => {
+              const failure = await onRenameBranch(renaming, newName);
+              if (failure === null) setRenaming(null);
+              return failure;
+            }}
+            onCancel={() => setRenaming(null)}
+          />
+        )}
 
         {clearUpstreamConfirm && upstream !== null && (
           <ConfirmDialog

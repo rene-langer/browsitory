@@ -30,7 +30,8 @@ export interface BranchActions {
   /** How many commits of `name` no other branch has (#996): a read, no pending state. */
   countCommitsOnlyOnBranch(name: string): Promise<number>;
   deleteBranch(name: string, force: boolean): Promise<void>;
-  renameBranch(oldName: string, newName: string): Promise<void>;
+  // Resolves to `null` once renamed, else why not: the Rename branch dialog shows it (#422, #1002).
+  renameBranch(oldName: string, newName: string): Promise<string | null>;
   openCreateBranchDraft(startPoint: string): void;
   closeCreateBranchDraft(): void;
   setGraphBranchSelection(local: string[]): Promise<void>;
@@ -230,8 +231,9 @@ export function useBranchActions(
   );
   const renameBranch = useCallback(
     async (oldName: string, newName: string) => {
-      if (refuseTaken(newName, oldName) !== null) return;
-      await runOptimisticMutation(
+      const refused = refuseTaken(newName, oldName);
+      if (refused !== null) return refused;
+      return runOptimisticMutationWithMessage(
         (prev) =>
           refNameClash(
             prev.branches.map((branch) => branch.name).filter((name) => name !== oldName),
@@ -249,7 +251,7 @@ export function useBranchActions(
         },
       );
     },
-    [client, refuseTaken, runOptimisticMutation, repoPath, updateSelection],
+    [client, refuseTaken, runOptimisticMutationWithMessage, repoPath, updateSelection],
   );
 
   const openCreateBranchDraft = useCallback(
