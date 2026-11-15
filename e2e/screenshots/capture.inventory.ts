@@ -1026,11 +1026,11 @@ describe("UX inventory", () => {
       });
       await browser.pause(800);
     });
-    it("inline-rename-branch", async () => {
+    it("rename-branch-dialog", async () => {
       await branchMenu("feature/offline-tiles");
-      await h.pick("Rename");
+      await h.pick("Rename…");
       await browser.pause(600);
-      await h.shoot("sidebar-rename-branch-inline", { keepFocus: true });
+      await h.shoot("dialog-rename-branch", { keepFocus: true });
       await h.esc();
     });
     it("reflog", async () => {

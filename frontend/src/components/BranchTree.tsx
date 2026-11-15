@@ -423,6 +423,12 @@ function BranchTreeContent({
     else setDeleteConfirm({ name, count });
   };
 
+  // "Show all branches" in the "+" menu and every branch menu (#985).
+  const graphFilter = {
+    active: graphBranchSelection !== null || graphRemoteBranchSelection !== null,
+    onShowAll: onShowAllGraphBranches,
+  };
+
   // Why the force delete and upstream dialogs (#521), the New branch form and the remote dialogs
   // (#561) can't act now, shown in them; `null` when nothing blocks.
   const busyReason = operationDisabled ? operationDisabledReason : null;
@@ -568,6 +574,7 @@ function BranchTreeContent({
                   onClearUpstream: () => setClearUpstreamConfirm(true),
                   onOpenPushDialog,
                   onIsolateGraphBranch,
+                  graphFilter,
                   onCopy: copyToClipboard,
                   onDelete: (name) => void handleDeleteClick(name),
                 }).concat(
@@ -614,7 +621,7 @@ function BranchTreeContent({
             key={rowMenuKey(rowMenu)}
             {...menuProps(rowMenu)}
             items={addMenuItems({
-              hasGraphSelection: graphBranchSelection !== null || graphRemoteBranchSelection !== null,
+              hasGraphSelection: graphFilter.active,
               onOpenCreateBranchDraft,
               onOpenAddRemoteDraft,
               onShowAllGraphBranches,
@@ -662,6 +669,7 @@ function BranchTreeContent({
               onRebaseOnto,
               onCompareBranch,
               onIsolateGraphBranch,
+              graphFilter,
               onCopy: copyToClipboard,
               onOpenDeleteRemoteBranch,
             }).concat(

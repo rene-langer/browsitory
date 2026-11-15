@@ -72,6 +72,18 @@ function currentBranchName(branches: BranchInfo[]): string | null {
   return branches.find((branch) => branch.isCurrent)?.name ?? null;
 }
 
+/** Whether a graph selection is saved, and how to forget it: "Show all branches" (#402, #985). */
+export type GraphFilter = {
+  /** A local or a remote graph selection is saved: "Show all branches" has something to undo. */
+  active: boolean;
+  onShowAll: () => void;
+};
+
+/** "Show all branches", in the "+" menu and every branch menu (#985); off while nothing is saved. */
+function showAllBranchesItem({ active, onShowAll }: GraphFilter): ContextMenuItem {
+  return { label: "Show all branches", disabled: !active, onSelect: onShowAll, group: "view" };
+}
+
 /** The menu of a local branch row. */
 export function localBranchMenuItems({
   branch,
@@ -89,6 +101,7 @@ export function localBranchMenuItems({
   onClearUpstream,
   onOpenPushDialog,
   onIsolateGraphBranch,
+  graphFilter,
   onCopy,
   onDelete,
 }: {
@@ -109,6 +122,7 @@ export function localBranchMenuItems({
   onClearUpstream: () => void;
   onOpenPushDialog: (localBranch: string) => void;
   onIsolateGraphBranch: (kind: "local" | "remote", name: string) => void;
+  graphFilter: GraphFilter;
   onCopy: CopyToClipboard;
   /** A soft delete that fails asks to force delete. */
   onDelete: (name: string) => void;
@@ -152,6 +166,7 @@ export function localBranchMenuItems({
     onSelect: () => onIsolateGraphBranch("local", branch.name),
     group: "view",
   });
+  items.push(showAllBranchesItem(graphFilter));
   items.push({ label: "Copy branch name", onSelect: () => onCopy(branch.name, "branch name"), group: "view" });
   items.push({ ...menuItem(actions.delete, () => onDelete(branch.name)), destructive: true, group: "delete" });
   return items;
@@ -207,6 +222,7 @@ export function remoteBranchMenuItems({
   onRebaseOnto,
   onCompareBranch,
   onIsolateGraphBranch,
+  graphFilter,
   onCopy,
   onOpenDeleteRemoteBranch,
 }: {
@@ -220,6 +236,7 @@ export function remoteBranchMenuItems({
   onRebaseOnto: (onto: string) => void;
   onCompareBranch?: (refName: string, label: string) => void;
   onIsolateGraphBranch: (kind: "local" | "remote", name: string) => void;
+  graphFilter: GraphFilter;
   onCopy: CopyToClipboard;
   onOpenDeleteRemoteBranch: (remoteName: string, branchName: string) => void;
 }): ContextMenuItem[] {
@@ -244,6 +261,7 @@ export function remoteBranchMenuItems({
       onSelect: () => onIsolateGraphBranch("remote", `${remoteName}/${branchName}`),
       group: "view",
     },
+    showAllBranchesItem(graphFilter),
     { label: "Copy branch name", onSelect: () => onCopy(`${remoteName}/${branchName}`, "branch name"), group: "view" },
     {
       ...menuItem(actions.delete, () => onOpenDeleteRemoteBranch(remoteName, branchName)),
@@ -269,7 +287,7 @@ export function addMenuItems({
   return [
     { label: "New branch…", onSelect: () => onOpenCreateBranchDraft("HEAD"), group: "new" },
     { ...menuItem(addRemoteAction(), onOpenAddRemoteDraft), group: "new" },
-    { label: "Show all branches", disabled: !hasGraphSelection, onSelect: onShowAllGraphBranches, group: "view" },
+    showAllBranchesItem({ active: hasGraphSelection, onShowAll: onShowAllGraphBranches }),
   ];
 }
 
