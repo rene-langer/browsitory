@@ -7,10 +7,66 @@
 }
 
 .row {
-  cursor: pointer;
   transition: background var(--motion-duration-fast) var(--motion-easing-standard);
 }
 
 .row:hover {
   background: var(--color-bg-subtle);
+}
+
+/* A new commit's run of lines starts with a faint rule (#986). */
+.runStart > td {
+  border-top: 1px solid var(--color-border);
+}
+
+.row > td {
+  padding: 0 var(--space-2);
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+/* The gutter: fixed widths, so the code starts at the same place on every line. */
+.commit {
+  width: 8ch;
+}
+
+.author {
+  max-width: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-text-muted);
+}
+
+.date {
+  width: 10ch;
+  color: var(--color-text-muted);
+}
+
+.lineNumber {
+  width: 4ch;
+  text-align: right;
+  color: var(--color-text-muted);
+  user-select: none;
+  border-right: 1px solid var(--color-border);
+}
+
+/* `pre`: a line's indentation and its runs of spaces stay as they are in the file. */
+.row > td.code {
+  width: 100%;
+  white-space: pre;
+}
+
+.hash {
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: var(--color-accent-fg);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.hash:hover:not(:disabled) {
+  background: transparent;
+  text-decoration-thickness: 2px;
 }

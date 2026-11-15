@@ -65,15 +65,13 @@ describe("Browsitory blame", () => {
     const blameButton = await $("button=Blame");
     await browser.execute((el) => (el as HTMLElement).click(), blameButton);
 
-    // Click a `<td>` inside the row, not the `<tr>` itself: WebKitGTK's WebDriver
-    // implementation (what `tauri-driver` proxies to on Linux) reports bare `display:table-row`
-    // elements as "element not interactable" even when they're fully visible on screen and have
-    // a non-zero bounding rect — a driver quirk, not an app bug. The click still bubbles up to
-    // the row's `onClick` handler (`BlameView.tsx`'s `<tr onClick={...}>`), so this exercises
-    // the same behavior the brief's row click was meant to.
+    // Only the commit id at the start of a run of lines is a link (#986): "line one" is line 1,
+    // so its row holds the first commit's id. Its row is the code cell's parent `<tr>`.
     const unchangedLineCell = await $("td*=line one");
     await unchangedLineCell.waitForExist();
-    await browser.execute((el) => (el as HTMLElement).click(), unchangedLineCell);
+    const commitLink = await (await unchangedLineCell.parentElement()).$("button");
+    await commitLink.waitForExist();
+    await browser.execute((el) => (el as HTMLElement).click(), commitLink);
 
     await browser.waitUntil(
       async () =>

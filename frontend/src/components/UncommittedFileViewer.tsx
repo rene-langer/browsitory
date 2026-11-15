@@ -231,9 +231,16 @@ export function UncommittedFileViewer({
         </span>
         {renamedFrom !== null && <span className={styles.renamedFrom}>Renamed from {renamedFrom}</span>}
         <div className={styles.rowActions}>
-          <button type="button" aria-pressed={mode === "blame"} onClick={() => setMode(mode === "blame" ? "diff" : "blame")}>
-            Blame
-          </button>
+          {/* While blame shows, the header's way back replaces Blame (#986). */}
+          {mode === "blame" ? (
+            <button type="button" onClick={() => setMode("diff")}>
+              Back to diff
+            </button>
+          ) : (
+            <button type="button" onClick={() => setMode("blame")}>
+              Blame
+            </button>
+          )}
           {onOpenFileHistory !== undefined && !isUntracked(entry) && (
             <button type="button" aria-label={`History of ${entry.path}`} onClick={() => onOpenFileHistory(entry.path)}>
               History
@@ -244,16 +251,11 @@ export function UncommittedFileViewer({
       </div>
       <div className={styles.viewerBody} data-file-body="">
         {mode === "blame" ? (
-          <>
-            {error !== null ? (
-              <InlineError message={error.message} hint={error.hint} onDismiss={() => setError(null)} onRetry={loadBlame} />
-            ) : (
-              <BlameView lines={blameLines} onSelectRow={onSelectRow} />
-            )}
-            <button type="button" onClick={() => setMode("diff")}>
-              Back to diff
-            </button>
-          </>
+          error !== null ? (
+            <InlineError message={error.message} hint={error.hint} onDismiss={() => setError(null)} onRetry={loadBlame} />
+          ) : (
+            <BlameView lines={blameLines} path={entry.path} onSelectRow={onSelectRow} />
+          )
         ) : isConflicted ? (
           <ConflictResolutionPane
             repoPath={repoPath}
