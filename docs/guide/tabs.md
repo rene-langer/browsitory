@@ -18,10 +18,12 @@ tab's menu (right-click), or press **Ctrl+Shift+T** (**⇧⌘T** on macOS) where
 use that key. It returns to its old place and workspace group and becomes the active tab;
 repeat it to go further back (up to ten tabs, until you quit). A repository that
 can no longer be opened is skipped, with a message saying why.
-A dot after a tab's name means its repository has uncommitted changes: staged,
-unstaged or untracked files, as the **Uncommitted changes** row counts them. The
-active tab's dot follows its changes live; the other tabs are checked when you
-leave them, when the window comes back into view, and after a fetch.
+**±** and a number after a tab's name, such as **±3**, mean its repository has
+uncommitted changes in that many files: staged, unstaged or untracked, a file with
+both staged and unstaged changes counted once. Hover it for the words, which are also
+part of the tab's name for screen readers. The active tab's count follows its changes
+live; the other tabs are checked when you leave them, when the window comes back into
+view, and after a fetch.
 
 ## Changes made outside Browsitory
 
