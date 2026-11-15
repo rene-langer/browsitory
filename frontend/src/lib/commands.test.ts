@@ -2983,6 +2983,15 @@ describe("global shortcuts on palette commands (#646)", () => {
       tabs: tabs(),
       app: { onReopenClosedTab: vi.fn() },
       goTo,
+      // "Stage all changes" is one of the diff commands.
+      diff: {
+        settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false, expandUntracked: true },
+        update: vi.fn(),
+        currentFile: null,
+        requestDiscardCurrentFile: vi.fn(),
+        requestDiscardAllUnstaged: vi.fn(),
+        openCurrentFileHistory: vi.fn(),
+      },
     });
     const ids = ["show-shortcuts", "refresh", "pull", "stage-all", "focus-commit-message", "close-tab", "reopen-closed-tab", "go-back", "go-forward"] as const;
     for (const id of ids) {
@@ -3085,7 +3094,9 @@ describe("command names (#990)", () => {
   // #993: tags have their own group, before the remotes.
   it("lists every tag command under Tags", () => {
     const tags = [{ name: "v1", targetId: "c1", commitId: "c1", annotated: false, message: null, taggerName: null, timestamp: null }];
-    const commands = commandsFor(makeAppState({ tags }));
+    // A HEAD commit, for "Create tag at HEAD…".
+    const headInfo = { ...makeAppState().state.headInfo, headId: "c1" };
+    const commands = commandsFor(makeAppState({ tags, headInfo }));
     for (const id of ["create-tag-head", "checkout-tag:v1", "delete-tag:v1", "delete-remote-tag:v1", "push-tags:origin"]) {
       expect({ id, group: commands.find((command) => command.id === id)?.group }).toEqual({ id, group: "Tags" });
     }
