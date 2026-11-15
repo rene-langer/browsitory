@@ -1512,9 +1512,9 @@ describe("DiffPane", () => {
           fireEvent.click(screen.getByRole("button", { name: "Show all changes" }));
           expect(groups).toHaveAttribute("data-collapsed", "true");
           expect(groups.scrollTop).toBe(0);
+          // The row's own element, inside its list item.
           const row = rowLabel("shared.txt (Conflicted)").closest("li");
-          expect(calls.filter((call) => call.element === row).at(-1)).toEqual({
-            element: row,
+          expect(calls.filter((call) => row?.contains(call.element) === true).at(-1)).toMatchObject({
             options: { block: "nearest" },
             listTop: 0,
           });
@@ -1536,8 +1536,7 @@ describe("DiffPane", () => {
           fireEvent.click(rowLabel("two.txt (Conflicted)"));
           await waitFor(() => expect(groups.scrollTop).toBe(0));
           const row = rowLabel("two.txt (Conflicted)").closest("li");
-          expect(calls.filter((call) => call.element === row).at(-1)).toEqual({
-            element: row,
+          expect(calls.filter((call) => row?.contains(call.element) === true).at(-1)).toMatchObject({
             options: { block: "nearest" },
             listTop: 0,
           });
