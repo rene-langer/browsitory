@@ -43,7 +43,7 @@ describe("UpdateBanner", () => {
       await Promise.resolve();
     });
     expect(updater.checkForUpdate).not.toHaveBeenCalled();
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("button", { name: /restart/i })).toBeNull();
   });
 
   it("renders nothing when no update is found", async () => {
@@ -52,7 +52,7 @@ describe("UpdateBanner", () => {
     render(<UpdateBanner />);
 
     await waitFor(() => expect(updater.checkForUpdate).toHaveBeenCalledTimes(1));
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("button", { name: /restart/i })).toBeNull();
   });
 
   it("auto-downloads and shows a restart banner when an update is found", async () => {
@@ -188,7 +188,7 @@ describe("UpdateBanner check schedule (#477)", () => {
     render(<UpdateBanner />);
     await advance(0);
     expect(checks()).toBe(1);
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("button", { name: /restart/i })).toBeNull();
 
     await advance(10 * MINUTE - 1);
     expect(checks()).toBe(1);
@@ -247,7 +247,7 @@ describe("UpdateBanner check schedule (#477)", () => {
     render(<UpdateBanner />);
     await advance(0);
     expect(download).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("button", { name: /restart/i })).toBeNull();
 
     await advance(10 * MINUTE);
     expect(download).toHaveBeenCalledTimes(2);
@@ -259,7 +259,7 @@ describe("UpdateBanner check schedule (#477)", () => {
 
     render(<UpdateBanner />);
     await advance(0);
-    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /restart/i })).toBeInTheDocument();
 
     await advance(24 * HOUR);
     expect(checks()).toBe(1);
