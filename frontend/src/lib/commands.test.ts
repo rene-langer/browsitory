@@ -821,13 +821,13 @@ describe("buildCommands", () => {
     const onOpenRepoTab = vi.fn();
     const commands = commandsFor(appState, { tabs: tabs({ onOpenRepoTab: onOpenRepoTab }) });
     const openMain = commands.find((c) => c.id === "open-worktree:/repo");
-    expect(openMain?.label).toBe("Open main worktree");
+    expect(openMain?.label).toBe("Open main worktree in new tab");
     openMain?.run();
     expect(onOpenRepoTab).toHaveBeenCalledWith("/repo");
     expect(commands.some((c) => c.id === "remove-worktree:main")).toBe(false);
 
     const openCmd = commands.find((c) => c.id === "open-worktree:/repo-wt1");
-    expect(openCmd?.label).toBe("Open worktree wt1");
+    expect(openCmd?.label).toBe("Open worktree wt1 in new tab");
   });
 
   it("opening a worktree calls onOpenRepoTab instead of a state mutation", () => {
