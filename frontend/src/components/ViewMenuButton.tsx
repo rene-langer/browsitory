@@ -5,7 +5,8 @@ import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 /**
  * "View ▾" (#1007): the rarely changed view toggles of a pane, as checkable items with text
  * labels, instead of a row of icon buttons whose meaning was only in a tooltip. `label` names it
- * for assistive tech ("Diff view", "Graph view"); a second click closes the menu.
+ * for assistive tech, starting with the visible "View" ("View diff options"); a second click
+ * closes the menu. Choosing a toggle keeps the menu open, to set another.
  */
 export function ViewMenuButton({
   label,
@@ -43,7 +44,14 @@ export function ViewMenuButton({
         <ChevronDown size={12} aria-hidden="true" />
       </button>
       {menu !== null && (
-        <ContextMenu x={menu.x} y={menu.y} returnFocusTo={menu.returnFocusTo} items={items} onClose={() => setMenu(null)} />
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          returnFocusTo={menu.returnFocusTo}
+          items={items}
+          keepOpenOnToggle
+          onClose={() => setMenu(null)}
+        />
       )}
     </>
   );

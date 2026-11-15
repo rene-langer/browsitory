@@ -216,7 +216,7 @@ export function CommitSearchBar({
       {graphViewItems.length > 0 && (
         // The graph's rarely changed toggles, in words (#1007).
         <ViewMenuButton
-          label="Graph view"
+          label="View graph options"
           title="Lines changed per commit, collapsed merges"
           items={graphViewItems}
           className={styles.viewButton}

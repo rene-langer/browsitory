@@ -164,8 +164,9 @@ image**). A conflicted image opens the conflict pane, like any conflict.
 Each pane has one diff toolbar, above its files: the working tree, a commit, a stash and a
 compare. It shows **Unified** / **Split** and the context lines; the options you change less
 often are in its **View** menu, each with a check mark when it is on: **Wrap lines**, **Show
-whole file**, **Ignore whitespace**, **Show whitespace** and **Show syntax highlighting**.
-Everything on it applies to every diff in the pane and is remembered across sessions. **Unified
+whole file**, **Ignore whitespace**, **Show whitespace** and **Show syntax highlighting**. The
+menu stays open when you turn one on or off, so you can set several; Esc or a click outside
+closes it. Everything on it applies to every diff in the pane and is remembered across sessions. **Unified
 view** shows old and new lines in one column; **Split view** shows the old and new version side
 by side. **Ignore whitespace**, **Context lines** (− and +, 0 to 20) and **Show syntax
 highlighting** are kept in your settings. While whitespace is ignored, partial staging (lines and hunks) is unavailable in
@@ -185,8 +186,8 @@ whitespace**.
 **Wrap lines** wraps long lines at the pane's width, or turns wrapping off so each line stays on
 one row and the diff scrolls sideways. Line numbers stay next to their line either way, and
 selecting and staging lines works the same. The menu item sets **Preferences → Diff → Word wrap**
-to **On** or **Off** for every diff; the setting also has **Auto** (the default, marked with a
-small **A** where the check mark goes). Auto wraps the split view, prose files (Markdown, plain text, reStructuredText,
+to **On** or **Off** for every diff; the setting also has **Auto** (the default, where the item
+reads **Wrap lines (automatic)** with a small **A** where the check mark goes). Auto wraps the split view, prose files (Markdown, plain text, reStructuredText,
 AsciiDoc and the like) and any diff with a line longer than 300 characters, such as minified or
 generated files; code in the unified view scrolls sideways so its indentation stays readable.
 
