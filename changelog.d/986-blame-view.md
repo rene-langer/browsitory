@@ -1,7 +1,8 @@
 ### Blame
 
 - Fixed: the blame view keeps each line's indentation, and its columns no longer run together:
-  the short SHA, author and the new date column have padded, fixed widths (#986).
+  the short SHA, author and the new date column have padded, fixed widths, and a long author
+  name ends in "…" (#986).
 - Changed: blame shows the short SHA, author and date once for each run of lines from the same
   commit, and only the SHA is a link to that commit; a click elsewhere on a line does nothing
   (#986).

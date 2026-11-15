@@ -1,6 +1,6 @@
 ### Pull requests section
 
-- Changed: a pull request card shows "Connect to GitHub" (or Bitbucket) until you connect; a
+- Changed: a pull request card shows "Connect to GitHub…" (or Bitbucket) until you connect; a
   dialog asks for the account and the access token and says why if saving fails. The token
   form with Save, Forget and Cancel is gone from the card (#1012).
 - Changed: a connected card lists its pull requests by itself when you open it, without a List

@@ -4,7 +4,9 @@ Every dialog now has the same frame: a bold title, its buttons at the right of o
 button that does the work highlighted.
 
 - Changed: every dialog shows its title, and the dialog is named by it; Edit remote, Push, Set
-  upstream, Credentials, Stash, Identity and every confirmation had none (#987).
+  upstream, Credentials, Stash, Identity and every confirmation had none. Screen readers read a
+  confirmation's message, or the line under a dialog's title, when it opens. Reflog's Restore
+  asks in the same confirmation as the others, with **Restore main** as its button (#987).
 - Changed: buttons sit at the right of one row in every dialog, the main one first and
   highlighted like the Commit button, Cancel last (#987).
 - Changed: red marks only actions that lose data, in menus, panes and dialogs alike, with an
@@ -15,7 +17,9 @@ button that does the work highlighted.
   commits the remote branch loses, that the lease refuses it if the branch moved, and that Undo
   can't take back a push; Remove remote says its remote-tracking branches go and Undo can't
   bring it back (its button is "Remove remote"); Delete tag says a copy on a remote stays and
-  Undo brings the tag back (#989).
+  Undo brings the tag back; Drop stash says "Undo can't bring it back." instead of repeating its
+  title. Delete branch's confirm, which Undo can take back, is a plain **Delete branch** (#989,
+  #988).
 - Changed: Set upstream opens with the only remote (or origin) and the branch's own name filled
   in. Identity, Create tag, Delete remote branch and Set upstream say under the form why their
   button is off. Edit remote's Push URL says "Same as fetch URL" when empty and its copy buttons
