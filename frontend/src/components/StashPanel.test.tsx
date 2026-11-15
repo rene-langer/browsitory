@@ -286,6 +286,16 @@ describe("StashPanel", () => {
     expect(actionsFor("stash2fix")).toHaveFocus();
   });
 
+  it("says what Drop loses and that Undo can't bring it back, without repeating the title (#989)", () => {
+    renderPanel({ stashes: three });
+    openMenu(/stash1fix/);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Drop…" }));
+    const dialog = screen.getByRole("dialog", { name: /Drop stash/ });
+    expect(dialog).toHaveTextContent("Undo can't bring it back.");
+    expect(dialog).not.toHaveTextContent("cannot be undone");
+    expect(dialog).not.toHaveTextContent(/Drop "/);
+  });
+
   it("moves focus to the '…' now in that place when the stash of a focused drop dialog disappears", () => {
     const { rerender } = renderPanel({ stashes: three });
     openMenu(/stash1fix/);

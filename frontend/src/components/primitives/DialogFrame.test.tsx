@@ -136,6 +136,14 @@ describe("ConfirmDialog's title and tone (#987, #988)", () => {
     expect(screen.getByRole("button", { name: "Drop stash" })).toHaveAttribute("data-tone", "danger");
   });
 
+  it.each(confirmDialogFiles.map(([path, source]) => ({ path, source })))(
+    "$path words every drop-stash confirmation alike (#989)",
+    ({ source }) => {
+      const drops = source.split("<ConfirmDialog").slice(1).filter((dialog) => /confirmLabel="Drop stash"/.test(dialog));
+      for (const dialog of drops) expect(dialog).toMatch(/message=\{<DropStashMessage\b/);
+    },
+  );
+
   it.each(confirmDialogFiles.map(([path, source]) => ({ path, source })))("$path gives each confirmation a title", ({ source }) => {
     expect(source).not.toMatch(/<ConfirmDialog[^>]*ariaLabel=/);
     const opened = source.split("<ConfirmDialog").length - 1;
