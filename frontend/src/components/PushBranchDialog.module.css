@@ -11,11 +11,6 @@
   gap: var(--space-2);
 }
 
-.actions {
-  display: flex;
-  gap: var(--space-2);
-}
-
 .message {
   margin: 0;
 }

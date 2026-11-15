@@ -47,10 +47,10 @@ describe("SetUpstreamDialog (in BranchTree)", () => {
     const reason = "A transfer is in progress.";
     const { props, rerender } = renderTree({ upstream: up });
     fireEvent.click(screen.getByRole("button", { name: "Clear upstream" }));
-    await screen.findByRole("dialog", { name: "Clear upstream confirmation", hidden: true });
+    await screen.findByRole("dialog", { name: "Clear upstream of main", hidden: true });
 
     rerender(<BranchTreeWithDialogs {...props} operationDisabled operationDisabledReason={reason} />);
-    const dialog = screen.getByRole("dialog", { name: "Clear upstream confirmation", hidden: true });
+    const dialog = screen.getByRole("dialog", { name: "Clear upstream of main", hidden: true });
     expect(dialog).toHaveTextContent(reason);
     const confirm = within(dialog).getByRole("button", { name: "Clear upstream", hidden: true });
     expect(confirm).toBeDisabled();

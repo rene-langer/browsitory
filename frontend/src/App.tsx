@@ -164,6 +164,8 @@ function AppContent({
     activePath,
   );
   const renameActiveTab = useCallback(() => setRenamingTab(activePath), [activePath]);
+  // The picker over a repository marks these and switches to their tab (#1013).
+  const openRepoPaths = useMemo(() => new Set(openRepos.openRepos.map((repo) => repo.path)), [openRepos.openRepos]);
 
   // `RepoPicker` only surfaces errors from its own `pickRepoFolder`/`listRecentRepos` calls, and
   // `useOpenRepos.openRepo` deliberately rejects rather than opening a tab for a repo that failed
@@ -641,6 +643,12 @@ function AppContent({
               onDeleteWorkspace={workspaces.deleteWorkspace}
               onCloneRepository={appCommands?.onCloneRepository}
               onNewRepository={appCommands?.onNewRepository}
+              onClose={() => setPickingRepo(false)}
+              openPaths={openRepoPaths}
+              onSwitchToTab={(path) => {
+                openRepos.switchTo(path);
+                setPickingRepo(false);
+              }}
             />
           </Overlay>
         )}
@@ -660,7 +668,7 @@ function AppContent({
         )}
         {existingRepoPrompt !== null && (
           <ConfirmDialog
-            ariaLabel="Repository already exists"
+            title="Repository already exists"
             message={<p>{existingRepoPrompt} is already a repository. Open it?</p>}
             confirmLabel="Open"
             onConfirm={() => {

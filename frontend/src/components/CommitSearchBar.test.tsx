@@ -63,6 +63,35 @@ it("Escape closes an open help panel before closing the search", () => {
   expect(props.onClose).not.toHaveBeenCalled();
 });
 
+it("Escape on any control of the bar closes the search, not only in the field (#1001)", () => {
+  const props = renderBar({ query: "path:src/" });
+  const help = screen.getByRole("button", { name: "Search syntax" });
+  help.focus();
+  fireEvent.keyDown(help, { key: "Escape" });
+  expect(props.onClose).toHaveBeenCalledOnce();
+});
+
+it("Escape on the help button closes the open help before the search (#1001)", () => {
+  const props = renderBar({ query: "x" });
+  const help = screen.getByRole("button", { name: "Search syntax" });
+  fireEvent.click(help);
+  fireEvent.keyDown(help, { key: "Escape" });
+  expect(screen.queryByRole("region", { name: "Search syntax" })).toBeNull();
+  expect(props.onClose).not.toHaveBeenCalled();
+});
+
+it("Escape returns focus to where it was before the search (#1001)", () => {
+  const opener = document.createElement("button");
+  document.body.appendChild(opener);
+  opener.focus();
+  const props = renderBar({ query: "x" });
+  field().focus();
+  fireEvent.keyDown(field(), { key: "Escape" });
+  expect(props.onClose).toHaveBeenCalledOnce();
+  expect(opener).toHaveFocus();
+  opener.remove();
+});
+
 it("focuses the field when focus is requested and acknowledges it", () => {
   const props = renderBar({ focusRequested: true });
   expect(field()).toHaveFocus();

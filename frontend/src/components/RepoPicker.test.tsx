@@ -393,6 +393,57 @@ describe("RepoPicker welcome (#688)", () => {
   });
 });
 
+describe("RepoPicker opened over a repository (#1013)", () => {
+  it("has an Open repository header with a close button, and no palette tip", async () => {
+    const onClose = vi.fn();
+    render(<RepoPicker client={fakeClient()} onOpenRepo={vi.fn()} {...workspaceProps()} onClose={onClose} />);
+    await screen.findByText("No recent repositories");
+
+    expect(screen.getByRole("heading", { name: "Open repository" })).toBeInTheDocument();
+    expect(screen.queryByText(/to search every command/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("on the start page, shows the palette tip below the lists and no close button", async () => {
+    render(<RepoPicker client={fakeClient()} onOpenRepo={vi.fn()} {...workspaceProps()} />);
+    await screen.findByText("No recent repositories");
+
+    const tip = screen.getByText(/to search every command/);
+    const workspaces = screen.getByRole("region", { name: "Workspaces" });
+    expect(workspaces.compareDocumentPosition(tip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+  });
+
+  it("marks the repositories already open as tabs and switches to their tab on click", async () => {
+    const client = fakeClient({ listRecentRepos: async () => ["/repo/a", "/repo/b"] });
+    const onOpenRepo = vi.fn();
+    const onSwitchToTab = vi.fn();
+    render(
+      <RepoPicker
+        client={client}
+        onOpenRepo={onOpenRepo}
+        {...workspaceProps()}
+        openPaths={new Set(["/repo/a"])}
+        onSwitchToTab={onSwitchToTab}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const openRow = (await screen.findByText("/repo/a")).closest("button")!;
+    expect(within(openRow).getByText("Open in a tab")).toBeInTheDocument();
+    const otherRow = screen.getByText("/repo/b").closest("button")!;
+    expect(within(otherRow).queryByText("Open in a tab")).toBeNull();
+
+    fireEvent.click(openRow);
+    expect(onSwitchToTab).toHaveBeenCalledWith("/repo/a");
+    expect(onOpenRepo).not.toHaveBeenCalled();
+
+    fireEvent.click(otherRow);
+    expect(onOpenRepo).toHaveBeenCalledWith("/repo/b");
+  });
+});
+
 describe("RepoPicker workspaces", () => {
   const workspace = {
     id: "ws-1",

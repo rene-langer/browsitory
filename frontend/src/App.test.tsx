@@ -1785,7 +1785,7 @@ describe("App", () => {
     async function mergeFromMenu() {
       fireEvent.contextMenu(await screen.findByRole("button", { name: "feature" }));
       fireEvent.click(screen.getByRole("menuitem", { name: "Merge into current branch…" }));
-      const dialog = await screen.findByRole("dialog", { name: "Merge feature" });
+      const dialog = await screen.findByRole("dialog", { name: "Merge feature into main" });
       expect(within(dialog).getByRole("heading")).toHaveTextContent("Merge feature into main");
       const merge = within(dialog).getByRole("button", { name: "Merge" });
       await waitFor(() => expect(merge).toBeEnabled());
@@ -1804,7 +1804,7 @@ describe("App", () => {
       const options = { fastForward: "Never", squash: false };
       await waitFor(() => expect(mergeBranch).toHaveBeenCalledWith("/repos/a", "feature", options));
       expect(setMergeOptions).toHaveBeenCalledWith("/repos/a", options);
-      expect(screen.queryByRole("dialog", { name: "Merge feature" })).toBeNull();
+      expect(screen.queryByRole("dialog", { name: "Merge feature into main" })).toBeNull();
     });
 
     it.each([
@@ -1874,7 +1874,7 @@ describe("App", () => {
         screen.getByRole("tab", { name: "a" }).focus();
 
         await runPaletteCommand("Reset to c1", "Reset to c1…");
-        const dialog = await screen.findByRole("dialog", { name: "Reset branch", hidden: true });
+        const dialog = await screen.findByRole("dialog", { name: /^Reset main to /, hidden: true });
         fireEvent.click(within(dialog).getByRole("button", { name: "Cancel", hidden: true }));
         await waitFor(() => expect(screen.getByRole("listbox", { name: "Commit history" })).toHaveFocus());
       } finally {
@@ -1911,10 +1911,10 @@ describe("App", () => {
         expect(await within(results).findByRole("option", { selected: true })).toHaveTextContent("one");
 
         await runPaletteCommand("Reset to c1", "Reset to c1…");
-        const dialog = await screen.findByRole("dialog", { name: "Reset branch", hidden: true });
-        fireEvent.click(within(dialog).getByRole("button", { name: "Reset", hidden: true }));
+        const dialog = await screen.findByRole("dialog", { name: /^Reset main to /, hidden: true });
+        fireEvent.click(within(dialog).getByRole("button", { name: "Reset mixed", hidden: true }));
         await waitFor(() => expect(resetToCommit).toHaveBeenCalledWith("/repos/a", "c1", "mixed"));
-        await waitFor(() => expect(screen.queryByRole("dialog", { name: "Reset branch", hidden: true })).toBeNull());
+        await waitFor(() => expect(screen.queryByRole("dialog", { name: /^Reset main to /, hidden: true })).toBeNull());
       } finally {
         Element.prototype.scrollIntoView = original;
       }
@@ -1975,8 +1975,8 @@ describe("App", () => {
         await waitFor(() => expect(revertCommit).toHaveBeenCalledWith("/repos/a", "c0", null));
 
         await runPaletteCommand("Reset to c0", "Reset to c0…");
-        const dialog = await screen.findByRole("dialog", { name: "Reset branch", hidden: true });
-        fireEvent.click(within(dialog).getByRole("button", { name: "Reset", hidden: true }));
+        const dialog = await screen.findByRole("dialog", { name: /^Reset main to /, hidden: true });
+        fireEvent.click(within(dialog).getByRole("button", { name: "Reset mixed", hidden: true }));
         await waitFor(() => expect(resetToCommit).toHaveBeenCalledWith("/repos/a", "c0", "mixed"));
       } finally {
         Element.prototype.scrollIntoView = original;
@@ -2056,15 +2056,15 @@ describe("App", () => {
         fireEvent.click(row);
         fireEvent.contextMenu(row);
         fireEvent.click(screen.getByRole("menuitem", { name: "Reset main to here…" }));
-        await screen.findByRole("dialog", { name: "Reset branch", hidden: true });
+        await screen.findByRole("dialog", { name: /^Reset main to /, hidden: true });
         await runPaletteCommand("Reset to c1", "Reset to c1…");
-        await waitFor(() => expect(screen.getAllByRole("dialog", { name: "Reset branch", hidden: true })).toHaveLength(1));
-        const dialog = screen.getByRole("dialog", { name: "Reset branch", hidden: true });
-        expect(within(dialog).getByRole("button", { name: "Reset", hidden: true })).toBeEnabled();
+        await waitFor(() => expect(screen.getAllByRole("dialog", { name: /^Reset main to /, hidden: true })).toHaveLength(1));
+        const dialog = screen.getByRole("dialog", { name: /^Reset main to /, hidden: true });
+        expect(within(dialog).getByRole("button", { name: "Reset mixed", hidden: true })).toBeEnabled();
 
         terminalRebase = { kind: "Rebase", branch: "topic", onto: "c1", currentStep: 1, totalSteps: 2 };
         await runPaletteCommand("Refresh", "Refresh");
-        const reset = within(dialog).getByRole("button", { name: "Reset", hidden: true });
+        const reset = within(dialog).getByRole("button", { name: "Reset mixed", hidden: true });
         await waitFor(() => expect(reset).toBeDisabled());
         expect(reset).toHaveAttribute("title", "A rebase started in a terminal is in progress.");
         fireEvent.submit(reset.closest("form")!);
@@ -2103,6 +2103,25 @@ describe("App", () => {
       expect(cherryPick).not.toHaveBeenCalled();
     });
 
+    it("the force push confirmation says what the remote loses, that the lease guards it, and that Undo can't help (#989)", async () => {
+      render(
+        <App
+          client={pickClient({
+            listRemotes: async () => [{ name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null, prune: false }],
+            getCurrentUpstream: async () => ({ localBranch: "main", remoteName: "origin", remoteBranch: "main", ahead: 1, behind: 2, pushBranch: "main" }),
+          })}
+        />,
+      );
+      await screen.findByText(/c1 one/);
+      await runPaletteCommand("Force push", "Force push current branch…");
+      const dialog = await screen.findByRole("dialog", { name: "Force push to origin/main", hidden: true });
+      expect(within(dialog).getByRole("heading", { name: "Force push to origin/main", hidden: true })).toBeInTheDocument();
+      expect(dialog).toHaveTextContent("The 2 commits on origin/main that your branch doesn't have are removed from it.");
+      expect(dialog).toHaveTextContent("--force-with-lease");
+      expect(dialog).toHaveTextContent("Undo can't take back a push.");
+      expect(within(dialog).getByRole("button", { name: "Force push", hidden: true })).toHaveAttribute("data-tone", "danger");
+    });
+
     it("the force push confirmation is disabled once a terminal rebase starts (#514)", async () => {
       let terminalRebase: { kind: "Rebase"; branch: string; onto: string; currentStep: number; totalSteps: number } | null = null;
       const forcePushCurrentBranch = vi.fn<RepoClient["forcePushCurrentBranch"]>().mockResolvedValue("push-1");
@@ -2118,7 +2137,7 @@ describe("App", () => {
       );
       await screen.findByText(/c1 one/);
       await runPaletteCommand("Force push", "Force push current branch…");
-      const dialog = await screen.findByRole("dialog", { name: "Confirm force push", hidden: true });
+      const dialog = await screen.findByRole("dialog", { name: "Force push to origin/main", hidden: true });
       expect(within(dialog).getByRole("button", { name: "Force push", hidden: true })).toBeEnabled();
 
       terminalRebase = { kind: "Rebase", branch: "topic", onto: "c1", currentStep: 1, totalSteps: 2 };
@@ -2138,7 +2157,7 @@ describe("App", () => {
       render(<App client={pickClient({ getCommitGraph: async () => graphPage([merge, ...graph]) })} />);
       const list = await screen.findByRole("listbox", { name: "Commit history" });
       for (const [summary, item, dialogName] of [
-        [/c1 one/, "Reset main to here…", "Reset branch"],
+        [/c1 one/, "Reset main to here…", "Reset main to c1"],
         [/m3 merge one/, "Cherry-pick…", "Choose parent"],
       ] as const) {
         screen.getByRole("tab", { name: "a" }).focus();
@@ -3437,7 +3456,7 @@ describe("App external tools", () => {
   it.each([
     ["Edit remote origin…", "Edit origin"],
     ["Manage credentials for origin…", "Credentials for origin"],
-    ["Remove remote origin…", "Remove remote confirmation"],
+    ["Remove remote origin…", "Remove remote origin"],
   ])("the palette's %s dialog is visible while the sidebar is collapsed (narrow window)", async (option, name) => {
     const originalInnerWidth = window.innerWidth;
     Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 800 });

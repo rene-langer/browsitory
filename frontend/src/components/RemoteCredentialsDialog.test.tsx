@@ -12,6 +12,9 @@ const origin: RemoteInfo = {
   authUsername: null,
 };
 
+/** `origin` with an HTTPS credential saved through the app (the mode is set when it is). */
+const saved: RemoteInfo = { ...origin, authMode: "HttpsToken", authUsername: "rene" };
+
 function renderDialog(overrides: Partial<Parameters<typeof RemoteCredentialsDialog>[0]> = {}) {
   const props: Parameters<typeof RemoteCredentialsDialog>[0] = {
     remote: origin,
@@ -73,7 +76,8 @@ describe("RemoteCredentialsDialog", () => {
   });
 
   it("disables saving and forgetting with the reason while the repository is busy (#561)", () => {
-    const { props, dialog } = renderDialog({ blockedReason: "A merge is in progress." });
+    // Forget shows only for a remote with a saved HTTPS credential (#1014).
+    const { props, dialog } = renderDialog({ remote: saved, blockedReason: "A merge is in progress." });
     expect(within(dialog).getByText("A merge is in progress.")).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Forget HTTPS credential", hidden: true }));
     expect(props.onForgetHttpsCredential).not.toHaveBeenCalled();
@@ -88,7 +92,7 @@ describe("RemoteCredentialsDialog", () => {
   });
 
   it("forgets the HTTPS credential", () => {
-    const { props, dialog } = renderDialog();
+    const { props, dialog } = renderDialog({ remote: saved });
     fireEvent.click(within(dialog).getByRole("button", { name: "Forget HTTPS credential", hidden: true }));
     expect(props.onForgetHttpsCredential).toHaveBeenCalledWith("origin");
   });

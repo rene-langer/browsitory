@@ -193,6 +193,24 @@ describe("ReadOnlyFileSection", () => {
     await waitFor(() => expect(getBlame).toHaveBeenCalledWith("/repo", "HEAD", "a.txt"));
   });
 
+  it("puts Back to diff in the file header while blame shows, once (#986)", async () => {
+    const getBlame = vi.fn(async () => [
+      { lineNumber: 1, content: "x", commitId: "c1", shortId: "c111111", authorName: "A", timestamp: 1 },
+    ]);
+    const { props } = renderSection({ client: fakeRepoClient({ getBlame }) });
+    fireEvent.click(screen.getByRole("button", { name: "Blame" }));
+    const table = (await screen.findByText("c111111")).closest("table")!;
+
+    const back = screen.getAllByRole("button", { name: "Back to diff" });
+    expect(back).toHaveLength(1);
+    expect(back[0].compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.click(back[0]);
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.getByRole("button", { name: "Blame" })).toBeInTheDocument();
+    await waitFor(() => expect(props.fetchDiff).toHaveBeenCalledTimes(2));
+  });
+
   it("shows the rename and a History button when given", () => {
     const onOpenFileHistory = vi.fn();
     renderSection({ path: "new.txt", oldPath: "old.txt", onOpenFileHistory });

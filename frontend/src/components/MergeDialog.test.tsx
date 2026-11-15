@@ -53,7 +53,7 @@ describe("MergeDialog", () => {
     for (const name of ["Fast-forward if possible", "Always create a merge commit", "Fast-forward only"]) {
       expect(screen.getByRole("radio", { name })).toBeDisabled();
     }
-    expect(screen.getByText("Stage the combined changes; you write the commit.")).toBeInTheDocument();
+    expect(screen.getByText("Stages the combined changes; you write the commit. The choices above don't apply.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Merge" }));
     expect(onMerge).toHaveBeenCalledWith({ fastForward: "Only", squash: true });
   });
@@ -65,9 +65,9 @@ describe("MergeDialog", () => {
 
   it("names both branches and cancels", async () => {
     const { onCancel } = renderDialog({ fastForward: "Allow", squash: false });
-    expect(screen.getByRole("dialog", { name: "Merge feature" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Merge feature into main" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Merge feature into main" })).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "Fast-forward" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "How to merge" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 

@@ -253,9 +253,16 @@ export function ReadOnlyFileSection({
             <LineStatsBadge insertions={lineStats.insertions} deletions={lineStats.deletions} />
           ))}
         <div className={styles.rowActions}>
-          <button type="button" onClick={() => setMode("blame")}>
-            Blame
-          </button>
+          {/* While blame shows, the header's way back replaces Blame (#986). */}
+          {mode === "blame" ? (
+            <button type="button" onClick={() => setMode("diff")}>
+              Back to diff
+            </button>
+          ) : (
+            <button type="button" onClick={() => setMode("blame")}>
+              Blame
+            </button>
+          )}
           {onOpenFileHistory !== undefined && (
             <button type="button" aria-label={`History of ${path}`} onClick={() => onOpenFileHistory(path)}>
               History
@@ -301,19 +308,16 @@ export function ReadOnlyFileSection({
       {!collapsed && (
         <div className={styles.fileSectionBody} ref={bodyRef}>
           {mode === "blame" ? (
-            <>
-              {error !== null ? (
-                <InlineError
-                  message={error.message}
-                  hint={error.hint}
-                  onDismiss={() => setError(null)}
-                  onRetry={loadBlame}
-                />
-              ) : (
-                <BlameView lines={blameLines} onSelectRow={onSelectRow} />
-              )}
-              <button onClick={() => setMode("diff")}>Back to diff</button>
-            </>
+            error !== null ? (
+              <InlineError
+                message={error.message}
+                hint={error.hint}
+                onDismiss={() => setError(null)}
+                onRetry={loadBlame}
+              />
+            ) : (
+              <BlameView lines={blameLines} path={path} onSelectRow={onSelectRow} />
+            )
           ) : showImage && previewSource !== undefined ? (
             <>
               {isSvgPath(path) && <ImageTextToggle asText={false} onToggle={() => setImageAsText(true)} />}

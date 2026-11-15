@@ -158,7 +158,7 @@ export function shortcutGroups(apple: boolean = isApplePlatform(), vscode: boole
       shortcuts: [
         row([LEFT, RIGHT], "Resize a pane (on a divider)"),
         row("Double-click a divider", "Collapse or expand the sidebar"),
-        row([k("Escape")], "Close a dialog or menu"),
+        row([k("Escape")], "Close a dialog, menu, search, compare or sidebar form"),
       ],
     },
   ];

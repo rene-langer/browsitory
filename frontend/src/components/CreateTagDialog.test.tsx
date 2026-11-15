@@ -26,7 +26,7 @@ describe("CreateTagDialog", () => {
   it("shows the fixed target commit and focuses the name", () => {
     renderDialog();
 
-    expect(screen.getByRole("dialog", { name: "Create tag" })).toHaveTextContent("Tag commit abc1234 Fix the thing");
+    expect(screen.getByRole("dialog", { name: "Create tag" })).toHaveTextContent("On commit abc1234 Fix the thing");
     expect(screen.getByLabelText("Tag name")).toHaveFocus();
   });
 

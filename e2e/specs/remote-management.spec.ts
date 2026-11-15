@@ -90,10 +90,10 @@ describe("Browsitory remote management", () => {
       );
     }, remoteFolderHeader);
     await (await $("button=Remove remote")).click();
-    const blockingDialog = await $("dialog[aria-label='Remove remote confirmation']");
+    const blockingDialog = await $(`dialog[aria-label='Remove remote ${REMOTE}']`);
     await blockingDialog.waitForExist();
-    expect(await blockingDialog.getText()).toContain("clear upstreams for");
-    await (await blockingDialog.$("button=Confirm remove")).click();
+    expect(await blockingDialog.getText()).toContain("clears the upstream of");
+    await (await blockingDialog.$("button=Remove remote")).click();
     await browser.waitUntil(
       async () => (await upstreamSection.getText()).includes("No upstream"),
       { timeoutMsg: "expected removing the remote to clear its upstream" },

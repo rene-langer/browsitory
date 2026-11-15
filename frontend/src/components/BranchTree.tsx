@@ -559,7 +559,7 @@ function BranchTreeContent({
             window) has nothing left to delete. */}
         {deleteConfirm !== null && branches.some((b) => b.name === deleteConfirm.name) && (
           <ConfirmDialog
-            ariaLabel={`Delete ${deleteConfirm.name}`}
+            title={`Delete ${deleteConfirm.name}`}
             message={
               <p>
                 {deleteConfirm.count === null
@@ -569,6 +569,7 @@ function BranchTreeContent({
               </p>
             }
             confirmLabel="Delete"
+            tone="danger"
             confirmDisabled={operationDisabled}
             // #521: the repository can become busy while the confirmation is open.
             confirmReason={busyReason}
@@ -746,7 +747,7 @@ function BranchTreeContent({
 
         {clearUpstreamConfirm && upstream !== null && (
           <ConfirmDialog
-            ariaLabel="Clear upstream confirmation"
+            title={`Clear upstream of ${upstream.localBranch}`}
             message={
               <>
                 <p>

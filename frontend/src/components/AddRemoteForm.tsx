@@ -1,4 +1,5 @@
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
+import { useEscapeToClose } from "../lib/escapeToClose";
 import type { RemoteInfo } from "../ipc/RepoClient";
 import { remoteNameProblem } from "../lib/refName";
 import { InlineError } from "./primitives/InlineError";
@@ -41,6 +42,9 @@ export function AddRemoteForm({
   const [showPushUrl, setShowPushUrl] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const reasonId = useId();
+  const nameRef = useRef<HTMLInputElement>(null);
+  // Escape anywhere in the form closes it, focus back where it came from (#1001).
+  const { containerRef: escapeRef, onKeyDown: onEscapeKeyDown, close: closeAndRefocus } = useEscapeToClose<HTMLFormElement>({ open, onClose, initialFocus: nameRef });
 
   if (!open) return null;
   const busyReason = operationDisabled ? operationDisabledReason : null;
@@ -72,11 +76,10 @@ export function AddRemoteForm({
 
   return (
     <form
+      ref={escapeRef}
       className={styles.form}
       aria-label="Add remote"
-      onKeyDown={(event) => {
-        if (event.key === "Escape") onClose();
-      }}
+      onKeyDown={onEscapeKeyDown}
       onSubmit={(event) => {
         event.preventDefault();
         void submitAddRemote();
@@ -85,7 +88,7 @@ export function AddRemoteForm({
       <label className={styles.label}>
         Remote name
         <input
-          autoFocus
+          ref={nameRef}
           placeholder="origin"
           value={newRemoteName}
           aria-invalid={newRemoteProblem !== null}
@@ -150,7 +153,7 @@ export function AddRemoteForm({
       >
         Add remote
       </button>
-      <button type="button" onClick={onClose}>
+      <button type="button" onClick={closeAndRefocus}>
         Cancel
       </button>
     </form>

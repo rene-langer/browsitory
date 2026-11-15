@@ -142,7 +142,7 @@ In lists and diffs (Ctrl means ⌘ on macOS):
 | Delete | Close the focused tab |
 | F2 | Rename the focused tab |
 | Menu key or Shift+F10 | Open the focused item's menu |
-| Esc | Close a dialog or menu |
+| Esc | Close a dialog or menu, or the search, compare or sidebar form the focus is in; the focus goes back to where it was |
 
 In the merge editor of the conflict pane (see [Conflicts](conflicts.md)):
 

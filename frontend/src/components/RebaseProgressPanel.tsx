@@ -75,7 +75,7 @@ export function RebaseProgressPanel({
         >
           {continueLabel}
         </button>
-        <button onClick={onAbort} disabled={abortDisabled}>
+        <button data-tone="danger" onClick={onAbort} disabled={abortDisabled}>
           {abortLabel}
         </button>
       </Toolbar>

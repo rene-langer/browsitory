@@ -3,9 +3,14 @@ import { useKeymap } from "../lib/keymap";
 import { isVscodeHost } from "../lib/platform";
 import { OpenPreferencesContext } from "../state/openPreferences";
 import { shortcutGroups } from "../lib/shortcuts";
+import { Panel } from "./primitives/Panel";
 import styles from "./ShortcutSheet.module.css";
 
-/** The keyboard shortcuts, written for the platform (#683): ⌘ on Apple platforms, Ctrl elsewhere. */
+/**
+ * The keyboard shortcuts, written for the platform (#683): ⌘ on Apple platforms, Ctrl elsewhere.
+ * A `Panel` with a footer, like the operation log (#1016): the list scrolls, "Change shortcuts…"
+ * and Close stay in view.
+ */
 export function ShortcutSheet({
   onClose,
   apple,
@@ -20,8 +25,28 @@ export function ShortcutSheet({
   const openPreferences = useContext(OpenPreferencesContext);
   const groups = shortcutGroups(apple, vscode);
   return (
-    <div className={styles.sheet} aria-labelledby="shortcut-sheet-title" role="group">
-      <h2 id="shortcut-sheet-title">Keyboard shortcuts</h2>
+    <Panel
+      title="Keyboard shortcuts"
+      footer={
+        <div className={styles.actions}>
+          {openPreferences !== null && (
+            // Preferences > Keyboard (#899), which in VSCode links to its Keyboard Shortcuts (#900).
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                openPreferences("keyboard");
+              }}
+            >
+              Change shortcuts…
+            </button>
+          )}
+          <button type="button" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      }
+    >
       {vscode && (
         <p className={styles.note}>
           In VSCode, F5, F6, the tab keys and the others VSCode uses itself are VSCode keybindings while
@@ -30,13 +55,13 @@ export function ShortcutSheet({
         </p>
       )}
       {groups.map((group) => (
-        <section key={group.title}>
+        <section key={group.title} className={styles.group}>
           <h3>{group.title}</h3>
           <dl className={styles.list}>
             {group.shortcuts.map((shortcut) => (
               <div key={shortcut.keys + shortcut.description} className={styles.row}>
                 <dt>
-                  <kbd>{shortcut.keys}</kbd>
+                  <kbd className={styles.keys}>{shortcut.keys}</kbd>
                 </dt>
                 <dd>{shortcut.description}</dd>
               </div>
@@ -44,23 +69,6 @@ export function ShortcutSheet({
           </dl>
         </section>
       ))}
-      <div className={styles.actions}>
-        {openPreferences !== null && (
-          // Preferences > Keyboard (#899), which in VSCode links to its Keyboard Shortcuts (#900).
-          <button
-            type="button"
-            onClick={() => {
-              onClose();
-              openPreferences("keyboard");
-            }}
-          >
-            Change shortcuts…
-          </button>
-        )}
-        <button type="button" onClick={onClose}>
-          Close
-        </button>
-      </div>
-    </div>
+    </Panel>
   );
 }

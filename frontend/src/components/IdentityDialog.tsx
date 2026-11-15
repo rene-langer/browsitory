@@ -1,5 +1,8 @@
-import { useState } from "react";
+import { useId, useState } from "react";
+import { describedBy } from "../lib/ariaDescribedBy";
+import { DialogActions } from "./primitives/DialogActions";
 import { FormDialog } from "./primitives/FormDialog";
+import formStyles from "./primitives/FormDialog.module.css";
 import { InlineError } from "./primitives/InlineError";
 import styles from "./IdentityDialog.module.css";
 
@@ -24,6 +27,7 @@ export function IdentityDialog({
   const [global, setGlobal] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const problemId = useId();
   const problem =
     name.trim() === "" || email.trim() === ""
       ? "Enter a name and an email address."
@@ -38,7 +42,7 @@ export function IdentityDialog({
     if (failure !== null) setError(failure);
   };
   return (
-    <FormDialog ariaLabel="Set your git identity" onCancel={onCancel}>
+    <FormDialog title="Set your git identity" onCancel={onCancel}>
       <form
         className={styles.form}
         onSubmit={(event) => {
@@ -73,15 +77,26 @@ export function IdentityDialog({
             This repository only
           </label>
         </fieldset>
-        {name !== "" && email !== "" && problem !== null && <p className={styles.problem}>{problem}</p>}
-        <div className={styles.actions}>
-          <button type="submit" disabled={problem !== null || saving}>
+        {/* Why Save is off, always in view (#1014): a hint while a field is empty, a problem once
+            both are typed. */}
+        {problem !== null && (
+          <p id={problemId} className={name !== "" && email !== "" ? styles.problem : formStyles.blocked}>
+            {problem}
+          </p>
+        )}
+        <DialogActions>
+          <button
+            type="submit"
+            data-tone="primary"
+            disabled={problem !== null || saving}
+            aria-describedby={describedBy(problemId, problem)}
+          >
             {retrying ? "Save and commit" : "Save"}
           </button>
           <button type="button" onClick={onCancel}>
             Cancel
           </button>
-        </div>
+        </DialogActions>
         {error !== null && <InlineError message={error} onDismiss={() => setError(null)} />}
       </form>
     </FormDialog>

@@ -968,7 +968,7 @@ export function RepoWorkspace({
       )}
       {userCommandRunner.confirming !== null && (
         <ConfirmDialog
-          ariaLabel={`Run ${userCommandRunner.confirming.command.name}`}
+          title={`Run ${userCommandRunner.confirming.command.name}`}
           message={
             <>
               <p>Run {userCommandRunner.confirming.command.name}?</p>

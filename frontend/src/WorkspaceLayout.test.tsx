@@ -68,11 +68,11 @@ describe("the diverged-pull prompt (#636)", () => {
     const pull = within(toolbar()).getByRole("button", { name: "Pull" });
     await waitFor(() => expect(pull).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(pull);
-    const dialog = await screen.findByRole("dialog", { name: "Pull has diverged" });
+    const dialog = await screen.findByRole("dialog", { name: "main and origin/main have diverged" });
     expect(dialog).toHaveTextContent("origin/main");
     expect(pull).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Pull has diverged" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "main and origin/main have diverged" })).toBeNull());
     expect(pull).not.toHaveAttribute("aria-disabled");
   });
 
@@ -83,7 +83,7 @@ describe("the diverged-pull prompt (#636)", () => {
     const pull = within(toolbar()).getByRole("button", { name: "Pull" });
     await waitFor(() => expect(pull).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(pull);
-    const dialog = await screen.findByRole("dialog", { name: "Pull has diverged" });
+    const dialog = await screen.findByRole("dialog", { name: "main and origin/main have diverged" });
     // `showModal()` inside a hidden ancestor is an invisible modal that makes the page inert.
     expect(dialog.closest("[hidden]")).toBeNull();
   });
@@ -107,7 +107,7 @@ describe("a pull git config wants as a merge commit (#740)", () => {
       expect(mergeBranch).toHaveBeenCalledWith("/repos/a", "refs/remotes/origin/main", { fastForward: "Never", squash: false }),
     );
     expect(mergeBranch).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("dialog", { name: "Pull has diverged" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "main and origin/main have diverged" })).toBeNull();
   });
 });
 

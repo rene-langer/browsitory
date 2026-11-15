@@ -1,8 +1,3 @@
-.title {
-  margin: 0 0 var(--space-3);
-  font-size: var(--text-md, 1rem);
-}
-
 /* A fixed size (#784): switching or filtering groups never resizes the dialog; only the group
    pane scrolls. `[open]` keeps the browser's `display: none` for a closed dialog. */
 dialog.dialog[open] {
@@ -70,7 +65,18 @@ dialog.dialog[open] {
 .panes {
   min-height: 0;
   overflow-y: auto;
+  /* The scrollbar's room is kept even while nothing scrolls, so fields never slide under it or
+     change width when a group gets long enough to scroll (#1017). */
+  scrollbar-gutter: stable;
   padding-right: var(--space-1);
+}
+
+/* A setting whose label holds the filter text (#1017). */
+.panel label[data-filter-match] {
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+  box-shadow: 0 0 0 2px var(--color-warning-bg);
 }
 
 /* Narrow window: the list above the group, its tabs in rows. */
@@ -158,14 +164,9 @@ dialog.dialog[open] {
   overflow-wrap: anywhere;
 }
 
-.footer {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: var(--space-3);
-}
-
+/* Room for the "Default" placeholder beside the number field's spin buttons (#1017). */
 .number {
-  width: 6em;
+  width: 8em;
 }
 
 .checkbox {

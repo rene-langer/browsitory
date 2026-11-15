@@ -89,19 +89,20 @@ export function RemoteDialogs({
     const clearUpstreams = affected.length > 0;
     return (
       <ConfirmDialog
-        ariaLabel="Remove remote confirmation"
+        title={`Remove remote ${remote.name}`}
         message={
           <>
-            {clearUpstreams ? (
-              <p>
-                Remove {remote.name} and clear upstreams for {affected.map((item) => item.localBranch).join(", ")}?
-              </p>
-            ) : (
-              <p>Remove remote {remote.name}?</p>
+            <p>
+              Removes {remote.name} and its remote-tracking branches from this repository. The repository on the
+              server doesn&apos;t change.
+            </p>
+            {clearUpstreams && (
+              <p>Also clears the upstream of {affected.map((item) => item.localBranch).join(", ")}.</p>
             )}
+            <p>Undo can&apos;t bring the remote back.</p>
           </>
         }
-        confirmLabel="Confirm remove"
+        confirmLabel="Remove remote"
         confirmDisabled={blocked}
         confirmReason={blockedReason}
         onConfirm={() => {
