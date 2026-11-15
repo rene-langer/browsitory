@@ -115,7 +115,7 @@ describe("historyEditChecks", () => {
     for (const check of Object.values(historyEditChecks(context({ commits, headInfo }), "C"))) {
       expect(check).toEqual({
         ok: false,
-        reason: "A merge commit comes after this one. Use Rebase onto here… instead.",
+        reason: "Can't edit: a merge commit comes after this one.",
       });
     }
   });
@@ -285,7 +285,7 @@ describe("foldStagedCheck (#883)", () => {
     const commits = [commit("M", ["E", "X"]), ...chain];
     expect(foldStagedCheck(context({ status, commits, headInfo: { ...HEAD, headId: "M" } }), "C")).toEqual({
       ok: false,
-      reason: "A merge commit comes after this one. Use Rebase onto here… instead.",
+      reason: "Can't edit: a merge commit comes after this one.",
     });
   });
 });

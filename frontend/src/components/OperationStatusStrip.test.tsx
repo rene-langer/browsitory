@@ -228,7 +228,7 @@ describe("OperationStatusStrip", () => {
   describe("a stored rebase", () => {
     const rebase = (health: RebaseInfo["health"]): RebaseInfo => ({ branch: "topic", onto: "o", currentStep: 1, totalSteps: 2, health, editing: null, splitParts: 0 });
 
-    it("keeps \"Rebasing, step N of M\" while paused", () => {
+    it("keeps \"Rebasing <branch> onto <target>, step N of M\" while paused", () => {
       render(
         <OperationStatusStrip
           merging
@@ -240,7 +240,7 @@ describe("OperationStatusStrip", () => {
           onAbortRebase={noop}
         />,
       );
-      expect(screen.getByRole("status")).toHaveTextContent("Rebasing, step 1 of 2");
+      expect(screen.getByRole("status")).toHaveTextContent("Rebasing topic onto o, step 1 of 2");
       expect(screen.queryByText(/interrupted/)).toBeNull();
     });
 

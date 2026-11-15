@@ -953,14 +953,14 @@ describe("DiffPane", () => {
       expect(within(dock).queryByText(/amend/i)).toBeNull();
     });
 
-    it("keeps the rebase actions in a pinned commit-actions group so they never scroll away with long diffs", () => {
+    it("keeps the rebase's Continue and Abort out of the commit-actions group: the strip has them (#995)", () => {
       renderUncommitted(fakeClient({}), status, { rebaseProgress: { currentStep: 1, totalSteps: 3 } });
 
       const dock = screen.getByRole("group", { name: "Commit actions" });
-      expect(within(dock).getByRole("button", { name: /abort rebase/i })).toBeInTheDocument();
+      expect(within(dock).queryByRole("button", { name: /abort rebase|continue rebase/i })).toBeNull();
     });
 
-    it("disables Continue with the divergence reason", () => {
+    it("leaves an interrupted rebase's reason and Abort to the strip (#995)", () => {
       const onRebaseAbort = vi.fn();
       renderUncommitted(fakeClient({}), status, {
         rebaseProgress: { currentStep: 1, totalSteps: 3 },
@@ -973,10 +973,21 @@ describe("DiffPane", () => {
       });
 
       const dock = screen.getByRole("group", { name: "Commit actions" });
-      expect(within(dock).getByRole("button", { name: /continue rebase/i })).toBeDisabled();
-      expect(within(dock).getByText("topic was changed outside Browsitory.")).toBeInTheDocument();
-      fireEvent.click(within(dock).getByRole("button", { name: /abort rebase/i }));
-      expect(onRebaseAbort).toHaveBeenCalled();
+      expect(within(dock).queryByRole("button", { name: /continue rebase|abort rebase/i })).toBeNull();
+      expect(within(dock).queryByText("topic was changed outside Browsitory.")).toBeNull();
+    });
+
+    it("shows a sequence Continue's running hook with Cancel in the dock", () => {
+      const onCancel = vi.fn();
+      const sequence = { kind: "CherryPick" as const, currentStep: 1, totalSteps: 2, currentCommit: "c" };
+      renderUncommitted(fakeClient({}), status, {
+        headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null },
+        commitHooks: { skip: false, onToggleSkip: () => {}, running: { operationId: "continue-1", hook: "pre-commit" }, onCancel },
+      });
+      const dock = screen.getByRole("group", { name: "Commit actions" });
+      expect(within(dock).getByRole("status")).toHaveTextContent("Running pre-commit hook…");
+      fireEvent.click(within(dock).getByRole("button", { name: "Cancel" }));
+      expect(onCancel).toHaveBeenCalledTimes(1);
     });
 
     it("names the pre-hook the merge commit will run in the Skip hooks tooltip", () => {
@@ -996,7 +1007,7 @@ describe("DiffPane", () => {
       );
     });
 
-    it("shows a paused cherry-pick sequence in the dock instead of the commit box", () => {
+    it("keeps a paused cherry-pick sequence's status and controls out of the dock: the strip has them (#995)", () => {
       const onSequenceContinue = vi.fn();
       const onSequenceAbort = vi.fn();
       const sequence = { kind: "CherryPick" as const, currentStep: 2, totalSteps: 5, currentCommit: "c" };
@@ -1008,35 +1019,23 @@ describe("DiffPane", () => {
       );
 
       const dock = screen.getByRole("group", { name: "Commit actions" });
-      expect(within(dock).getByText("Cherry-pick in progress")).toBeInTheDocument();
-      expect(within(dock).getByText("Step 2 of 5")).toBeInTheDocument();
-      expect(within(dock).getByRole("button", { name: "Continue cherry-pick" })).toBeDisabled();
+      expect(within(dock).queryByText("Cherry-pick in progress")).toBeNull();
+      expect(within(dock).queryByText("Step 2 of 5")).toBeNull();
+      expect(within(dock).queryByRole("button", { name: /cherry-pick/ })).toBeNull();
       expect(within(dock).queryByRole("textbox", { name: "Commit message" })).toBeNull();
-      fireEvent.click(within(dock).getByRole("button", { name: "Abort cherry-pick" }));
-      expect(onSequenceAbort).toHaveBeenCalled();
       unmount();
 
-      // Stopped by an error: nothing conflicted, so Continue (a retry) is enabled.
+      // Stopped by an error: the same.
       renderUncommitted(fakeClient({}), status, {
         headInfo: { ...headInfo, operation: null, sequence: { ...sequence, kind: "Revert" }, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null },
         onSequenceContinue,
         onSequenceAbort,
       });
       const revertDock = screen.getByRole("group", { name: "Commit actions" });
-      expect(within(revertDock).getByText("Revert in progress")).toBeInTheDocument();
-      fireEvent.click(within(revertDock).getByRole("button", { name: "Continue revert" }));
-      expect(onSequenceContinue).toHaveBeenCalled();
-    });
-
-    it("disables the sequence's Continue and Abort while an action is pending", () => {
-      const sequence = { kind: "Revert" as const, currentStep: 1, totalSteps: 2, currentCommit: "c" };
-      renderUncommitted(fakeClient({}), status, {
-        headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null },
-        sequencePending: true,
-      });
-      const dock = screen.getByRole("group", { name: "Commit actions" });
-      expect(within(dock).getByRole("button", { name: "Continue revert" })).toBeDisabled();
-      expect(within(dock).getByRole("button", { name: "Abort revert" })).toBeDisabled();
+      expect(within(revertDock).queryByText("Revert in progress")).toBeNull();
+      expect(within(revertDock).queryByRole("button", { name: /revert/ })).toBeNull();
+      expect(onSequenceContinue).not.toHaveBeenCalled();
+      expect(onSequenceAbort).not.toHaveBeenCalled();
     });
 
     it("keeps the commit box in the pinned commit-actions group", () => {
@@ -1222,15 +1221,17 @@ describe("DiffPane", () => {
       expect(screen.queryByText("Keep our version")).not.toBeInTheDocument();
     });
 
-    it("disables Commit while a Conflicted entry exists in status, even with staged files", () => {
+    it("shrinks the commit box to one line while a Conflicted entry exists, even with staged files (#980)", () => {
       const mixedStatus: StatusEntry[] = [
         { path: "a.txt", oldPath: null, staged: true, kind: "New" },
         { path: "shared.txt", oldPath: null, staged: false, kind: "Conflicted" },
       ];
       renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), mixedStatus);
 
-      const commitButton = screen.getByText("Commit 1 file").closest("button");
-      expect(commitButton).toBeDisabled();
+      const dock = screen.getByRole("group", { name: "Commit actions" });
+      expect(within(dock).queryByRole("button", { name: /^Commit/ })).toBeNull();
+      expect(within(dock).queryByRole("textbox", { name: "Commit message" })).toBeNull();
+      expect(dock).toHaveTextContent("Commit once every conflict is resolved.");
     });
 
     it("groups unstaged and staged entries under labelled headings with counts", () => {
@@ -1416,10 +1417,10 @@ describe("DiffPane", () => {
       });
     });
 
-    it("shows RebaseProgressPanel instead of CommitBox while a rebase is in progress", () => {
+    it("shows neither the commit box nor the rebase's step while a rebase is in progress: the strip has it (#995)", () => {
       renderUncommitted(fakeClient({}), status, { rebaseProgress: { currentStep: 1, totalSteps: 3 } });
 
-      expect(screen.getByText(/Step 1 of 3/)).toBeInTheDocument();
+      expect(screen.queryByText(/Step 1 of 3/)).toBeNull();
       expect(screen.queryByPlaceholderText("Commit message")).not.toBeInTheDocument();
     });
 
