@@ -501,7 +501,9 @@ describe("CommitGraph", () => {
     expect(screen.getByText("origin/main")).toBeInTheDocument();
   });
 
-  it("renders both a local and a remote badge for a commit that is both tips, each with its own CSS class", () => {
+  // #1004: the graph shows a row's first badge and "+N" for the rest; RefBadges.test.tsx checks
+  // each badge's class where all of them show.
+  it("renders the local badge of a commit that is both tips, and +1 naming the remote one", () => {
     const commitsWithBothBadges: GraphCommit[] = [
       { ...commits[0], branchRefs: ["main"], remoteBranchRefs: ["origin/main"] },
       commits[1],
@@ -520,9 +522,8 @@ describe("CommitGraph", () => {
     );
 
     const localBadge = screen.getByText("main");
-    const remoteBadge = screen.getByText("origin/main");
     expect(localBadge).toHaveClass(styles.branchBadge);
-    expect(remoteBadge).toHaveClass(styles.remoteBranchBadge);
+    expect(screen.getByText("+1")).toHaveAttribute("title", "origin/main");
   });
 
   it("renders a lane graphic for every commit row", () => {
