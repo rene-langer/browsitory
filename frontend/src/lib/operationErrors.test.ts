@@ -103,6 +103,14 @@ describe("failedOperation", () => {
       },
     ],
     [
+      "merge fast-forward only",
+      failedOperation.merge("feature", true),
+      {
+        failed: "Couldn't merge feature",
+        next: "Pick “Fast-forward if possible” and merge again, or rebase first.",
+      },
+    ],
+    [
       "rebase",
       failedOperation.rebaseOnto("refs/remotes/origin/main"),
       {

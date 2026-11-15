@@ -107,7 +107,7 @@ describe("a failed operation's banner (#1032)", () => {
       "Couldn't drop stash@{0}",
       "Check that the stash still exists, then drop it again.",
     ],
-    ["reset", { resetToCommit: rejects() }, (app) => app.resetToCommit(ID, "Mixed"), "Couldn't reset to 4c5beaf", `${LOCKED}, then reset again.`],
+    ["reset", { resetToCommit: rejects() }, (app) => app.resetToCommit(ID, "mixed"), "Couldn't reset to 4c5beaf", `${LOCKED}, then reset again.`],
     [
       "commit",
       { commit: rejects() },
@@ -277,5 +277,41 @@ describe("a failed operation's banner (#1032)", () => {
     );
     expect(error).toBe("The applypatch-msg hook failed on “fix: x”. Nothing was applied.");
     expect(hint).toBe("Fix what the hook reports, then apply the patch again.");
+  });
+
+  it("says what to do about a fast-forward-only merge that couldn't fast-forward", async () => {
+    const { error, hint } = await failed(
+      {
+        setMergeOptions: async () => {},
+        mergeBranch: async () => {
+          throw new RepoError("Other", "Can't fast-forward: 'feature' has diverged from the current branch.");
+        },
+      },
+      (app) => app.mergeBranch("feature", { fastForward: "Only", squash: false }),
+    );
+    expect(error).toBe("Couldn't merge feature: Can't fast-forward: 'feature' has diverged from the current branch.");
+    expect(hint).toBe("Pick “Fast-forward if possible” and merge again, or rebase first.");
+  });
+
+  it("adds no next step when the history changed under a history edit: the message is the remediation", async () => {
+    const { error, hint } = await failed(
+      { commitsSince: async () => [{ id: "p" }, { id: "other" }] as never },
+      (app) => app.editHistory(ID, "p", { kind: "Squash" }),
+    );
+    expect(error).toBe("Couldn't squash 4c5beaf into its parent: The history changed. Refresh and try again.");
+    expect(hint).toBeNull();
+  });
+
+  it("keeps a dropped patch file's read error, which names the file, and adds the next step", async () => {
+    const { error, hint } = await failed(
+      {
+        readPatchFile: async () => {
+          throw new RepoError("Other", "Couldn't read /tmp/a.patch: gone");
+        },
+      },
+      (app) => app.applyPatchFiles(["/tmp/a.patch"]),
+    );
+    expect(error).toBe("Couldn't read /tmp/a.patch: gone");
+    expect(hint).toBe("Check that the file exists and is a patch, then open it again.");
   });
 });
