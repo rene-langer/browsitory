@@ -13,8 +13,11 @@ export interface ContextMenuItem {
    * shows as visible text under the label, the item's description (#664).
    */
   title?: string;
-  /** When set, the item is a checkbox (`menuitemcheckbox` + `aria-checked`) with a check mark. */
-  checked?: boolean;
+  /**
+   * When set, the item is a checkbox (`menuitemcheckbox` + `aria-checked`) with a check mark.
+   * `"mixed"` (Wrap lines on Auto, #1007) shows a small "A" badge in the mark's place.
+   */
+  checked?: boolean | "mixed";
   /**
    * The item's group (#645): a separator is drawn between neighbours whose groups differ, so a
    * long menu reads as read-only, history-changing and destructive sections. Items without a
@@ -407,8 +410,14 @@ export function ContextMenu({
               onFocus={() => setFocusedIndex(index)}
               onClick={() => activate(index)}
             >
-              {item.checked !== undefined && (
-                <Check size={12} aria-hidden="true" className={item.checked ? styles.check : styles.checkHidden} />
+              {item.checked === "mixed" ? (
+                <span aria-hidden="true" className={styles.mixed}>
+                  A
+                </span>
+              ) : (
+                item.checked !== undefined && (
+                  <Check size={12} aria-hidden="true" className={item.checked ? styles.check : styles.checkHidden} />
+                )
               )}
               {item.label}
               {item.shortcut !== undefined && (

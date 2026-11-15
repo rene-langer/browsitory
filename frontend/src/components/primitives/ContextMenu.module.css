@@ -57,6 +57,20 @@
   visibility: hidden;
 }
 
+/* A mixed checkbox item (#1007): "A" for automatic, in the check mark's 12px slot. */
+.mixed {
+  flex-shrink: 0;
+  align-self: center;
+  width: 12px;
+  margin-right: var(--space-1);
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 10px;
+  text-align: center;
+}
+
 /* The shortcut hint (#645): after the label, dimmed, in the body font. */
 .shortcut {
   flex-shrink: 0;

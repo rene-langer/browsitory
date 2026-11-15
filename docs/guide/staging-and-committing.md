@@ -102,9 +102,10 @@ Each hunk header has the buttons **Stage hunk** (or **Unstage hunk**) and **Disc
 which is red; their keys are `s` and `d`. Discard doesn't ask: the hunk goes at once, and the
 notification that says so has an **Undo** button (Ctrl+Z, ⌘Z on macOS, works too).
 
-The options above the viewer (**Unified view** / **Split view**, **Wrap lines**, **Show whole
-file**, **Ignore whitespace**, **Show whitespace**, **Syntax highlighting** and the context
-lines) apply to every file and are remembered; see [Diff options](history.md#diff-options).
+The options above the viewer (**Unified view** / **Split view**, the context lines, and in the
+**View** menu **Wrap lines**, **Show whole file**, **Ignore whitespace**, **Show whitespace** and
+**Show syntax highlighting**) apply to every file and are remembered; see
+[Diff options](history.md#diff-options).
 
 ??? note "Details"
     Only the current file's diff is loaded. To keep large new or generated files from loading

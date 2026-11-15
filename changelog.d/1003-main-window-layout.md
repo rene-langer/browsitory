@@ -25,3 +25,8 @@
   appears. The counts sit on the buttons, `↓n` on **Pull** and `↑n` on **Push**, and only when
   they aren't zero. **Apply patch…** moved from an icon button into the **Stash** menu, where it
   stays available when there is nothing to stash (#1006).
+- Changed: the diff options you change less often (**Wrap lines**, **Show whole file**, **Ignore
+  whitespace**, **Show whitespace**, **Show syntax highlighting**) and the graph's **Show lines
+  changed** and **Collapse merges** moved from icon buttons into **View** menus with their names
+  and check marks. Word wrap on **Auto** shows a small **A** instead of a dashed outline that
+  looked like keyboard focus (#1007).
