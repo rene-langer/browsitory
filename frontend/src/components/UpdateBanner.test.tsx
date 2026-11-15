@@ -71,6 +71,19 @@ describe("UpdateBanner", () => {
     expect(screen.getByRole("button", { name: /restart/i })).toBeInTheDocument();
   });
 
+  it("is no live region of its own: the toast region it sits in announces it (#1000)", async () => {
+    vi.mocked(updater.checkForUpdate).mockResolvedValue({
+      version: "1.2.3",
+      download: vi.fn().mockResolvedValue(undefined),
+      installAndRelaunch: vi.fn().mockResolvedValue(undefined),
+    });
+
+    render(<UpdateBanner />);
+
+    const notice = await screen.findByText("Update v1.2.3 ready");
+    expect(notice.closest('[role="status"], [aria-live]')).toBeNull();
+  });
+
   it("calls installAndRelaunch when the restart button is clicked", async () => {
     const download = vi.fn().mockResolvedValue(undefined);
     const installAndRelaunch = vi.fn().mockResolvedValue(undefined);
