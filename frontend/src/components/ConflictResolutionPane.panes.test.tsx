@@ -7,6 +7,9 @@ import { fakeRepoClient } from "../test/fakeRepoClient";
 import { DEFAULT_DIFF_SETTINGS } from "../ipc/generated/wire-constants";
 import { DiffSettingsContext } from "../state/useDiffSettings";
 import { MergeEditorContext, useMergeEditorRegistry, type MergeEditorRegistry } from "../state/useCurrentMergeEditor";
+import { cascadedValue, compoundsOf, rulesOf } from "../test/cssCascade";
+import { placeRow, rulesFor, tracksOf, widthOf, type Placement } from "../test/cssGrid";
+import mergePanesCss from "./MergePanes.module.css?raw";
 
 // The three-pane merge editor (#875): ours | result | theirs for the whole file, the default
 // layout. The block view (#720) is covered by ConflictResolutionPane.test.tsx.
@@ -1214,5 +1217,110 @@ describe("ConflictResolutionPane accessibility (#880)", () => {
     expect(save).toBeEnabled();
     fireEvent.click(save);
     expect(onResolve).toHaveBeenCalledWith("shared.txt", "a\nb\no1\no2\no3\nc\nt2\nt3, typed\nd\n");
+  });
+});
+
+describe("ConflictResolutionPane pane widths (#931)", () => {
+  // jsdom wraps nothing, so these work the widths out from MergePanes.module.css's rules and the
+  // custom properties the panes set (src/test/cssGrid.ts). A line wraps at its text's width, so
+  // panes whose lines are equally wide wrap an unchanged line alike and stay level.
+  const paneRules = rulesOf(mergePanesCss);
+
+  /** Each cell or pane name of `row`, by pane: the grid tracks it covers and its content width. */
+  function layoutOf(row: Element): Record<string, Placement> {
+    const container = row.closest<HTMLElement>('[style*="--merge-gutter"]');
+    if (container === null) throw new Error("no merge panes around the row");
+    const vars = Object.fromEntries(
+      [...container.style]
+        .filter((name) => name.startsWith("--"))
+        .map((name) => [name, container.style.getPropertyValue(name)]),
+    );
+    const rowRules = rulesFor(paneRules, row, ["row"]);
+    const tracks = tracksOf(cascadedValue(rowRules, "grid-template-columns") ?? "none", vars);
+    const gap = widthOf(cascadedValue(rowRules, "gap") ?? "0", vars);
+    const cells = [...row.children];
+    const classes = (cell: Element) =>
+      cell.hasAttribute("data-pane-header") ? ["label"] : ["cell", ...(cell.hasAttribute("data-chosen") ? ["chosen"] : [])];
+    const placed = placeRow(
+      cells.map((cell) => ({ rules: rulesFor(paneRules, cell, classes(cell)) })),
+      tracks,
+      gap,
+    );
+    return Object.fromEntries(
+      cells.map((cell, i) => [cell.getAttribute("data-pane") ?? cell.getAttribute("data-pane-header") ?? "?", placed[i]]),
+    );
+  }
+
+  const widths = (row: Element) =>
+    Object.fromEntries(Object.entries(layoutOf(row)).map(([pane, placement]) => [pane, placement.content]));
+  /** Every pane of `row` as wide as its result. */
+  const resultWide = (row: Element) => {
+    const all = widths(row);
+    return Object.fromEntries(Object.keys(all).map((pane) => [pane, all.result]));
+  };
+  const headerRow = () => document.querySelector("[data-pane-header]")!.parentElement!;
+  const unchangedRow = () => placeOf(screen.getAllByText("c", { ignore: "script, style, textarea" })[0]).row!;
+
+  it("gives the lines in every pane the same width, so an unchanged line wraps alike in each", async () => {
+    renderPane(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    const blockRow = () => cellOf(first, "ours").parentElement!;
+
+    expect(Object.keys(widths(unchangedRow()))).toEqual(["ours", "result", "theirs"]);
+    expect(widths(unchangedRow())).toEqual(resultWide(unchangedRow()));
+    expect(widths(blockRow())).toEqual(resultWide(blockRow()));
+
+    fireEvent.click(screen.getByRole("button", { name: "Show base" }));
+    expect(Object.keys(widths(unchangedRow()))).toEqual(["base", "ours", "result", "theirs"]);
+    expect(widths(unchangedRow())).toEqual(resultWide(unchangedRow()));
+    expect(widths(blockRow())).toEqual(resultWide(blockRow()));
+  });
+
+  it("keeps each pane's name over its own lines", async () => {
+    renderPane(unequal);
+    await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    const columns = (row: Element) =>
+      Object.fromEntries(Object.entries(layoutOf(row)).map(([pane, { start, span }]) => [pane, { start, span }]));
+
+    expect(columns(headerRow())).toEqual(columns(unchangedRow()));
+    fireEvent.click(screen.getByRole("button", { name: "Show base" }));
+    expect(columns(headerRow())).toEqual(columns(unchangedRow()));
+  });
+
+  it("lays the result's field over its lines' text, so the field wraps where the lines do", () => {
+    const declared = (subject: string, property: string) =>
+      cascadedValue(
+        paneRules.filter(({ selector }) => compoundsOf(selector).length === 1 && compoundsOf(selector)[0] === subject),
+        property,
+      );
+    // The lines' text starts after the number, which is the gutter wide (border-box, its padding
+    // inside); the field starts there too and ends at the cell's edge, as the text does.
+    expect(declared(".number", "flex")).toBe("0 0 var(--merge-gutter)");
+    expect(declared(".text", "flex")).toBe("1 1 auto");
+    expect(declared(".input", "inset")).toBe("0 0 0 var(--merge-gutter)");
+    expect(declared(".input", "padding")).toBe("0");
+    expect(declared(".input", "border")).toBe("0");
+  });
+
+  describe("in two panes (#980)", () => {
+    const width = window.innerWidth;
+    beforeEach(() => {
+      window.innerWidth = 600;
+    });
+    afterEach(() => {
+      window.innerWidth = width;
+    });
+
+    it("gives ours and theirs the same width and the result the whole row", async () => {
+      renderPane(unequal);
+      const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+      const sides = layoutOf(cellOf(first, "ours").parentElement!);
+      expect(sides.ours.content).toEqual(sides.theirs.content);
+      const result = layoutOf(cellOf(first, "result").parentElement!).result;
+      expect(result).toMatchObject({ start: 0, span: sides.theirs.start + sides.theirs.span });
+      const header = layoutOf(headerRow());
+      expect(header.ours).toMatchObject({ start: sides.ours.start, span: sides.ours.span });
+      expect(header.theirs).toMatchObject({ start: sides.theirs.start, span: sides.theirs.span });
+    });
   });
 });
