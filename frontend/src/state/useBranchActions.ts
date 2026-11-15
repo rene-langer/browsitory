@@ -27,6 +27,8 @@ export interface BranchActions {
    */
   stashAndSwitch(name: string, reapply: boolean): Promise<StashSwitchOutcome | null>;
   closeSwitchConflict(): void;
+  /** How many commits of `name` no other branch has (#996): a read, no pending state. */
+  countCommitsOnlyOnBranch(name: string): Promise<number>;
   deleteBranch(name: string, force: boolean): Promise<void>;
   renameBranch(oldName: string, newName: string): Promise<void>;
   openCreateBranchDraft(startPoint: string): void;
@@ -211,6 +213,10 @@ export function useBranchActions(
   const closeSwitchConflict = useCallback(() => {
     setState((prev) => ({ ...prev, switchConflict: null }));
   }, [setState]);
+  const countCommitsOnlyOnBranch = useCallback(
+    (name: string) => client.countCommitsOnlyOnBranch(repoPath, name),
+    [client, repoPath],
+  );
   const deleteBranch = useCallback(
     (name: string, force: boolean) =>
       runOptimisticMutation(
@@ -302,6 +308,7 @@ export function useBranchActions(
     switchBranch,
     stashAndSwitch,
     closeSwitchConflict,
+    countCommitsOnlyOnBranch,
     deleteBranch,
     renameBranch,
     openCreateBranchDraft,

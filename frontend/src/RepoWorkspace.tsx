@@ -9,7 +9,7 @@ import { HookRunStrip } from "./components/HookRunStrip";
 import { OperationLogDialog } from "./components/OperationLogDialog";
 import { rerunBlockedReason, runRerun } from "./lib/rerun";
 import type { PushToast } from "./state/useToasts";
-import { InlineError } from "./components/primitives/InlineError";
+import { InlineError, type InlineErrorAction } from "./components/primitives/InlineError";
 import { SplitView, type SplitViewLeftState, type SplitViewRequest } from "./components/primitives/SplitView";
 import { RepoToolbar } from "./components/RepoToolbar";
 import { RepoActivity } from "./components/RepoActivity";
@@ -569,7 +569,40 @@ export function RepoWorkspace({
     if (reason !== null) pushToast(`Can't pull now. ${reason}`, { tone: "info" });
     else void pullCurrentUpstream();
   }, [pullCurrentUpstream, pushToast]);
-  useOutcomeToasts(appState.state, pushToast, undoToastAction, pullFromToast);
+  // A fetch that left the branch only ahead offers Push to its upstream (#999).
+  const latestPush = useRef({ reason: operationDisabledReason, remote: appState.state.upstream?.remoteName ?? null });
+  useEffect(() => {
+    latestPush.current = { reason: operationDisabledReason, remote: appState.state.upstream?.remoteName ?? null };
+  });
+  const { pushCurrentBranch } = appState;
+  const pushFromToast = useCallback(() => {
+    const { reason, remote } = latestPush.current;
+    if (reason !== null) pushToast(`Can't push now. ${reason}`, { tone: "info" });
+    else if (remote !== null) void pushCurrentBranch(remote);
+  }, [pushCurrentBranch, pushToast]);
+  useOutcomeToasts(appState.state, pushToast, undoToastAction, pullFromToast, pushFromToast);
+  // No banner while a dialog handles the same error (#996): the identity dialog, the hook
+  // failure's output, the force push confirm. Closing the last two brings it back.
+  const errorInDialog =
+    appState.state.identityRequired !== null ||
+    appState.state.hookFailure?.dialogOpen === true ||
+    appState.state.dialog?.kind === "forcePush";
+  // The banner's next steps, in its row (#984): a rejected push offers Pull first.
+  const { forcePushOffer, hookFailure } = appState.state;
+  const errorActions: InlineErrorAction[] = [
+    ...(forcePushOffer !== null
+      ? [
+          { label: "Pull", primary: true, onClick: pullFromToast },
+          {
+            label: "Force push…",
+            onClick: () => openDialog({ kind: "forcePush", remoteName: forcePushOffer.remoteName }),
+          },
+        ]
+      : []),
+    ...(hookFailure !== null && !hookFailure.dialogOpen
+      ? [{ label: "Show hook output…", onClick: appState.openHookFailure }]
+      : []),
+  ];
   useStashSwitchToasts(appState.state, pushToast, undoToastAction);
 
   // The palette's commands, built only while it is open.
@@ -893,31 +926,16 @@ export function RepoWorkspace({
           <InlineError message={clipboard.error} copyDetails onDismiss={clipboard.dismissError} />
         </div>
       )}
-      {appState.state.error !== null && (
+      {appState.state.error !== null && !errorInDialog && (
         <div className={styles.errorLayer}>
           <InlineError
             message={appState.state.error}
             hint={appState.state.errorHint ?? undefined}
-            copyDetails
             earlier={earlierErrors.earlier}
+            actions={errorActions}
+            onDetails={() => setOperationLog("latestFailed")}
             onDismiss={earlierErrors.dismiss}
           />
-          {appState.state.forcePushOffer !== null && appState.state.dialog?.kind !== "forcePush" && (
-            <button
-              type="button"
-              onClick={() => openDialog({ kind: "forcePush", remoteName: appState.state.forcePushOffer!.remoteName })}
-            >
-              Force push (with lease)…
-            </button>
-          )}
-          {appState.state.hookFailure !== null && !appState.state.hookFailure.dialogOpen && (
-            <button type="button" onClick={appState.openHookFailure}>
-              Show hook output…
-            </button>
-          )}
-          <button type="button" onClick={() => setOperationLog("latestFailed")}>
-            Show details
-          </button>
         </div>
       )}
       {operationLog !== null && (
@@ -1009,6 +1027,7 @@ export function RepoWorkspace({
         branch={{
           current: currentBranch,
           detachedAt: appState.state.headInfo.detachedAt,
+          unbornBranch: appState.state.headInfo.unbornBranch ?? null,
           upstream: appState.state.upstream,
           onOpenSwitcher: openBranchSwitcher,
         }}

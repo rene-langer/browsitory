@@ -79,6 +79,14 @@
   color: var(--color-accent-text);
 }
 
+/* Locate… (#998), in place of Pin on a row whose folder is gone. */
+.locate {
+  flex: none;
+  margin-inline-end: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
+}
+
 .repoName {
   font-weight: 600;
 }

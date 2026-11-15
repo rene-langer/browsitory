@@ -52,6 +52,14 @@
   font-size: var(--text-xs);
 }
 
+/* The next step the banner suggests first (#984): filled, the others outlined. */
+.action.primary {
+  background: var(--color-danger-text);
+  color: var(--color-danger);
+  border-color: var(--color-danger-text);
+  font-weight: 600;
+}
+
 /* The errors this one replaced (#663), collapsed under it. */
 .earlier {
   margin-top: var(--space-1);

@@ -73,7 +73,12 @@ export function useHistoryActions(
   // a single pick has nothing to retry (`prepare-commit-msg` can't be skipped); a sequence
   // offers Continue.
   const runRepoChanging = useCallback(
-    async <T extends PickOutcome | SequenceOutcome>(call: () => Promise<T>, retry: HookRetry): Promise<T | null> => {
+    async <T extends PickOutcome | SequenceOutcome>(
+      call: () => Promise<T>,
+      retry: HookRetry,
+      /** What a refusal says first ("Cherry-pick of 4c5beaf didn't start", #997). */
+      refused?: string,
+    ): Promise<T | null> => {
       let outcome: T | null = null;
       let failure: unknown = undefined;
       let failed = false;
@@ -87,7 +92,8 @@ export function useHistoryActions(
       });
       setState((prev) => ({ ...prev, hookRun: null }));
       if (failed) {
-        setState((prev) => ({ ...prev, ...failureError(failure) }));
+        const { error, errorHint } = failureError(failure);
+        setState((prev) => ({ ...prev, error: refused === undefined ? error : `${refused}: ${error}`, errorHint }));
         return null;
       }
       const settled = outcome as T | null;
@@ -106,12 +112,20 @@ export function useHistoryActions(
   );
   const cherryPick = useCallback(
     (commitId: string, mainline?: number | null) =>
-      runRepoChanging(() => client.cherryPick(repoPath, commitId, mainline ?? null), { kind: "pick" }),
+      runRepoChanging(
+        () => client.cherryPick(repoPath, commitId, mainline ?? null),
+        { kind: "pick" },
+        `Cherry-pick of ${commitId.slice(0, 7)} didn't start`,
+      ),
     [client, runRepoChanging, repoPath],
   );
   const revertCommit = useCallback(
     (commitId: string, mainline?: number | null) =>
-      runRepoChanging(() => client.revertCommit(repoPath, commitId, mainline ?? null), { kind: "pick" }),
+      runRepoChanging(
+        () => client.revertCommit(repoPath, commitId, mainline ?? null),
+        { kind: "pick" },
+        `Revert of ${commitId.slice(0, 7)} didn't start`,
+      ),
     [client, runRepoChanging, repoPath],
   );
   const cherryPickMany = useCallback(

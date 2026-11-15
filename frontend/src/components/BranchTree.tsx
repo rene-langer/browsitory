@@ -70,6 +70,7 @@ function BranchTreeContent({
   onSwitchBranch,
   onCreateBranch,
   onDeleteBranch,
+  onCountCommitsOnlyOnBranch,
   onRenameBranch,
   onOpenCreateBranchDraft,
   onCloseCreateBranchDraft,
@@ -118,6 +119,8 @@ function BranchTreeContent({
   // `checkout` (default true): switch to the new branch too (#656).
   onCreateBranch: (name: string, startPoint: string, checkout?: boolean) => Promise<string | null>;
   onDeleteBranch: (name: string, force: boolean) => Promise<void>;
+  /** How many commits of a branch no other branch has: Delete asks first when some (#996). */
+  onCountCommitsOnlyOnBranch: (name: string) => Promise<number>;
   onRenameBranch: (oldName: string, newName: string) => void;
   onOpenCreateBranchDraft: (startPoint: string) => void;
   onCloseCreateBranchDraft: () => void;
@@ -207,7 +210,8 @@ function BranchTreeContent({
   const userCommandsApi = useUserCommandsContext();
   const userCommands = userCommandsProp ?? userCommandsApi?.commands ?? [];
   const onRunUserCommand = onRunUserCommandProp ?? userCommandsApi?.run;
-  const [pendingForceFor, setPendingForceFor] = useState<string | null>(null);
+  // The branch Delete asks about, with the commits only it has (`null`: couldn't count them).
+  const [deleteConfirm, setDeleteConfirm] = useState<{ name: string; count: number | null } | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [rowMenu, setRowMenu] = useState<RowContextMenu | null>(null);
@@ -423,8 +427,17 @@ function BranchTreeContent({
   const renameProblem = renaming !== null ? branchNameProblem(renameValue.trim()) : null;
 
   const handleDeleteClick = async (name: string) => {
-    await onDeleteBranch(name, false);
-    setPendingForceFor(name);
+    // Counted first (#996): a branch whose commits another branch has loses nothing and goes at
+    // once; otherwise one confirm says what would be left on no branch. Either way it is deleted
+    // with force, since git's own check (merged into HEAD) is what this replaces.
+    let count: number | null;
+    try {
+      count = await onCountCommitsOnlyOnBranch(name);
+    } catch {
+      count = null;
+    }
+    if (count === 0) void onDeleteBranch(name, true);
+    else setDeleteConfirm({ name, count });
   };
 
   // Like the New branch form (#418): the name is trimmed, an unchanged one just closes the input
@@ -542,33 +555,29 @@ function BranchTreeContent({
         {checkoutError !== null && <InlineError message={checkoutError} onDismiss={() => setCheckoutError(null)} />}
         {remoteCache.error !== null && <InlineError message={remoteCache.error} onDismiss={remoteCache.clearError} />}
 
-        {/* Guarded by `branches.some(...)`, not just `pendingForceFor !== null`: the app's
-            optimistic-update flow removes a deleted branch from `branches` immediately on a
-            successful soft delete, only rolling back on failure. So "is the name still in
-            `branches`" is the reliable signal for "did the soft delete actually fail" — without
-            it, this dialog would also fire right after every successful delete, since
-            `handleDeleteClick` always sets `pendingForceFor` unconditionally. */}
-        {pendingForceFor !== null && branches.some((b) => b.name === pendingForceFor) && (
+        {/* Guarded by `branches.some(...)`: a branch that went meanwhile (a refresh, another
+            window) has nothing left to delete. */}
+        {deleteConfirm !== null && branches.some((b) => b.name === deleteConfirm.name) && (
           <ConfirmDialog
-            ariaLabel={`Force delete ${pendingForceFor}`}
+            ariaLabel={`Delete ${deleteConfirm.name}`}
             message={
-              <>
-                <p>
-                  Force delete "{pendingForceFor}"? Its unmerged commits will be on no branch. Undo can bring the
-                  branch back.
-                </p>
-              </>
+              <p>
+                {deleteConfirm.count === null
+                  ? `Delete ${deleteConfirm.name}? Commits that no other branch has would be on no branch.`
+                  : `${deleteConfirm.name} has ${deleteConfirm.count} ${deleteConfirm.count === 1 ? "commit" : "commits"} on no other branch. Delete it anyway?`}{" "}
+                Undo can bring it back.
+              </p>
             }
-            confirmLabel="Force delete"
+            confirmLabel="Delete"
             confirmDisabled={operationDisabled}
             // #521: the repository can become busy while the confirmation is open.
             confirmReason={busyReason}
             onConfirm={() => {
               if (operationDisabled) return;
-              void onDeleteBranch(pendingForceFor, true);
-              setPendingForceFor(null);
+              void onDeleteBranch(deleteConfirm.name, true);
+              setDeleteConfirm(null);
             }}
-            onCancel={() => setPendingForceFor(null)}
+            onCancel={() => setDeleteConfirm(null)}
           />
         )}
 

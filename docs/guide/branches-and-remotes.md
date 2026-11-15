@@ -18,7 +18,10 @@ The menus offer:
   ⟨branch⟩…** (see [Rebase](rebase.md)), **Push to…**, **Isolate branch** (the graph then shows
   only that branch's own commits and merges, see
   [Which branches the graph shows](history.md#which-branches-the-graph-shows)), and for the
-  current branch **Set upstream…** and **Push to ⟨remote⟩**, and **Copy branch name**;
+  current branch **Set upstream…** and **Push to ⟨remote⟩**, and **Copy branch name**. Delete
+  goes at once when every commit of the branch is on another branch too (local or
+  remote-tracking); otherwise it asks first, saying how many commits would be on no branch
+  ("feature has 1 commit on no other branch. Delete it anyway?"). **Undo** brings it back;
 - a remote branch: **Switch to** (to a local branch tracking it), **Set as upstream for current
   branch**, **Rebase current branch onto ⟨remote⟩/⟨branch⟩…**, **Isolate branch** (as for a
   local branch), **Copy branch name** (as `remote/branch`), or **Delete ⟨remote⟩/⟨branch⟩…**;
@@ -135,8 +138,12 @@ branch was deleted on the remote.
 While a fetch, pull or push runs, the repository toolbar names it ("Pushing main to
 origin/main"), with a progress bar, the objects and bytes sent or received, and **Cancel**. When
 it is done, a notification says what happened: "Pushed 2 commits to origin/main", "Fetched from
-origin. main is 3 commits behind origin/main." (with **Pull**), or "Nothing to push" when the
-remote already had everything.
+origin. main is 3 commits behind origin/main." (with **Pull**), "main is 2 commits ahead of
+origin/main." (with **Push**), "main and origin/main have diverged: 1 commit ahead, 1 behind."
+(with **Pull**, which asks whether to merge or rebase), or "Nothing to push" when the remote
+already had everything. A fetch, pull or push that fails names what it worked on and the next
+step, such as "Couldn't fetch from origin. Check the remote's URL and your connection, then try
+again."; **Details** shows the cause in the operation log.
 
 ??? note "Details"
     The **Prune** toggle is remembered per repository; until you set it, your git config

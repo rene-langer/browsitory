@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { RepoError } from "../ipc/RepoClient";
-import { describeError } from "./errorMessages";
+import { describeError, withoutLibgit2Codes } from "./errorMessages";
 
 describe("describeError", () => {
   it("adds a hint when the VSCode extension lost its sidecar", () => {

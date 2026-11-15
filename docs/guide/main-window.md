@@ -42,11 +42,15 @@ focus to it and a note under it says why. A menu item that can't run shows the r
 label, and a dialog or form shows it above its buttons.
 
 **Errors.** When something fails, a red banner appears between the toolbar and the columns,
-pushing them down rather than covering them. It shows Git's or the system's own message and,
-where there is one, what to do next, for example "Commit or stash your changes, then try again."
-**Copy details** copies the message and that hint, for a bug report. An error you didn't
-dismiss isn't lost when a later action fails: the banner lists it under **1 earlier error** (up
-to five). The ✕ dismisses the banner with them.
+pushing them down rather than covering them. It says what failed and, where there is one, what
+to do next, for example "Cherry-pick of 4c5beaf didn't start: Commit or unstage your staged
+changes first." Its buttons sit in the same row: the next steps, if any (a rejected push offers
+**Pull** first, then **Force push…**), then **Details**, which opens the
+[operation log](operation-log.md) on the failed operation with its full error and **Copy
+details** for a bug report. An error you didn't dismiss isn't lost when a later action fails: the
+banner lists it under **1 earlier error** (up to five). The ✕ dismisses the banner with them.
+While a dialog deals with the error (setting your git identity, a hook's output, the force push
+confirm), the banner waits; closing the identity dialog clears it.
 
 **Menus.** A menu (right-click, the **⋯** button, or the Menu key or Shift+F10) is split into
 groups by thin lines: in a commit's menu, for example, new branches and tags, applying the commit
@@ -167,7 +171,8 @@ in view while you scroll: **Close** (or Escape, or a click outside the dialog) c
 **Updates (desktop app).** Browsitory checks for a new version when it starts and every six
 hours, and downloads it in the background. If a check or download fails (for example while the
 download server is down), it tries again after 10 minutes, then waits twice as long each time, up
-to 3 hours, until a check succeeds. When it is ready, a banner says "Update v… ready".
+to 3 hours, until a check succeeds. When it is ready, a notice with the notifications says
+"Update v… ready" and stays until you restart.
 Click **Restart to update** to install it, or keep working: nothing changes until you restart.
 
 To stop the automatic checks, clear **Check for updates automatically** under **Updates** in
@@ -179,7 +184,8 @@ the same banner.
 The VSCode extension updates through VSCode instead and has neither setting, menu item nor
 command.
 
-**Notifications.** A finished action shows a short notification in the bottom-right corner:
+**Notifications.** A finished action shows a short notification in the bottom-left corner, away
+from the commit box:
 green for done, blue for information, amber for a warning, red for an error, each with its own
 icon. It closes by itself after 5 to 15 seconds, depending on its length; one with a button
 (such as **Undo**) stays at least 10 seconds, and an error stays until you close it. While the

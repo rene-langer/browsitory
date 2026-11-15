@@ -34,6 +34,23 @@ export function describeError(err: unknown): DescribedError {
   return hint === undefined ? { message } : { message, hint };
 }
 
+/** The plain-language next step for an error kind, if it has one (the operation log, #1022). */
+export function hintForKind(kind: RepoErrorKind): string | null {
+  return HINTS[kind] ?? null;
+}
+
+// libgit2 appends its error class and code to every message: "…; class=Os (2); code=NotFound
+// (-3)". Either part can be missing.
+const LIBGIT2_CODES = /;\s*(?:class|code)=\w+ \(-?\d+\)/g;
+
+/**
+ * `message` without libgit2's class and code (#997). Banners show this; "Copy details" and the
+ * operation log keep the full text for bug reports.
+ */
+export function withoutLibgit2Codes(message: string): string {
+  return message.replace(LIBGIT2_CODES, "");
+}
+
 /** What to do about a credential failure a transfer reported (`TransferProgress.errorKind`). */
 export function credentialRemediation(kind: "MissingCredential" | "CredentialStoreFailure" | "SshAgentFailure"): string {
   switch (kind) {
