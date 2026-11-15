@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { BranchInfo, WorktreeInfo } from "../ipc/RepoClient";
 import { WorktreePanel } from "./WorktreePanel";
@@ -182,6 +182,55 @@ describe("WorktreePanel", () => {
     fireEvent.change(within(dialog).getByLabelText("Worktree name"), { target: { value: "feature-tree-2" } });
 
     expect(within(dialog).queryByRole("alert", { hidden: true })).not.toBeInTheDocument();
+  });
+
+  it("lists the worktrees with no form fields in the section; + opens New worktree with hints (#1011)", () => {
+    renderPanel();
+
+    const section = screen.getByRole("region", { name: "Worktrees" });
+    expect(within(section).queryAllByRole("textbox")).toHaveLength(0);
+    const { dialog } = openNewWorktreeDialog();
+    expect(within(dialog).getByLabelText("Branch")).toHaveAccessibleDescription(
+      "An existing branch, or the name of a new one.",
+    );
+    expect(within(dialog).getByLabelText("Start point")).toHaveAccessibleDescription(
+      "Where a new branch starts, such as HEAD or main. An existing branch doesn't need one.",
+    );
+    expect(within(dialog).getByLabelText("Worktree path")).toHaveAccessibleDescription(
+      "The folder to check the branch out in. A relative path starts at this repository's folder.",
+    );
+    expect(within(dialog).getByLabelText("Worktree name")).toHaveAccessibleDescription(
+      "Git's name for the worktree, usually the folder's name.",
+    );
+  });
+
+  it("closes the New worktree dialog once the worktree is created, and on Cancel (#1011)", async () => {
+    const onCreateWorktree = vi.fn().mockResolvedValue(null);
+    renderPanel({ onCreateWorktree });
+
+    let { dialog, create } = openNewWorktreeDialog();
+    expect(create).toBeDisabled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel", hidden: true }));
+    expect(screen.queryByRole("dialog", { name: "New worktree", hidden: true })).toBeNull();
+
+    ({ dialog, create } = openNewWorktreeDialog());
+    fireEvent.change(within(dialog).getByLabelText("Branch"), { target: { value: " topic " } });
+    fireEvent.change(within(dialog).getByLabelText("Worktree path"), { target: { value: "../topic" } });
+    fireEvent.change(within(dialog).getByLabelText("Worktree name"), { target: { value: "topic" } });
+    expect(create).toBeEnabled();
+    fireEvent.click(create);
+
+    expect(onCreateWorktree).toHaveBeenCalledWith("topic", "../topic", "topic", null);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "New worktree", hidden: true })).toBeNull());
+  });
+
+  it("opens a worktree in a new tab from its menu (#1011)", () => {
+    const onOpenWorktree = vi.fn().mockResolvedValue(undefined);
+    renderPanel({ onOpenWorktree });
+
+    openRowMenu("/repos/project-feature");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open in new tab" }));
+    expect(onOpenWorktree).toHaveBeenCalledWith("/repos/project-feature");
   });
 
   it("requires an explicit dialog confirmation before removing the selected worktree", async () => {
