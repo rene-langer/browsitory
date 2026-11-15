@@ -629,7 +629,7 @@ describe("UX inventory", () => {
       await h.clickInPage("[aria-label='Sync'] button", "Push", { contains: true });
       await browser.pause(3000);
       try {
-        await h.clickInPage("button", "Show details", { timeout: 4000 });
+        await h.clickInPage("button", "Details", { timeout: 4000 });
         await browser.pause(800);
         await h.shoot("dialog-operation-log-push-rejected");
       } catch (error) {
