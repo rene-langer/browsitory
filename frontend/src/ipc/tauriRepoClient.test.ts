@@ -359,6 +359,28 @@ describe("tauriRepoClient transfer progress subscription", () => {
     });
   });
 
+  // Reword… on HEAD (#981): `messageOnly` goes on the wire only when set.
+  it("sends amendCommit's messageOnly only when it is set", async () => {
+    vi.mocked(invoke).mockResolvedValue({ kind: "Committed", commitId: "c" });
+    await tauriRepoClient.amendCommit("/r", "m", false, { author: null, trailers: [], messageOnly: true });
+    expect(invoke).toHaveBeenLastCalledWith("amend_commit", {
+      repoPath: "/r",
+      message: "m",
+      noVerify: false,
+      author: null,
+      trailers: [],
+      messageOnly: true,
+    });
+    await tauriRepoClient.amendCommit("/r", "m", false, { author: null, trailers: [], messageOnly: false });
+    expect(invoke).toHaveBeenLastCalledWith("amend_commit", {
+      repoPath: "/r",
+      message: "m",
+      noVerify: false,
+      author: null,
+      trailers: [],
+    });
+  });
+
   it("invokes the file sides, recent authors and commit message settings commands", async () => {
     vi.mocked(invoke).mockResolvedValue(null);
     await tauriRepoClient.getFileSides("/r", "a.png", { kind: "Unstaged" });
