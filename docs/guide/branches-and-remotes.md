@@ -161,7 +161,7 @@ remote already had everything.
 Ahead/behind counts and remote branches are only as fresh as the last fetch. To keep them
 current, open **Preferences → Fetch** and choose how often **Fetch automatically** fetches: off
 (the default), every 5, 10 or 30 minutes, or every hour. The setting applies to every
-repository; **In <repository>** below it overrides it for the open repository alone (for
+repository; **For this repository (<name>)** below it overrides it for the open repository alone (for
 example, off for a slow server, or more often for a busy project). Choose **Use the app
 setting** to follow the app-wide choice again.
 

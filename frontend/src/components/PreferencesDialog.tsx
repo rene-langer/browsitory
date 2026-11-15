@@ -33,10 +33,11 @@ import {
   writeAutoFetchOverride,
 } from "../lib/autoFetch";
 import { readPreferencesGroup, writePreferencesGroup, type PreferencesGroupId } from "../lib/preferencesGroup";
+import { USER_GUIDE_URL } from "../lib/links";
 import { repoNameOf } from "../lib/repoName";
 import { THEME_PREFERENCES, type ThemePreference } from "../lib/theme";
 import styles from "./PreferencesDialog.module.css";
-import { Field } from "./primitives/Field";
+import { Field, type FieldControlProps } from "./primitives/Field";
 import { CodeFontField } from "./CodeFontField";
 import { FormDialog } from "./primitives/FormDialog";
 
@@ -119,6 +120,21 @@ export function PreferencesDialog({
       if (first !== undefined) select(first.id);
     }
   };
+
+  // Marks the settings whose label holds the filter text (#1017), so the match is easy to find in
+  // its group. The labels are the sections' own elements; only this attribute is set on them.
+  useEffect(() => {
+    const needle = query.trim().toLowerCase();
+    for (const panel of panels.current.values()) {
+      for (const label of panel.querySelectorAll("label")) {
+        if (needle !== "" && (label.textContent ?? "").toLowerCase().includes(needle)) {
+          label.setAttribute("data-filter-match", "true");
+        } else {
+          label.removeAttribute("data-filter-match");
+        }
+      }
+    }
+  }, [query]);
 
   const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
     const keys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"];
@@ -413,7 +429,7 @@ export function FetchSection({ repoPath }: { repoPath: string | null }) {
         )}
       </Field>
       {repoPath !== null && (
-        <Field label={`In ${repoNameOf(repoPath)}`}>
+        <Field label={`For this repository (${repoNameOf(repoPath)})`}>
           {(props) => (
             <select
               {...props}
@@ -454,11 +470,14 @@ export function FetchSection({ repoPath }: { repoPath: string | null }) {
  */
 function CommitOnBlurField({
   label,
+  hint,
   value,
   onCommit,
   ...input
 }: {
   label: string;
+  /** Help under the field, also its description. */
+  hint?: string;
   value: string;
   onCommit: (value: string) => void;
   type: "text" | "number";
@@ -474,7 +493,7 @@ function CommitOnBlurField({
     if (draft.trim() !== value) onCommit(draft.trim());
   };
   return (
-    <Field label={label}>
+    <Field label={label} hint={hint}>
       {(props) => (
         <input
           {...props}
@@ -519,7 +538,7 @@ export function AppearanceSection({
   return (
     <PreferencesSection title="Appearance">
       {theme !== undefined && (
-        <Field label="Theme">
+        <Field label="Theme" hint="System follows your operating system's light or dark setting.">
           {(props) => (
             <select
               {...props}
@@ -542,6 +561,7 @@ export function AppearanceSection({
       />
       <CommitOnBlurField
         label="Code font size (px)"
+        hint="Leave it empty for the default size."
         type="number"
         min={CODE_FONT_SIZES.min}
         max={CODE_FONT_SIZES.max}
@@ -568,7 +588,7 @@ export function AppearanceSection({
           </select>
         )}
       </Field>
-      <Field label="Date format">
+      <Field label="Date format" hint="System uses your operating system's date and time format.">
         {(props) => (
           <select
             {...props}
@@ -585,6 +605,7 @@ export function AppearanceSection({
       </Field>
       <CommitOnBlurField
         label="Tab size"
+        hint="How many columns a tab character takes."
         type="number"
         min={TAB_SIZES.min}
         max={TAB_SIZES.max}
@@ -594,12 +615,6 @@ export function AppearanceSection({
           if (text !== "" && Number.isFinite(size)) update({ tabSize: size });
         }}
       />
-      <p className={styles.hint}>
-        {theme !== undefined && "System follows your operating system's light or dark setting. "}
-        The code font and its size apply to diffs, blame, the file viewer and conflicts; typing
-        suggests installed fonts, and a font that is not installed falls back to the default. Leave them empty for the defaults. The tab size
-        is in columns. System dates use your operating system's date and time format.
-      </p>
       {error !== null && (
         <p role="alert" className={styles.problem}>
           {error}{" "}
@@ -686,13 +701,19 @@ const SOURCE_LABEL: Record<GitConfigSource, string> = {
 const sourceText = (tool: GitToolInfo) =>
   tool.viaMergeTool ? `from merge.tool in ${SOURCE_LABEL[tool.source]}` : `from ${SOURCE_LABEL[tool.source]}`;
 
-function GitToolRow({ label, tool }: { label: string; tool: GitToolInfo | null }) {
+/** The user guide's section on `diff.tool` and `merge.tool` (#1017). */
+const GIT_TOOLS_GUIDE_URL = `${USER_GUIDE_URL}external-tools/#diff-and-merge-tools`;
+
+function GitToolRow({ label, configKey, tool }: { label: string; configKey: string; tool: GitToolInfo | null }) {
   return (
     <>
       <dt>{label}</dt>
       <dd className={styles.toolValue}>
         {tool === null ? (
-          <span className={styles.muted}>Not configured</span>
+          <>
+            <span className={styles.muted}>Not configured</span>
+            <span className={styles.hint}>{`Set ${configKey} in your git config.`}</span>
+          </>
         ) : (
           <>
             <span>{tool.name}</span>
@@ -741,7 +762,6 @@ function DesktopExternalTools({ client, repoPath }: { client: RepoClient; repoPa
   // Local edits; `null` until the user types, so the loaded settings show until then.
   const [editorDraft, setEditorDraft] = useState<string | null>(null);
   const [terminalDraft, setTerminalDraft] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
   const [gitTools, setGitTools] = useState<GitTools | null>(null);
   const [gitToolsError, setGitToolsError] = useState<string | null>(null);
 
@@ -763,64 +783,51 @@ function DesktopExternalTools({ client, repoPath }: { client: RepoClient; repoPa
 
   const editor = editorDraft ?? settings?.editor ?? "";
   const terminal = terminalDraft ?? settings?.terminal ?? "";
-  const next = { editor: editor.trim() || null, terminal: terminal.trim() || null };
-  const changed = settings !== null && (next.editor !== settings.editor || next.terminal !== settings.terminal);
 
-  const onSave = async () => {
-    setSaving(true);
-    const ok = await save(next);
-    setSaving(false);
-    if (ok) {
-      setEditorDraft(null);
-      setTerminalDraft(null);
+  // Saved on blur or Enter, like every other setting (#1017). A refused command keeps its typed
+  // text, with the reason below, so it can be fixed rather than typed again.
+  const commit = async (field: "editor" | "terminal") => {
+    const draft = field === "editor" ? editorDraft : terminalDraft;
+    if (settings === null || draft === null) return;
+    const clear = field === "editor" ? setEditorDraft : setTerminalDraft;
+    const value = draft.trim() || null;
+    if (value === settings[field]) {
+      clear(null);
+      return;
     }
+    if (await save({ ...settings, [field]: value })) clear(null);
   };
+  const commandInput = (field: "editor" | "terminal", placeholder: string) => (props: FieldControlProps) => (
+    <input
+      {...props}
+      type="text"
+      spellCheck={false}
+      placeholder={placeholder}
+      value={field === "editor" ? editor : terminal}
+      disabled={settings === null}
+      onChange={(event) => (field === "editor" ? setEditorDraft : setTerminalDraft)(event.target.value)}
+      onBlur={() => void commit(field)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") void commit(field);
+      }}
+    />
+  );
 
   return (
     <PreferencesSection title="External tools">
-      <form
-        className={styles.form}
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (changed && !saving) void onSave();
-        }}
-      >
-        <Field label="Editor command">
-          {(props) => (
-            <input
-              {...props}
-              type="text"
-              spellCheck={false}
-              placeholder="System default app"
-              value={editor}
-              disabled={settings === null}
-              onChange={(event) => setEditorDraft(event.target.value)}
-            />
-          )}
+      <div className={styles.form}>
+        <Field label="Editor command" hint="Placeholders: {file}, {line}, {dir}">
+          {commandInput("editor", "System default app")}
         </Field>
-        <Field label="Terminal command">
-          {(props) => (
-            <input
-              {...props}
-              type="text"
-              spellCheck={false}
-              placeholder="System default terminal"
-              value={terminal}
-              disabled={settings === null}
-              onChange={(event) => setTerminalDraft(event.target.value)}
-            />
-          )}
+        <Field label="Terminal command" hint="Placeholder: {dir}">
+          {commandInput("terminal", "System default terminal")}
         </Field>
-        <p className={styles.hint}>Placeholders: {"{file}, {line}, {dir}"}</p>
         {error !== null && (
           <p role="alert" className={styles.problem}>
             {error}
           </p>
         )}
-        <button type="submit" disabled={!changed || saving}>
-          Save
-        </button>
-      </form>
+      </div>
       {repoPath !== null && (
         <>
           {gitToolsError !== null && (
@@ -829,10 +836,29 @@ function DesktopExternalTools({ client, repoPath }: { client: RepoClient; repoPa
             </p>
           )}
           {gitTools !== null && (
-            <dl className={styles.gitTools}>
-              <GitToolRow label="Diff tool" tool={gitTools.diffTool} />
-              <GitToolRow label="Merge tool" tool={gitTools.mergeTool} />
-            </dl>
+            <>
+              <dl className={styles.gitTools}>
+                <GitToolRow label="Diff tool" configKey="diff.tool" tool={gitTools.diffTool} />
+                <GitToolRow label="Merge tool" configKey="merge.tool" tool={gitTools.mergeTool} />
+              </dl>
+              {(gitTools.diffTool === null || gitTools.mergeTool === null) && (
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGitToolsError(null);
+                      client
+                        .openExternalUrl(GIT_TOOLS_GUIDE_URL)
+                        .catch((err: unknown) =>
+                          setGitToolsError(`Couldn't open the user guide: ${err instanceof Error ? err.message : String(err)}`),
+                        );
+                    }}
+                  >
+                    Diff and merge tools in the user guide
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </>
       )}

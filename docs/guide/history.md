@@ -1,7 +1,11 @@
 # History and diffs
 
 Click a commit in the graph to see the files it changed and their diffs. **Blame** on a file
-shows who last changed each line. **All files** above the list browses every file of the commit
+shows who last changed each line: the commit's short SHA, author and date once for each run of
+lines from the same commit, colored like the diff. Click the SHA to go to that commit; **Back to
+diff** in the file's header returns to the diff. A merge commit's diff is against its first
+parent: **Changes compared with** above the diff names that parent and lets you pick another
+one. **All files** above the list browses every file of the commit
 instead (see [Files at a commit](files-at-a-commit.md)). Each row shows the branches and tags that point at the commit,
 and the author and date (they hide when the pane is narrow). Selecting a commit shows its full
 message, author, date, full SHA (**Copy** copies it), parents and children (the loaded commits

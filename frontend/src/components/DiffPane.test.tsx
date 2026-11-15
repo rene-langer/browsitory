@@ -1053,6 +1053,22 @@ describe("DiffPane", () => {
       expect(within(screen.getByRole("region", { name: "Changes in a.txt (unstaged)" })).getByText("Blame")).toBeInTheDocument();
     });
 
+    it("puts Back to diff in the viewer's header while blame shows, once (#986)", async () => {
+      const blameLines: BlameLine[] = [
+        { lineNumber: 1, content: "hello", commitId: "abc123", shortId: "abc1234", authorName: "Rene", timestamp: 1 },
+      ];
+      renderUncommitted(fakeClient({ getBlame: vi.fn(async () => blameLines), getWorkingDiff: async () => [] }), status);
+
+      fireEvent.click(screen.getAllByText("Blame")[0]);
+      const table = (await screen.findByText("hello")).closest("table")!;
+
+      const back = screen.getAllByRole("button", { name: "Back to diff" });
+      expect(back).toHaveLength(1);
+      expect(back[0].compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      fireEvent.click(back[0]);
+      expect(screen.queryByRole("table")).toBeNull();
+    });
+
     it("clicking Blame fetches and renders blame for that file", async () => {
       const blameLines: BlameLine[] = [
         { lineNumber: 1, content: "hello", commitId: "abc123", shortId: "abc1234", authorName: "Rene", timestamp: 1 },
@@ -1066,7 +1082,7 @@ describe("DiffPane", () => {
       expect(getBlame).toHaveBeenCalledWith(TEST_REPO_PATH, "HEAD", "a.txt");
     });
 
-    it("clicking a blame line calls onSelectRow with that line's commit id", async () => {
+    it("clicking a blame line's commit id calls onSelectRow with that commit", async () => {
       const blameLines: BlameLine[] = [
         { lineNumber: 1, content: "hello", commitId: "abc123", shortId: "abc1234", authorName: "Rene", timestamp: 1 },
       ];
@@ -1075,8 +1091,7 @@ describe("DiffPane", () => {
       renderUncommitted(fakeClient({ getBlame, getWorkingDiff: async () => [] }), status, { onSelectRow });
 
       fireEvent.click(screen.getAllByText("Blame")[0]);
-      const row = await screen.findByText("hello");
-      fireEvent.click(row.closest("tr")!);
+      fireEvent.click(await screen.findByRole("button", { name: "abc1234" }));
 
       expect(onSelectRow).toHaveBeenCalledWith({ commitId: "abc123" });
     });
@@ -1456,7 +1471,7 @@ describe("DiffPane", () => {
       expect(getBlame).toHaveBeenCalledWith(TEST_REPO_PATH, "abc123", "src/main.rs");
     });
 
-    it("clicking a blame line calls onSelectRow with that line's commit id", async () => {
+    it("clicking a blame line's commit id calls onSelectRow with that commit", async () => {
       const blameLines: BlameLine[] = [
         { lineNumber: 1, content: "fn main() {}", commitId: "abc123", shortId: "abc1234", authorName: "Rene", timestamp: 1 },
       ];
@@ -1466,8 +1481,7 @@ describe("DiffPane", () => {
 
       await screen.findByText("src/main.rs");
       fireEvent.click(screen.getByText("Blame"));
-      const row = await screen.findByText("fn main() {}");
-      fireEvent.click(row.closest("tr")!);
+      fireEvent.click(await screen.findByRole("button", { name: "abc1234" }));
 
       expect(onSelectRow).toHaveBeenCalledWith({ commitId: "abc123" });
     });
@@ -1531,6 +1545,58 @@ describe("DiffPane", () => {
 
       expect(screen.getByRole("button", { name: "Collapse src/main.rs" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Collapse src/lib.rs" })).toBeInTheDocument();
+    });
+
+    describe("merge commit parent (#1009)", () => {
+      const first = "1".repeat(40);
+      const second = "2".repeat(40);
+      const merge = "3".repeat(40);
+      const graphCommit = (id: string, parentIds: string[]) => ({
+        id,
+        shortId: id.slice(0, 7),
+        summary: `commit ${id.slice(0, 1)}`,
+        authorName: "Me",
+        authorEmail: "me@x.org",
+        timestamp: 0,
+        parentIds,
+        branchRefs: [],
+        remoteBranchRefs: [],
+      });
+      const commits = [graphCommit(merge, [first, second]), graphCommit(first, []), graphCommit(second, [])];
+      const picker = () => screen.findByRole("combobox", { name: "Changes compared with" });
+
+      it("names the first parent it compares with", async () => {
+        renderCommit(fakeClient({ getCommitFiles, getCommitDiff }), merge, { commits });
+
+        const select = await picker();
+        expect(select).toHaveValue(first);
+        expect(within(select).getByRole("option", { name: "1111111 (first parent)" })).toBeInTheDocument();
+        expect(within(select).getByRole("option", { name: "2222222 (second parent)" })).toBeInTheDocument();
+        await waitFor(() => expect(getCommitDiff).toHaveBeenCalledWith(TEST_REPO_PATH, merge, "src/main.rs", DEFAULT_DIFF_OPTIONS));
+      });
+
+      it("diffs against the parent picked", async () => {
+        const getRangeFiles = vi.fn(async () => [{ path: "src/other.rs", oldPath: null }]);
+        const getRangeDiff = vi.fn(async () => hunks);
+        renderCommit(fakeClient({ getCommitFiles, getCommitDiff, getRangeFiles, getRangeDiff }), merge, { commits });
+
+        fireEvent.change(await picker(), { target: { value: second } });
+
+        await waitFor(() => expect(getRangeFiles).toHaveBeenCalledWith(TEST_REPO_PATH, second, merge));
+        expect(await screen.findByText("src/other.rs")).toBeInTheDocument();
+        await waitFor(() =>
+          expect(getRangeDiff).toHaveBeenCalledWith(TEST_REPO_PATH, second, merge, "src/other.rs", null, DEFAULT_DIFF_OPTIONS),
+        );
+      });
+
+      it("shows no picker for a commit with one parent", async () => {
+        renderCommit(fakeClient({ getCommitFiles, getCommitDiff }), first, {
+          commits: [graphCommit(first, [second]), graphCommit(second, [])],
+        });
+
+        expect(await screen.findByText("src/main.rs")).toBeInTheDocument();
+        expect(screen.queryByRole("combobox", { name: "Changes compared with" })).toBeNull();
+      });
     });
   });
 });

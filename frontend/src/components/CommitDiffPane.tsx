@@ -1,7 +1,17 @@
 import type { CommitView, DiffPanePatchActions, FileHistoryFocus } from "./diffPaneShared";
 import { describeError, type DescribedError } from "../lib/errorMessages";
-import { useEffect, useMemo, useState } from "react";
-import type { CommitHunk, CommitStats, DiffOptions, FileStats, ForgeRepository, GraphCommit, RepoClient } from "../ipc/RepoClient";
+import { useEffect, useId, useMemo, useState } from "react";
+import type {
+  ChangedFile,
+  CommitHunk,
+  CommitStats,
+  DiffOptions,
+  DiffSource,
+  FileStats,
+  ForgeRepository,
+  GraphCommit,
+  RepoClient,
+} from "../ipc/RepoClient";
 import { useWorkspaceActions } from "../state/useWorkspaceActions";
 import { CollapseAllToggle } from "./CollapseToggle";
 import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
@@ -31,6 +41,13 @@ function commitFilePatch(
     onRevertHunk: (hunk, stage) => change(true, hunk, stage),
     onApplyHunk: (hunk, stage) => change(false, hunk, stage),
   };
+}
+
+const ORDINALS = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"];
+
+/** "first", "second", … for a parent's index; "11th" past ten (an octopus merge). */
+function parentOrdinal(index: number): string {
+  return ORDINALS[index] ?? `${index + 1}th`;
 }
 
 export function CommitDiffPane({
@@ -70,11 +87,27 @@ export function CommitDiffPane({
     () => (commits ?? []).filter((c) => c.parentIds.includes(commitId)).map((c) => c.id),
     [commits, commitId],
   );
+  // A merge commit's diff is against its first parent unless another one is picked (#1009).
+  const parentIds = useMemo(() => commits?.find((c) => c.id === commitId)?.parentIds ?? [], [commits, commitId]);
+  const [parentPick, setParentPick] = useState<{ commitId: string; parentId: string } | null>(null);
+  const comparedParent =
+    parentPick !== null && parentPick.commitId === commitId && parentIds.includes(parentPick.parentId)
+      ? parentPick.parentId
+      : (parentIds[0] ?? null);
+  // The picked parent when it isn't the first: the diff is then a range from it to the commit.
+  const otherParent = comparedParent !== null && comparedParent !== parentIds[0] ? comparedParent : null;
+  const parentPickerLabelId = useId();
   const fetchCommitDiff = (path: string, oldPath: string | null) => (opts: DiffOptions) =>
-    oldPath != null
-      ? client.getCommitRenameDiff(repoPath, commitId, oldPath, path, opts)
-      : client.getCommitDiff(repoPath, commitId, path, opts);
-  const [files, setFiles] = useState<string[]>([]);
+    otherParent !== null
+      ? client.getRangeDiff(repoPath, otherParent, commitId, path, oldPath, opts)
+      : oldPath != null
+        ? client.getCommitRenameDiff(repoPath, commitId, oldPath, path, opts)
+        : client.getCommitDiff(repoPath, commitId, path, opts);
+  const diffSource = (oldPath: string | null): DiffSource =>
+    otherParent !== null
+      ? { kind: "Range", fromId: otherParent, toId: commitId, oldPath }
+      : { kind: "Commit", commitId, oldPath };
+  const [files, setFiles] = useState<ChangedFile[]>([]);
   const [error, setError] = useState<DescribedError | null>(null);
   const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(new Set());
   const [showAll, setShowAll] = useState(false);
@@ -82,8 +115,10 @@ export function CommitDiffPane({
 
   const loadFiles = () => {
     let ignore = false;
-    client
-      .getCommitFiles(repoPath, commitId)
+    (otherParent !== null
+      ? client.getRangeFiles(repoPath, otherParent, commitId)
+      : client.getCommitFiles(repoPath, commitId).then((paths) => paths.map((path) => ({ path, oldPath: null })))
+    )
       .then((next) => {
         if (!ignore) {
           setFiles(next);
@@ -103,7 +138,7 @@ export function CommitDiffPane({
   useEffect(() => {
     return loadFiles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repoPath, client, commitId]);
+  }, [repoPath, client, commitId, otherParent]);
 
   // #620: the totals in the header and each file's +/−. `undefined` while counting, `null` for a
   // commit over the backend's cap (or a failed count): then the header has no totals.
@@ -127,7 +162,7 @@ export function CommitDiffPane({
     [commitStats],
   );
 
-  const allCollapsed = files.length > 0 && files.every((path) => collapsedPaths.has(path));
+  const allCollapsed = files.length > 0 && files.every((file) => collapsedPaths.has(file.path));
 
   const toggleCollapse = (path: string) => {
     setCollapsedPaths((prev) => {
@@ -142,7 +177,7 @@ export function CommitDiffPane({
   };
 
   const toggleCollapseAll = () => {
-    setCollapsedPaths(allCollapsed ? new Set() : new Set(files));
+    setCollapsedPaths(allCollapsed ? new Set() : new Set(files.map((file) => file.path)));
   };
 
   if (error !== null) {
@@ -157,6 +192,14 @@ export function CommitDiffPane({
   }
 
   const focused = focus !== null && !showAll;
+  // Against another parent a rename is that parent's, from the range's file list.
+  const focusOldPath =
+    focus === null ? null : otherParent === null ? focus.oldPath : (files.find((f) => f.path === focus.path)?.oldPath ?? null);
+  const diffKey = `commit:${commitId}:${otherParent ?? "first"}`;
+  // Revert / Apply and the line counts are the first parent's, so another parent has neither.
+  const patchFor = (path: string, oldPath: string | null) =>
+    otherParent === null && patchActions ? commitFilePatch(patchActions, commitId, path, oldPath) : undefined;
+  const statsFor = (path: string) => (otherParent === null ? fileStats.get(path) : undefined);
 
   return (
     <div>
@@ -180,6 +223,22 @@ export function CommitDiffPane({
           All files
         </button>
       </div>
+      {view !== "tree" && parentIds.length > 1 && comparedParent !== null && (
+        <div className={styles.parentPicker}>
+          <span id={parentPickerLabelId}>Changes compared with</span>
+          <select
+            aria-labelledby={parentPickerLabelId}
+            value={comparedParent}
+            onChange={(event) => setParentPick({ commitId, parentId: event.target.value })}
+          >
+            {parentIds.map((parentId, index) => (
+              <option key={parentId} value={parentId}>
+                {`${parentId.slice(0, 7)} (${parentOrdinal(index)} parent)`}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       {view !== "tree" && <DiffOptionsToolbar sticky />}
       {view === "tree" ? (
         <CommitTreeBrowser
@@ -202,9 +261,9 @@ export function CommitDiffPane({
               repoPath={repoPath}
               client={client}
               path={focus.path}
-              oldPath={focus.oldPath}
-              diffKey={`commit:${commitId}`}
-              fetchDiff={fetchCommitDiff(focus.path, focus.oldPath)}
+              oldPath={focusOldPath}
+              diffKey={diffKey}
+              fetchDiff={fetchCommitDiff(focus.path, focusOldPath)}
               blameAt={commitId}
               collapsed={focusCollapsed}
               onToggleCollapse={() => setFocusCollapsed((c) => !c)}
@@ -212,10 +271,10 @@ export function CommitDiffPane({
               onOpenLineHistory={onOpenLineHistory}
               onOpenFolderHistory={onOpenFolderHistory}
               externalTools={externalTools}
-              toolSource={{ kind: "Commit", commitId, oldPath: focus.oldPath }}
-              previewSource={{ kind: "Commit", commitId, oldPath: focus.oldPath }}
-              patch={patchActions && commitFilePatch(patchActions, commitId, focus.path, focus.oldPath)}
-              lineStats={fileStats.get(focus.path)}
+              toolSource={diffSource(focusOldPath)}
+              previewSource={diffSource(focusOldPath)}
+              patch={patchFor(focus.path, focusOldPath)}
+              lineStats={statsFor(focus.path)}
             />
           </ul>
           {files.length > 1 && (
@@ -232,14 +291,15 @@ export function CommitDiffPane({
             </div>
           )}
           <ul className={styles.fileList}>
-            {files.map((path) => (
+            {files.map(({ path, oldPath }) => (
               <ReadOnlyFileSection
-                key={path}
+                key={`${oldPath ?? ""}→${path}`}
                 repoPath={repoPath}
                 client={client}
                 path={path}
-                diffKey={`commit:${commitId}`}
-                fetchDiff={fetchCommitDiff(path, null)}
+                oldPath={oldPath}
+                diffKey={diffKey}
+                fetchDiff={fetchCommitDiff(path, oldPath)}
                 blameAt={commitId}
                 collapsed={collapsedPaths.has(path)}
                 onToggleCollapse={() => toggleCollapse(path)}
@@ -248,10 +308,10 @@ export function CommitDiffPane({
                 onOpenLineHistory={onOpenLineHistory}
                 onOpenFolderHistory={onOpenFolderHistory}
                 externalTools={externalTools}
-                toolSource={{ kind: "Commit", commitId, oldPath: null }}
-                previewSource={{ kind: "Commit", commitId, oldPath: null }}
-                patch={patchActions && commitFilePatch(patchActions, commitId, path, null)}
-                lineStats={fileStats.get(path)}
+                toolSource={diffSource(oldPath)}
+                previewSource={diffSource(oldPath)}
+                patch={patchFor(path, oldPath)}
+                lineStats={statsFor(path)}
               />
             ))}
           </ul>

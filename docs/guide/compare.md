@@ -1,7 +1,8 @@
 # Comparing commits and branches
 
-Compares are read-only and replace the diff pane until you click **×** or click a row (a
-commit, a stash, a search result), including the one already selected.
+Compares are read-only and replace the diff pane until you click **×**, press Escape while the
+focus is in the compare (it then goes back to where you opened the compare from), or click a
+row (a commit, a stash, a search result), including the one already selected.
 
 - **Two commits:** select one commit, then Ctrl-click (Cmd-click on macOS) a second one, and
   choose **Compare these commits** in the bar under the graph or in the right-click

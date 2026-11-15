@@ -165,4 +165,20 @@ describe("AddRemoteForm (in BranchTree)", () => {
     fireEvent.keyDown(input, { key: "Escape" });
     expect(props.onCloseAddRemoteDraft).toHaveBeenCalled();
   });
+
+  it("Escape anywhere in the form closes it and returns focus to what opened it (#1001)", () => {
+    const opener = document.createElement("button");
+    document.body.appendChild(opener);
+    opener.focus();
+    const { props } = renderTree({ addRemoteDraftOpen: true });
+    expect(screen.getByPlaceholderText("origin")).toHaveFocus();
+
+    const fetchUrl = screen.getByTestId("add-remote-fetch-url");
+    fetchUrl.focus();
+    fireEvent.keyDown(fetchUrl, { key: "Escape" });
+
+    expect(props.onCloseAddRemoteDraft).toHaveBeenCalledOnce();
+    expect(opener).toHaveFocus();
+    opener.remove();
+  });
 });
