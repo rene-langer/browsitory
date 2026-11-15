@@ -47,7 +47,7 @@ describe("Browsitory VSCode extension edit commit", () => {
 
       await write("vscode-edit-older.txt", "first, edited\n");
       git("add", "vscode-edit-older.txt");
-      await webview.clickByText("[aria-label='Operation status'] button", "Continue");
+      await webview.clickByText("[aria-label='Operation status'] button", "Finish editing");
 
       await waitFor(
         () => git("rev-parse", "--abbrev-ref", "HEAD") === branch,
