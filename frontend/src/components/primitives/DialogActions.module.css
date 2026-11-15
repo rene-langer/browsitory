@@ -1,0 +1,21 @@
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+/* A dialog's action that loses data (#988) is filled, so it reads as the one strong action. The
+   attribute is repeated to outrank `index.css`'s outlined danger button. */
+.actions button[data-tone][data-tone="danger"]:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--color-danger-text);
+  border-color: var(--color-danger-text);
+  color: var(--color-surface);
+}
+
+.actions button[data-tone][data-tone="danger"]:hover:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--color-danger-text);
+  filter: brightness(0.9);
+}

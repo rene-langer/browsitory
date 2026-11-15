@@ -16,8 +16,10 @@ the current branch itself or on a detached HEAD, and while a merge, rebase or ch
 progress it is disabled and says why. **Undo** names the branch too ("Rebase onto main"). To
 rebase onto any commit instead, right-click it in the graph and choose **Rebase onto here**.
 
-**The planner.** It lists the commits oldest first, in the order the rebase replays them. Each
-row has an action (Pick, Reword, Edit, Squash, Fixup, Drop) and **Move up**/**Move down**;
+**The planner.** Its title names the branch and the target ("Rebase main onto 4c5beaf"), and a
+line under it says how many commits it rewrites. It lists the commits oldest first, in the order
+the rebase replays them. Each row has an action (Pick, Reword, Edit, Squash, Fixup, Drop) and
+move up and move down buttons (arrows);
 Alt+Up and Alt+Down move the row you are in. You can also drag a row by its handle (⠿ at its
 left) and drop it on another row: a line above or below that row shows where it will go, and
 Escape cancels the drag. **Reword** fills a message field with the commit's

@@ -40,26 +40,26 @@ describe("PendingPullPrompt (#652)", () => {
 
   it("asks when no strategy is set, and remembers the choice when asked to", async () => {
     const { onMerge, setPullStrategy } = renderPrompt(null);
-    const dialog = await screen.findByRole("dialog", { name: "Pull has diverged" });
-    expect(dialog).toHaveTextContent("have both changed");
-    fireEvent.click(screen.getByRole("checkbox", { name: "Remember for this repository" }));
-    fireEvent.click(screen.getByRole("button", { name: "Merge" }));
+    const dialog = await screen.findByRole("dialog", { name: "main and origin/main have diverged" });
+    expect(dialog).toHaveTextContent("have diverged");
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Always do this for / }));
+    fireEvent.click(screen.getByRole("button", { name: "Pull with merge" }));
     expect(setPullStrategy).toHaveBeenCalledWith("Merge");
     expect(onMerge).toHaveBeenCalledWith("refs/remotes/origin/main");
   });
 
   it("asks, saying a fast-forward wasn't possible, for Fast-forward only", async () => {
     const { setPullStrategy, onRebase } = renderPrompt("FastForwardOnly");
-    const dialog = await screen.findByRole("dialog", { name: "Pull has diverged" });
+    const dialog = await screen.findByRole("dialog", { name: "main and origin/main have diverged" });
     expect(dialog).toHaveTextContent("can't be fast-forwarded");
-    fireEvent.click(screen.getByRole("button", { name: "Rebase" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pull with rebase" }));
     expect(onRebase).toHaveBeenCalled();
     expect(setPullStrategy).not.toHaveBeenCalled();
   });
 
   it("asks when the strategy can't be read", async () => {
     renderPrompt(new Error("config unreadable"));
-    expect(await screen.findByRole("dialog", { name: "Pull has diverged" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "main and origin/main have diverged" })).toBeInTheDocument();
   });
 
   it("waits while the repository is busy, saying why, then merges once it is idle", async () => {
@@ -74,8 +74,8 @@ describe("PendingPullPrompt (#652)", () => {
     const { rerender } = render(
       <PendingPullPrompt {...props} operationDisabled operationDisabledReason="A transfer is in progress." />,
     );
-    await screen.findByRole("dialog", { name: "Pull has diverged" });
-    expect(screen.getByRole("button", { name: "Merge" })).toHaveAttribute("title", "A transfer is in progress.");
+    await screen.findByRole("dialog", { name: "main and origin/main have diverged" });
+    expect(screen.getByRole("button", { name: "Pull with merge" })).toHaveAttribute("title", "A transfer is in progress.");
     expect(handlers.onMerge).not.toHaveBeenCalled();
 
     rerender(<PendingPullPrompt {...props} operationDisabled={false} operationDisabledReason={null} />);

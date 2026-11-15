@@ -1042,6 +1042,7 @@ export function UncommittedDiffPane({
               )}
               <button
                 type="button"
+                data-tone="danger"
                 onClick={() =>
                   setDiscardRequest(filtering ? { kind: "all", paths: shownDiscardablePaths } : { kind: "all" })
                 }
@@ -1052,6 +1053,7 @@ export function UncommittedDiffPane({
               {untrackedCount > 0 && (
                 <button
                   type="button"
+                  data-tone="danger"
                   onClick={() =>
                     setDiscardRequest(filtering ? { kind: "untracked", paths: shownUntrackedPaths } : { kind: "untracked" })
                   }
@@ -1129,7 +1131,7 @@ export function UncommittedDiffPane({
       )}
       {discardRequest?.kind === "all" && discardAllEntries.length > 0 && (
         <ConfirmDialog
-          ariaLabel={discardRequest.paths === undefined ? "Discard all changes" : "Discard shown changes"}
+          title={discardRequest.paths === undefined ? "Discard all changes" : "Discard shown changes"}
           message={
             discardRequest.paths === undefined ? (
               discardAllConfirmMessage(discardAllEntries, true)
@@ -1145,6 +1147,7 @@ export function UncommittedDiffPane({
               </>
             )
           }
+          tone="danger"
           confirmLabel={
             discardRequest.paths === undefined
               ? "Discard all"
@@ -1161,7 +1164,7 @@ export function UncommittedDiffPane({
       )}
       {discardRequest?.kind === "untracked" && deleteUntrackedPaths.length > 0 && (
         <ConfirmDialog
-          ariaLabel="Delete untracked files"
+          title="Delete untracked files"
           message={
             <>
               <p>{deleteUntrackedConfirmMessage(
@@ -1183,6 +1186,7 @@ export function UncommittedDiffPane({
             </>
           }
           confirmLabel={`Delete ${deleteUntrackedPaths.length} ${deleteUntrackedPaths.length === 1 ? "file" : "files"}`}
+          tone="danger"
           confirmReason={discardBlockedReason}
           onConfirm={() => {
             if (discardBlockedReason !== null) return;
@@ -1194,9 +1198,10 @@ export function UncommittedDiffPane({
       )}
       {discardRequest?.kind === "files" && discardFilesEntries.length > 0 && (
         <ConfirmDialog
-          ariaLabel="Discard selected changes"
+          title="Discard selected changes"
           message={discardAllConfirmMessage(discardFilesEntries)}
           confirmLabel={`Discard ${discardFilesEntries.length} ${discardFilesEntries.length === 1 ? "file" : "files"}`}
+          tone="danger"
           confirmReason={discardFilesBlockedReason}
           onConfirm={() => {
             if (discardFilesBlockedReason !== null) return;
@@ -1209,8 +1214,9 @@ export function UncommittedDiffPane({
       )}
       {discardFileEntry !== undefined && (
         <ConfirmDialog
-          ariaLabel="Discard changes"
+          title="Discard changes"
           message={discardConfirmMessage(discardFileEntry)}
+          tone="danger"
           confirmLabel={
             discardFileEntry.untrackedFolder === true
               ? "Delete folder"

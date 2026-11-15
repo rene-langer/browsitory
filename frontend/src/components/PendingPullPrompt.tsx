@@ -19,6 +19,9 @@ export function PendingPullPrompt({
   upstreamRef,
   noFastForward = false,
   branchName,
+  repoName = null,
+  ahead = null,
+  behind = null,
   operationDisabled,
   operationDisabledReason,
   getPullStrategy,
@@ -30,6 +33,11 @@ export function PendingPullPrompt({
   upstreamRef: string;
   noFastForward?: boolean;
   branchName: string | null;
+  /** For the dialog's "Always do this for …" (#1019). */
+  repoName?: string | null;
+  /** The branch's commits not on the upstream and the other way round, when known (#1019). */
+  ahead?: number | null;
+  behind?: number | null;
   operationDisabled: boolean;
   operationDisabledReason: string | null;
   getPullStrategy: () => Promise<PullStrategy | null>;
@@ -76,6 +84,9 @@ export function PendingPullPrompt({
     <PullDivergedDialog
       upstreamRef={upstreamRef}
       branchName={branchName}
+      repoName={repoName}
+      ahead={ahead}
+      behind={behind}
       fastForwardOnly={strategy === "FastForwardOnly"}
       operationDisabled={operationDisabled}
       operationDisabledReason={operationDisabledReason}

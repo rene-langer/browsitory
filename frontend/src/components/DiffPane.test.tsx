@@ -323,7 +323,7 @@ describe("DiffPane", () => {
         const dialog = screen.getByRole("dialog", { name: "Discard changes", hidden: true });
         expect(within(dialog).getByText("Discard changes to src/a.ts? Undo can bring them back.")).toBeInTheDocument();
         expect(onDiscardFile).not.toHaveBeenCalled();
-        fireEvent.click(within(dialog).getByText("Discard changes"));
+        fireEvent.click(within(dialog).getByRole("button", { name: "Discard changes", hidden: true }));
 
         expect(onDiscardFile).toHaveBeenCalledWith("src/a.ts");
       });
@@ -503,6 +503,14 @@ describe("DiffPane", () => {
         expect(screen.queryByRole("button", { name: "Actions for shared.txt" })).not.toBeInTheDocument();
       });
 
+      it("marks Discard all… and its confirmation as a danger (#988)", () => {
+        render();
+        const discardAll = screen.getByRole("button", { name: "Discard all…" });
+        expect(discardAll).toHaveAttribute("data-tone", "danger");
+        fireEvent.click(discardAll);
+        expect(screen.getByRole("button", { name: "Discard all" })).toHaveAttribute("data-tone", "danger");
+      });
+
       it("Discard all confirms then calls onDiscardAllUnstaged", () => {
         const onDiscardAllUnstaged = vi.fn();
         render({ onDiscardAllUnstaged });
@@ -561,7 +569,7 @@ describe("DiffPane", () => {
           onCurrentFileChange,
         });
 
-        fireEvent.click(screen.getByText("Discard changes"));
+        fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
 
         expect(onDiscardFile).toHaveBeenCalledWith("src/a.ts");
         expect(onDiscardRequestChange).toHaveBeenCalledWith(null);
@@ -589,13 +597,13 @@ describe("DiffPane", () => {
           );
         }
         const { rerender } = rtlRender(<Harness status={fileStatus} />);
-        expect(screen.getByText("Discard changes")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Discard changes" })).toBeInTheDocument();
 
         rerender(<Harness status={[fileStatus[1]]} />);
-        expect(screen.queryByText("Discard changes")).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Discard changes" })).not.toBeInTheDocument();
 
         rerender(<Harness status={fileStatus} />);
-        expect(screen.queryByText("Discard changes")).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Discard changes" })).not.toBeInTheDocument();
       });
 
       it("clears an all request when nothing is discardable and shows no dialog", () => {
@@ -2183,6 +2191,16 @@ describe("DiffPane stash view", () => {
     renderStash({ tracked: [], untracked: [], untrackedCommitId: null });
 
     expect(await screen.findByText("This stash has no file changes.")).toBeInTheDocument();
+  });
+
+  it("marks Drop… and its confirmation as a danger (#988)", async () => {
+    renderStash({ tracked: ["a.txt"], untracked: [], untrackedCommitId: null });
+    const section = await screen.findByRole("region", { name: "Stash details" });
+    const drop = within(section).getByRole("button", { name: "Drop…" });
+    expect(drop).toHaveAttribute("data-tone", "danger");
+    fireEvent.click(drop);
+    const dialog = screen.getByRole("dialog", { name: "Drop stash wip", hidden: true });
+    expect(within(dialog).getByRole("button", { name: "Drop stash", hidden: true })).toHaveAttribute("data-tone", "danger");
   });
 
   it("applies, pops and drops (after confirming) from the toolbar", async () => {

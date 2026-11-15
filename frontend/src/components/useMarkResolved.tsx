@@ -20,7 +20,7 @@ export function useMarkResolved(path: string): {
   };
   const confirmDialog = confirmMarkers ? (
     <ConfirmDialog
-      ariaLabel="Mark resolved"
+      title="Mark resolved"
       message={`Conflict markers remain in ${path}. Mark it resolved anyway?`}
       confirmLabel="Mark resolved"
       onConfirm={() => {

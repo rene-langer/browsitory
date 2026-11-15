@@ -366,7 +366,7 @@ describe("StashPanel", () => {
     expect(onSelectRow).not.toHaveBeenCalled();
 
     const dialog = screen.getByRole("dialog", { name: /Drop stash/ });
-    expect(within(dialog).getByText(/stash1fix earlier edit/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("heading", { name: /stash1fix earlier edit/ })).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Drop stash" }));
 
     expect(onDropStash).toHaveBeenCalledWith(1);

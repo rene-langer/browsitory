@@ -7,7 +7,7 @@ describe("ConfirmDialog", () => {
   it("renders as an accessible dialog with the given message and button labels", () => {
     render(
       <ConfirmDialog
-        ariaLabel="Remove thing"
+        title="Remove thing"
         message={<p>Remove thing?</p>}
         confirmLabel="Remove"
         onConfirm={vi.fn()}
@@ -24,7 +24,7 @@ describe("ConfirmDialog", () => {
   it("supports a custom cancel label", () => {
     render(
       <ConfirmDialog
-        ariaLabel="Remove thing"
+        title="Remove thing"
         message="Remove thing?"
         confirmLabel="Remove"
         cancelLabel="Never mind"
@@ -39,7 +39,7 @@ describe("ConfirmDialog", () => {
   it("renders only the cancel action when hideConfirm is set", () => {
     render(
       <ConfirmDialog
-        ariaLabel="Info"
+        title="Info"
         message="Nothing to confirm."
         confirmLabel="Remove"
         cancelLabel="Close"
@@ -57,7 +57,7 @@ describe("ConfirmDialog", () => {
     const onConfirm = vi.fn();
     render(
       <ConfirmDialog
-        ariaLabel="Remove thing"
+        title="Remove thing"
         message="Remove thing?"
         confirmLabel="Remove"
         onConfirm={onConfirm}
@@ -74,7 +74,7 @@ describe("ConfirmDialog", () => {
     const onCancel = vi.fn();
     render(
       <ConfirmDialog
-        ariaLabel="Remove thing"
+        title="Remove thing"
         message="Remove thing?"
         confirmLabel="Remove"
         onConfirm={vi.fn()}
@@ -91,7 +91,7 @@ describe("ConfirmDialog", () => {
     const onCancel = vi.fn();
     render(
       <ConfirmDialog
-        ariaLabel="Remove thing"
+        title="Remove thing"
         message="Remove thing?"
         confirmLabel="Remove"
         onConfirm={vi.fn()}
@@ -108,7 +108,7 @@ describe("ConfirmDialog", () => {
   it("autofocuses the cancel button on mount", async () => {
     render(
       <ConfirmDialog
-        ariaLabel="Remove thing"
+        title="Remove thing"
         message="Remove thing?"
         confirmLabel="Remove"
         onConfirm={vi.fn()}
@@ -124,7 +124,7 @@ describe("ConfirmDialog", () => {
   it("disables the confirm button when confirmDisabled is true", () => {
     render(
       <ConfirmDialog
-        ariaLabel="Remove thing"
+        title="Remove thing"
         message="Remove thing?"
         confirmLabel="Remove"
         confirmDisabled
@@ -140,7 +140,7 @@ describe("ConfirmDialog", () => {
     const onConfirm = vi.fn();
     render(
       <ConfirmDialog
-        ariaLabel="Remove thing"
+        title="Remove thing"
         message="Remove thing?"
         confirmLabel="Remove"
         confirmReason="A merge is in progress."
@@ -160,7 +160,7 @@ describe("ConfirmDialog", () => {
 
   it("enables the confirm button when confirmReason is null", () => {
     render(
-      <ConfirmDialog ariaLabel="Remove thing" message="Remove thing?" confirmLabel="Remove" confirmReason={null} onConfirm={vi.fn()} onCancel={vi.fn()} />,
+      <ConfirmDialog title="Remove thing" message="Remove thing?" confirmLabel="Remove" confirmReason={null} onConfirm={vi.fn()} onCancel={vi.fn()} />,
     );
     expect(screen.getByRole("button", { name: "Remove" })).toBeEnabled();
     expect(describedByText(screen.getByRole("button", { name: "Remove" }))).toBe("");
@@ -172,7 +172,7 @@ describe("ConfirmDialog", () => {
     // Overlay.test.tsx's equivalent assertion for the same reasoning.
     render(
       <ConfirmDialog
-        ariaLabel="Remove thing"
+        title="Remove thing"
         message="Remove thing?"
         confirmLabel="Remove"
         onConfirm={vi.fn()}

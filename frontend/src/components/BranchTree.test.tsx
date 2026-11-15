@@ -832,7 +832,7 @@ describe("BranchTree — remotes", () => {
     renderTree({ remotes: oneRemote, onRemoveRemote });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Remove remote" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Confirm remove" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Remove remote" }));
     expect(onRemoveRemote).toHaveBeenCalledWith("origin", false);
   });
 
@@ -843,7 +843,7 @@ describe("BranchTree — remotes", () => {
     });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Remove remote" }));
-    expect(await screen.findByText(/clear upstreams for main/)).toBeInTheDocument();
+    expect(await screen.findByText(/clears the upstream of main/)).toBeInTheDocument();
   });
 
   it("the header '+' menu's Add Remote opens the add-remote draft", () => {
@@ -947,8 +947,8 @@ describe("BranchTree — remotes", () => {
     });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Remove remote" }));
-    expect(await screen.findByText(/clear upstreams for main, topic/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Confirm remove" }));
+    expect(await screen.findByText(/clears the upstream of main, topic/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove remote" }));
     expect(onRemoveRemote).toHaveBeenCalledWith("origin", true);
   });
 
@@ -956,7 +956,7 @@ describe("BranchTree — remotes", () => {
     renderTree({ remotes: oneRemote });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Remove remote" }));
-    const dialog = await screen.findByRole("dialog", { name: "Remove remote confirmation" });
+    const dialog = await screen.findByRole("dialog", { name: "Remove remote origin" });
     await waitFor(() => {
       expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
     });
@@ -1090,7 +1090,7 @@ describe("BranchTree — remote list states and upstream block", () => {
     const { props } = renderTree({ upstream: up });
     fireEvent.click(screen.getByRole("button", { name: "Clear upstream" }));
     expect(props.onClearUpstream).not.toHaveBeenCalled();
-    const dialog = await screen.findByRole("dialog", { name: "Clear upstream confirmation", hidden: true });
+    const dialog = await screen.findByRole("dialog", { name: "Clear upstream of main", hidden: true });
     fireEvent.click(within(dialog).getByRole("button", { name: "Clear upstream", hidden: true }));
     expect(props.onClearUpstream).toHaveBeenCalledOnce();
   });
@@ -1098,9 +1098,9 @@ describe("BranchTree — remote list states and upstream block", () => {
   it("says why Clear upstream can't run while the repository is busy, there and in its confirmation (#748)", async () => {
     const { props, rerender } = renderTree({ upstream: up });
     fireEvent.click(screen.getByRole("button", { name: "Clear upstream" }));
-    await screen.findByRole("dialog", { name: "Clear upstream confirmation", hidden: true });
+    await screen.findByRole("dialog", { name: "Clear upstream of main", hidden: true });
     rerender(<BranchTreeWithDialogs {...props} operationDisabled operationDisabledReason="A merge is in progress." />);
-    const dialog = screen.getByRole("dialog", { name: "Clear upstream confirmation", hidden: true });
+    const dialog = screen.getByRole("dialog", { name: "Clear upstream of main", hidden: true });
     const confirm = within(dialog).getByRole("button", { name: "Clear upstream", hidden: true });
     expect(confirm).toBeDisabled();
     expect(describedByText(confirm)).toBe("A merge is in progress.");
@@ -1110,7 +1110,7 @@ describe("BranchTree — remote list states and upstream block", () => {
     expect(button).toHaveAttribute("aria-disabled", "true");
     expect(describedByText(button)).toBe("A merge is in progress.");
     fireEvent.click(button);
-    expect(screen.queryByRole("dialog", { name: "Clear upstream confirmation", hidden: true })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Clear upstream of main", hidden: true })).toBeNull();
     expect(props.onClearUpstream).not.toHaveBeenCalled();
   });
 });

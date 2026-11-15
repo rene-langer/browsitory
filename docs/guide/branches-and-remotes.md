@@ -70,13 +70,14 @@ all your local changes, untracked files included, switches, and with **Re-apply 
 
 ## Merging
 
-**Merge into current branch…** opens a dialog naming both branches. Choose **Fast-forward if
-possible** (move the branch when nothing diverged, else create a merge commit), **Always create
+**Merge into current branch…** opens a dialog naming both branches. Under **How to merge**,
+choose **Fast-forward if possible** (move the branch when nothing diverged, else create a merge commit), **Always create
 a merge commit** (even when a fast-forward was possible; the commit box is pre-filled and the
 commit gets two parents), or **Fast-forward only** (refuse, changing nothing, when the branches
 have diverged). **Squash** stages the combined changes of the branch without committing and
 without recording a merge: HEAD does not move, the commit box is pre-filled with the squashed
-commits' messages, and the commit you make has a single parent. **Undo** reverts a squash.
+commits' messages, and the commit you make has a single parent; the choices above it don't apply
+then. **Undo** reverts a squash.
 
 ??? note "Details"
     The dialog remembers your last choice per repository; until then it follows your git
@@ -105,8 +106,9 @@ without dragging.
 Branches section says which remote branch the current branch tracks ("main tracks
 origin/main."); **Pull** pulls from it (see [The main window](main-window.md) and
 [Pulling](#pulling)). **Clear upstream** removes the setting (after asking); the branches
-themselves don't change. To set an upstream, use **Set upstream…** in the current branch's menu,
-or **Set as upstream for current branch** on a remote branch.
+themselves don't change. To set an upstream, use **Set upstream…** in the current branch's menu
+(it opens with the only remote, or `origin`, and the branch's own name filled in), or **Set as
+upstream for current branch** on a remote branch.
 
 **Publishing a branch.** **Push to…** pushes any local branch to a remote under any name. The
 dialog asks for the remote (the branch's upstream remote, else `origin`), the remote branch name
@@ -211,9 +213,10 @@ them the way your pull strategy says:
 - **Pull, fast-forward only**: stops and asks, changing nothing.
 
 Choose one from the menu next to **Pull** (or in the command palette): it is remembered for this
-repository and pulls at once. Until you choose, a diverged pull asks: **Merge**, **Rebase** or
-**Cancel**, with **Remember for this repository**. A merge, or a rebase that finished, can be
-undone with **Undo**.
+repository and pulls at once. Until you choose, a diverged pull asks in a dialog that names both
+branches and counts the commits each has: **Pull with merge**, **Pull with rebase** or
+**Cancel**, with **Always do this for ⟨repository⟩**, which you can change later in the Pull
+menu. A merge, or a rebase that finished, can be undone with **Undo**.
 
 ??? note "Details"
     Until you choose a strategy, Browsitory follows your git config like `git pull`:

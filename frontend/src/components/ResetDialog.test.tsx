@@ -9,7 +9,7 @@ describe("ResetDialog", () => {
     render(<ResetDialog branch="main" shortId="abc1234" onReset={onReset} onCancel={() => {}} />);
     expect(screen.getByRole("radio", { name: /Mixed/ })).toBeChecked();
     fireEvent.click(screen.getByRole("radio", { name: /Soft/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reset soft" }));
     expect(onReset).toHaveBeenCalledWith("soft");
   });
 
@@ -17,7 +17,7 @@ describe("ResetDialog", () => {
     const onReset = vi.fn();
     render(<ResetDialog branch="main" shortId="abc1234" onReset={onReset} onCancel={() => {}} />);
     fireEvent.click(screen.getByRole("radio", { name: /Hard/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reset hard" }));
     expect(onReset).not.toHaveBeenCalled();
     expect(screen.getByText("Discards all uncommitted changes. Undo can bring them back.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Reset hard" }));
@@ -42,7 +42,7 @@ describe("ResetDialog", () => {
         onCancel={() => {}}
       />,
     );
-    const reset = screen.getByRole("button", { name: "Reset" });
+    const reset = screen.getByRole("button", { name: "Reset mixed" });
     expect(reset).toBeDisabled();
     expect(reset).toHaveAttribute("title", "A rebase started in a terminal is in progress.");
     expect(describedByText(reset)).toBe("A rebase started in a terminal is in progress.");
@@ -57,7 +57,7 @@ describe("ResetDialog", () => {
     const props = { branch: "main", shortId: "abc1234", onReset, onCancel: () => {} };
     const { rerender } = render(<ResetDialog {...props} />);
     fireEvent.click(screen.getByRole("radio", { name: /Hard/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reset hard" }));
     rerender(<ResetDialog {...props} blockedReason="A cherry-pick is in progress." />);
     const hard = screen.getByRole("button", { name: "Reset hard" });
     expect(hard).toBeDisabled();

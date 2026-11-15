@@ -550,7 +550,7 @@ function BranchTreeContent({
             `handleDeleteClick` always sets `pendingForceFor` unconditionally. */}
         {pendingForceFor !== null && branches.some((b) => b.name === pendingForceFor) && (
           <ConfirmDialog
-            ariaLabel={`Force delete ${pendingForceFor}`}
+            title={`Force delete ${pendingForceFor}`}
             message={
               <>
                 <p>
@@ -560,6 +560,7 @@ function BranchTreeContent({
               </>
             }
             confirmLabel="Force delete"
+            tone="danger"
             confirmDisabled={operationDisabled}
             // #521: the repository can become busy while the confirmation is open.
             confirmReason={busyReason}
@@ -737,7 +738,7 @@ function BranchTreeContent({
 
         {clearUpstreamConfirm && upstream !== null && (
           <ConfirmDialog
-            ariaLabel="Clear upstream confirmation"
+            title={`Clear upstream of ${upstream.localBranch}`}
             message={
               <>
                 <p>

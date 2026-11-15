@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from "react";
 import { Field } from "./primitives/Field";
+import { DialogActions } from "./primitives/DialogActions";
 import { FormDialog } from "./primitives/FormDialog";
 import { InlineError } from "./primitives/InlineError";
 import styles from "./PushBranchDialog.module.css";
@@ -55,7 +56,11 @@ export function RewordDialog({
   const blocked = disabled || original === null || next.trim() === "" || next === original;
 
   return (
-    <FormDialog ariaLabel={`Reword commit ${shortId}`} onCancel={onCancel}>
+    <FormDialog
+      title={`Reword commit ${shortId}`}
+      description="The commits after it are rewritten too."
+      onCancel={onCancel}
+    >
       <form
         className={styles.form}
         onSubmit={(event) => {
@@ -63,9 +68,6 @@ export function RewordDialog({
           if (!blocked) onReword(`${next}\n`);
         }}
       >
-        <p className={styles.message}>
-          Reword commit <code>{shortId}</code>. The commits after it are rewritten too.
-        </p>
         <Field label="Commit message">
           {(props) => (
             <textarea
@@ -82,9 +84,10 @@ export function RewordDialog({
         </Field>
         {loadError !== null && <InlineError message={loadError} onDismiss={() => setLoadError(null)} />}
         <BlockedReason id={reasonId} reason={busyReason} />
-        <div className={styles.actions}>
+        <DialogActions>
           <button
             type="submit"
+            data-tone="primary"
             disabled={blocked}
             title={busyReason ?? undefined}
             aria-describedby={describedBy(reasonId, busyReason)}
@@ -94,7 +97,7 @@ export function RewordDialog({
           <button type="button" onClick={onCancel}>
             Cancel
           </button>
-        </div>
+        </DialogActions>
       </form>
     </FormDialog>
   );

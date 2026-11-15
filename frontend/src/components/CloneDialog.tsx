@@ -4,7 +4,7 @@ import { CloneError } from "../ipc/RepoClient";
 import { deriveRepoName, joinPath } from "../lib/cloneNames";
 import { FormDialog } from "./primitives/FormDialog";
 import { InlineError } from "./primitives/InlineError";
-import { Toolbar } from "./primitives/Toolbar";
+import { DialogActions } from "./primitives/DialogActions";
 import styles from "./CloneDialog.module.css";
 
 type Progress = { phase: "Receiving"; current: number; total: number } | { phase: "Updating" } | null;
@@ -114,7 +114,7 @@ export function CloneDialog({
   };
 
   return (
-    <FormDialog ariaLabel="Clone repository" onCancel={running ? () => {} : onCancel}>
+    <FormDialog title="Clone repository" onCancel={running ? () => {} : onCancel}>
       <form
         className={styles.form}
         onSubmit={(event) => {
@@ -191,14 +191,14 @@ export function CloneDialog({
                 : "Connecting…"}
           </p>
         )}
-        <Toolbar>
+        <DialogActions>
           {running ? (
             <button type="button" onClick={() => operationId.current !== null && void client.cancelClone(operationId.current)}>
               Cancel clone
             </button>
           ) : (
             <>
-              <button type="submit" disabled={url.trim() === "" || dest === ""}>
+              <button type="submit" data-tone="primary" disabled={url.trim() === "" || dest === ""}>
                 Clone
               </button>
               <button type="button" onClick={onCancel}>
@@ -206,7 +206,7 @@ export function CloneDialog({
               </button>
             </>
           )}
-        </Toolbar>
+        </DialogActions>
       </form>
     </FormDialog>
   );

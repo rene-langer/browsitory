@@ -445,9 +445,10 @@ export function ConflictResolutionPane({
         </button>
         {confirmLeave && (
           <ConfirmDialog
-            ariaLabel="Drop the edits"
+            title="Drop the edits"
             message="Going back to the blocks drops what you changed in the whole result."
             confirmLabel="Drop edits"
+            tone="danger"
             cancelLabel="Keep editing"
             onConfirm={leaveWholeEdit}
             onCancel={() => setConfirmLeave(false)}

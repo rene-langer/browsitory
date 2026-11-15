@@ -182,7 +182,7 @@ function WorktreePanelContent({
       </Toolbar>
       {removeConfirmation !== null && (
         <ConfirmDialog
-          ariaLabel={`Remove worktree ${removeConfirmation.path}`}
+          title={`Remove worktree ${removeConfirmation.path}`}
           message={
             <>
               <p>Remove worktree at {removeConfirmation.path}?</p>

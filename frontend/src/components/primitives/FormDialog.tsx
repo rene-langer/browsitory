@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { DialogHeader } from "./DialogHeader";
 import { useRestoreFocus } from "./useRestoreFocus";
 import styles from "./FormDialog.module.css";
 
@@ -8,17 +9,23 @@ import styles from "./FormDialog.module.css";
  * unsupported), Escape (`cancel` event) routed to `onCancel` instead of letting the browser close
  * the element behind React's state, and initial focus on an element marked `data-autofocus`, else
  * the first form field, else the first button. Callers render it conditionally — mounting is
- * opening, unmounting is closing (same model as `ConfirmDialog`). The `aria-label` sits on the
- * `<dialog>` itself so both tests and E2E specs can address it as `dialog[aria-label=...]`.
+ * opening, unmounting is closing (same model as `ConfirmDialog`).
+ *
+ * `title` is the dialog's visible heading (`DialogHeader`, #987) and its accessible name: the
+ * `aria-label` on the `<dialog>` is the same text, so tests and E2E specs can address it as
+ * `dialog[aria-label=...]`. Put the buttons in `DialogActions`.
  */
 export function FormDialog({
-  ariaLabel,
+  title,
+  description,
   onCancel,
   returnFocusTo,
   className,
   children,
 }: {
-  ariaLabel: string;
+  title: string;
+  /** A line under the title: what the dialog acts on, a count. */
+  description?: ReactNode;
   /** Added to the dialog's own class, e.g. for a dialog that needs another size. */
   className?: string;
   onCancel: () => void;
@@ -48,12 +55,13 @@ export function FormDialog({
     <dialog
       ref={dialogRef}
       className={className === undefined ? styles.dialog : `${styles.dialog} ${className}`}
-      aria-label={ariaLabel}
+      aria-label={title}
       onCancel={(event) => {
         event.preventDefault();
         onCancel();
       }}
     >
+      <DialogHeader title={title} description={description} />
       {children}
     </dialog>
   );

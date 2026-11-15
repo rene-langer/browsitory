@@ -1,8 +1,3 @@
-.title {
-  margin: 0 0 var(--space-3);
-  font-size: var(--text-md, 1rem);
-}
-
 /* A fixed size (#784): switching or filtering groups never resizes the dialog; only the group
    pane scrolls. `[open]` keeps the browser's `display: none` for a closed dialog. */
 dialog.dialog[open] {
@@ -167,12 +162,6 @@ dialog.dialog[open] {
 .command {
   font-family: var(--font-mono, monospace);
   overflow-wrap: anywhere;
-}
-
-.footer {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: var(--space-3);
 }
 
 /* Room for the "Default" placeholder beside the number field's spin buttons (#1017). */
