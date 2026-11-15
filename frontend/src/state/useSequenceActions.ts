@@ -175,8 +175,9 @@ export function useSequenceActions(
     if (terminalSequence === null) return;
     if (terminalSequence.rewinds && terminalSequence.commitsToRemove > 0)
       setTerminalAbortRequest({ sequence: terminalSequence, headId });
-    else runTerminalAbort(terminalSequence, headId);
-  }, [headId, runTerminalAbort, terminalSequence]);
+    // No commits to remove: it still asks when it would lose resolutions (#979).
+    else guardAbort({ kind: terminalSequence.kind }, () => runTerminalAbort(terminalSequence, headId));
+  }, [guardAbort, headId, runTerminalAbort, terminalSequence]);
   // A stored sequence first (its file must never outlive it), then a terminal sequence's paused
   // step (a merge paused during one is a plain merge), then the merge or single pick.
   const isTerminalStep = terminalSequence !== null && appState.state.headInfo.operation !== "Merge";
