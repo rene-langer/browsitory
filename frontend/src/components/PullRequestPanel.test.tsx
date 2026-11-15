@@ -47,7 +47,7 @@ function renderPanel(overrides: Partial<Parameters<typeof PullRequestPanel>[0]> 
       pullRequests={{}}
       onListPullRequests={vi.fn().mockResolvedValue(undefined)}
       onSaveForgeToken={vi.fn().mockResolvedValue(null)}
-      onForgetForgeToken={vi.fn().mockResolvedValue(undefined)}
+      onForgetForgeToken={vi.fn().mockResolvedValue(null)}
       onCreatePullRequest={vi.fn().mockResolvedValue(null)}
       onOpenExternalUrl={vi.fn().mockResolvedValue(undefined)}
       operationDisabled={false}
@@ -185,7 +185,7 @@ describe("PullRequestPanel", () => {
 
   it("Disconnect forgets the token and shows Connect again", async () => {
     connect();
-    const onForgetForgeToken = vi.fn().mockResolvedValue(undefined);
+    const onForgetForgeToken = vi.fn().mockResolvedValue(null);
     renderPanel({ onForgetForgeToken });
 
     openSectionMenu();
@@ -318,7 +318,7 @@ describe("PullRequestPanel", () => {
 
   it("stops showing pull requests for a repository once it is disconnected", async () => {
     connect();
-    const onForgetForgeToken = vi.fn().mockResolvedValue(undefined);
+    const onForgetForgeToken = vi.fn().mockResolvedValue(null);
     renderPanel({
       onForgetForgeToken,
       pullRequests: { origin: { pullRequests: [openPullRequest], truncated: false } },
