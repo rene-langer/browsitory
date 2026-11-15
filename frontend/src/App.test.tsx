@@ -672,7 +672,7 @@ describe("App", () => {
       render(<App client={client} />);
       fireEvent.click(await screen.findByRole("option", { name: /^a\.txt ?\(Modified\)/ }));
 
-      await runPaletteCommand("Discard changes in current file");
+      await runPaletteCommand("Discard changes in current file…");
       expect(await screen.findByText("Discard changes to a.txt? Undo can bring them back.")).toBeInTheDocument();
       expect(client.discardFile).not.toHaveBeenCalled();
 
@@ -680,7 +680,7 @@ describe("App", () => {
       expect(screen.queryByText("Discard changes to a.txt? Undo can bring them back.")).not.toBeInTheDocument();
       expect(client.discardFile).not.toHaveBeenCalled();
 
-      await runPaletteCommand("Discard changes in current file");
+      await runPaletteCommand("Discard changes in current file…");
       fireEvent.click(await screen.findByRole("button", { name: "Discard changes" }));
       await waitFor(() => expect(client.discardFile).toHaveBeenCalledTimes(1));
       expect(client.discardFile).toHaveBeenCalledWith("/repos/a", "a.txt");
@@ -691,7 +691,7 @@ describe("App", () => {
       render(<App client={client} />);
       await screen.findByRole("option", { name: /^a\.txt ?\(Modified\)/ });
 
-      await runPaletteCommand("Discard all unstaged changes");
+      await runPaletteCommand("Discard all unstaged changes…");
       expect(await screen.findByText("Discard changes to 1 file? Undo can bring them back.")).toBeInTheDocument();
       expect(client.discardAllUnstaged).not.toHaveBeenCalled();
 
@@ -699,7 +699,7 @@ describe("App", () => {
       expect(screen.queryByText("Discard changes to 1 file? Undo can bring them back.")).not.toBeInTheDocument();
       expect(client.discardAllUnstaged).not.toHaveBeenCalled();
 
-      await runPaletteCommand("Discard all unstaged changes");
+      await runPaletteCommand("Discard all unstaged changes…");
       fireEvent.click(await screen.findByRole("button", { name: "Discard all" }));
       await waitFor(() => expect(client.discardAllUnstaged).toHaveBeenCalledTimes(1));
       expect(client.discardAllUnstaged).toHaveBeenCalledWith("/repos/a", ["a.txt"]);
@@ -712,7 +712,7 @@ describe("App", () => {
       render(<App client={client} />);
       await screen.findByRole("option", { name: /^a\.txt ?\(Modified\)/ });
 
-      await runPaletteCommand("Discard all unstaged changes");
+      await runPaletteCommand("Discard all unstaged changes…");
       const confirm = await screen.findByRole("button", { name: "Discard all" });
       expect(confirm).toBeEnabled();
       fireEvent.click(confirm);
@@ -1873,7 +1873,7 @@ describe("App", () => {
         fireEvent.click((await screen.findByText(/c1 one/)).closest("li")!);
         screen.getByRole("tab", { name: "a" }).focus();
 
-        await runPaletteCommand("Reset to c1", "Reset to c1…");
+        await runPaletteCommand("Reset to c1", "Reset main to c1…");
         const dialog = await screen.findByRole("dialog", { name: /^Reset main to /, hidden: true });
         fireEvent.click(within(dialog).getByRole("button", { name: "Cancel", hidden: true }));
         await waitFor(() => expect(screen.getByRole("listbox", { name: "Commit history" })).toHaveFocus());
@@ -1889,11 +1889,11 @@ describe("App", () => {
       render(<App client={pickClient({ cherryPick, revertCommit })} />);
       fireEvent.click((await screen.findByText(/c1 one/)).closest("li")!);
 
-      await runPaletteCommand("Cherry-pick c1", "Cherry-pick c1");
+      await runPaletteCommand("Cherry-pick c1", "Cherry-pick c1 onto main");
       await waitFor(() => expect(cherryPick).toHaveBeenCalledWith("/repos/a", "c1", null));
       expect(await screen.findByText(/^Cherry-picked \S+$/)).toBeInTheDocument();
 
-      await runPaletteCommand("Revert c1", "Revert c1");
+      await runPaletteCommand("Revert c1", "Revert c1 (new commit on main)");
       await waitFor(() => expect(revertCommit).toHaveBeenCalledWith("/repos/a", "c1", null));
       expect(await screen.findByText(/^Reverted \S+$/)).toBeInTheDocument();
     });
@@ -1910,7 +1910,7 @@ describe("App", () => {
         const results = await showSearchResults();
         expect(await within(results).findByRole("option", { selected: true })).toHaveTextContent("one");
 
-        await runPaletteCommand("Reset to c1", "Reset to c1…");
+        await runPaletteCommand("Reset to c1", "Reset main to c1…");
         const dialog = await screen.findByRole("dialog", { name: /^Reset main to /, hidden: true });
         fireEvent.click(within(dialog).getByRole("button", { name: "Reset mixed", hidden: true }));
         await waitFor(() => expect(resetToCommit).toHaveBeenCalledWith("/repos/a", "c1", "mixed"));
@@ -1940,7 +1940,7 @@ describe("App", () => {
         const results = await showSearchResults();
         expect(await within(results).findByRole("option", { selected: true })).toHaveTextContent("merge one");
 
-        await runPaletteCommand("Cherry-pick m3", "Cherry-pick m3…");
+        await runPaletteCommand("Cherry-pick m3", "Cherry-pick m3 onto main…");
         const dialog = await screen.findByRole("dialog", { name: "Choose parent", hidden: true });
         fireEvent.click(within(dialog).getByRole("radio", { name: /Parent 2/, hidden: true }));
         fireEvent.click(within(dialog).getByRole("button", { name: "Cherry-pick", hidden: true }));
@@ -1967,14 +1967,14 @@ describe("App", () => {
         const results = await showSearchResults();
         expect(await within(results).findByRole("option", { selected: true })).toHaveTextContent("one older");
 
-        await runPaletteCommand("Cherry-pick c0", "Cherry-pick c0");
+        await runPaletteCommand("Cherry-pick c0", "Cherry-pick c0 onto main");
         await waitFor(() => expect(cherryPick).toHaveBeenCalledWith("/repos/a", "c0", null));
         expect(await screen.findByText(/^Cherry-picked \S+$/)).toBeInTheDocument();
 
-        await runPaletteCommand("Revert c0", "Revert c0");
+        await runPaletteCommand("Revert c0", "Revert c0 (new commit on main)");
         await waitFor(() => expect(revertCommit).toHaveBeenCalledWith("/repos/a", "c0", null));
 
-        await runPaletteCommand("Reset to c0", "Reset to c0…");
+        await runPaletteCommand("Reset to c0", "Reset main to c0…");
         const dialog = await screen.findByRole("dialog", { name: /^Reset main to /, hidden: true });
         fireEvent.click(within(dialog).getByRole("button", { name: "Reset mixed", hidden: true }));
         await waitFor(() => expect(resetToCommit).toHaveBeenCalledWith("/repos/a", "c0", "mixed"));
@@ -1999,7 +1999,7 @@ describe("App", () => {
       fireEvent.click(await screen.findByRole("button", { name: "History of a.txt" }));
       expect(await screen.findByRole("option", { selected: true, name: /merge older/ })).toHaveTextContent("merge older");
 
-      await runPaletteCommand("Revert m0", "Revert m0…");
+      await runPaletteCommand("Revert m0", "Revert m0 (new commit on main)…");
       const dialog = await screen.findByRole("dialog", { name: "Choose parent", hidden: true });
       fireEvent.click(within(dialog).getByRole("radio", { name: /Parent 2/, hidden: true }));
       fireEvent.click(within(dialog).getByRole("button", { name: "Revert", hidden: true }));
@@ -2057,7 +2057,7 @@ describe("App", () => {
         fireEvent.contextMenu(row);
         fireEvent.click(screen.getByRole("menuitem", { name: "Reset main to here…" }));
         await screen.findByRole("dialog", { name: /^Reset main to /, hidden: true });
-        await runPaletteCommand("Reset to c1", "Reset to c1…");
+        await runPaletteCommand("Reset to c1", "Reset main to c1…");
         await waitFor(() => expect(screen.getAllByRole("dialog", { name: /^Reset main to /, hidden: true })).toHaveLength(1));
         const dialog = screen.getByRole("dialog", { name: /^Reset main to /, hidden: true });
         expect(within(dialog).getByRole("button", { name: "Reset mixed", hidden: true })).toBeEnabled();
@@ -2089,7 +2089,7 @@ describe("App", () => {
         />,
       );
       fireEvent.contextMenu((await screen.findByText(/m3 merge one/)).closest("li")!);
-      fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick…" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick onto main…" }));
       const dialog = await screen.findByRole("dialog", { name: "Choose parent", hidden: true });
       expect(within(dialog).getByRole("button", { name: "Cherry-pick", hidden: true })).toBeEnabled();
 
@@ -2158,7 +2158,7 @@ describe("App", () => {
       const list = await screen.findByRole("listbox", { name: "Commit history" });
       for (const [summary, item, dialogName] of [
         [/c1 one/, "Reset main to here…", "Reset main to c1"],
-        [/m3 merge one/, "Cherry-pick…", "Choose parent"],
+        [/m3 merge one/, "Cherry-pick onto main…", "Choose parent"],
       ] as const) {
         screen.getByRole("tab", { name: "a" }).focus();
         fireEvent.contextMenu((await screen.findByText(summary)).closest("li")!);
@@ -2178,7 +2178,7 @@ describe("App", () => {
       render(<App client={pickClient({ cherryPick })} />);
 
       fireEvent.contextMenu((await screen.findByText(/c1 one/)).closest("li")!);
-      fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick onto main" }));
       await waitFor(() => expect(cherryPick).toHaveBeenCalledWith("/repos/a", "c1", null));
       // Give a would-be toast every chance to render before asserting there is none.
       await waitFor(() => expect(cherryPick).toHaveBeenCalledTimes(1));
@@ -2186,7 +2186,7 @@ describe("App", () => {
       expect(screen.queryByText(/^Cherry-picked/)).toBeNull();
 
       fireEvent.contextMenu((await screen.findByText(/c1 one/)).closest("li")!);
-      fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick onto main" }));
       expect(await screen.findByText(/^Cherry-picked \S+$/)).toBeInTheDocument();
     });
 
@@ -2207,9 +2207,9 @@ describe("App", () => {
       expect(within(strip).queryByRole("button")).toBeNull();
 
       fireEvent.contextMenu((await screen.findByText(/c1 one/)).closest("li")!);
-      expect(screen.getByRole("menuitem", { name: "Revert" })).toBeEnabled();
+      expect(screen.getByRole("menuitem", { name: "Revert (new commit on main)" })).toBeEnabled();
       expect(screen.getByRole("menuitem", { name: /^Reset .* to here…$/ })).toBeEnabled();
-      fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick onto main" }));
       await waitFor(() => expect(cherryPick).toHaveBeenCalledWith("/repos/a", "c1", null));
       expect(await screen.findByText(/^Cherry-picked \S+$/)).toBeInTheDocument();
     });
@@ -2230,8 +2230,8 @@ describe("App", () => {
       expect(within(strip).queryByRole("button")).toBeNull();
 
       fireEvent.contextMenu((await screen.findByText(/c1 one/)).closest("li")!);
-      expect(screen.getByRole("menuitem", { name: "Cherry-pick" })).toBeDisabled();
-      expect(screen.getByRole("menuitem", { name: "Revert" })).toBeDisabled();
+      expect(screen.getByRole("menuitem", { name: "Cherry-pick onto main" })).toBeDisabled();
+      expect(screen.getByRole("menuitem", { name: "Revert (new commit on main)" })).toBeDisabled();
     });
 
     // #503: between steps a terminal rebase leaves no MERGE_MSG; the palette must still agree
@@ -2254,18 +2254,18 @@ describe("App", () => {
         const row = (await screen.findByText(/c1 one/)).closest("li")!;
         fireEvent.click(row);
         fireEvent.contextMenu(row);
-        for (const name of ["Cherry-pick", "Revert", "Switch to (detached)"]) {
+        for (const name of ["Cherry-pick onto main", "Revert (new commit on main)", "Switch to (detached)"]) {
           const item = screen.getByRole("menuitem", { name });
           expect(item).toBeDisabled();
           expect(item).toHaveAttribute("title", "A rebase started in a terminal is in progress.");
         }
-        fireEvent.keyDown(screen.getByRole("menuitem", { name: "Cherry-pick" }), { key: "Escape" });
+        fireEvent.keyDown(screen.getByRole("menuitem", { name: "Cherry-pick onto main" }), { key: "Escape" });
 
         fireEvent.keyDown(window, { key: "k", ctrlKey: true });
         fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), { target: { value: "c1" } });
         const results = await screen.findByRole("listbox", { name: "Command results" });
         // Listed as unavailable, with the reason, never runnable (#644).
-        for (const name of ["Cherry-pick c1", "Revert c1", "Switch to c1 (detached)", "Reset to c1…"]) {
+        for (const name of ["Cherry-pick c1 onto main", "Revert c1 (new commit on main)", "Switch to c1 (detached)", "Reset main to c1…"]) {
           const option = within(results).getByRole("option", { name });
           expect(option).toHaveAttribute("aria-disabled", "true");
           expect(option).toHaveAccessibleDescription("A rebase started in a terminal is in progress.");
@@ -2294,7 +2294,7 @@ describe("App", () => {
       const strip = await screen.findByRole("status", { name: "Operation status" });
       expect(strip).toHaveTextContent("Cherry-picking 1/2");
       fireEvent.contextMenu((await screen.findByText(/c1 one/)).closest("li")!);
-      expect(screen.getByRole("menuitem", { name: "Cherry-pick" })).toBeDisabled();
+      expect(screen.getByRole("menuitem", { name: "Cherry-pick onto main" })).toBeDisabled();
       fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
 
       fireEvent.click(within(strip).getByRole("button", { name: "Continue" }));
@@ -2446,7 +2446,7 @@ describe("App", () => {
         render(<App client={pickClient({ getHeadInfo: async () => headWith(terminal()), cherryPick })} />);
 
         fireEvent.contextMenu((await screen.findByText(/c1 one/)).closest("li")!);
-        fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick" }));
+        fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick onto main" }));
         await waitFor(() => expect(cherryPick).toHaveBeenCalled());
         expect(await screen.findByText(refusal)).toBeInTheDocument();
       });

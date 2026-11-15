@@ -581,7 +581,7 @@ describe("CommitGraph", () => {
     expect(row?.getAttribute("aria-selected")).toBe("true");
   });
 
-  it("right-clicking a commit and choosing Rebase onto here calls onRebaseFromCommit", () => {
+  it("right-clicking a commit and choosing Rebase current branch onto here… calls onRebaseFromCommit", () => {
     const onRebaseFromCommit = vi.fn();
     render(
       <CommitGraph
@@ -598,7 +598,7 @@ describe("CommitGraph", () => {
 
     const row = screen.getByText(/second commit/).closest("li");
     fireEvent.contextMenu(row!);
-    fireEvent.click(screen.getByText("Rebase onto here"));
+    fireEvent.click(screen.getByText("Rebase current branch onto here…"));
 
     expect(onRebaseFromCommit).toHaveBeenCalledWith("aaa111...");
   });
@@ -1080,7 +1080,7 @@ describe("CommitGraph", () => {
     expect(screen.getByRole("menuitem", { name: "Interactive rebase…" })).toBeEnabled();
   });
 
-  it("disables Rebase onto here while a repository operation is pending", () => {
+  it("disables Rebase current branch onto here… while a repository operation is pending", () => {
     render(
       <CommitGraph
         {...historyProps}
@@ -1096,7 +1096,7 @@ describe("CommitGraph", () => {
 
     fireEvent.contextMenu(screen.getByText(/second commit/).closest("li")!);
 
-    expect(screen.getByText("Rebase onto here")).toBeDisabled();
+    expect(screen.getByText("Rebase current branch onto here…")).toBeDisabled();
   });
 });
 
@@ -1157,11 +1157,11 @@ describe("CommitGraph — keyboard access", () => {
   it("the Menu key and Shift+F10 open the same menu", () => {
     const { list, unmount } = setup({ commitId: "B" });
     fireEvent.keyDown(list, { key: "ContextMenu" });
-    expect(screen.getByRole("menuitem", { name: "Rebase onto here" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Rebase current branch onto here…" })).toBeInTheDocument();
     unmount();
     const second = setup({ commitId: "B" });
     fireEvent.keyDown(second.list, { key: "F10", shiftKey: true });
-    expect(screen.getByRole("menuitem", { name: "Rebase onto here" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Rebase current branch onto here…" })).toBeInTheDocument();
   });
 
   it("Enter on the Uncommitted changes row opens no menu", () => {
@@ -1317,10 +1317,10 @@ describe("CommitGraph — history actions", () => {
   it("offers cherry-pick, revert, checkout and reset on a single commit", () => {
     const { openMenu, onCherryPick, onRevert, onCheckoutCommit, onRequestReset } = setup();
     openMenu("B");
-    fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick onto main" }));
     expect(onCherryPick).toHaveBeenCalledWith("B", null);
     openMenu("B");
-    fireEvent.click(screen.getByRole("menuitem", { name: "Revert" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Revert (new commit on main)" }));
     expect(onRevert).toHaveBeenCalledWith("B", null);
     openMenu("B");
     fireEvent.click(screen.getByRole("menuitem", { name: "Switch to (detached)" }));
@@ -1335,7 +1335,7 @@ describe("CommitGraph — history actions", () => {
   it("disables cherry-pick on HEAD and rewords HEAD in the amend box", () => {
     const { openMenu, onEditHeadMessage } = setup();
     openMenu("C");
-    expect(screen.getByRole("menuitem", { name: "Cherry-pick" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Cherry-pick onto main" })).toBeDisabled();
     fireEvent.click(screen.getByRole("menuitem", { name: "Reword…" }));
     expect(onEditHeadMessage).toHaveBeenCalled();
     openMenu("M");
@@ -1346,11 +1346,11 @@ describe("CommitGraph — history actions", () => {
     const { openMenu, onCherryPick, onRevert, onChooseParent } = setup();
     const list = screen.getByRole("listbox", { name: "Commit history" });
     openMenu("M");
-    expect(screen.queryByRole("menuitem", { name: "Cherry-pick" })).toBeNull();
-    fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick…" }));
+    expect(screen.queryByRole("menuitem", { name: "Cherry-pick onto main" })).toBeNull();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick onto main…" }));
     expect(onChooseParent).toHaveBeenCalledWith("Cherry-pick", "M", list);
     openMenu("M");
-    fireEvent.click(screen.getByRole("menuitem", { name: "Revert…" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Revert (new commit on main)…" }));
     expect(onChooseParent).toHaveBeenCalledWith("Revert", "M", list);
     expect(onCherryPick).not.toHaveBeenCalled();
     expect(onRevert).not.toHaveBeenCalled();
@@ -1368,7 +1368,7 @@ describe("CommitGraph — history actions", () => {
       const list = screen.getByRole("listbox", { name: "Commit history" });
       for (const [summary, item] of [
         ["B", "Reset main to here…"],
-        ["M", "Cherry-pick…"],
+        ["M", "Cherry-pick onto main…"],
       ] as const) {
         outside.focus();
         const outsideFocus = vi.spyOn(outside, "focus");
@@ -1387,14 +1387,14 @@ describe("CommitGraph — history actions", () => {
   it("disables Cherry-pick… on a merge commit at HEAD", () => {
     const { openMenu } = setup({ headInfo: { ...NO_HEAD, headId: "M" } });
     openMenu("M");
-    expect(screen.getByRole("menuitem", { name: "Cherry-pick…" })).toBeDisabled();
-    expect(screen.getByRole("menuitem", { name: "Revert…" })).toBeEnabled();
+    expect(screen.getByRole("menuitem", { name: "Cherry-pick onto main…" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Revert (new commit on main)…" })).toBeEnabled();
   });
 
   it("disables the new actions while pending", () => {
     const { openMenu } = setup({ operationsBlocked: true });
     openMenu("B");
-    for (const name of ["Cherry-pick", "Revert", "Switch to (detached)", "Reset main to here…"]) {
+    for (const name of ["Cherry-pick onto main", "Revert (new commit on main)", "Switch to (detached)", "Reset main to here…"]) {
       expect(screen.getByRole("menuitem", { name })).toBeDisabled();
     }
   });
@@ -1615,7 +1615,7 @@ describe("CommitGraph — tag badges", () => {
 
     fireEvent.contextMenu(screen.getByTitle("Tag v2.0"));
     expect(screen.getByRole("menuitem", { name: "Push v2.0 to origin" })).toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: "Cherry-pick" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Cherry-pick onto main" })).toBeNull();
     fireEvent.click(screen.getByRole("menuitem", { name: "Switch to (detached)" }));
     expect(onCheckoutCommit).toHaveBeenCalledWith(tagged[0].id);
 
@@ -1639,7 +1639,7 @@ describe("CommitGraph — tag badges", () => {
   it("falls back to the commit menu when no tag actions are wired", () => {
     renderGraph();
     fireEvent.contextMenu(screen.getByTitle("Tag v2.0"));
-    expect(screen.getByRole("menuitem", { name: "Cherry-pick" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Cherry-pick onto main" })).toBeInTheDocument();
   });
 
   it("offers Branch from tag and Delete from remote… on a tag badge", () => {
@@ -1862,7 +1862,8 @@ describe("CommitGraph — copy items (#614)", () => {
     return writeText;
   }
 
-  it("ends the commit menu with enabled copy items that write the expected text", () => {
+  // #992: in a "Copy" submenu, the commit menu's last item.
+  it("ends the commit menu with a Copy submenu whose enabled items write the expected text", () => {
     const writeText = renderBusyGraph();
     const expected: [string, string][] = [
       ["Copy SHA", "aaa111..."],
@@ -1873,9 +1874,14 @@ describe("CommitGraph — copy items (#614)", () => {
     ];
     for (const [label, text] of expected) {
       fireEvent.contextMenu(screen.getByText(/second commit/).closest("li")!);
-      const names = screen.getAllByRole("menuitem").map((item) => item.textContent);
-      expect(names.slice(-expected.length)).toEqual(expected.map(([name]) => name));
-      const item = screen.getByRole("menuitem", { name: label });
+      const names = within(screen.getByRole("menu")).getAllByRole("menuitem").map((item) => item.textContent);
+      expect(names[names.length - 1]).toBe("Copy");
+      fireEvent.click(screen.getByRole("menuitem", { name: "Copy" }));
+      const submenu = screen.getByRole("menu", { name: "Copy" });
+      expect(within(submenu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(
+        expected.map(([name]) => name),
+      );
+      const item = within(submenu).getByRole("menuitem", { name: label });
       expect(item).toBeEnabled();
       fireEvent.click(item);
       expect(writeText).toHaveBeenLastCalledWith(text);
@@ -1892,14 +1898,8 @@ describe("CommitGraph — copy items (#614)", () => {
       else groups[groups.length - 1].push(child.querySelector('[role^="menuitem"]')?.textContent ?? "");
     }
     expect(groups[0][0]).toBe("Branch from here");
-    expect(groups.find((group) => group.includes("Rebase onto here"))).not.toContain("Branch from here");
-    expect(groups[groups.length - 1]).toEqual([
-      "Copy SHA",
-      "Copy short SHA",
-      "Copy subject",
-      "Copy author",
-      "Copy date",
-    ]);
+    expect(groups.find((group) => group.includes("Rebase current branch onto here…"))).not.toContain("Branch from here");
+    expect(groups[groups.length - 1]).toEqual(["Copy"]);
     expect(groups.every((group) => group.length > 0)).toBe(true);
   });
 
@@ -2151,7 +2151,7 @@ describe("CommitGraph collapsed merges (#617)", () => {
     fireEvent.keyDown(list(), { key: "Enter" });
 
     expect(screen.getByRole("menuitem", { name: "Branch from here" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Copy SHA" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Copy" })).toBeInTheDocument();
   });
 
   it("selects the merge when it collapses with the selection inside it", () => {

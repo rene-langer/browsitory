@@ -222,7 +222,7 @@ describe("CommitTreeBrowser", () => {
     renderBrowser({ onOpenLineHistory });
     fireEvent.click(await screen.findByRole("button", { name: /README\.txt/ }));
     await screen.findByText("line two");
-    expect(screen.getByRole("button", { name: "History of selected lines of README.txt" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "History of selected lines of README.txt" })).toHaveAttribute("aria-disabled", "true");
 
     const range = document.createRange();
     range.selectNodeContents(document.querySelector('[data-line-number="2"]')!);

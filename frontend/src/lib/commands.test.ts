@@ -286,7 +286,7 @@ describe("buildPaletteCommands (#644)", () => {
 
   it("lists what an operation in progress leaves out, with the blocker's reason", () => {
     const all = paletteFor(makeAppState({ pending: true }));
-    const push = all.find((command) => command.label === "Push branch to…");
+    const push = all.find((command) => command.label === "Push current branch to…");
     expect(push?.disabledReason).toBe("Another action is in progress.");
     const fetchAll = all.find((command) => command.label === "Fetch all remotes");
     expect(fetchAll?.disabledReason).toBe("Another action is in progress.");
@@ -401,37 +401,37 @@ describe("buildCommands", () => {
     expect(commandsFor(makeAppState()).some((c) => c.id === "toggle-skip-hooks")).toBe(false);
   });
 
-  it("offers Fetch all remotes, Push branch to… and Delete remote branch… when a remote exists", () => {
+  it("offers Fetch all remotes, Push current branch to… and Delete remote branch… when a remote exists", () => {
     const appState = makeAppState();
     const commands = commandsFor(appState);
     const fetchAll = commands.find((command) => command.label === "Fetch all remotes")!;
     expect(fetchAll.keywords).toEqual(expect.arrayContaining(["fetch", "all", "remotes", "prune"]));
     fetchAll.run();
-    commands.find((command) => command.label === "Push branch to…")!.run();
+    commands.find((command) => command.label === "Push current branch to…")!.run();
     commands.find((command) => command.label === "Delete remote branch…")!.run();
     expect(appState.fetchAllRemotes).toHaveBeenCalled();
     expect(appState.openDialog).toHaveBeenCalledWith({ kind: "push", localBranch: "main" });
     expect(appState.openDialog).toHaveBeenCalledWith({ kind: "deleteRemoteBranch", remoteName: null, branchName: null });
   });
 
-  it("hides the new remote commands without a remote, and Push branch to… on a detached HEAD", () => {
+  it("hides the new remote commands without a remote, and Push current branch to… on a detached HEAD", () => {
     const labels = (overrides: Parameters<typeof makeAppState>[0]) =>
       commandsFor(makeAppState(overrides)).map((command) => command.label);
     expect(labels({ remotes: [] })).not.toContain("Fetch all remotes");
-    expect(labels({ remotes: [] })).not.toContain("Push branch to…");
+    expect(labels({ remotes: [] })).not.toContain("Push current branch to…");
     expect(labels({ remotes: [] })).not.toContain("Delete remote branch…");
     const detached = labels({
       branches: [],
       headInfo: { headId: "abc", detachedAt: "abc1234", headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null },
     });
-    expect(detached).not.toContain("Push branch to…");
+    expect(detached).not.toContain("Push current branch to…");
     expect(detached).toContain("Fetch all remotes");
   });
 
   it("hides the new remote commands while a repository operation runs", () => {
     const labels = commandsFor(makeAppState({ pending: true })).map((command) => command.label);
     expect(labels).not.toContain("Fetch all remotes");
-    expect(labels).not.toContain("Push branch to…");
+    expect(labels).not.toContain("Push current branch to…");
     expect(labels).not.toContain("Delete remote branch…");
   });
 
@@ -911,23 +911,25 @@ describe("buildCommands", () => {
       return { appState, command, revealSection: sidebarCommands.revealSection };
     }
 
-    it("delete-tag reveals the Tags section instead of calling deleteTag", () => {
-      const { appState, revealSection } = run("delete-tag:v1.0");
-      expect(revealSection).toHaveBeenCalledWith("tags");
+    // #993, #990: the panel's own confirmation, opened as a workspace dialog.
+    it("delete-tag opens the tag's delete confirmation instead of calling deleteTag", () => {
+      const { appState, command } = run("delete-tag:v1.0");
+      expect(command?.label).toBe("Delete tag v1.0…");
+      expect(appState.openDialog).toHaveBeenCalledWith({ kind: "deleteTag", tagName: "v1.0" });
       expect(appState.deleteTag).not.toHaveBeenCalled();
     });
 
-    it("drop-stash selects the stash and reveals the Stashes section instead of dropping", () => {
-      const { appState, command, revealSection } = run("drop-stash:0");
-      expect(command?.label).toBe("Drop stash: WIP");
+    it("drop-stash opens the stash's drop confirmation instead of dropping", () => {
+      const { appState, command } = run("drop-stash:0");
+      expect(command?.label).toBe("Drop stash: WIP…");
+      expect(appState.openDialog).toHaveBeenCalledWith({ kind: "dropStash", commitId: "ccc" });
       expect(appState.dropStash).not.toHaveBeenCalled();
-      expect(appState.selectRow).toHaveBeenCalledWith({ commitId: "ccc" });
-      expect(revealSection).toHaveBeenCalledWith("stash");
     });
 
-    it("remove-worktree reveals the Worktrees section instead of calling removeWorktree", () => {
-      const { appState, revealSection } = run("remove-worktree:wt1");
-      expect(revealSection).toHaveBeenCalledWith("worktree");
+    it("remove-worktree opens the worktree's remove confirmation instead of calling removeWorktree", () => {
+      const { appState, command } = run("remove-worktree:wt1");
+      expect(command?.label).toBe("Remove worktree wt1…");
+      expect(appState.openDialog).toHaveBeenCalledWith({ kind: "removeWorktree", name: "wt1" });
       expect(appState.removeWorktree).not.toHaveBeenCalled();
     });
 
@@ -1325,9 +1327,9 @@ describe("history commands", () => {
       const commitCommands = makeCommitCommands();
       const commands = withListed(makeAppState(listedState), commitCommands);
       const label = (id: string) => commands.find((c) => c.id === id)?.label;
-      expect(label("cherry-pick-selected")).toBe("Cherry-pick old1234");
-      expect(label("revert-selected")).toBe("Revert old1234");
-      expect(label("reset-selected")).toBe("Reset to old1234…");
+      expect(label("cherry-pick-selected")).toBe("Cherry-pick old1234 onto main");
+      expect(label("revert-selected")).toBe("Revert old1234 (new commit on main)");
+      expect(label("reset-selected")).toBe("Reset main to old1234…");
       expect(label("checkout-selected")).toBe("Switch to old1234 (detached)");
       expect(label("create-tag-selected")).toBe("Create tag at old1234…");
       commands.find((c) => c.id === "cherry-pick-selected")!.run();
@@ -1413,11 +1415,11 @@ describe("history commands", () => {
       ["a terminal git am is paused", { headInfo: { ...head, terminalRebase: { kind: "Am", branch: "", onto: "", currentStep: 1, totalSteps: 2 } } }],
       ["HEAD is selected on a detached HEAD", { selectedRow: { commitId: "c1" }, branches: [{ name: "main", isCurrent: false }], headInfo: { ...head, detachedAt: "c1" } }],
     ];
-    const pairs: [string, string][] = [
-      ["Cherry-pick", "cherry-pick-selected"],
-      ["Revert", "revert-selected"],
-      ["Switch to (detached)", "checkout-selected"],
-      ["Create tag…", "create-tag-selected"],
+    const pairs: [RegExp, string][] = [
+      [/^Cherry-pick onto \S+$/, "cherry-pick-selected"],
+      [/^Revert \(new commit on \S+\)$/, "revert-selected"],
+      [/^Switch to \(detached\)$/, "checkout-selected"],
+      [/^Create tag…$/, "create-tag-selected"],
     ];
 
     it.each(states)("while %s", (_label, overrides) => {
@@ -1452,7 +1454,7 @@ describe("history commands", () => {
         fireEvent.contextMenu(row!);
         const ids = buildWithCommitCommands(appState).map((command) => command.id);
         const resetItem = screen.getByRole("menuitem", { name: /^Reset .* to here…$/ });
-        for (const [label, id] of [...pairs, [resetItem.textContent!, "reset-selected"] as [string, string]]) {
+        for (const [label, id] of [...pairs, [new RegExp(`^${resetItem.textContent!}$`), "reset-selected"] as [RegExp, string]]) {
           const item = screen.getByRole("menuitem", { name: label });
           expect({ label, offered: ids.includes(id) }).toEqual({ label, offered: !item.hasAttribute("disabled") });
           if (item.hasAttribute("disabled") && blockers.blocked) expect(item).toHaveAttribute("title", blockers.reason);
@@ -1659,11 +1661,11 @@ describe("diff option and discard commands", () => {
     const currentDiff = { path: "src/a.ts", canShowWholeFile: true, toggleWrap: vi.fn(), toggleWholeFile: vi.fn() };
     const { commands } = build(makeAppState(), { currentDiff });
     const wrap = commands.find((c) => c.id === "toggle-wrap-lines")!;
-    expect(wrap.label).toBe("Toggle wrap lines (src/a.ts)");
+    expect(wrap.label).toBe("Wrap lines (src/a.ts)");
     wrap.run();
     expect(currentDiff.toggleWrap).toHaveBeenCalled();
     const whole = commands.find((c) => c.id === "toggle-show-whole-file")!;
-    expect(whole.label).toBe("Toggle show whole file (src/a.ts)");
+    expect(whole.label).toBe("Show whole file (src/a.ts)");
     whole.run();
     expect(currentDiff.toggleWholeFile).toHaveBeenCalled();
   });
@@ -2100,7 +2102,7 @@ describe("remote and tag palette entries", () => {
     expect(command?.label).toBe("Switch to tag v1 (detached)");
     command?.run();
     expect(appState.checkoutCommit).toHaveBeenCalledWith("c1");
-    expect(command?.group).toBe("Branches");
+    expect(command?.group).toBe("Tags");
   });
 
   it("opens Delete from remote… for each tag while a remote exists", () => {
@@ -2480,10 +2482,10 @@ describe("agree with the branch, remote, stash and worktree menus (#509)", () =>
     if (state.remotes.length > 0) {
       expectAgreement(menu(branchTree(state), "Actions for remote origin"), ids, [
         ["Fetch", "fetch-remote:origin"],
-        ["Push current branch here", "push-branch:origin"],
-        ["Edit remote", "edit-remote:origin"],
-        ["Manage credentials", "manage-credentials:origin"],
-        ["Remove remote", "remove-remote:origin"],
+        ["Push current branch to origin", "push-branch:origin"],
+        ["Edit remote…", "edit-remote:origin"],
+        ["Manage credentials…", "manage-credentials:origin"],
+        ["Remove remote…", "remove-remote:origin"],
       ], state);
     }
 
@@ -2521,18 +2523,18 @@ describe("agree with the branch, remote, stash and worktree menus (#509)", () =>
       fireEvent.click(screen.getByRole("button", { name: "Worktrees" }));
       for (const [label, id] of [
         ["Open /repo", "open-worktree:/repo"],
-        ["Remove /repo", "remove-worktree:main"],
+        ["Remove /repo…", "remove-worktree:main"],
         ["Open /repo-wt1", "open-worktree:/repo-wt1"],
-        ["Remove /repo-wt1", "remove-worktree:wt1"],
+        ["Remove /repo-wt1…", "remove-worktree:wt1"],
         ["Prune worktrees", "prune-worktrees"],
       ]) {
         // ReasonButtons (#748): aria-disabled, the reason in visible text as their description.
         const button = screen.getByRole("button", { name: label });
         const unavailable = button.getAttribute("aria-disabled") === "true";
         expect({ label, offered: ids.includes(id) }).toEqual({ label, offered: !unavailable });
-        if (unavailable && label !== "Remove /repo") expect(describedByText(button)).toBe(blockers.reason);
+        if (unavailable && label !== "Remove /repo…") expect(describedByText(button)).toBe(blockers.reason);
       }
-      expect(describedByText(screen.getByRole("button", { name: "Remove /repo" }))).toBe(
+      expect(describedByText(screen.getByRole("button", { name: "Remove /repo…" }))).toBe(
         blockers.reason ?? "The main worktree can't be removed.",
       );
     } finally {
@@ -2615,16 +2617,16 @@ describe("command ids and groups", () => {
       ["apply-patch", "Diff"],
       ["browse-remote-branches:origin", "Remotes"],
       ["checkout-selected", "General"],
-      ["checkout-tag:v1.0", "Branches"],
+      ["checkout-tag:v1.0", "Tags"],
       ["cherry-pick-selected", "General"],
       ["clone-repository", "General"],
       ["close-tab", "Repositories"],
-      ["create-tag-head", "Branches"],
-      ["create-tag-selected", "Branches"],
+      ["create-tag-head", "Tags"],
+      ["create-tag-selected", "Tags"],
       ["decrease-context-lines", "Diff"],
       ["delete-remote-branch", "Remotes"],
-      ["delete-remote-tag:v1.0", "Remotes"],
-      ["delete-tag:v1.0", "Branches"],
+      ["delete-remote-tag:v1.0", "Tags"],
+      ["delete-tag:v1.0", "Tags"],
       ["discard-all-unstaged", "Diff"],
       ["discard-current-file", "Diff"],
       ["discard-selected-files", "Diff"],
@@ -2667,7 +2669,7 @@ describe("command ids and groups", () => {
       ["pull-strategy:FastForwardOnly", "Remotes"],
       ["push-branch-to", "Remotes"],
       ["push-branch:origin", "Remotes"],
-      ["push-tags:origin", "Remotes"],
+      ["push-tags:origin", "Tags"],
       ["redo", "General"],
       ["refresh", "General"],
       ["toggle-collapse-merges", "General"],
@@ -2704,8 +2706,8 @@ describe("command ids and groups", () => {
       ["create-branch", "Branches"],
       ["add-remote", "Remotes"],
       ["clone-repository", "General"],
-      ["create-tag-head", "Branches"],
-      ["create-tag-selected", "Branches"],
+      ["create-tag-head", "Tags"],
+      ["create-tag-selected", "Tags"],
       ["decrease-context-lines", "Diff"],
       ["discard-all-unstaged", "Diff"],
       ["discard-current-file", "Diff"],
@@ -2759,8 +2761,8 @@ describe("command ids and groups", () => {
       ["add-remote", "Remotes"],
       ["clone-repository", "General"],
       ["continue-sequence", "General"],
-      ["create-tag-head", "Branches"],
-      ["create-tag-selected", "Branches"],
+      ["create-tag-head", "Tags"],
+      ["create-tag-selected", "Tags"],
       ["decrease-context-lines", "Diff"],
       ["discard-all-unstaged", "Diff"],
       ["discard-current-file", "Diff"],
@@ -2810,8 +2812,8 @@ describe("command ids and groups", () => {
       ["create-branch", "Branches"],
       ["add-remote", "Remotes"],
       ["clone-repository", "General"],
-      ["create-tag-head", "Branches"],
-      ["create-tag-selected", "Branches"],
+      ["create-tag-head", "Tags"],
+      ["create-tag-selected", "Tags"],
       ["decrease-context-lines", "Diff"],
       ["discard-all-unstaged", "Diff"],
       ["discard-current-file", "Diff"],
@@ -2869,14 +2871,14 @@ describe("command ids and groups", () => {
       ["apply-patch", "Diff"],
       ["apply-stash:0", "Stash"],
       ["browse-remote-branches:origin", "Remotes"],
-      ["checkout-tag:v1.0", "Branches"],
+      ["checkout-tag:v1.0", "Tags"],
       ["clone-repository", "General"],
       ["close-tab", "Repositories"],
-      ["create-tag-head", "Branches"],
+      ["create-tag-head", "Tags"],
       ["decrease-context-lines", "Diff"],
       ["delete-remote-branch", "Remotes"],
-      ["delete-remote-tag:v1.0", "Remotes"],
-      ["delete-tag:v1.0", "Branches"],
+      ["delete-remote-tag:v1.0", "Tags"],
+      ["delete-tag:v1.0", "Tags"],
       ["discard-current-file", "Diff"],
       ["discard-selected-files", "Diff"],
       ["drop-stash:0", "Stash"],
@@ -2919,7 +2921,7 @@ describe("command ids and groups", () => {
       ["pull-strategy:FastForwardOnly", "Remotes"],
       ["push-branch-to", "Remotes"],
       ["push-branch:origin", "Remotes"],
-      ["push-tags:origin", "Remotes"],
+      ["push-tags:origin", "Tags"],
       ["redo", "General"],
       ["refresh", "General"],
       ["toggle-collapse-merges", "General"],

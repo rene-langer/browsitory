@@ -23,10 +23,17 @@ describe("commitActions", () => {
       expect(action.enabled).toBe(true);
       expect(action.reason).toBeUndefined();
     }
-    expect(actions.cherryPick).toMatchObject({ label: "Cherry-pick", paletteLabel: "Cherry-pick abc1234", needsParent: false });
-    expect(actions.revert).toMatchObject({ label: "Revert", paletteLabel: "Revert abc1234" });
+    expect(actions.cherryPick).toMatchObject({
+      label: "Cherry-pick onto main",
+      paletteLabel: "Cherry-pick abc1234 onto main",
+      needsParent: false,
+    });
+    expect(actions.revert).toMatchObject({
+      label: "Revert (new commit on main)",
+      paletteLabel: "Revert abc1234 (new commit on main)",
+    });
     expect(actions.checkout).toMatchObject({ label: "Switch to (detached)", paletteLabel: "Switch to abc1234 (detached)" });
-    expect(actions.reset).toMatchObject({ label: "Reset main to here…", paletteLabel: "Reset to abc1234…" });
+    expect(actions.reset).toMatchObject({ label: "Reset main to here…", paletteLabel: "Reset main to abc1234…" });
     expect(actions.createTag).toMatchObject({ label: "Create tag…", paletteLabel: "Create tag at abc1234…" });
   });
 
@@ -49,9 +56,18 @@ describe("commitActions", () => {
 
   it("asks for a parent on a merge commit", () => {
     const actions = commitActions({ blockers: free, headId: null, currentBranch: "main" }, commit("abc1234", ["p1", "p2"]));
-    expect(actions.cherryPick).toMatchObject({ label: "Cherry-pick…", paletteLabel: "Cherry-pick abc1234…", needsParent: true });
-    expect(actions.revert).toMatchObject({ label: "Revert…", paletteLabel: "Revert abc1234…", needsParent: true });
+    expect(actions.cherryPick).toMatchObject({
+      label: "Cherry-pick onto main…",
+      paletteLabel: "Cherry-pick abc1234 onto main…",
+      needsParent: true,
+    });
+    expect(actions.revert).toMatchObject({
+      label: "Revert (new commit on main)…",
+      paletteLabel: "Revert abc1234 (new commit on main)…",
+      needsParent: true,
+    });
   });
+
 });
 
 // #744: commits dragged from the graph onto a branch in the sidebar. A cherry-pick lands on the
