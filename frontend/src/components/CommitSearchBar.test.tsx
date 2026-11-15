@@ -233,23 +233,21 @@ describe("recent searches (#540)", () => {
 it("toggles the commit list's lines-changed badges (#620)", () => {
   const onToggleLineStats = vi.fn();
   const props = renderBar({ showLineStats: true, onToggleLineStats });
-  const toggle = screen.getByRole("button", { name: "Show lines changed" });
-  expect(toggle).toHaveAttribute("aria-pressed", "true");
-  fireEvent.click(toggle);
+  expect(viewOptionState("Show lines changed", "Graph view")).toBe("true");
+  chooseViewOption("Show lines changed", "Graph view");
   expect(onToggleLineStats).toHaveBeenCalledTimes(1);
   props.rerender({ showLineStats: false });
-  expect(toggle).toHaveAttribute("aria-pressed", "false");
+  expect(viewOptionState("Show lines changed", "Graph view")).toBe("false");
 });
 
 it("toggles Collapse merges (#617)", () => {
   const onToggleCollapseMerges = vi.fn();
   const props = renderBar({ collapseMerges: false, onToggleCollapseMerges });
-  const toggle = screen.getByRole("button", { name: "Collapse merges" });
-  expect(toggle).toHaveAttribute("aria-pressed", "false");
-  fireEvent.click(toggle);
+  expect(viewOptionState("Collapse merges", "Graph view")).toBe("false");
+  chooseViewOption("Collapse merges", "Graph view");
   expect(onToggleCollapseMerges).toHaveBeenCalledTimes(1);
   props.rerender({ collapseMerges: true });
-  expect(toggle).toHaveAttribute("aria-pressed", "true");
+  expect(viewOptionState("Collapse merges", "Graph view")).toBe("true");
 });
 
 // #687: with a search open, Enter / F3 go to the next match, with Shift to the previous one.

@@ -5,6 +5,7 @@ import { wordDiff } from "../lib/wordDiff";
 import type { ReactNode } from "react";
 import { DiffSettingsContext, type DiffSettingsApi } from "../state/useDiffSettings";
 import { DiffView as PaneDiffView } from "./DiffView";
+import { chooseViewOption, viewOptionNames, viewOptionState } from "../test/viewMenu";
 import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
 import { DiffViewOptionsProvider } from "../state/DiffViewOptionsProvider";
 
@@ -559,7 +560,7 @@ describe("DiffView options toolbar", () => {
         <DiffView hunks={[lineHunk]} />
       </TestDiffSettings>,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Ignore whitespace" }));
+    chooseViewOption("Ignore whitespace");
     expect(update).toHaveBeenCalledWith({ ignoreWhitespace: true });
     fireEvent.click(screen.getByRole("button", { name: "More context lines" }));
     expect(update).toHaveBeenCalledWith({ contextLines: 4 });
@@ -593,9 +594,8 @@ describe("DiffView show whitespace (#616)", () => {
         <DiffView hunks={[wsHunk]} />
       </TestDiffSettings>,
     );
-    const button = screen.getByRole("button", { name: "Show whitespace" });
-    expect(button).toHaveAttribute("aria-pressed", "false");
-    fireEvent.click(button);
+    expect(viewOptionState("Show whitespace")).toBe("false");
+    chooseViewOption("Show whitespace");
     expect(value.update).toHaveBeenCalledWith({ showWhitespace: true });
   });
 
@@ -615,7 +615,7 @@ describe("DiffView show whitespace (#616)", () => {
       </TestDiffSettings>,
     );
     if (split) fireEvent.click(screen.getByRole("button", { name: "Split view" }));
-    expect(screen.getByRole("button", { name: "Show whitespace" })).toHaveAttribute("aria-pressed", "true");
+    expect(viewOptionState("Show whitespace")).toBe("true");
     const [context, removed, added] = contents(container);
     expect(markers(context)).toEqual(["space", "cr"]);
     expect(markers(removed)).toEqual(["tab"]);
@@ -663,7 +663,6 @@ describe("DiffView word wrap", () => {
     settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap, algorithm: "Default" as const, showWhitespace: false, expandUntracked: true },
     update: vi.fn(),
   });
-  const wrapButton = () => screen.getByRole("button", { name: "Wrap lines" });
   const lines = (container: HTMLElement) => container.querySelector<HTMLElement>("[data-wrap]")!;
 
   it("follows the setting: Auto leaves code unwrapped in the unified view and wraps the split view", () => {
@@ -673,7 +672,7 @@ describe("DiffView word wrap", () => {
       </TestDiffSettings>,
     );
     expect(lines(container)).toHaveAttribute("data-wrap", "false");
-    expect(wrapButton()).toHaveAttribute("aria-pressed", "mixed");
+    expect(viewOptionState("Wrap lines")).toBe("mixed");
     fireEvent.click(screen.getByRole("button", { name: "Split view" }));
     expect(lines(container)).toHaveAttribute("data-wrap", "true");
   });
@@ -686,8 +685,8 @@ describe("DiffView word wrap", () => {
       </TestDiffSettings>,
     );
     expect(lines(container)).toHaveAttribute("data-wrap", "true");
-    expect(wrapButton()).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(wrapButton());
+    expect(viewOptionState("Wrap lines")).toBe("true");
+    chooseViewOption("Wrap lines");
     expect(value.update).toHaveBeenCalledWith({ wordWrap: "Off" });
   });
 
@@ -709,9 +708,9 @@ describe("DiffView word wrap", () => {
 describe("DiffView whole file", () => {
   it("offers Show whole file only when the pane's diffs can fetch it", () => {
     const { rerender } = render(<DiffView hunks={[lineHunk]} />);
-    expect(screen.queryByRole("button", { name: "Show whole file" })).toBeNull();
+    expect(viewOptionNames()).not.toContain("Show whole file");
     rerender(<DiffView hunks={[lineHunk]} wholeFile={{ on: false, onToggle: vi.fn(), tooLongLines: null }} />);
-    expect(screen.getByRole("button", { name: "Show whole file" })).toBeInTheDocument();
+    expect(viewOptionNames()).toContain("Show whole file");
   });
 
   it("says when the file is too long to show whole", () => {

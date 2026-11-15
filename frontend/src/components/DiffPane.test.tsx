@@ -15,6 +15,7 @@ import { cascadedValue, rulesOf, subjectOf } from "../test/cssCascade";
 import { fakeRepoClient } from "../test/fakeRepoClient";
 import { describedByText } from "../test/describedBy";
 import { chooseCommitMenuItem, commitMenuItems } from "../test/commitMenu";
+import { chooseViewOption } from "../test/viewMenu";
 
 const TEST_REPO_PATH = "/repo";
 
@@ -1936,7 +1937,7 @@ describe("DiffPane diff options contract", () => {
       pane(fakeClient({ getWorkingDiff }), { ignoreWhitespace: false, contextLines: 3 }, { onStageHunk, onStageLines }),
     );
     await screen.findByRole("button", { name: "Stage hunk" });
-    fireEvent.click(screen.getByRole("button", { name: "Show whole file" }));
+    chooseViewOption("Show whole file");
     await waitFor(() =>
       expect(getWorkingDiff).toHaveBeenLastCalledWith(TEST_REPO_PATH, "f.txt", false, {
         ignoreWhitespace: false,
@@ -1951,7 +1952,7 @@ describe("DiffPane diff options contract", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Stage lines (1)" }));
     await waitFor(() => expect(onStageLines).toHaveBeenCalledWith("f.txt", 1, 1, { contextLines: WHOLE_FILE_CONTEXT_LINES, algorithm: "Default" }, [2], shown));
 
-    fireEvent.click(screen.getByRole("button", { name: "Show whole file" }));
+    chooseViewOption("Show whole file");
     await waitFor(() =>
       expect(getWorkingDiff).toHaveBeenLastCalledWith(TEST_REPO_PATH, "f.txt", false, { ignoreWhitespace: false, contextLines: 3, algorithm: "Default" }),
     );
@@ -1970,7 +1971,7 @@ describe("DiffPane diff options contract", () => {
     );
     render(pane(fakeClient({ getWorkingDiff }), { ignoreWhitespace: false, contextLines: 3 }, {}));
     await screen.findByRole("button", { name: "Stage hunk" });
-    fireEvent.click(screen.getByRole("button", { name: "Show whole file" }));
+    chooseViewOption("Show whole file");
     expect(await screen.findByText(/too long to show whole \(10,001 lines\)/)).toBeInTheDocument();
     await waitFor(() =>
       expect(getWorkingDiff).toHaveBeenLastCalledWith(TEST_REPO_PATH, "f.txt", false, { ignoreWhitespace: false, contextLines: 3, algorithm: "Default" }),
