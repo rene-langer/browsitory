@@ -2700,6 +2700,86 @@ describe("App", () => {
         expect(screen.queryByRole("button", { name: "Amend" })).toBeNull();
       });
 
+      // A4: a Reword of HEAD is not an amend: it leaves amend mode and Skip hooks as they were,
+      // and a failure names the reword.
+      async function rewordHead(message: string) {
+        fireEvent.contextMenu((await screen.findByText(/c2 two/)).closest("li")!);
+        fireEvent.click(screen.getByRole("menuitem", { name: "Reword…" }));
+        const dialog = await screen.findByRole("dialog", { name: "Reword commit c2" });
+        const field = await within(dialog).findByDisplayValue("two");
+        fireEvent.change(field, { target: { value: message } });
+        fireEvent.click(within(dialog).getByRole("button", { name: "Reword" }));
+      }
+
+      it("keeps amend mode and Skip hooks through a Reword of HEAD (#981)", async () => {
+        const amendCommit = vi.fn<RepoClient["amendCommit"]>(async () => ({ kind: "Committed", commitId: "c2b" }));
+        render(
+          <App
+            client={pickClient({
+              getStatus: async () => [{ path: "staged.txt", oldPath: null, staged: true, kind: "Modified" }],
+              getHeadInfo: async () => head({ commitHooks: ["pre-commit"] }),
+              getCommitMessage: async () => "two\n",
+              amendCommit,
+            })}
+          />,
+        );
+        await screen.findByRole("button", { name: "More commit options" });
+        fireEvent.click(await screen.findByRole("checkbox", { name: "Skip hooks" }));
+        chooseCommitMenuItem("Amend last commit");
+        expect(await screen.findByRole("button", { name: "Amend" })).toBeInTheDocument();
+
+        await rewordHead("two, reworded");
+        expect(await screen.findByText("Reworded c2")).toBeInTheDocument();
+        expect(amendCommit).toHaveBeenCalledTimes(1);
+        expect(screen.getByRole("button", { name: "Amend" })).toBeInTheDocument();
+        expect(screen.getByRole("checkbox", { name: "Skip hooks" })).toBeChecked();
+      });
+
+      it("names a failed Reword of HEAD as a reword (#981, #1032)", async () => {
+        render(
+          <App
+            client={pickClient({
+              getCommitMessage: async () => "two\n",
+              amendCommit: async () => {
+                throw new RepoError("Other", "failed to lock file");
+              },
+            })}
+          />,
+        );
+        await rewordHead("two, reworded");
+        const banner = await screen.findByRole("alert");
+        expect(banner).toHaveTextContent("Couldn't reword c2: failed to lock file");
+        expect(banner).toHaveTextContent("Check that no other Git program is using the repository, then try again.");
+        expect(banner).not.toHaveTextContent("amend");
+      });
+
+      it("offers to reword without hooks when a hook stops a Reword of HEAD (#981)", async () => {
+        const amendCommit = vi
+          .fn<RepoClient["amendCommit"]>()
+          .mockResolvedValueOnce({ kind: "HookFailed", hook: "commit-msg", output: "no\n" })
+          .mockResolvedValueOnce({ kind: "Committed", commitId: "c2b" });
+        render(
+          <App
+            client={pickClient({
+              getHeadInfo: async () => head({ commitHooks: ["commit-msg"] }),
+              getCommitMessage: async () => "two\n",
+              amendCommit,
+            })}
+          />,
+        );
+        await rewordHead("two, reworded");
+        const dialog = await screen.findByRole("dialog", { name: "commit-msg hook failed" });
+        fireEvent.click(within(dialog).getByRole("button", { name: "Reword without hooks" }));
+        await waitFor(() =>
+          expect(amendCommit).toHaveBeenLastCalledWith("/repos/a", "two, reworded\n", true, {
+            author: null,
+            trailers: [],
+            messageOnly: true,
+          }),
+        );
+        expect(await screen.findByText("Reworded c2")).toBeInTheDocument();
+      });
+
       it("names an Edit commit… stop after the edit: strip, toolbar, confirm and toasts (#994, #995, #979)", async () => {
         let rebase: RebaseInfo | null = null;
         let status: StatusEntry[] = [];
