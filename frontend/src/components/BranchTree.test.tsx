@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import type { RepoClient } from "../ipc/RepoClient";
 import { BranchTree } from "./BranchTree";
@@ -465,6 +465,43 @@ describe("BranchTree — local branches", () => {
 
     fireEvent.change(input, { target: { value: "feat/bar" } });
     expect(within(dialog).queryByText("Branch names can't contain spaces.")).not.toBeInTheDocument();
+  });
+
+  it("refuses a taken name in the dialog without calling onRenameBranch (#1002)", () => {
+    const { props } = renderTree();
+    const { dialog, input } = openRenameDialog();
+    fireEvent.change(input, { target: { value: "main" } });
+
+    expect(within(dialog).getByText('A branch named "main" already exists.')).toBeInTheDocument();
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(within(dialog).getByRole("button", { name: "Rename", hidden: true })).toBeDisabled();
+    fireEvent.submit(input.closest("form")!);
+    expect(props.onRenameBranch).not.toHaveBeenCalled();
+  });
+
+  it("keeps the dialog open with the typed name and the failure inside it when the rename fails (#422)", async () => {
+    const onRenameBranch = vi.fn().mockResolvedValue("the branch is locked");
+    renderTree({ onRenameBranch });
+    const { dialog, input } = openRenameDialog();
+    fireEvent.change(input, { target: { value: "feat/bar" } });
+    fireEvent.submit(input.closest("form")!);
+
+    expect(await within(dialog).findByText("the branch is locked")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Rename branch", hidden: true })).toBeInTheDocument();
+    expect(input).toHaveValue("feat/bar");
+  });
+
+  it("disables Rename with the reason once the repository is busy (#1002)", () => {
+    const { props, rerender } = renderTree();
+    const { dialog, input } = openRenameDialog();
+    fireEvent.change(input, { target: { value: "feat/bar" } });
+    rerender(<BranchTreeWithDialogs {...props} operationDisabled operationDisabledReason="A merge is in progress." />);
+
+    const rename = within(dialog).getByRole("button", { name: "Rename", hidden: true });
+    expect(rename).toBeDisabled();
+    expect(describedByText(rename)).toBe("A merge is in progress.");
+    fireEvent.submit(input.closest("form")!);
+    expect(props.onRenameBranch).not.toHaveBeenCalled();
   });
 
   it("disables the merge action while a merge is already in progress", () => {
@@ -1093,6 +1130,20 @@ describe("BranchTree — remote list states and upstream block", () => {
     fireEvent.click(screen.getByRole("button", { name: "Actions for main" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Clear upstream…" }));
   }
+
+  it("offers Clear upstream… only on the current branch, and only with an upstream (#1025)", () => {
+    renderTree({ upstream: up });
+    fireEvent.click(screen.getByRole("button", { name: "Actions for main" }));
+    expect(screen.getByRole("menuitem", { name: "Clear upstream…" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Actions for feat/foo" }));
+    expect(screen.queryByRole("menuitem", { name: "Clear upstream…" })).toBeNull();
+    cleanup();
+
+    renderTree();
+    fireEvent.click(screen.getByRole("button", { name: "Actions for main" }));
+    expect(screen.queryByRole("menuitem", { name: "Clear upstream…" })).toBeNull();
+    expect(screen.getByTitle("main")).toBeInTheDocument();
+  });
 
   it("asks for confirmation before clearing the upstream", async () => {
     const { props } = renderTree({ upstream: up });
