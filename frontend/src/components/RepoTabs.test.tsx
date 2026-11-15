@@ -462,6 +462,16 @@ describe("RepoTabs tab list (#625)", () => {
     expect(filter).toHaveAttribute("aria-activedescendant", api.id);
   });
 
+  it("marks a tab with uncommitted changes with ± and the file count, as the tab bar does (#1028)", () => {
+    renderMany({ changedCounts: new Map([["/other/tools", 2]]) });
+    fireEvent.click(screen.getByRole("button", { name: "List open tabs" }));
+    const tools = within(screen.getByRole("group", { name: "Not in a workspace" })).getByRole("option");
+    const marker = within(tools).getByText("±2");
+    expect(marker).toHaveAttribute("aria-hidden", "true");
+    expect(marker).toHaveAttribute("title", "Uncommitted changes in 2 files");
+    expect(tools).toHaveTextContent("tools, uncommitted changes in 2 files");
+  });
+
   it("filters by name, folder name and path", () => {
     renderMany();
     fireEvent.click(screen.getByRole("button", { name: "List open tabs" }));
