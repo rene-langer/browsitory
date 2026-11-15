@@ -1,4 +1,5 @@
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
+import { useEscapeToClose } from "../lib/escapeToClose";
 import type { BranchInfo } from "../ipc/RepoClient";
 import { readCheckoutNewBranch, writeCheckoutNewBranch } from "../lib/checkoutNewBranch";
 import { branchNameProblem } from "../lib/refName";
@@ -36,6 +37,16 @@ export function NewBranchForm({
   const [checkoutAfterCreate, setCheckoutAfterCreate] = useState(readCheckoutNewBranch);
   const [newBranchName, setNewBranchName] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+  // Escape anywhere in the form closes it, focus back where it came from (#1001).
+  const { containerRef: escapeRef, onKeyDown: onEscapeKeyDown, close: closeAndRefocus } = useEscapeToClose<HTMLFormElement>({
+    open: draft !== null,
+    initialFocus: nameRef,
+    onClose: () => {
+      setCreateError(null);
+      onClose();
+    },
+  });
 
   if (draft === null) return null;
 
@@ -57,15 +68,12 @@ export function NewBranchForm({
     setCreateError(null);
   };
 
-  const close = () => {
-    setCreateError(null);
-    onClose();
-  };
-
   return (
     <form
+      ref={escapeRef}
       className={styles.draftForm}
       aria-label="New branch"
+      onKeyDown={onEscapeKeyDown}
       onSubmit={(event) => {
         event.preventDefault();
         if (newBranchProblem === null) void submitCreate();
@@ -79,7 +87,7 @@ export function NewBranchForm({
       </label>
       <input
         id="new-branch-name"
-        autoFocus
+        ref={nameRef}
         value={newBranchName}
         aria-invalid={newBranchProblem !== null}
         aria-describedby={newBranchProblem !== null ? "new-branch-name-problem" : undefined}
@@ -88,9 +96,6 @@ export function NewBranchForm({
           setCreateError(null);
         }}
         placeholder="New branch name"
-        onKeyDown={(event) => {
-          if (event.key === "Escape") close();
-        }}
       />
       {newBranchProblem !== null && (
         <p id="new-branch-name-problem" className={styles.draftProblem}>
@@ -118,7 +123,7 @@ export function NewBranchForm({
         >
           Create
         </button>
-        <button type="button" onClick={close}>
+        <button type="button" onClick={closeAndRefocus}>
           Cancel
         </button>
       </div>

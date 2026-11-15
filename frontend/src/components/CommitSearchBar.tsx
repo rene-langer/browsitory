@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { CircleHelp, Diff, FoldVertical, Search, X } from "lucide-react";
+import { useEscapeToClose } from "../lib/escapeToClose";
 import { SEARCH_SYNTAX, SEARCH_SYNTAX_FOOTER } from "../lib/searchSyntax";
 import styles from "./CommitSearchBar.module.css";
 
@@ -58,6 +59,9 @@ export function CommitSearchBar({
   // The highlighted recent search, -1 for none (the list opens with nothing highlighted).
   const [active, setActive] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Escape on any control of the bar closes the open help, else the search, and focus goes back
+  // to where it was before the search (#1001).
+  const { containerRef: escapeRef, onKeyDown: onEscapeKeyDown, close: closeAndRefocus } = useEscapeToClose<HTMLDivElement>({ onClose });
   const helpId = useId();
   const errorId = useId();
   const listId = useId();
@@ -133,15 +137,28 @@ export function CommitSearchBar({
     if (event.key === "Escape") {
       event.preventDefault();
       if (helpOpen) setHelpOpen(false);
-      else onClose();
+      else closeAndRefocus();
     } else if (event.key === "ArrowDown") {
       event.preventDefault();
       onFocusResults();
     }
   };
 
+  // The field handles its own keys (above); this is Escape on the bar's other controls. With
+  // nothing open (no help, no query) it is left to the page.
+  const handleBarKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Escape" || event.defaultPrevented) return;
+    if (helpOpen) {
+      event.preventDefault();
+      event.stopPropagation();
+      setHelpOpen(false);
+    } else if (query !== "") {
+      onEscapeKeyDown(event);
+    }
+  };
+
   return (
-    <div className={styles.bar} role="search">
+    <div ref={escapeRef} className={styles.bar} role="search" onKeyDown={handleBarKeyDown}>
       <Search size={14} aria-hidden="true" className={styles.icon} />
       <input
         ref={inputRef}
@@ -174,7 +191,7 @@ export function CommitSearchBar({
         onKeyDown={handleKeyDown}
       />
       {query !== "" && (
-        <button type="button" className={styles.iconButton} aria-label="Close search" onClick={onClose}>
+        <button type="button" className={styles.iconButton} aria-label="Close search" onClick={closeAndRefocus}>
           <X size={14} aria-hidden="true" />
         </button>
       )}
