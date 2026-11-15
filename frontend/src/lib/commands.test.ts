@@ -2512,39 +2512,36 @@ describe("agree with the branch, remote, stash and worktree menus (#509)", () =>
       ["Drop…", "drop-stash:0", stashRules.drop],
     ], state);
 
-    // The worktree panel's buttons, for both worktrees (the main one can't be removed, #561).
+    // The worktree panel's row menus, for both worktrees (the main one has no Remove, #561,
+    // #1011), and its Prune button.
     const blockers = operationBlockers(state);
+    const worktreePanel = createElement(WorktreePanel, {
+      worktrees: state.worktrees,
+      branches: state.branches,
+      onOpenWorktree: vi.fn(),
+      onCreateWorktree: vi.fn(),
+      onRemoveWorktree: vi.fn(),
+      onPruneWorktrees: vi.fn(),
+      operationDisabled: blockers.blocked,
+      operationDisabledReason: blockers.reason,
+    });
+    expectAgreement(menu(worktreePanel, "Actions for /repo", "Worktrees"), ids, [
+      ["Open in new tab", "open-worktree:/repo"],
+      ["Remove…", "remove-worktree:main"],
+    ], state);
+    expectAgreement(menu(worktreePanel, "Actions for /repo-wt1", "Worktrees"), ids, [
+      ["Open in new tab", "open-worktree:/repo-wt1"],
+      ["Remove…", "remove-worktree:wt1"],
+    ], state);
     localStorage.clear();
-    render(
-      createElement(WorktreePanel, {
-        worktrees: state.worktrees,
-        branches: state.branches,
-        onOpenWorktree: vi.fn(),
-        onCreateWorktree: vi.fn(),
-        onRemoveWorktree: vi.fn(),
-        onPruneWorktrees: vi.fn(),
-        operationDisabled: blockers.blocked,
-        operationDisabledReason: blockers.reason,
-      }),
-    );
+    render(worktreePanel);
     try {
       fireEvent.click(screen.getByRole("button", { name: "Worktrees" }));
-      for (const [label, id] of [
-        ["Open /repo", "open-worktree:/repo"],
-        ["Remove /repo…", "remove-worktree:main"],
-        ["Open /repo-wt1", "open-worktree:/repo-wt1"],
-        ["Remove /repo-wt1…", "remove-worktree:wt1"],
-        ["Prune worktrees", "prune-worktrees"],
-      ]) {
-        // ReasonButtons (#748): aria-disabled, the reason in visible text as their description.
-        const button = screen.getByRole("button", { name: label });
-        const unavailable = button.getAttribute("aria-disabled") === "true";
-        expect({ label, offered: ids.includes(id) }).toEqual({ label, offered: !unavailable });
-        if (unavailable && label !== "Remove /repo…") expect(describedByText(button)).toBe(blockers.reason);
-      }
-      expect(describedByText(screen.getByRole("button", { name: "Remove /repo…" }))).toBe(
-        blockers.reason ?? "The main worktree can't be removed.",
-      );
+      // A ReasonButton (#748): aria-disabled, the reason in visible text as its description.
+      const prune = screen.getByRole("button", { name: "Prune worktrees" });
+      const unavailable = prune.getAttribute("aria-disabled") === "true";
+      expect({ offered: ids.includes("prune-worktrees") }).toEqual({ offered: !unavailable });
+      if (unavailable) expect(describedByText(prune)).toBe(blockers.reason);
     } finally {
       cleanup();
     }

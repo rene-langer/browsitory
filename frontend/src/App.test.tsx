@@ -1729,11 +1729,12 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /^Worktrees/ }));
     await screen.findByText("/repos/a-feature");
-    const form = screen.getByRole("form", { name: "Create worktree" });
+    fireEvent.click(screen.getByRole("button", { name: "New worktree…" }));
+    const form = screen.getByRole("dialog", { name: "New worktree", hidden: true });
     fireEvent.change(within(form).getByLabelText("Worktree name"), { target: { value: "feature" } });
     fireEvent.change(within(form).getByLabelText("Worktree path"), { target: { value: "/repos/a-other" } });
     fireEvent.change(within(form).getByLabelText("Branch"), { target: { value: "other" } });
-    fireEvent.click(within(form).getByRole("button", { name: "Create worktree" }));
+    fireEvent.click(within(form).getByRole("button", { name: "Create worktree", hidden: true }));
 
     expect(await within(form).findByText('A worktree named "feature" already exists.')).toBeInTheDocument();
     expect(screen.queryByText("/repos/a-other")).toBeNull();
