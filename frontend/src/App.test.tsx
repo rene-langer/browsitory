@@ -1172,8 +1172,10 @@ describe("App", () => {
     });
     render(<App client={client} />);
 
-    const continueButton = await screen.findByRole("button", { name: "Continue cherry-pick" });
-    await waitFor(() => expect(continueButton).toBeEnabled());
+    // The status strip's Continue: the dock has none since #995.
+    const strip = await screen.findByRole("status", { name: "Operation status" });
+    const continueButton = within(strip).getByRole("button", { name: "Continue" });
+    await waitFor(() => expect(continueButton).not.toHaveAttribute("aria-disabled", "true"));
     fireEvent.click(continueButton);
 
     const dialog = await screen.findByRole("dialog", { name: "pre-commit hook failed" });
