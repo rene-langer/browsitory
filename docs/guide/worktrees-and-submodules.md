@@ -1,7 +1,17 @@
 # Worktrees and submodules
 
-**Worktrees** creates and removes linked worktrees, and opens one directly
-in Browsitory. If the worktree's folder is inside folders that don't exist
+**Worktrees** lists the repository's worktrees: each row shows the worktree's name ("Main
+worktree" for the main one), its branch and its folder. **+** in the section header opens **New
+worktree**, which asks for:
+
+- **Branch**: an existing branch, or the name of a new one;
+- **Start point**: where a new branch starts, such as `HEAD` or `main` (an existing branch
+  doesn't need one);
+- **Worktree path**: the folder to check the branch out in (a relative path starts at the
+  repository's folder);
+- **Worktree name**: git's name for the worktree, usually the folder's name.
+
+If creating it fails, the dialog says why and keeps what you typed. If the worktree's folder is inside folders that don't exist
 yet, Browsitory creates them, as `git worktree add` does. On Windows, the
 worktree's name and the folders in its path, as you type it, can't end in a
 dot or a space,
@@ -17,10 +27,11 @@ it; delete it by hand. A half-made worktree left by an older version of
 Browsitory can't be removed with Remove: delete its folder by hand, click
 **Prune worktrees**, then delete the branch if you don't need it.
 
-Each worktree's row has **Open ⟨path⟩** and **Remove ⟨path⟩…**, the main worktree's **Open** too, so
-you can get back to it from a linked worktree's tab. The command palette has the same: **Open
-worktree ⟨name⟩** for a linked worktree and **Open main worktree**, and **Remove worktree ⟨name⟩…**
-for a linked one, which asks first as the row's button does. While a merge, rebase, cherry-pick or
+Each worktree's menu (its **…** button, a right-click, or the Menu key or Shift+F10 on the row)
+has **Open in new tab** and, for a linked worktree, **Remove…**; the main worktree can't be
+removed. Open the main worktree to get back to it from a linked worktree's tab. The command
+palette has the same: **Open worktree ⟨name⟩** for a linked worktree and **Open main worktree**,
+and **Remove worktree ⟨name⟩…** for a linked one, which asks first as the menu item does. While a merge, rebase, cherry-pick or
 revert is in progress, or another action or a transfer runs, opening, removing and pruning are
 disabled with the reason and left out of the palette; an open Remove confirmation says why.
 
