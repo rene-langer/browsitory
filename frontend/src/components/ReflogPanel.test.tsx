@@ -118,6 +118,18 @@ describe("ReflogPanel", () => {
     expect(onRestore).toHaveBeenCalledWith("refs/heads/main", entry.newId);
   });
 
+  it("confirms with the shared dialog: a title, the consequence, Undo, and Restore main (#987)", () => {
+    const onRestore = vi.fn().mockResolvedValue(undefined);
+    renderPanel({ onRestore });
+    fireEvent.click(screen.getByRole("button", { name: `Restore main to ${entry.newId}` }));
+
+    const dialog = screen.getByRole("dialog", { name: "Restore main" });
+    expect(within(dialog).getByRole("heading", { level: 2, name: "Restore main" })).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("Undo can bring it back.");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Restore main" }));
+    expect(onRestore).toHaveBeenCalledWith("refs/heads/main", entry.newId);
+  });
+
   it("disables restore controls while a repository mutation is pending", () => {
     renderPanel({ operationDisabled: true });
 
