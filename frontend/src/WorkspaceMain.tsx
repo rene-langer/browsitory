@@ -2,7 +2,7 @@ import { SearchMatchBar } from "./components/SearchMatchBar";
 import { useSearchView, writeSearchView } from "./lib/searchViewPreference";
 import { useSearchMatches } from "./state/useSearchMatches";
 import type { CommitGraphLayout } from "./lib/useCommitGraphLayout";
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { CommitDraft } from "./components/CommitBox";
 import { CommitGraph } from "./components/CommitGraph";
 import { GraphFilterStrip } from "./components/GraphFilterStrip";
@@ -108,6 +108,8 @@ export function WorkspaceMain({
   graphLayout: CommitGraphLayout;
 }) {
   const searchResultsRef = useRef<HTMLUListElement>(null);
+  // A conflicted file is open in the merge editor (#980): the history column narrows meanwhile.
+  const [conflictFileOpen, setConflictFileOpen] = useState(false);
   // #620: the commit list's lines-changed badges, counted as rows come into view.
   const showLineStats = useShowLineStats();
   const lineStats = useCommitLineStats(client, repoPath);
@@ -162,6 +164,7 @@ export function WorkspaceMain({
       defaultWidth={defaultHistoryWidth()}
       minWidth={HISTORY_MIN_WIDTH}
       maxWidth={HISTORY_MAX_WIDTH}
+      overrideWidth={conflictFileOpen ? MERGE_EDITOR_HISTORY_WIDTH : null}
       label="History and diff width"
       leftRegion="History"
       rightRegion="Diff"
@@ -337,6 +340,7 @@ export function WorkspaceMain({
             focusCommitMessage={focusCommitMessage}
             clearCommitMessage={appState.state.clearCommitMessage}
             rebaseProgress={appState.state.rebaseProgress}
+            onConflictFileOpenChange={setConflictFileOpen}
           />
         )
       }
@@ -346,6 +350,12 @@ export function WorkspaceMain({
 
 const HISTORY_MIN_WIDTH = 280;
 const HISTORY_MAX_WIDTH = 1200;
+/**
+ * The history column's width while a conflicted file is open (#980), not saved: at 1280×800 with
+ * the sidebar at its default, it leaves the merge editor about 696 px, room for its three panes
+ * (680). Below the 280 px a drag can reach; a drag or arrow key during it ends it.
+ */
+const MERGE_EDITOR_HISTORY_WIDTH = 240;
 
 /**
  * The history column's width until the user drags it (#1004): about 40% of the window it opens

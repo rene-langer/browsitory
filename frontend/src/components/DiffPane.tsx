@@ -60,7 +60,10 @@ function DiffPaneContent({
   discardBlockedReason = null,
   restoreBlockedReason = null,
   issueForge = null,
+  onConflictFileOpenChange,
 }: {
+  /** Passed through to `UncommittedDiffPane` (#980). */
+  onConflictFileOpenChange?: (open: boolean) => void;
   // The forge repository a selected commit's `#123` links to (#612), else `null`.
   issueForge?: ForgeRepository | null;
   // Why Restore… can't run now (`operationBlockers`), else `null`.
@@ -134,6 +137,7 @@ function DiffPaneContent({
         discardBlockedReason={discardBlockedReason}
         commits={commits}
         branchCommits={branchCommits}
+        onConflictFileOpenChange={onConflictFileOpenChange}
       />
     );
   }

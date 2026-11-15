@@ -433,4 +433,88 @@ describe("SplitView", () => {
       expect(localStorage.getItem("w")).toBeNull();
     });
   });
+
+  describe("a temporary width from outside (#980)", () => {
+    function renderSplit(overrideWidth: number | null) {
+      return (
+        <SplitView
+          left={<div>left</div>}
+          right={<div>right</div>}
+          storageKey="w"
+          defaultWidth={400}
+          minWidth={280}
+          maxWidth={1200}
+          overrideWidth={overrideWidth}
+        />
+      );
+    }
+    const leftPane = () => screen.getByText("left").parentElement;
+
+    it("shows the override, below the minimum too, without saving it", () => {
+      localStorage.setItem("w", "500");
+      const { rerender } = render(renderSplit(null));
+      expect(leftPane()).toHaveStyle({ width: "500px" });
+      rerender(renderSplit(240));
+      expect(leftPane()).toHaveStyle({ width: "240px", minWidth: "240px" });
+      expect(screen.getByRole("separator")).toHaveAttribute("aria-valuenow", "240");
+      expect(localStorage.getItem("w")).toBe("500");
+    });
+
+    it("returns to the saved width when the override ends", () => {
+      localStorage.setItem("w", "500");
+      const { rerender } = render(renderSplit(240));
+      expect(leftPane()).toHaveStyle({ width: "240px" });
+      rerender(renderSplit(null));
+      expect(leftPane()).toHaveStyle({ width: "500px" });
+      expect(localStorage.getItem("w")).toBe("500");
+    });
+
+    it("keeps a drag made during the override, saved like any drag, after the override ends", () => {
+      localStorage.setItem("w", "500");
+      const { rerender } = render(renderSplit(240));
+      const divider = screen.getByRole("separator");
+      fireEvent.pointerDown(divider, { clientX: 240 });
+      fireEvent.pointerMove(window, { clientX: 340 });
+      fireEvent.pointerUp(window);
+      expect(leftPane()).toHaveStyle({ width: "340px" });
+      expect(localStorage.getItem("w")).toBe("340");
+      rerender(renderSplit(null));
+      expect(leftPane()).toHaveStyle({ width: "340px" });
+    });
+
+    it("ends the override with an arrow key, from the width shown", () => {
+      localStorage.setItem("w", "500");
+      const { rerender } = render(renderSplit(240));
+      const divider = screen.getByRole("separator");
+      fireEvent.keyDown(divider, { key: "ArrowRight" });
+      // 240 + 16, clamped to the minimum.
+      expect(leftPane()).toHaveStyle({ width: "280px" });
+      expect(localStorage.getItem("w")).toBe("280");
+      fireEvent.keyDown(divider, { key: "ArrowRight" });
+      expect(leftPane()).toHaveStyle({ width: "296px" });
+      rerender(renderSplit(null));
+      expect(leftPane()).toHaveStyle({ width: "296px" });
+    });
+
+    it("applies a later override again after one the user ended", () => {
+      localStorage.setItem("w", "500");
+      const { rerender } = render(renderSplit(240));
+      fireEvent.keyDown(screen.getByRole("separator"), { key: "ArrowRight" });
+      expect(leftPane()).toHaveStyle({ width: "280px" });
+      rerender(renderSplit(null));
+      rerender(renderSplit(240));
+      expect(leftPane()).toHaveStyle({ width: "240px" });
+      expect(localStorage.getItem("w")).toBe("280");
+    });
+
+    it("does not end the override on a press without a move", () => {
+      localStorage.setItem("w", "500");
+      render(renderSplit(240));
+      const divider = screen.getByRole("separator");
+      fireEvent.pointerDown(divider, { clientX: 240 });
+      fireEvent.pointerUp(window);
+      expect(leftPane()).toHaveStyle({ width: "240px" });
+      expect(localStorage.getItem("w")).toBe("500");
+    });
+  });
 });

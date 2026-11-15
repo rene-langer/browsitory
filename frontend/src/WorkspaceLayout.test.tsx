@@ -351,3 +351,33 @@ describe("the history column (#1004)", () => {
     expect(screen.getByRole("separator", { name: "History and diff width" })).toHaveAttribute("aria-valuenow", "640");
   });
 });
+
+describe("the history column while a conflicted file is open (#980)", () => {
+  const conflictClient = () =>
+    layoutClient({
+      getStatus: async () => [
+        { path: "shared.txt", oldPath: null, staged: false, kind: "Conflicted" },
+        { path: "README.md", oldPath: null, staged: false, kind: "Modified" },
+      ],
+      getConflictHunks: async () => [],
+      getWorkingDiff: async () => [],
+    });
+  const historyWidth = () => screen.getByRole("separator", { name: "History and diff width" });
+  const fileRow = (label: string) =>
+    screen.getByText(
+      (_, element) => element?.tagName === "SPAN" && element.textContent === label && element.closest('[role="option"]') !== null,
+    );
+
+  it("narrows to 240 px for the merge editor, unsaved, and comes back when another file is selected", async () => {
+    setWindowWidth(1280);
+    localStorage.setItem("history-diff-width", "500");
+    await renderApp(conflictClient());
+    await screen.findByText("Save resolution");
+    await waitFor(() => expect(historyWidth()).toHaveAttribute("aria-valuenow", "240"));
+    expect(localStorage.getItem("history-diff-width")).toBe("500");
+
+    fireEvent.click(fileRow("README.md (Modified)"));
+    await waitFor(() => expect(historyWidth()).toHaveAttribute("aria-valuenow", "500"));
+    expect(localStorage.getItem("history-diff-width")).toBe("500");
+  });
+});

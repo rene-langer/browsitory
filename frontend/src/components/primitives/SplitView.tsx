@@ -94,6 +94,7 @@ export function SplitView({
   onLeftStateChange,
   leftRegion,
   rightRegion,
+  overrideWidth = null,
 }: {
   left: ReactNode;
   right: ReactNode;
@@ -116,6 +117,13 @@ export function SplitView({
    */
   leftRegion?: string;
   rightRegion?: string;
+  /**
+   * A width the left pane shows for a while, below `minWidth` too, without saving it (the
+   * history column while the merge editor is open, #980); `null` shows the pane's own width
+   * again. A drag or arrow key ends it: the new width is the pane's own, saved as usual, until
+   * the next override starts.
+   */
+  overrideWidth?: number | null;
 }) {
   const [width, setWidth] = useState(() =>
     loadWidth(storageKey, defaultWidth, minWidth, maxWidth, collapsible),
@@ -133,6 +141,17 @@ export function SplitView({
   const leftRef = useRef<HTMLDivElement>(null);
   // The drawer's width while it is open, else `null`: the pane's width, or the last one it had open.
   const [overlayWidth, setOverlayWidth] = useState<number | null>(null);
+  // The user moved the divider during the current override: it no longer applies.
+  const [overrideEnded, setOverrideEnded] = useState(false);
+  if (overrideWidth === null && overrideEnded) setOverrideEnded(false);
+  const overriding = overrideWidth !== null && !overrideEnded;
+  // The width the pane shows while docked: read by a drag or an arrow key.
+  const dockedWidth = overriding ? overrideWidth : width;
+  // For the window's pointer handlers, which outlive a render.
+  const overrideActive = useRef(overriding);
+  useEffect(() => {
+    overrideActive.current = overriding;
+  }, [overriding]);
   const overlayOpen = overlayWidth !== null;
   // Where focus was when the drawer opened, to return it there when the drawer closes.
   const overlayOpener = useRef<HTMLElement | null>(null);
@@ -165,13 +184,15 @@ export function SplitView({
   function handlePointerDown(event: ReactPointerEvent) {
     // A pane hidden for lack of room can't be dragged open; double-click opens the drawer.
     if (hiddenForSpace) return;
-    dragState.current = { startX: event.clientX, startWidth: width };
+    dragState.current = { startX: event.clientX, startWidth: dockedWidth };
   }
 
   useEffect(() => {
     function handlePointerMove(event: PointerEvent) {
       if (dragState.current === null) return;
       const delta = event.clientX - dragState.current.startX;
+      // A move ends an override (a press alone doesn't).
+      if (overrideActive.current) setOverrideEnded(true);
       setWidth(clamp(dragState.current.startWidth + delta));
     }
     function handlePointerUp() {
@@ -206,7 +227,8 @@ export function SplitView({
       return;
     }
     const delta = event.key === "ArrowRight" ? ARROW_KEY_STEP : -ARROW_KEY_STEP;
-    const next = clamp(width + delta);
+    const next = clamp(dockedWidth + delta);
+    if (overriding) setOverrideEnded(true);
     setWidth(next);
     persist(next);
   }
@@ -245,7 +267,7 @@ export function SplitView({
   // Room came back: the pane docks again, and the drawer is not reopened by itself later.
   if (!hiddenForSpace && overlayOpen) setOverlayWidth(null);
   const overlay = hiddenForSpace && overlayOpen;
-  const shownWidth = overlay ? overlayWidth : hiddenForSpace ? 0 : width;
+  const shownWidth = overlay ? overlayWidth : hiddenForSpace ? 0 : dockedWidth;
   const leftState: SplitViewLeftState = overlay ? "overlay" : shownWidth === 0 ? "collapsed" : "docked";
 
   function openOverlay(returnFocusTo?: HTMLElement | null) {
