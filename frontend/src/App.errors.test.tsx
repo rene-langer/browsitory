@@ -63,7 +63,7 @@ function transferEvents() {
 
 /** The error banners outside any dialog. */
 function banners(): HTMLElement[] {
-  return screen.queryAllByRole("alert", { hidden: true }).filter((element) => element.closest('[role="dialog"]') === null);
+  return screen.queryAllByRole("alert", { hidden: true }).filter((element) => element.closest('dialog, [role="dialog"]') === null);
 }
 
 const buttonNames = (element: HTMLElement) =>
