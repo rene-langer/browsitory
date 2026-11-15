@@ -95,7 +95,8 @@ has **Isolate branch**, which shows only that branch.
 
 While the graph leaves out some local branch, a strip above it says so ("Showing
 feature/offline-tiles only", or how many branches it shows). **Show all branches**, there, in
-every branch's menu and in the **+** menu of the Branches section, goes back to the graph you
+every branch's menu (while some branch is left out) and in the **+** menu of the Branches
+section, goes back to the graph you
 started with: every local branch, also ones you create later, no remote-only commits, and every
 remote branch's badge. Turning dots back on until
 every local branch is on does the same for the local branches; the remote branches you picked
