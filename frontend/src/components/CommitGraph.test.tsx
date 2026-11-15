@@ -1308,6 +1308,12 @@ describe("CommitGraph — history actions", () => {
     return { ...handlers, openMenu };
   }
 
+  it("marks Reset to here as a destructive item (#988)", () => {
+    const { openMenu } = setup();
+    openMenu("B");
+    expect(screen.getByRole("menuitem", { name: "Reset main to here…" })).toHaveAttribute("data-destructive", "true");
+  });
+
   it("offers cherry-pick, revert, checkout and reset on a single commit", () => {
     const { openMenu, onCherryPick, onRevert, onCheckoutCommit, onRequestReset } = setup();
     openMenu("B");

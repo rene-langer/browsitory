@@ -108,6 +108,14 @@ describe("RemoteDialogs", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it("says what Remove remote removes and that Undo can't bring it back (#989)", () => {
+    render(<RemoteDialogs {...props({ remoteDialog: { kind: "remote", action: "remove", remoteName: "origin" } })} />);
+    const dialog = screen.getByRole("dialog", { name: "Remove remote origin", hidden: true });
+    expect(within(dialog).getByRole("heading", { name: "Remove remote origin", hidden: true })).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("Undo can't bring the remote back.");
+    expect(within(dialog).getByRole("button", { name: "Remove remote", hidden: true })).toBeInTheDocument();
+  });
+
   it("asks to clear upstreams based on the upstreams when the confirmation renders", () => {
     const base = props({ remoteDialog: { kind: "remote", action: "remove", remoteName: "origin" } });
     const { rerender } = render(<RemoteDialogs {...base} />);

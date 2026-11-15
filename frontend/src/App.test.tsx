@@ -2103,6 +2103,25 @@ describe("App", () => {
       expect(cherryPick).not.toHaveBeenCalled();
     });
 
+    it("the force push confirmation says what the remote loses, that the lease guards it, and that Undo can't help (#989)", async () => {
+      render(
+        <App
+          client={pickClient({
+            listRemotes: async () => [{ name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null, prune: false }],
+            getCurrentUpstream: async () => ({ localBranch: "main", remoteName: "origin", remoteBranch: "main", ahead: 1, behind: 2, pushBranch: "main" }),
+          })}
+        />,
+      );
+      await screen.findByText(/c1 one/);
+      await runPaletteCommand("Force push", "Force push current branch…");
+      const dialog = await screen.findByRole("dialog", { name: "Force push to origin/main", hidden: true });
+      expect(within(dialog).getByRole("heading", { name: "Force push to origin/main", hidden: true })).toBeInTheDocument();
+      expect(dialog).toHaveTextContent("The 2 commits on origin/main that your branch doesn't have are removed from it.");
+      expect(dialog).toHaveTextContent("--force-with-lease");
+      expect(dialog).toHaveTextContent("Undo can't take back a push.");
+      expect(within(dialog).getByRole("button", { name: "Force push", hidden: true })).toHaveAttribute("data-tone", "danger");
+    });
+
     it("the force push confirmation is disabled once a terminal rebase starts (#514)", async () => {
       let terminalRebase: { kind: "Rebase"; branch: string; onto: string; currentStep: number; totalSteps: number } | null = null;
       const forcePushCurrentBranch = vi.fn<RepoClient["forcePushCurrentBranch"]>().mockResolvedValue("push-1");

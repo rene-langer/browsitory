@@ -279,6 +279,16 @@ describe("TagPanel", () => {
     }
   });
 
+  it("says the remote copy stays and Undo brings the tag back (#989)", () => {
+    renderPanel();
+    openMenu("v1.0.0");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete tag…" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete local tag v1.0.0" });
+    expect(within(dialog).getByRole("heading", { name: "Delete local tag v1.0.0" })).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("A copy of the tag on a remote stays.");
+    expect(dialog).toHaveTextContent("Undo brings it back.");
+  });
+
   it("deletes only after the local-delete confirmation", () => {
     const { props: p } = renderPanel();
 

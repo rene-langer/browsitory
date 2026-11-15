@@ -97,6 +97,50 @@ describe("RebasePlanner", () => {
     expect(screen.getByRole("heading", { name: "Rebase onto 0123456" })).toBeInTheDocument();
   });
 
+  // #1015: the title names the branch and the target; a summary says what changes.
+  it("names the branch and a commit target, and says what it rewrites", async () => {
+    render(
+      <RebasePlanner
+        repoPath={TEST_REPO_PATH}
+        client={fakeClient({ commitsSince: async () => commits })}
+        onto="0123456789abcdef0123456789abcdef01234567"
+        branchName="main"
+        onStartRebase={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    await screen.findByText(/add a/);
+    expect(screen.getByRole("heading", { name: "Rebase main onto 0123456" })).toBeInTheDocument();
+    expect(screen.getByText("Rewrites 2 commits on main. Undo restores the branch.")).toBeInTheDocument();
+  });
+
+  it("names the branch and a branch target", async () => {
+    render(
+      <RebasePlanner
+        repoPath={TEST_REPO_PATH}
+        client={fakeClient({ commitsSince: async () => commits })}
+        onto="refs/heads/feat/x"
+        branchName="main"
+        onStartRebase={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    await screen.findByText(/add a/);
+    expect(screen.getByRole("heading", { name: "Rebase main onto feat/x" })).toBeInTheDocument();
+  });
+
+  it("shows the Action label once as a column header, and icon move buttons named by aria-label", async () => {
+    render(
+      <RebasePlanner repoPath={TEST_REPO_PATH} client={fakeClient({ commitsSince: async () => commits })} onto="base" onStartRebase={vi.fn()} onCancel={vi.fn()} />,
+    );
+    await screen.findByText(/add a/);
+    expect(screen.getAllByText("Action")).toHaveLength(1);
+    expect(screen.queryByText("Move up")).toBeNull();
+    expect(screen.queryByText("Move down")).toBeNull();
+    expect(screen.getByRole("button", { name: "Move down: aaa1111 add a" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Start rebase" })).toHaveAttribute("data-tone", "primary");
+  });
+
   it("lists commits oldest-first with a default Pick action each", async () => {
     const client = fakeClient({ commitsSince: async () => commits });
 
