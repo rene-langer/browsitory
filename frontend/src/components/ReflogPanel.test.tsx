@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ReflogEntry } from "../ipc/RepoClient";
 import { formatAbsoluteDate, formatShortDate } from "../lib/formatDate";
@@ -42,6 +42,24 @@ describe("ReflogPanel", () => {
     renderPanel({ selectedReference: null, entries: [] });
 
     expect(screen.getByText(/Select a reference above/)).toBeInTheDocument();
+  });
+
+  it("selects HEAD by itself when no reference is selected (#1026)", () => {
+    const onSelectReference = vi.fn().mockResolvedValue(undefined);
+    renderPanel({ selectedReference: null, entries: [], onSelectReference });
+
+    expect(onSelectReference).toHaveBeenCalledOnce();
+    expect(onSelectReference).toHaveBeenCalledWith("HEAD");
+  });
+
+  it("selects nothing by itself without a HEAD reflog, or with a reference selected (#1026)", () => {
+    const onSelectReference = vi.fn().mockResolvedValue(undefined);
+    renderPanel({ references: ["refs/heads/main"], selectedReference: null, entries: [], onSelectReference });
+    expect(onSelectReference).not.toHaveBeenCalled();
+    cleanup();
+
+    renderPanel({ onSelectReference });
+    expect(onSelectReference).not.toHaveBeenCalled();
   });
 
   it("shows an empty state when the selected reference has no reflog entries", () => {
