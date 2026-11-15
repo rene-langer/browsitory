@@ -143,8 +143,15 @@ li.uncommittedRow[aria-selected="true"] {
   text-overflow: ellipsis;
 }
 
+/* The date column is compact ("3d", #1004): right-aligned, so the column lines up. */
+.date {
+  min-width: 3ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Author and date columns give way to the summary when the history pane is narrow. */
-@container (max-width: 480px) {
+@container (max-width: 300px) {
   .date {
     display: none;
   }
@@ -196,4 +203,24 @@ li.searchDimmed[aria-selected="true"] {
 
 li.searchMatch .commitSummary {
   font-weight: 600;
+}
+
+/* "+N" for a row's other refs (#1004), named in its tooltip. */
+.moreBadges {
+  flex: 0 0 auto;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  background: var(--color-control);
+  color: var(--color-text-muted);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }

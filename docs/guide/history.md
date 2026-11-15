@@ -7,11 +7,13 @@ diff** in the file's header returns to the diff. A merge commit's diff is agains
 parent: **Changes compared with** above the diff names that parent and lets you pick another
 one. **All files** above the list browses every file of the commit
 instead (see [Files at a commit](files-at-a-commit.md)). Each row shows the branches and tags that point at the commit,
-and the author and date (they hide when the pane is narrow). Selecting a commit shows its full
+the author and how long ago it was made (**3h**, **2d**, **4mo**; hover it for the date). They
+hide when the pane is narrow. A commit with several branches and tags shows the first (the
+checked-out branch when it is one of them) and **+N** for the others; hover it for their names. Selecting a commit shows its full
 message, author, date, full SHA (**Copy** copies it), parents and children (the loaded commits
 it is a parent of) above the file list; click a parent or child to jump to it. The date is the
-author's, as `2026-09-08 21:00` in your time zone (the graph's dates use the same form) with
-"2 days ago" after it. When someone else committed it (a patch applied, a cherry-pick),
+author's, as `2026-09-08 21:00` in your time zone (the graph's date tooltips use the same form)
+with "2 days ago" after it. When someone else committed it (a patch applied, a cherry-pick),
 **Committer** shows them and when they committed; when the author committed it later (a rebase,
 an amend), **Committed** shows that time. **Contained in** lists the local branches, remote
 branches (dashed) and tags (`#`) whose tip is the commit or comes after it, the first eight and

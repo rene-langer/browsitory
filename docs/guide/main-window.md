@@ -67,8 +67,8 @@ first one that doesn't apply.
 
 Drag the dividers between the columns to resize them. Double-click a divider to collapse the
 sidebar, and again to bring it back at its width. With a divider focused, the arrow keys resize
-too. The sidebar and the commit graph keep their width when you resize the window; only the
-diff pane grows or shrinks.
+too. The commit graph starts at about 40% of the window's width. The sidebar and the commit graph
+keep their width when you resize the window; only the diff pane grows or shrinks.
 
 **From the keyboard.** **F6** moves the focus from pane to pane (the repository toolbar, the
 sidebar, the commit graph, the diff pane) and **Shift+F6** back, returning to where the focus
@@ -157,8 +157,8 @@ Each change shows at once, without a restart:
   conflicts, from 10 to 24 pixels. Empty keeps each view's built-in size.
 - **Interface size**: Small, Normal or Large text for the rest of the window.
 - **Date format**: **ISO** (2026-11-11 14:05, the default) or **System**, your operating
-  system's short date and time. Every date follows it: the history, search results, file
-  history, the Reflog, stashes and commit details. "3 days ago" labels stay in English.
+  system's short date and time. Every date follows it: the history's date tooltips, search
+  results, file history, the Reflog, stashes and commit details. "3 days ago" labels stay in English.
 - **Tab size**: how many columns a tab character takes in file content, from 1 to 16 (4 at
   first).
 

@@ -18,3 +18,6 @@
 - Changed: a clean working tree's commit box no longer says "Stage changes to commit" in amber: it
   says "Nothing to commit.", and "Stage changes to commit." only when there are changes to
   stage, both in muted text (#1005).
+- Changed: the commit graph starts at about 40% of the window, so a wide window shows longer
+  subjects. Its date column is compact ("3h", "2d", "4mo"; the date in the tooltip), and a row
+  with several branches and tags shows the first and "+N" for the rest (#1004).

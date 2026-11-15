@@ -157,9 +157,9 @@ export function WorkspaceMain({
   return (
     <SplitView
       storageKey="history-diff-width"
-      defaultWidth={420}
-      minWidth={280}
-      maxWidth={800}
+      defaultWidth={defaultHistoryWidth()}
+      minWidth={HISTORY_MIN_WIDTH}
+      maxWidth={HISTORY_MAX_WIDTH}
       label="History and diff width"
       leftRegion="History"
       rightRegion="Diff"
@@ -331,4 +331,15 @@ export function WorkspaceMain({
       }
     />
   );
+}
+
+const HISTORY_MIN_WIDTH = 280;
+const HISTORY_MAX_WIDTH = 1200;
+
+/**
+ * The history column's width until the user drags it (#1004): about 40% of the window it opens
+ * in, so a wide window shows longer subjects instead of an empty diff pane.
+ */
+function defaultHistoryWidth(): number {
+  return Math.min(HISTORY_MAX_WIDTH, Math.max(HISTORY_MIN_WIDTH, Math.round(window.innerWidth * 0.4)));
 }

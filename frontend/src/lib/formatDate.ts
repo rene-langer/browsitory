@@ -47,3 +47,24 @@ export function formatRelativeDate(timestampSeconds: number, nowMs: number = Dat
   }
   return formatter.format(0, "second");
 }
+
+const COMPACT_UNITS: [string, number][] = [
+  ["y", 365 * 24 * 3600],
+  ["mo", 30 * 24 * 3600],
+  ["w", 7 * 24 * 3600],
+  ["d", 24 * 3600],
+  ["h", 3600],
+  ["m", 60],
+];
+
+/**
+ * How long ago in a few characters ("5m", "3h", "2d", "3w", "4mo", "1y"; "now" under a minute
+ * or ahead of the clock), for the history's date column (#1004). The full date goes in a tooltip.
+ */
+export function formatCompactAge(timestampSeconds: number, nowMs: number = Date.now()): string {
+  const age = nowMs / 1000 - timestampSeconds;
+  for (const [unit, seconds] of COMPACT_UNITS) {
+    if (age >= seconds) return `${Math.floor(age / seconds)}${unit}`;
+  }
+  return "now";
+}
