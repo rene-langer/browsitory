@@ -14,7 +14,7 @@ export interface WorktreeActions {
 /**
  * Availability, reason and labels of a worktree's actions (#509), shared by the Worktrees panel
  * and the command palette; both follow the one busy rule (`operationBlockers`). Like the panel,
- * the palette offers to open every worktree, the main one too ("Open main worktree", useful from
+ * the palette offers to open every worktree, the main one too ("Open main worktree in new tab", useful from
  * a linked worktree's tab, #561); removing the main worktree is refused, so neither offers it.
  */
 export function worktreeActions(blockers: OperationBlockers, worktree: WorktreeInfo): WorktreeActions {
@@ -23,7 +23,8 @@ export function worktreeActions(blockers: OperationBlockers, worktree: WorktreeI
     open: {
       label: "Open in new tab",
       // The main worktree is named "main" (`list_worktrees`), which would read as a branch.
-      paletteLabel: worktree.isMain ? "Open main worktree" : `Open worktree ${worktree.name}`,
+      // The palette's label is the menu's plus its object (#990), like "Open submodule … in new tab".
+      paletteLabel: worktree.isMain ? "Open main worktree in new tab" : `Open worktree ${worktree.name} in new tab`,
       ...gate(blockers),
     },
     remove: {

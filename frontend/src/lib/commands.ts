@@ -1201,7 +1201,7 @@ function submoduleCommands({ appState, state, blocked, tabs, panelVisible }: Fam
         run: () => void appState.initSubmodule(submodule.path),
       });
     }
-    // Like "Open worktree": a tab of its own (#445). Only a checked-out submodule has a
+    // Like "Open worktree … in new tab": a tab of its own (#445). Only a checked-out submodule has a
     // folder to open; for the others the commands above offer Initialize / Update.
     const workdir = submodule.workdir;
     if (workdir !== null && tabs !== undefined) {

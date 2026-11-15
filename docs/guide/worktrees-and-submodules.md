@@ -30,7 +30,8 @@ Browsitory can't be removed with Remove: delete its folder by hand, click
 Each worktree's menu (its **…** button, a right-click, or the Menu key or Shift+F10 on the row)
 has **Open in new tab** and, for a linked worktree, **Remove…**; the main worktree can't be
 removed. Open the main worktree to get back to it from a linked worktree's tab. The command
-palette has the same: **Open worktree ⟨name⟩** for a linked worktree and **Open main worktree**,
+palette has the same: **Open worktree ⟨name⟩ in new tab** for a linked worktree and **Open main worktree
+in new tab**,
 and **Remove worktree ⟨name⟩…** for a linked one, which asks first as the menu item does. While a merge, rebase, cherry-pick or
 revert is in progress, or another action or a transfer runs, opening, removing and pruning are
 disabled with the reason and left out of the palette; an open Remove confirmation says why.
