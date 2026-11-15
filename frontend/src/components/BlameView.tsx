@@ -82,7 +82,7 @@ export function BlameView({
                 )}
               </td>
               <td className={styles.author} title={runStart ? line.authorName : undefined}>
-                {runStart ? line.authorName : null}
+                {runStart && <span className={styles.authorName}>{line.authorName}</span>}
               </td>
               <td className={styles.date}>
                 {runStart && (

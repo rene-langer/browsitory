@@ -31,10 +31,16 @@
 }
 
 .author {
+  color: var(--color-text-muted);
+}
+
+/* A cell's max-width doesn't limit it: the name's own box does, cut with an ellipsis (#986). */
+.authorName {
+  display: inline-block;
   max-width: 16ch;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--color-text-muted);
+  vertical-align: top;
 }
 
 .date {
