@@ -312,12 +312,12 @@ describe("BranchTree — local branches", () => {
     expect(props.onSetGraphBranchSelection).not.toHaveBeenCalled();
   });
 
-  it("offers Show all branches in every branch menu, enabled only while the graph is filtered (#985)", async () => {
+  it("offers Show all branches in every branch menu while the graph is filtered, and only then (#985)", async () => {
     const remotes = [{ name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null }];
     const onListRemoteBranches = vi.fn().mockResolvedValue(["topic"]);
     const { props, rerender } = renderTree({ remotes, onListRemoteBranches });
     fireEvent.click(screen.getByRole("button", { name: "Actions for main" }));
-    expect(screen.getByRole("menuitem", { name: "Show all branches" })).toBeDisabled();
+    expect(screen.queryByRole("menuitem", { name: "Show all branches" })).toBeNull();
 
     rerender(<BranchTreeWithDialogs {...props} graphBranchSelection={["feat/foo"]} />);
     fireEvent.click(screen.getByRole("button", { name: "Actions for feat/foo" }));
