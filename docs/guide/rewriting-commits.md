@@ -46,16 +46,18 @@ while a sequence is paused. On screen, a paused cherry-pick or revert has its **
 
 ## Amending the last commit
 
-Tick **Amend last commit** under the commit message. The message fills with the last commit's,
-and the **Commit** button becomes **Amend** (the commit button's arrow has **Amend last commit**
-too): anything staged is folded into that commit (or just reword it). If that commit is already
-on the upstream, a warning reads "Already pushed — you'll need to force push." Whatever you had
-half-typed is kept and comes back when you untick amend or after a successful amend.
+Choose **Amend last commit** from the arrow next to **Commit**. The message fills with the last
+commit's, and the **Commit** button becomes **Amend**: anything staged is folded into that commit
+(or just reword it). If that commit is already on the upstream, a warning reads "Already pushed —
+you'll need to force push." **Cancel amend** next to **Amend** goes back to a normal commit.
+Whatever you had half-typed is kept and comes back when you cancel amend or after a successful
+amend.
 
 An **Author** field shows the commit's author as `Name <email>`. Leave it as it is (or empty) to
 keep the author, or change it to give the commit a different author; the original author date is
-kept and you stay the committer. It must have the form `Name <email>`. Co-authors work here too;
-amend starts without the chips you added for your next commit and gives them back afterwards.
+kept and you stay the committer. It must have the form `Name <email>`. Co-authors work here too
+(**Add co-author…** in the arrow next to **Amend**); amend starts without the chips you added for
+your next commit and gives them back afterwards.
 
 ## Editing older commits
 

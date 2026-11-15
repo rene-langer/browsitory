@@ -20,7 +20,7 @@ import styles from "./FormDialog.module.css";
  * field (a radio group's checked radio, where Tab would enter the group), else its first enabled
  * button. Never the frame itself.
  */
-export function initialFocusTarget(dialog: HTMLElement): HTMLElement | null {
+function initialFocusTarget(dialog: HTMLElement): HTMLElement | null {
   const marked = dialog.querySelector<HTMLElement>("[data-autofocus]");
   if (marked !== null) return marked;
   const enabled = (selector: string) =>

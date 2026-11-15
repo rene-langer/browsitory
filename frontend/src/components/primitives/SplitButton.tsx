@@ -16,6 +16,7 @@ export function SplitButton({
   label,
   onClick,
   disabled = false,
+  menuDisabled = disabled,
   title,
   menuLabel,
   menuTitle,
@@ -29,6 +30,9 @@ export function SplitButton({
   label: string;
   onClick: () => void;
   disabled?: boolean;
+  /** Disables the chevron; defaults to `disabled`. The commit box's menu stays open to amend
+   * and co-authors while Commit waits for a message (#1003). */
+  menuDisabled?: boolean;
   title?: string;
   menuLabel: string;
   menuTitle?: string;
@@ -72,7 +76,7 @@ export function SplitButton({
         aria-label={menuLabel}
         aria-haspopup="menu"
         aria-expanded={menu !== null}
-        disabled={disabled}
+        disabled={menuDisabled}
         title={blocked ? undefined : (menuTitle ?? title)}
         {...blockedProps}
         onClick={(event) => {

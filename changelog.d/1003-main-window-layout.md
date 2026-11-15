@@ -10,3 +10,11 @@
   a dialog starts on its first control, a radio group on its chosen option, never on its frame.
   The focus ring is blue with a small gap, so a focused button no longer looks like a pressed
   toggle (#1029).
+- Changed: the commit box is one line with **Commit** beside it until you click into the message,
+  so the diff above gets the room; it stays open while it has the focus or holds anything, and it
+  never takes more than half the column. **Add co-author…** and **Amend last commit** moved into
+  the menu of the arrow next to **Commit**, which now opens without a message; **Cancel amend**
+  ends amend mode (#1003).
+- Changed: a clean working tree's commit box no longer says "Stage changes to commit" in amber: it
+  says "Nothing to commit.", and "Stage changes to commit." only when there are changes to
+  stage, both in muted text (#1005).

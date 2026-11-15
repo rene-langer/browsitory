@@ -51,11 +51,10 @@ async function tidy(): Promise<void> {
         .find((b) => (b.textContent ?? "").trim() === "Cancel")
         ?.click();
     });
-    // Reword turns on "Amend last commit" in the commit box: turn it off again.
-    document.querySelectorAll<HTMLLabelElement>("label").forEach((label) => {
-      const input = label.querySelector<HTMLInputElement>("input[type='checkbox']");
-      if ((label.textContent ?? "").includes("Amend last commit") && input?.checked) input.click();
-    });
+    // Reword turns on amend mode in the commit box: turn it off again (#1003: "Cancel amend").
+    Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+      .find((b) => (b.textContent ?? "").trim() === "Cancel amend")
+      ?.click();
   });
 }
 

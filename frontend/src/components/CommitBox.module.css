@@ -39,6 +39,8 @@
   color: var(--color-warning-text);
 }
 
+/* A warning about what the commit will do (amending a pushed commit). Why Commit is disabled
+   is `.hint`, muted (#1005). */
 .reason {
   margin: 0;
   color: var(--color-warning-text);
@@ -70,17 +72,14 @@
   align-items: center;
 }
 
-/* Co-author chips and the "Add co-author" picker. */
-.coAuthors {
+/* Co-author chips; "Add co-author…" is in the Commit menu (#1003). */
+.chips {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1);
   align-items: center;
-  margin-bottom: var(--space-2);
-}
-
-.chips {
-  display: contents;
+  margin: 0 0 var(--space-2);
+  padding: 0;
   list-style: none;
 }
 
@@ -194,4 +193,37 @@
   margin: 0;
   color: var(--color-text-muted);
   font-size: var(--text-sm);
+}
+
+.box {
+  min-width: 0;
+}
+
+/* The box until the message field has focus (#1003): the one-line field and Commit side by side,
+   anything else (why Commit waits, Skip hooks) on full-width lines below. */
+.collapsed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
+.collapsed > .textarea {
+  flex: 1 1 12rem;
+  min-height: 0;
+  margin: 0;
+  resize: none;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.collapsed > .commitRow {
+  order: 1;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.collapsed > :not(.textarea):not(.commitRow) {
+  order: 2;
+  flex: 1 0 100%;
 }

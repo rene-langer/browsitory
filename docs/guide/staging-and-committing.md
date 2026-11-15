@@ -9,21 +9,25 @@ To commit:
 1. Stage what goes into the commit: the stage button on a file's row, **Stage all** above the
    **Changes** group, or **Stage hunk** in the diff. **Unstage** on a **Staged** row takes a
    file back out.
-2. Type a commit message.
+2. Type a commit message. Until you click into it, the commit box at the bottom is one line
+   with **Commit** beside it, so the diff above keeps the room; it opens fully while it has the
+   focus or holds a message.
 3. Click **Commit**. The button says what it commits and where, for example **Commit 3 files to
    main** (without the branch on a detached HEAD).
 
 After a commit a notification names it, "Committed 4c5beaf to main", with **Push** to push the
 branch (to its upstream, or through the Push dialog when it has none) and **Undo**; without a
 remote it has **Undo** only. The arrow next to **Commit** has **Commit and push**, which commits
-and then pushes the same way, and **Amend last commit**, which turns on amend mode (see
-[Rewriting commits](rewriting-commits.md)). **Stash** in the repository toolbar sets the current
+and then pushes the same way, **Amend last commit**, which turns on amend mode (see
+[Rewriting commits](rewriting-commits.md)), and **Add co-author…** (see below). **Stash** in the repository toolbar sets the current
 changes aside; see [Stashes](stashes.md).
 
 ![Staging a change, with the diff and commit message visible](assets/staging.png)
 
 ??? note "Details"
     Without a message **Commit** is disabled, and "Write a commit message to commit." says why.
+    With nothing staged it says "Stage changes to commit.", or "Nothing to commit." when the
+    working tree is clean. The arrow's menu works without a message.
     The notification's **Push** only pushes the branch it names: if you have checked out another
     branch since, it says "Not pushed: main is no longer the current branch." instead. **Undo**
     only acts while that commit is still the latest. **Commit and push** needs a branch and a
@@ -141,13 +145,15 @@ the command palette offer the same actions.
 **Alt+C** (**⌥C** on macOS), or **Go to commit message** in the command palette, shows the
 working tree and puts the cursor in the message from anywhere outside a text field.
 
-Below the message, **Summary 42/50** counts the characters of the first line. Past the limit it
+Below the message (once the box is open), **Summary 42/50** counts the characters of the first
+line. Past the limit it
 turns to a warning color, because many tools cut longer summaries; it never stops a commit. A
 faint dotted ruler marks column 72 for wrapping the body. Change the limit, the ruler column
 (both 10 to 200) or turn the ruler off under **Preferences → Commit message**.
 
-**Add co-author** lists the authors of the last 1,000 commits on the current branch (newest
-first, without you); type to filter, or type a new `Name <email>` and press Enter. Each
+**Add co-author…** in the menu of the arrow next to **Commit** lists the authors of the last
+1,000 commits on the current branch (newest first, without you); type to filter, or type a new
+`Name <email>` and press Enter. Each
 co-author shows as a chip (× removes it) and is added to the message as a `Co-authored-by: Name
 <email>` trailer when you commit.
 
