@@ -188,6 +188,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     resetToCommit: vi.fn(),
     checkoutCommit: vi.fn(),
     amendCommit: vi.fn(),
+    rewordHead: vi.fn(),
     setAmendMode: vi.fn(),
     cancelForcePush: vi.fn(),
     forcePushCurrentBranch: vi.fn(),

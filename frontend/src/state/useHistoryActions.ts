@@ -39,6 +39,11 @@ export interface HistoryActions {
   checkoutCommit(commitId: string): Promise<void>;
   // Resolves `true` once amended; see `StagingActions.commit`.
   amendCommit(message: string, noVerify: boolean, options?: AmendOptions): Promise<boolean>;
+  /**
+   * The Reword dialog on HEAD (#981): replaces its message only, staged changes stay staged.
+   * Not an amend: amend mode and Skip hooks stay as they are. Resolves `true` once reworded.
+   */
+  rewordHead(commitId: string, message: string, noVerify?: boolean): Promise<boolean>;
   setAmendMode(on: boolean): void;
 }
 
@@ -222,6 +227,34 @@ export function useHistoryActions(
     },
     [client, runMutationWithOutcome, repoPath, setState],
   );
+  const rewordHead = useCallback(
+    async (commitId: string, message: string, noVerify = false) => {
+      const ok = await runMutationWithOutcome(async () => {
+        const options: AmendOptions = { ...NO_AMEND_OPTIONS, messageOnly: true };
+        const outcome = await client.amendCommit(repoPath, message, noVerify, options).catch((error: unknown) => {
+          // No `user.name`/`user.email`: the identity dialog offers to set them (#689).
+          if (errorKind(error) === "MissingIdentity") setState((prev) => ({ ...prev, identityRequired: "amend" }));
+          throw error;
+        });
+        if (outcome.kind === "HookFailed") {
+          setState((prev) => ({
+            ...prev,
+            hookFailure: {
+              hook: outcome.hook,
+              output: outcome.output,
+              retry: { kind: "reword", commitId, message },
+              dialogOpen: true,
+            },
+          }));
+          throw new FailureWithNextStep(hookFailedMessage(outcome.hook), hookNextStep("reword it again"));
+        }
+        setState((prev) => ({ ...prev, hookFailure: null }));
+      }, failedOperation.historyEdit("Reword", commitId));
+      setState((prev) => ({ ...prev, hookRun: null }));
+      return ok;
+    },
+    [client, runMutationWithOutcome, repoPath, setState],
+  );
   const setAmendMode = useCallback(
     (on: boolean) => setState((prev) => ({ ...prev, amendMode: on })),
     [setState],
@@ -236,6 +269,7 @@ export function useHistoryActions(
     resetToCommit,
     checkoutCommit,
     amendCommit,
+    rewordHead,
     setAmendMode,
   };
 }

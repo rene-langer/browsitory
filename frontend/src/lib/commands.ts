@@ -777,7 +777,7 @@ function historyCommands({ appState, state, blockers, blocked, commit }: FamilyC
   if (!blocked && graphCommit !== undefined) {
     const isHead = headId === graphCommit.id;
     // The commit menu's one-click history edits (#442), only where the menu enables them.
-    // HEAD's Reword… is "Amend last commit" below.
+    // HEAD's Reword… is the same dialog, which changes its message only (#981).
     const commitId = graphCommit.id;
     const short = graphCommit.shortId;
     const checks = historyEditChecks(
@@ -786,8 +786,8 @@ function historyCommands({ appState, state, blockers, blocked, commit }: FamilyC
     );
     const edit = (request: HistoryEditRequest) => (onto: string) => void appState.editHistory(commitId, onto, request);
     const edits: [string, string, HistoryEditCheck, string[], (onto: string) => void][] = [
-      ["reword-selected", `Reword ${short}…`, isHead ? { ok: false, reason: "" } : checks.Reword, ["reword", "message"],
-        (onto) => appState.openDialog({ kind: "reword", commitId, onto })],
+      ["reword-selected", `Reword ${short}…`, isHead ? { ok: true, onto: "" } : checks.Reword, ["reword", "message"],
+        (onto) => appState.openDialog({ kind: "reword", commitId, onto: isHead ? null : onto })],
       ["edit-selected", `Edit ${short}…`, checks.Edit, ["edit", "change", "files", "amend"], edit({ kind: "Edit" })],
       ["split-selected", `Split ${short}…`, checks.Split, ["split", "parts", "divide"], edit({ kind: "Split" })],
       ["squash-selected", `Squash ${short} with parent`, checks.Squash, ["squash", "combine", "parent"], edit({ kind: "Squash" })],
