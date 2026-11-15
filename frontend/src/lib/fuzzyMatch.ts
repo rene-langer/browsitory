@@ -1,7 +1,7 @@
 /**
  * The command palette's matcher (#644): every word of the query must match the label or a
  * keyword, in any order. A word matches, best first, as the start of a label word, anywhere in
- * the label, as letters in order from the start of a label word ("ftch" → "Fetch"), or as the
+ * the label, as letters in order inside one label word ("ftch" → "Fetch"), or as the
  * start of (or anywhere in) a keyword. The whole label typed, or a label prefix, ranks above all.
  */
 
@@ -32,15 +32,27 @@ interface TokenMatch {
 }
 
 function isWordStart(text: string, index: number): boolean {
-  return index === 0 || !/[\p{L}\p{N}]/u.test(text[index - 1]);
+  return index === 0 || isWordBreak(text, index - 1);
 }
 
-/** `token`'s letters in order in `label` from the word start at `start`, as ranges; or null. */
+/** Whether `text[index]` separates words (a space, "/", "-", "…"). */
+function isWordBreak(text: string, index: number): boolean {
+  return !/[\p{L}\p{N}]/u.test(text[index]);
+}
+
+/**
+ * `token`'s letters in order in `label`'s word that starts at `start`, as ranges; or null. Only
+ * within that word (#1021): letters scattered over several words ("stash" in "Save staged changes
+ * as patch") are no match.
+ */
 function fuzzyFrom(label: string, token: string, start: number): { gaps: number; ranges: MatchRange[] } | null {
   const ranges: [number, number][] = [];
+  let end = start;
+  while (end < label.length && !isWordBreak(label, end)) end++;
+  const word = label.slice(0, end);
   let position = start;
   for (const char of token) {
-    const found = label.indexOf(char, position);
+    const found = word.indexOf(char, position);
     if (found === -1) return null;
     const last = ranges[ranges.length - 1];
     if (last !== undefined && last[1] === found) last[1] = found + 1;

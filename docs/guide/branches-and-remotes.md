@@ -22,8 +22,9 @@ The menus offer:
 - a remote branch: **Switch to** (to a local branch tracking it), **Set as upstream for current
   branch**, **Rebase current branch onto ⟨remote⟩/⟨branch⟩…**, **Isolate branch** (as for a
   local branch), **Copy branch name** (as `remote/branch`), or **Delete ⟨remote⟩/⟨branch⟩…**;
-- a remote: fetch, **Push current branch here**, edit, manage credentials, **Copy fetch URL**
-  (and **Copy push URL** when pushes go to a different URL), or remove.
+- a remote: **Fetch**, **Push current branch to ⟨remote⟩**, **Edit remote…**, **Manage
+  credentials…**, **Copy fetch URL** (and **Copy push URL** when pushes go to a different URL),
+  or **Remove remote…**.
 
 ??? note "Details"
     The copy items put plain text on the clipboard and work even while another operation runs;
@@ -41,9 +42,9 @@ The menus offer:
     Menu key or Shift+F10 (Fn+Shift+F10 on most Mac keyboards), or use its **…** button, to open
     the same menu. In any menu, ↑/↓, Home/End or a letter move between items, Enter or Space
     runs one, Esc closes the menu and returns to the row, and Tab closes it and moves on. The
-    command palette also has **Edit remote …**, **Manage credentials for …** and **Remove remote
-    …** for each remote; they open the same dialogs (Remove still asks first), even while the
-    Branches section is collapsed.
+    command palette also has **Edit remote ⟨name⟩…**, **Manage credentials for ⟨name⟩…** and
+    **Remove remote ⟨name⟩…** for each remote; they open the same dialogs (Remove still asks
+    first), even while the Branches section is collapsed.
 
 ## Creating a branch
 

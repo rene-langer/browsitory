@@ -50,7 +50,7 @@ describe("Browsitory operation log", () => {
     await browser.execute((el) => {
       el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }));
     }, remoteHeader);
-    await clickInPage("[role='menu'] button", "Push current branch here");
+    await clickInPage("[role='menu'] button", `Push current branch to ${REMOTE_NAME}`);
     // Depending on `push.default`, Push may first ask where to: confirm the suggestion.
     const branch = git("branch", "--show-current");
     const pushDialog = `dialog[aria-label="Push ${branch}"]`;

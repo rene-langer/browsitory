@@ -82,14 +82,14 @@ describe("Browsitory remote management", () => {
       { timeoutMsg: "expected the upstream to be set before removing its remote" },
     );
 
-    // Removing a remote is now a context-menu item ("Remove remote") on the remote's folder
+    // Removing a remote is now a context-menu item ("Remove remote…") on the remote's folder
     // header, not a standalone "Remove <name>" icon button.
     await browser.execute((el) => {
       el.dispatchEvent(
         new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
       );
     }, remoteFolderHeader);
-    await (await $("button=Remove remote")).click();
+    await (await $("button=Remove remote…")).click();
     const blockingDialog = await $(`dialog[aria-label='Remove remote ${REMOTE}']`);
     await blockingDialog.waitForExist();
     expect(await blockingDialog.getText()).toContain("clears the upstream of");

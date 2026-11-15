@@ -2,12 +2,12 @@
 
 Right-click a commit in the graph:
 
-- **Cherry-pick** applies that commit on top of your current branch (not available on the
-  current HEAD commit). If it conflicts, the status strip shows **Cherry-picking**, conflicts
-  resolve exactly like a merge, and **Commit** finishes it. **Abort cherry-pick** undoes it and
-  keeps unrelated unstaged edits.
-- **Revert** commits the inverse of that commit, with the same conflict flow (**Reverting**,
-  **Abort revert**).
+- **Cherry-pick onto ⟨branch⟩** applies that commit on top of your current branch (not
+  available on the current HEAD commit). If it conflicts, the status strip shows **Cherry-picking**,
+  conflicts resolve exactly like a merge, and **Commit** finishes it. **Abort cherry-pick** undoes
+  it and keeps unrelated unstaged edits.
+- **Revert (new commit on ⟨branch⟩)** commits the inverse of that commit on your current
+  branch, with the same conflict flow (**Reverting**, **Abort revert**).
 - **Switch to (detached)** checks the commit out without a branch. The toolbar shows **HEAD
   detached at …** and push and pull are disabled until you check out a branch. The commit's row
   in the graph has a **HEAD** badge.
@@ -21,19 +21,20 @@ Right-click a commit in the graph:
   (see [Editing older commits](#editing-older-commits) below).
 
 The command palette also has commands to cherry-pick, revert, check out and reset to the
-selected commit, to reword, edit, split, squash, fixup, move or drop it (**Reword 1a2b3c4…**,
-**Drop 1a2b3c4** and so on), to fold staged changes into it (**Fold staged changes into
-1a2b3c4**), and to amend the last commit (where the commit menu offers them), plus
-**Continue cherry-pick** / **Abort cherry-pick** (or revert) while a sequence is paused.
+selected commit (**Cherry-pick 1a2b3c4 onto main**, **Reset main to 1a2b3c4…**), to reword, edit,
+split, squash, fixup, move or drop it (**Reword 1a2b3c4…**, **Drop 1a2b3c4** and so on), to fold
+staged changes into it (**Fold staged changes into 1a2b3c4**), and to amend the last commit (where
+the commit menu offers them), plus **Continue cherry-pick** / **Abort cherry-pick** (or revert)
+while a sequence is paused.
 
 ??? note "Details"
     A pick is refused if it would overwrite unstaged edits or if changes are staged. Picking a
     commit whose changes are already on the branch reports "Nothing to apply — those changes are
-    already on this branch." On a merge commit the item reads **Cherry-pick…** and asks which
-    parent to apply it against: parent 1 is usually the branch that was merged into, so picking
-    against it applies what the merge brought in. On a merge commit, **Revert…** asks for the
-    parent to keep (parent 1 undoes what the merge brought in), and the message names it like
-    `git revert -m` does.
+    already on this branch." On a merge commit the item reads **Cherry-pick onto ⟨branch⟩…** and
+    asks which parent to apply it against: parent 1 is usually the branch that was merged into, so
+    picking against it applies what the merge brought in. On a merge commit, **Revert (new commit on
+    ⟨branch⟩)…** asks for the parent to keep (parent 1 undoes what the merge brought in), and the
+    message names it like `git revert -m` does.
 
     Cherry-pick, revert, check out, reset and **Create tag at…** also work for a commit selected
     in the search results or a file history that is older than the history loaded in the graph;
@@ -76,7 +77,8 @@ The commit menu has eight one-click edits for commits of the current branch:
 - **Move up** and **Move down** swap the commit with the newer or the older neighbour.
 - **Drop** removes the commit and its changes from the branch.
 
-![Edit commit… stopped at a commit: the status strip, the staged change and the commit area with Commit part](assets/edit-commit.png)
+![Edit commit… stopped at a commit: the status strip, the staged change and the commit area with
+Commit part](assets/edit-commit.png)
 
 Each one is a small interactive rebase (see [Rebase](rebase.md)): the commits after the edited
 one are rewritten, so they get new ids. A conflict pauses it like any rebase: the progress panel
@@ -107,8 +109,8 @@ files have to be staged or stashed first (untracked files are fine). It runs no 
     An edit is disabled, with the reason as its tooltip, when:
 
     - the commit isn't on the current branch (or HEAD is detached);
-    - it is a merge commit, or a merge commit comes after it (use **Rebase onto here…**
-      instead);
+    - it is a merge commit, or a merge commit comes after it (use **Rebase current branch
+      onto here…** or **Interactive rebase from here…** instead);
     - it is the first commit of the history; Squash, Fixup and Move down also need a parent
       that isn't the first commit or a merge commit;
     - Move up is on the latest commit;

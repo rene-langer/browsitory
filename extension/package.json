@@ -84,7 +84,7 @@
       },
       {
         "command": "browsitory.shortcut.refresh",
-        "title": "Refresh the repository",
+        "title": "Refresh",
         "category": "Browsitory"
       },
       {
@@ -124,22 +124,22 @@
       },
       {
         "command": "browsitory.shortcut.close-tab",
-        "title": "Close the active tab",
+        "title": "Close tab",
         "category": "Browsitory"
       },
       {
         "command": "browsitory.shortcut.reopen-closed-tab",
-        "title": "Reopen the last closed tab",
+        "title": "Reopen closed tab",
         "category": "Browsitory"
       },
       {
         "command": "browsitory.shortcut.go-back",
-        "title": "Back through the selected commits",
+        "title": "Back to previous commit",
         "category": "Browsitory"
       },
       {
         "command": "browsitory.shortcut.go-forward",
-        "title": "Forward through the selected commits",
+        "title": "Forward to next commit",
         "category": "Browsitory"
       }
     ],

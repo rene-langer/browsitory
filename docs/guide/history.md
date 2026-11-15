@@ -32,9 +32,10 @@ sidebar. To revert or apply only one file or hunk of a commit, or to save commit
 see [Patches and partial reverts](patches.md).
 
 **Copying a commit's details.** A commit's menu (right-click its row, or the Menu key or
-Shift+F10 on it) ends with **Copy SHA**, **Copy short SHA**, **Copy subject**, **Copy author**
-(`Name <email>`) and **Copy date** (ISO 8601, for example `2026-11-10T09:30:00.000Z`, the same
-instant the details show). They copy plain text, work while another operation runs, and a
+Shift+F10 on it) ends with **Copy**, a submenu (click it, or press → or Enter on it; ← or Esc goes
+back) with **Copy SHA**, **Copy short SHA**, **Copy subject**, **Copy author** (`Name <email>`) and
+**Copy date** (ISO 8601, for example `2026-11-10T09:30:00.000Z`, the same instant the details
+show). They copy plain text, work while another operation runs, and a
 short notification confirms the copy; if the clipboard refuses, an error says so. Branch, remote
 and tag menus have copy items too (see [Branches and remotes](branches-and-remotes.md) and
 [Tags](tags.md)).
@@ -164,7 +165,8 @@ each tab (as wide as the tab size in **Preferences → Appearance**), and a fain
 carriage return, such as the end of a line with Windows line endings. On added lines, trailing
 spaces and tabs are highlighted. The markers are only drawn over the text: copying from the diff
 copies the original characters, lines wrap as before, and staging is unaffected. It is off by
-default, remembered across sessions, and in the command palette as **Toggle whitespace**.
+default, remembered across sessions, and in the command palette as **Show whitespace** or **Hide
+whitespace**.
 
 **Wrap lines** wraps long lines at the pane's width, or turns wrapping off so each line stays on
 one row and the diff scrolls sideways. Line numbers stay next to their line either way, and
@@ -195,9 +197,9 @@ With a screen reader, each line of a diff is read with what it is and its line n
 and the line-number columns are not read. Where lines can be selected, each hunk's lines are a
 list: the line cursor is read as you move it, with whether the line is selected.
 
-The command palette also has **Toggle wrap lines** and **Toggle show whole file**, which change
-the same options. **Toggle wrap lines** turns wrapping on or off depending on what the current
-diff shows: the one you last clicked or moved the focus into, or the working tree's current file.
+The command palette also has **Wrap lines** (or **Stop wrapping lines**) and **Show whole file**
+(or **Show changes only**), named for what they do to the current diff: the one you last clicked
+or moved the focus into, or the working tree's current file.
 
 **Preferences → Diff → Diff algorithm** chooses how the old and new lines are lined up, for every
 diff: **Default** (Myers, what `git diff` uses), **Patience** or **Minimal**. Patience lines up

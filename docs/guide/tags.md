@@ -27,7 +27,8 @@ the row), a right-click, or the Menu key or Shift+F10 on the row, its checkbox o
 badge in the graph: push to a remote, **Branch from tag**, **Switch to (detached)**, **Compare
 with current branch** (see [Compare](compare.md)), **Copy tag name**, **Delete from remote…** and
 **Delete tag…** (the local tag, after a confirmation; a copy on a remote stays, and **Undo**
-brings the tag back).
+brings the tag back). The command palette lists every tag command under **Tags**, among them
+**Delete tag ⟨name⟩…**, which asks first too.
 
 ## Delete a tag on a remote
 

@@ -22,22 +22,27 @@ export interface RemoteActions {
 export function remoteActions(blockers: OperationBlockers, remoteName: string): RemoteActions {
   return {
     fetch: { label: "Fetch", paletteLabel: `Fetch ${remoteName}`, ...gate(blockers) },
-    pushCurrentBranch: { label: "Push current branch here", paletteLabel: `Push to ${remoteName}`, ...gate(blockers) },
-    edit: { label: "Edit remote", paletteLabel: `Edit remote ${remoteName}…`, ...gate(blockers) },
+    pushCurrentBranch: {
+      label: `Push current branch to ${remoteName}`,
+      paletteLabel: `Push current branch to ${remoteName}`,
+      ...gate(blockers),
+    },
+    // Each opens a dialog or a confirmation, so each ends in "…" (#990).
+    edit: { label: "Edit remote…", paletteLabel: `Edit remote ${remoteName}…`, ...gate(blockers) },
     credentials: {
-      label: "Manage credentials",
+      label: "Manage credentials…",
       paletteLabel: `Manage credentials for ${remoteName}…`,
       ...gate(blockers),
     },
-    remove: { label: "Remove remote", paletteLabel: `Remove remote ${remoteName}…`, ...gate(blockers) },
+    remove: { label: "Remove remote…", paletteLabel: `Remove remote ${remoteName}…`, ...gate(blockers) },
   };
 }
 
 /**
- * "Add remote…" in the Branches section's Add menu, "Add remote" in the palette. Only opens the
- * form, whose Add remote button carries the busy rule and its reason, so it is offered while an
- * operation runs (like "Create tag…", #495).
+ * "Add remote…" in the Branches section's Add menu and in the palette. Only opens the form, whose
+ * Add remote button carries the busy rule and its reason, so it is offered while an operation
+ * runs (like "Create tag…", #495).
  */
 export function addRemoteAction(): PaletteAction {
-  return { label: "Add remote…", paletteLabel: "Add remote", enabled: true, reason: undefined };
+  return { label: "Add remote…", paletteLabel: "Add remote…", enabled: true, reason: undefined };
 }

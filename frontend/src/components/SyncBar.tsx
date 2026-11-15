@@ -63,7 +63,10 @@ export function SyncBar({
   onPublish: () => void;
   leading?: ReactNode;
   trailing?: ReactNode;
-  /** Stash, with "Stash all" and "Stash…" in its menu; `reason` (`stashBlockReason`) disables it. */
+  /**
+   * Stash, with "Stash all changes" and "Stash…" in its menu; `reason` (`stashBlockReason`)
+   * disables it.
+   */
   stash?: { reason: string | null; onStash: () => void; onStashWithOptions: () => void };
   /** A diverged pull waits for Merge, Rebase or Cancel: Pull is disabled meanwhile. */
   pullPending?: boolean;
@@ -197,7 +200,7 @@ export function SyncBar({
           menuLabel="More stash options"
           chevronClassName={styles.split}
           items={[
-            { label: "Stash all", onSelect: () => stash.onStash() },
+            { label: "Stash all changes", onSelect: () => stash.onStash() },
             { label: "Stash…", onSelect: () => stash.onStashWithOptions() },
           ]}
         />

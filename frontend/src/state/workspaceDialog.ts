@@ -21,6 +21,11 @@ export type WorkspaceDialog =
   | { kind: "createTag"; commitId: string }
   // "Delete from remote" for that tag.
   | { kind: "deleteRemoteTag"; tagName: string }
+  // The palette's "Delete tag …", "Drop stash: …" and "Remove worktree …" (#993, #990): the same
+  // confirmations as the tag, stash and worktree panels'.
+  | { kind: "deleteTag"; tagName: string }
+  | { kind: "dropStash"; commitId: string }
+  | { kind: "removeWorktree"; name: string }
   // A remote's Edit / Credentials / Remove dialog (`RemoteDialogs`).
   | { kind: "remote"; action: "edit" | "credentials" | "remove"; remoteName: string }
   // The merge options dialog for that branch.

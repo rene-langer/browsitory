@@ -30,7 +30,7 @@ describe("Browsitory VSCode extension cherry-pick", () => {
     try {
       await webview.waitForText("li", "vscode-e2e: commit to cherry-pick", 15000);
       await webview.contextMenuByText("li", "vscode-e2e: commit to cherry-pick");
-      await webview.clickByText("button", "Cherry-pick");
+      await webview.clickByText("button", `Cherry-pick onto ${baseBranch}`);
 
       const deadline = Date.now() + 15000;
       while (git("log", "-1", "--format=%s") !== "vscode-e2e: commit to cherry-pick") {

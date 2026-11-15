@@ -310,8 +310,8 @@ function CommitGraphContent({
   function singleCommitItems(commitId: string): ContextMenuItem[] {
     const commit = commits.find((candidate) => candidate.id === commitId);
     const isHead = headInfo.headId === commitId;
-    // Grouped (#645): new refs, applying the commit elsewhere, moving HEAD, history edits,
-    // read-only exports, then copying.
+    // Grouped (#645): new refs, rebasing, applying the commit elsewhere, moving HEAD, history
+    // edits, read-only exports, then the Copy submenu (#992).
     const items: ContextMenuItem[] = [
       { label: "Branch from here", onSelect: () => onBranchFromCommit(commitId), group: "refs" },
     ];
@@ -333,14 +333,18 @@ function CommitGraphContent({
         group,
       });
       if (onCreateTag !== undefined) items.push(menuItem(actions.createTag, () => onCreateTag(commitId), "refs"));
+      // Both open the planner (#991): onto this commit, or from it (onto its parent, the commit
+      // itself the first Pick).
+      const interactive = actions.interactiveRebase;
       items.push(
-        {
-          label: "Rebase onto here",
-          onSelect: () => onRebaseFromCommit(commitId),
-          disabled: operationsBlocked,
-          title: busyTitle,
-          group: "apply",
-        },
+        menuItem(actions.rebaseOnto, () => onRebaseFromCommit(commitId), "rebase"),
+        menuItem(
+          interactive,
+          () => {
+            if (interactive.onto !== null) onRebaseSelection?.(interactive.onto, new Map([[commitId, "Pick"]]));
+          },
+          "rebase",
+        ),
         // A merge commit needs a parent to apply against: the ellipsis opens the parent picker.
         menuItem(
           actions.cherryPick,
@@ -371,15 +375,15 @@ function CommitGraphContent({
     if (onSavePatch !== undefined) {
       items.push({ label: "Save as patch…", onSelect: () => onSavePatch([commitId]), group: "export" });
     }
-    items.push(...copyItems(commitId, commit));
+    items.push({ label: "Copy", onSelect: () => {}, submenu: copyItems(commitId, commit), group: "copy" });
     if (onRunUserCommand !== undefined) {
       items.push(...userCommandMenuItems(userCommands, "Commit", { ...NO_SELECTION, commitId }, onRunUserCommand));
     }
     return items;
   }
 
-  // "Copy …" (#614): last in the menu and never disabled (copying is not a Git operation). The
-  // date is the instant the commit details show, in ISO 8601.
+  // "Copy …" (#614): the Copy submenu, last in the menu (#992), never disabled (copying is not a Git
+  // operation). The date is the instant the commit details show, in ISO 8601.
   function copyItems(commitId: string, commit: GraphCommit | undefined): ContextMenuItem[] {
     const copy = (label: string, text: string, what: string): ContextMenuItem => ({
       label,

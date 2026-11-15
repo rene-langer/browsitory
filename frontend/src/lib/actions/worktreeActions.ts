@@ -7,7 +7,7 @@ export const MAIN_WORKTREE = "The main worktree can't be removed.";
 export interface WorktreeActions {
   /** Opens the worktree in a tab of its own. */
   open: PaletteAction;
-  /** Opens the confirmation (in the palette: opens the Worktrees section). */
+  /** Opens the confirmation, in the panel and the palette alike (#990). */
   remove: PaletteAction;
 }
 
@@ -26,8 +26,8 @@ export function worktreeActions(blockers: OperationBlockers, worktree: WorktreeI
       ...gate(blockers),
     },
     remove: {
-      label: `Remove ${worktree.path}`,
-      paletteLabel: `Remove worktree ${worktree.name}`,
+      label: `Remove ${worktree.path}…`,
+      paletteLabel: `Remove worktree ${worktree.name}…`,
       ...gate(blockers, worktree.isMain ? MAIN_WORKTREE : undefined),
     },
   };

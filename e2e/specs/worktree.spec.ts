@@ -93,7 +93,7 @@ describe("Browsitory worktrees", () => {
 
     await openMainWorktree.click();
     await expect(await activeCurrentBranchButton(mainBranch)).toHaveText(expect.stringContaining(`${mainBranch} (current)`));
-    const removeLinkedWorktree = await activeElement(`button=Remove ${WORKTREE_PATH}`);
+    const removeLinkedWorktree = await activeElement(`button=Remove ${WORKTREE_PATH}…`);
 
     await removeLinkedWorktree.click();
     const removalDialog = await $("aria/Remove worktree " + WORKTREE_PATH);

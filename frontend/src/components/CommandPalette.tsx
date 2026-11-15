@@ -27,6 +27,7 @@ const RECENT_SHOWN = 5;
 /** PageUp/PageDown's step when the rows have no measured height (jsdom). */
 const FALLBACK_PAGE = 10;
 const RECENT_HEADING = "Recent";
+const SUGGESTED_HEADING = "Suggested";
 /** Heads the matches that can't run now, listed after the others for a typed query (#644). */
 const UNAVAILABLE_HEADING = "Unavailable now";
 
@@ -56,10 +57,10 @@ export function CommandPalette({
   const picker = pickerCommand?.picker;
 
   const grouped = picker === undefined && query.trim() === "";
-  // Unfiltered (#644): the recently used commands, then every other command under its kind
-  // group (stable within a group). Filtered: one list in relevance order. Keyboard order always
-  // equals displayed order, so the highlight index is over `results`; `headings` maps the index
-  // of a group's first row to its heading.
+  // Unfiltered (#644): the recently used commands, the suggested ones (#1021), then every other
+  // command under its kind group (stable within a group). Filtered: one list in relevance order.
+  // Keyboard order always equals displayed order, so the highlight index is over `results`;
+  // `headings` maps the index of a group's first row to its heading.
   const { results, headings } = useMemo((): {
     results: readonly PaletteItem[];
     headings: ReadonlyMap<number, string>;
@@ -87,11 +88,15 @@ export function CommandPalette({
       .filter((command): command is Command => command !== undefined)
       .slice(0, RECENT_SHOWN);
     const recentIds = new Set(recent.map((command) => command.id));
+    // What the state calls for (#1021), after the recent commands.
+    const suggested = ranked.filter((command) => command.suggested === true && !recentIds.has(command.id));
+    const shownIds = new Set([...recentIds, ...suggested.map((command) => command.id)]);
     const sections: { heading: string; commands: Command[] }[] = [
       { heading: RECENT_HEADING, commands: recent },
+      { heading: SUGGESTED_HEADING, commands: suggested },
       ...COMMAND_GROUPS.map((group) => ({
         heading: group,
-        commands: ranked.filter((command) => command.group === group && !recentIds.has(command.id)),
+        commands: ranked.filter((command) => command.group === group && !shownIds.has(command.id)),
       })),
     ];
     const flat: Command[] = [];

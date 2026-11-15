@@ -301,7 +301,12 @@ export function DiffView({
   // The palette's "Wrap lines" flips what this diff shows, for every diff: it sets the setting.
   const claimCurrent = useRegisterDiffView(
     path ?? null,
-    { toggleWrap: () => update({ wordWrap: wrap ? "Off" : "On" }), toggleWholeFile: wholeFile?.onToggle ?? null },
+    {
+      toggleWrap: () => update({ wordWrap: wrap ? "Off" : "On" }),
+      toggleWholeFile: wholeFile?.onToggle ?? null,
+      wrapped: wrap,
+      wholeFile: wholeFileOn,
+    },
     current,
   );
   const claimHandlers = { onPointerDownCapture: claimCurrent, onFocusCapture: claimCurrent };

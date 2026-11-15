@@ -425,7 +425,7 @@ describe("UX inventory", () => {
     fromCommit("dialog-create-tag", COMMIT_OLD, "Create tag");
     fromCommit("error-cherry-pick-with-staged-changes", COMMIT_OFFLINE, "Cherry-pick");
     fromCommit("dialog-reword", COMMIT_HEAD, "Reword");
-    fromCommit("dialog-rebase-planner-onto-commit", COMMIT_OFFLINE, "Rebase onto here");
+    fromCommit("dialog-rebase-planner-onto-commit", COMMIT_OFFLINE, "Rebase current branch onto here");
     fromBranch("dialog-merge", "feature/offline-tiles", "Merge");
     fromBranch("dialog-rebase-onto-branch", "feature/offline-tiles", "Rebase current branch onto");
     fromBranch("dialog-delete-branch", "feature/offline-tiles", "Delete");
@@ -773,7 +773,7 @@ describe("UX inventory", () => {
     });
     it("interactive-rebase-planner", async () => {
       await commitMenu(COMMIT_OLD);
-      await h.pick("Rebase onto here");
+      await h.pick("Rebase current branch onto here…");
       await browser.pause(1000);
       h.note("planner", await h.dialogs());
       await h.shoot("dialog-interactive-rebase-planner");
@@ -782,7 +782,7 @@ describe("UX inventory", () => {
     it("interactive-rebase-planner-dark", async () => {
       await h.setTheme("dark");
       await commitMenu(COMMIT_OLD);
-      await h.pick("Rebase onto here");
+      await h.pick("Rebase current branch onto here…");
       await browser.pause(1000);
       await h.shoot("dialog-interactive-rebase-planner-dark");
       await h.esc();
@@ -791,14 +791,14 @@ describe("UX inventory", () => {
     it("cherry-pick-and-revert-clean", async () => {
       const head = h.git("rev-parse", "HEAD");
       await commitMenu(COMMIT_OFFLINE);
-      await h.pick("Cherry-pick");
+      await h.pick("Cherry-pick onto main");
       await browser.pause(2500);
       h.note("cherry-pick-clean", await h.dialogs());
       await h.shoot("after-cherry-pick");
       h.git("reset", "-q", "--hard", head);
       await h.refresh();
       await commitMenu(COMMIT_OLD);
-      await h.pick("Revert");
+      await h.pick("Revert (new commit on main)");
       await browser.pause(2500);
       h.note("revert-clean", await h.dialogs());
       await h.shoot("after-revert-or-conflict");
@@ -977,7 +977,8 @@ describe("UX inventory", () => {
     });
     it("folder-history", async () => {
       await selectCommit(COMMIT_OLD);
-      await h.clickInPage("button", "Folder history");
+      await h.click('button[aria-label^="Actions for src/"]');
+      await h.pick("History of folder", { prefix: true });
       await browser.pause(1500);
       await h.shoot("folder-history");
       await h.esc();

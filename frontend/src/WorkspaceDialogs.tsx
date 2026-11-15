@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { ApplyPatchDialog } from "./components/ApplyPatchDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { CreateTagDialog } from "./components/CreateTagDialog";
+import { DeleteTagMessage } from "./components/DeleteTagMessage";
 import { DeleteRemoteBranchDialog } from "./components/DeleteRemoteBranchDialog";
 import { DeleteRemoteTagDialog } from "./components/DeleteRemoteTagDialog";
 import { EditRestDialog } from "./components/EditRestDialog";
@@ -28,6 +29,7 @@ import { busyReason, stashBlockReason, terminalAbortConfirm } from "./lib/operat
 import { upstreamPushBranch } from "./lib/pushTarget";
 import { repoNameOf } from "./lib/repoName";
 import { shortRefName } from "./lib/shortRefName";
+import { stashTitle } from "./lib/actions/stashActions";
 import type { useAnnounce } from "./state/useAnnounce";
 import type { UseAppStateResult } from "./state/useAppState";
 import type { useCommitDraftActions } from "./state/useCommitDraftActions";
@@ -142,6 +144,16 @@ export function WorkspaceDialogs({
   const applyPatchDialog = dialogOf(dialog, "applyPatch");
   const deleteRemoteBranchDialog = dialogOf(dialog, "deleteRemoteBranch");
   const deleteRemoteTagDialog = dialogOf(dialog, "deleteRemoteTag");
+  const deleteTagDialog = dialogOf(dialog, "deleteTag");
+  const dropStashDialog = dialogOf(dialog, "dropStash");
+  // Found by commit, as the indexes shift when another stash is pushed or dropped meanwhile.
+  const dropStashEntry =
+    dropStashDialog === null ? undefined : appState.state.stashes.find((stash) => stash.commitId === dropStashDialog.commitId);
+  const removeWorktreeDialog = dialogOf(dialog, "removeWorktree");
+  const removeWorktreeEntry =
+    removeWorktreeDialog === null
+      ? undefined
+      : appState.state.worktrees.find((worktree) => worktree.name === removeWorktreeDialog.name);
   const remoteDialog = dialogOf(dialog, "remote");
   const rewordDialog = dialogOf(dialog, "reword");
   // Read from `dialog` itself, not `rewordDialog`: the React Compiler cannot keep the memoization
@@ -421,6 +433,54 @@ export function WorkspaceDialogs({
             void appState.editHistory(commitId, onto, { kind: "Reword", message });
           }}
           onCancel={() => closeDialog("reword")}
+        />
+      )}
+      {active && deleteTagDialog !== null && (
+        // The palette's "Delete tag …" (#993): TagPanel's confirmation.
+        <ConfirmDialog
+          title={`Delete local tag ${deleteTagDialog.tagName}`}
+          message={<DeleteTagMessage name={deleteTagDialog.tagName} />}
+          confirmLabel="Delete tag"
+          confirmDisabled={repositoryOperationDisabled}
+          // The repository can become busy while the confirmation is open (#521).
+          confirmReason={operationDisabledReason}
+          onConfirm={() => {
+            if (repositoryOperationDisabled) return;
+            void appState.deleteTag(deleteTagDialog.tagName).then(() => closeDialog("deleteTag"));
+          }}
+          onCancel={() => closeDialog("deleteTag")}
+        />
+      )}
+      {active && dropStashDialog !== null && dropStashEntry !== undefined && (
+        // The palette's "Drop stash: …" (#990): the Stashes panel's confirmation. Only an action in
+        // flight or a transfer blocks a drop (#521).
+        <ConfirmDialog
+          title={`Drop stash ${stashTitle(dropStashEntry)}`}
+          message={<p>Drop &quot;{stashTitle(dropStashEntry)}&quot;? This cannot be undone.</p>}
+          confirmLabel="Drop stash"
+          tone="danger"
+          confirmReason={busyReason(appState.state)}
+          onConfirm={() => {
+            if (busyReason(appState.state) !== null) return;
+            closeDialog("dropStash");
+            void appState.dropStash(dropStashEntry.index);
+          }}
+          onCancel={() => closeDialog("dropStash")}
+        />
+      )}
+      {active && removeWorktreeDialog !== null && removeWorktreeEntry !== undefined && (
+        // The palette's "Remove worktree …" (#990): the Worktrees panel's confirmation.
+        <ConfirmDialog
+          title={`Remove worktree ${removeWorktreeEntry.path}`}
+          message={<p>Remove worktree at {removeWorktreeEntry.path}?</p>}
+          confirmLabel="Remove worktree"
+          confirmDisabled={repositoryOperationDisabled}
+          confirmReason={operationDisabledReason}
+          onConfirm={() => {
+            if (repositoryOperationDisabled) return;
+            void appState.removeWorktree(removeWorktreeEntry.name).then(() => closeDialog("removeWorktree"));
+          }}
+          onCancel={() => closeDialog("removeWorktree")}
         />
       )}
       {active && deleteRemoteTagDialog !== null && (

@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { Check } from "lucide-react";
+import { Check, ChevronRight } from "lucide-react";
 import { isMenuKey } from "../../lib/menuKeys";
 import styles from "./ContextMenu.module.css";
 
@@ -28,6 +28,34 @@ export interface ContextMenuItem {
   shortcut?: string;
   /** The `shortcut` in `aria-keyshortcuts` syntax (`"Control+Z Meta+Z"`), for assistive tech. */
   ariaKeyShortcuts?: string;
+  /**
+   * Items of a submenu this item opens (#992), by click, Enter, Space or ArrowRight; ArrowLeft or
+   * Escape goes back, choosing one of them closes the whole menu. `onSelect` is not called.
+   */
+  submenu?: ContextMenuItem[];
+}
+
+/** Space kept between the menu and the window's edges. */
+const MARGIN = 4;
+
+/**
+ * For each item, the reason it shares with every other item of its group (#992): all of them
+ * disabled with the same `title`. The menu shows such a reason once, under the group's last item.
+ */
+function sharedReasons(items: readonly ContextMenuItem[]): (string | undefined)[] {
+  const shared: (string | undefined)[] = items.map(() => undefined);
+  let start = 0;
+  for (let end = 1; end <= items.length; end++) {
+    if (end < items.length && items[end].group === items[start].group) continue;
+    const run = items.slice(start, end);
+    const reason = run[0].title;
+    const allShare = run.every((item) => item.disabled === true && item.title === reason);
+    if (run.length > 1 && reason !== undefined && allShare) {
+      for (let index = start; index < end; index++) shared[index] = reason;
+    }
+    start = end;
+  }
+  return shared;
 }
 
 export function ContextMenu({
@@ -37,6 +65,7 @@ export function ContextMenu({
   onClose,
   returnFocusTo,
   isTrigger,
+  submenuOf,
 }: {
   x: number;
   y: number;
@@ -53,7 +82,13 @@ export function ContextMenu({
    * right-click. Called at press time with the pressed `aria-haspopup="menu"` element.
    */
   isTrigger?: (button: Element) => boolean;
+  /**
+   * Set on a submenu (#992): its item's label (the submenu's name) and closing the whole menu,
+   * which Tab does. Keys stay in the submenu; Escape and ArrowLeft go back to the item.
+   */
+  submenuOf?: { label: string; closeAll: () => void };
 }) {
+  const isSubmenu = submenuOf !== undefined;
   const menuRef = useRef<HTMLUListElement>(null);
   const reasonIdPrefix = useId();
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -78,9 +113,8 @@ export function ContextMenu({
     const menu = menuRef.current;
     if (menu === null) return;
     const rect = menu.getBoundingClientRect();
-    const margin = 4;
-    const nextX = Math.max(margin, Math.min(x, window.innerWidth - rect.width - margin));
-    const nextY = Math.max(margin, Math.min(y, window.innerHeight - rect.height - margin));
+    const nextX = Math.max(MARGIN, Math.min(x, window.innerWidth - rect.width - MARGIN));
+    const nextY = Math.max(MARGIN, Math.min(y, window.innerHeight - rect.height - MARGIN));
     setPosition((current) => (current.x === nextX && current.y === nextY ? current : { x: nextX, y: nextY }));
   }, [x, y, items.length]);
 
@@ -96,6 +130,10 @@ export function ContextMenu({
   // so the menu is immediately usable from the keyboard the moment it opens, matching the APG
   // menu pattern's initial-focus expectation.
   const [focusedIndex, setFocusedIndex] = useState<number>(() => enabledIndexes[0] ?? -1);
+  // The open submenu (#992): its item and where it opens, beside that item.
+  const [submenu, setSubmenu] = useState<{ index: number; x: number; y: number; button: HTMLButtonElement } | null>(
+    null,
+  );
 
   // The document listeners below read the latest `restoreFocus` and trigger without re-subscribing.
   const restoreFocusRef = useRef(restoreFocus);
@@ -111,7 +149,8 @@ export function ContextMenu({
     // Escape with focus outside the menu (e.g. a menu opened by the pointer while focus stayed
     // elsewhere). Escape inside the menu is handled — and stopped — by `handleMenuKeyDown`.
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
+      // A submenu's Escape outside it is its parent menu's to handle.
+      if (event.key !== "Escape" || isSubmenu) return;
       if (menuRef.current !== null && menuRef.current.contains(event.target as Node)) return;
       restoreFocusRef.current();
       onClose();
@@ -143,7 +182,7 @@ export function ContextMenu({
       document.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [onClose]);
+  }, [onClose, isSubmenu]);
 
   // Move actual DOM focus onto the initial item once, when the menu first mounts — a menu opened
   // via keyboard (Enter/Space on a "…" affordance, or Shift+F10/Menu-key) should drop focus
@@ -191,10 +230,27 @@ export function ContextMenu({
   function activate(index: number) {
     const item = items[index];
     if (item === undefined || item.disabled === true) return;
+    if (item.submenu !== undefined) {
+      openSubmenu(index);
+      return;
+    }
     restoreFocus();
     item.onSelect();
     onClose();
   }
+
+  function openSubmenu(index: number) {
+    const button = itemRefs.current[index];
+    if (button == null) return;
+    const rect = button.getBoundingClientRect();
+    setSubmenu({ index, x: rect.right, y: rect.top, button });
+  }
+
+  // A submenu's choice closes this menu too, focus going back to its trigger first (#992).
+  const closeAll = () => {
+    restoreFocus();
+    onClose();
+  };
 
   // Single-character typeahead: the next enabled item (after the focused one, wrapping) whose
   // label starts with `key`, case-insensitively. No multi-character buffer.
@@ -213,6 +269,8 @@ export function ContextMenu({
   }
 
   function handleMenuKeyDown(event: ReactKeyboardEvent<HTMLUListElement>) {
+    // A submenu's keys never reach the menu it opened from.
+    if (isSubmenu) event.stopPropagation();
     if (isMenuKey(event)) {
       // Already open: the key must not reach a row or list underneath and open another menu.
       event.preventDefault();
@@ -231,8 +289,29 @@ export function ContextMenu({
       case "Tab":
         // APG: Tab closes the menu and moves on. Focus goes back to the trigger first, and the
         // browser's default Tab action then moves on from there (not prevented).
+        if (submenuOf !== undefined) {
+          submenuOf.closeAll();
+          return;
+        }
         restoreFocus();
         onClose();
+        return;
+      case "ArrowRight": {
+        // The item the key was pressed on (the roving index may not have caught up yet).
+        const pressed = itemRefs.current.findIndex((button) => button === event.target);
+        const index = pressed === -1 ? focusedIndex : pressed;
+        if (items[index]?.submenu !== undefined) {
+          event.preventDefault();
+          activate(index);
+        }
+        return;
+      }
+      case "ArrowLeft":
+        if (isSubmenu) {
+          event.preventDefault();
+          restoreFocus();
+          onClose();
+        }
         return;
       case "Enter":
       case " ":
@@ -264,12 +343,27 @@ export function ContextMenu({
     }
   }
 
+  const shared = sharedReasons(items);
+  const groupReasonId = (index: number) => {
+    let last = index;
+    while (last + 1 < items.length && items[last + 1].group === items[index].group) last++;
+    return `${reasonIdPrefix}-reason-${last}`;
+  };
+
   return (
     <ul
       ref={menuRef}
       role="menu"
+      aria-label={submenuOf?.label}
       className={styles.menu}
-      style={{ position: "fixed", top: position.y, left: position.x }}
+      // Never taller than the window (#992): a long menu scrolls.
+      style={{
+        position: "fixed",
+        top: position.y,
+        left: position.x,
+        maxHeight: `calc(100vh - ${2 * MARGIN}px)`,
+        overflowY: "auto",
+      }}
       tabIndex={enabledIndexes.length === 0 ? -1 : undefined}
       onKeyDown={handleMenuKeyDown}
       // A keyboard-generated contextmenu (the Menu key fires it on keyup, after focus moved in
@@ -280,9 +374,15 @@ export function ContextMenu({
       }}
     >
       {items.map((item, index) => {
-        // A disabled item's `title` is why; it also shows under the label, as its description.
+        // A disabled item's `title` is why; it also shows under the label, as its description. A
+        // reason the whole group shares shows once, under its last item (#992).
         const reason = item.disabled === true && item.title !== undefined ? item.title : undefined;
-        const reasonId = `${reasonIdPrefix}-reason-${index}`;
+        const ownReasonId = `${reasonIdPrefix}-reason-${index}`;
+        const reasonId = shared[index] === undefined ? ownReasonId : groupReasonId(index);
+        const showsReason = reason !== undefined && reasonId === ownReasonId;
+        const opensSubmenu = item.submenu !== undefined;
+        const openSubmenuHere = submenu !== null && submenu.index === index ? submenu : null;
+        const submenuOpen = openSubmenuHere !== null;
         return [
           index > 0 && items[index - 1].group !== item.group && (
             <li key={`separator:${item.label}`} role="separator" className={styles.separator} />
@@ -295,6 +395,8 @@ export function ContextMenu({
               type="button"
               role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"}
               aria-checked={item.checked}
+              aria-haspopup={opensSubmenu ? "menu" : undefined}
+              aria-expanded={opensSubmenu ? submenuOpen : undefined}
               aria-keyshortcuts={item.ariaKeyShortcuts}
               className={styles.item}
               disabled={item.disabled}
@@ -314,11 +416,29 @@ export function ContextMenu({
                   {item.shortcut}
                 </kbd>
               )}
+              {opensSubmenu && <ChevronRight size={12} aria-hidden="true" className={styles.submenuMark} />}
             </button>
-            {reason !== undefined && (
+            {showsReason && (
               <span id={reasonId} className={styles.reason}>
                 {reason}
               </span>
+            )}
+            {openSubmenuHere !== null && item.submenu !== undefined && (
+              <ContextMenu
+                x={openSubmenuHere.x}
+                y={openSubmenuHere.y}
+                returnFocusTo={openSubmenuHere.button}
+                submenuOf={{ label: item.label, closeAll }}
+                onClose={() => setSubmenu(null)}
+                items={item.submenu.map((sub) => ({
+                  ...sub,
+                  onSelect: () => {
+                    restoreFocus();
+                    sub.onSelect();
+                    onClose();
+                  },
+                }))}
+              />
             )}
           </li>,
         ];

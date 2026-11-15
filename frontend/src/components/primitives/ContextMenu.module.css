@@ -79,11 +79,21 @@
   background: var(--color-border);
 }
 
-/* Why a disabled item can't run (#664), visible under its label. */
+/* Why a disabled item can't run (#664), visible under its label (under a group's last item when
+   the whole group shares it, #992). */
 .reason {
   display: block;
   max-width: 22rem;
   padding: 0 var(--space-2) var(--space-1);
   color: var(--color-text-muted);
   font-size: var(--text-xs);
+}
+
+/* An item that opens a submenu (#992): the chevron after its label. */
+.submenuMark {
+  flex-shrink: 0;
+  align-self: center;
+  margin-left: auto;
+  padding-left: var(--space-3);
+  box-sizing: content-box;
 }

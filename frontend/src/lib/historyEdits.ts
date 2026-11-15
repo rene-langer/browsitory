@@ -85,7 +85,7 @@ function commonRefusal(
   }
   if (current === undefined) return NOT_ON_BRANCH;
   if (current.parentIds.length > 1) return "Merge commits can't be edited here.";
-  if (mergeAbove) return "A merge commit comes after this one. Use Rebase onto here… instead.";
+  if (mergeAbove) return "A merge commit comes after this one. Use Rebase current branch onto here… instead.";
   if (current.parentIds.length === 0) return ROOT;
   return null;
 }

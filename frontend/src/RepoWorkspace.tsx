@@ -662,6 +662,8 @@ export function RepoWorkspace({
             ? null
             : {
                 ...currentDiff.current,
+                wrapped: currentDiff.isWrapped(),
+                wholeFile: currentDiff.isWholeFile(),
                 toggleWrap: currentDiff.toggleWrap,
                 toggleWholeFile: currentDiff.toggleWholeFile,
               },

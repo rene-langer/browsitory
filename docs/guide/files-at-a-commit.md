@@ -24,9 +24,9 @@ submodules are not shown; a notice says so. A symbolic link shows its target.
 The file's header has these actions:
 
 - **History** opens the [file history](file-history.md) of that path.
-- **History of lines N–M** (or **Line history** while no lines are selected): select lines of a
-  text file with the mouse, then click it for the commits that changed those lines (see
-  [History of lines](file-history.md#history-of-lines)).
+- **History of lines N–M** (**Line history**, which says "Select lines first.", while no lines
+  are selected): select lines of a text file with the mouse, then click it for the commits that
+  changed those lines (see [History of lines](file-history.md#history-of-lines)).
 - **Folder history** lists the commits that changed anything in the file's folder.
 - **Compare with working tree** shows the diff between this version and the file in your working
   tree, as **Diff against working tree** does for a whole commit (see
