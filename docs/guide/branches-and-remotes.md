@@ -60,8 +60,9 @@ The **+** button in the section header opens **New branch…**, **Add remote…*
 branches**. The New branch form's **Switch to it after creating** is on at first, as `git switch
 -c`, and keeps your last choice; creating and checking out is one step, which one **Undo** takes
 back. **Create branch…** in the command palette, or in the toolbar's branch list, opens the same
-form, also in a narrow window. Creating a branch from a specific commit, or starting a rebase
-onto one, is available from that commit's row in the graph.
+form, also in a narrow window. Escape closes the New branch and Add remote forms from anywhere
+inside them, and the focus goes back to where it was. Creating a branch from a specific commit,
+or starting a rebase onto one, is available from that commit's row in the graph.
 
 ## Switching with local changes
 
