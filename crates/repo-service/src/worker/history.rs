@@ -335,6 +335,15 @@ impl WorkerHandle {
             reply,
         })
     }
+    /// Reword… on HEAD (#981): its message only. Stub until the implementation commit.
+    pub fn reword_head(
+        &self,
+        message: String,
+        no_verify: bool,
+        events: Sender<super::HookEvent>,
+    ) -> Result<git_core::commit::CommitOutcome, ErrorDto> {
+        self.amend_commit(message, no_verify, None, Vec::new(), events)
+    }
     /// `mainline` (1-based parent) is required for a merge commit and refused otherwise. A clean
     /// pick runs `prepare-commit-msg` and `post-commit` (#183), reported on `events`
     /// (`HookSource::Pick`) under a `pick-<n>` id that `cancel_transfer` stops.

@@ -2199,6 +2199,7 @@ pub fn rebase_plan_commits() -> Cases<git_core::rebase::RebasePlanCommit> {
             summary: "Add".to_string(),
             author_name: "Ada Lovelace".to_string(),
             timestamp: 1_700_000_400,
+            merge: false,
         },
     )]
 }

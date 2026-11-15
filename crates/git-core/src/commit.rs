@@ -1338,6 +1338,16 @@ pub fn amend_head(
     Ok(oid.to_string())
 }
 
+/// Reword… on HEAD (#981): rewrites HEAD's commit with `message` only. Stub until the
+/// implementation commit.
+pub fn reword_head(
+    repo: &git2::Repository,
+    message: &str,
+    hooks: HookOptions<'_>,
+) -> Result<String, CommitError> {
+    amend_head(repo, message, None, hooks)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

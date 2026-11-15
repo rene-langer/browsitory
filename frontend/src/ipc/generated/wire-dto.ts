@@ -334,7 +334,11 @@ editing: string | null,
  */
 splitParts: number, };
 
-export type RebasePlanCommit = { id: string, shortId: string, summary: string, authorName: string, timestamp: number, };
+export type RebasePlanCommit = { id: string, shortId: string, summary: string, authorName: string, timestamp: number, 
+/**
+ * A merge commit: the planner can't replay it (#982).
+ */
+merge: boolean, };
 
 export type RebasePlanEntry = { commitId: string, action: RebaseAction, combinedMessage: string | null, };
 

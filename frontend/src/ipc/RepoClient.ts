@@ -1176,6 +1176,8 @@ export interface RebasePlanCommit {
   summary: string;
   authorName: string;
   timestamp: number;
+  /** A merge commit (#982): the plan replays first parents only, so it can't be replayed. */
+  merge: boolean;
 }
 
 export type RebaseAction =

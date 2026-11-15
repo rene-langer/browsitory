@@ -2765,6 +2765,8 @@ pub struct RebasePlanCommitDto {
     pub summary: String,
     pub author_name: String,
     pub timestamp: i64,
+    /// A merge commit: the planner can't replay it (#982).
+    pub merge: bool,
 }
 
 impl From<git_core::rebase::RebasePlanCommit> for RebasePlanCommitDto {
@@ -2775,6 +2777,7 @@ impl From<git_core::rebase::RebasePlanCommit> for RebasePlanCommitDto {
             summary: c.summary,
             author_name: c.author_name,
             timestamp: c.timestamp,
+            merge: c.merge,
         }
     }
 }

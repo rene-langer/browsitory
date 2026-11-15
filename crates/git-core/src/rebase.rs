@@ -269,6 +269,8 @@ pub struct RebasePlanCommit {
     pub summary: String,
     pub author_name: String,
     pub timestamp: i64,
+    /// A merge commit (#982): the plan replays first parents only, so it can't be replayed.
+    pub merge: bool,
 }
 
 pub fn commits_since(repo: &Repository, onto: &str) -> Result<Vec<RebasePlanCommit>, RebaseError> {
@@ -301,6 +303,7 @@ pub fn commits_since(repo: &Repository, onto: &str) -> Result<Vec<RebasePlanComm
                 .to_string(),
             author_name: commit.author().name().ok().unwrap_or_default().to_string(),
             timestamp: commit.time().seconds(),
+            merge: false,
         });
     }
     // `revwalk` yields newest-first; the plan wants oldest-first, matching actual replay order.

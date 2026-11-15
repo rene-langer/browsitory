@@ -251,7 +251,7 @@ MergeOptions/Only-squash-false {"fastForward":"Only","squash":false}
 ConflictSegment/Clean {"content":"same\n","kind":"Clean"}
 ConflictSegment/Conflict {"base":"base\n","kind":"Conflict","ours":"ours\n","theirs":"theirs\n"}
 ConflictSegment/Conflict-no-base {"base":"","kind":"Conflict","ours":"ours\n","theirs":"theirs\n"}
-RebasePlanCommit/plain {"authorName":"Ada Lovelace","id":"1818181818181818181818181818181818181818","shortId":"1818181","summary":"Add","timestamp":1700000400}
+RebasePlanCommit/plain {"authorName":"Ada Lovelace","id":"1818181818181818181818181818181818181818","merge":false,"shortId":"1818181","summary":"Add","timestamp":1700000400}
 RebaseStepResult/Conflicted {"files":["a.txt"],"kind":"Conflicted"}
 RebaseStepResult/PausedForEdit {"kind":"PausedForEdit"}
 RebaseStepResult/Advanced {"kind":"Advanced"}

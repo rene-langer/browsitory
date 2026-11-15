@@ -158,6 +158,39 @@ fn the_commit_msg_hook_sees_the_trailers() {
     );
 }
 
+/// Reword… on the latest commit (#981): the message only, staged changes stay staged; one undo
+/// step named after it.
+#[test]
+fn reword_head_keeps_staged_changes_out_of_the_commit() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a");
+    commit_all(&repo, "first");
+    let old_tree = repo.head().unwrap().peel_to_commit().unwrap().tree_id();
+    write_file(dir.path(), "b.txt", "b");
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    handle.stage_file("b.txt".into()).unwrap();
+    handle
+        .reword_head("first, reworded".into(), false, mpsc::channel().0)
+        .unwrap();
+    assert_eq!(head_commit_message(&repo), "first, reworded");
+    assert_eq!(
+        repo.head().unwrap().peel_to_commit().unwrap().tree_id(),
+        old_tree
+    );
+    let status = handle.get_status().unwrap();
+    assert!(
+        status
+            .iter()
+            .any(|entry| entry.path == "b.txt" && entry.staged),
+        "b.txt is still staged: {status:?}"
+    );
+    assert_eq!(
+        handle.get_undo_state().unwrap().undo.as_deref(),
+        Some("Reword “first, reworded”")
+    );
+}
+
 #[test]
 fn amend_commit_overrides_the_author_and_appends_trailers() {
     let (dir, repo) = init_repo();
