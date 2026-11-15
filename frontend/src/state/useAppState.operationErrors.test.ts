@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { RepoError, type RepoClient, type StashEntry } from "../ipc/RepoClient";
+import { RepoError, type HeadInfo, type RepoClient, type StashEntry } from "../ipc/RepoClient";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 import { useAppState, type UseAppStateResult } from "./useAppState";
 import { TEST_REPO_PATH, transferClient } from "./useAppStateTestClient";
 
@@ -313,5 +314,55 @@ describe("a failed operation's banner (#1032)", () => {
     );
     expect(error).toBe("Couldn't read /tmp/a.patch: gone");
     expect(hint).toBe("Check that the file exists and is a patch, then open it again.");
+  });
+
+  // A1: a pick that fails after some steps leaves a paused sequence (`SequenceRun::stopped`), a
+  // paused step or a moved HEAD; that pick did start, so the banner doesn't say it didn't.
+  it.each<[string, Partial<HeadInfo>, (app: UseAppStateResult) => Promise<unknown>, Partial<RepoClient>, string, string]>([
+    [
+      "a stopped cherry-pick sequence",
+      { sequence: { kind: "CherryPick", currentStep: 2, totalSteps: 2, currentCommit: ID } },
+      (app) => app.cherryPickMany([ID, ID]),
+      { cherryPickMany: rejects() },
+      "Couldn't finish the cherry-pick of 2 commits",
+      "Fix what stopped it, then continue or abort the cherry-pick.",
+    ],
+    [
+      "a paused revert step",
+      { operation: "Revert" },
+      (app) => app.revertCommit(ID),
+      { revertCommit: rejects() },
+      "Couldn't finish the revert of 4c5beaf",
+      "Fix what stopped it, then continue or abort the revert.",
+    ],
+    [
+      "a moved HEAD",
+      { headId: "moved" },
+      (app) => app.cherryPick(ID),
+      { cherryPick: rejects() },
+      "Couldn't finish the cherry-pick of 4c5beaf",
+      "Fix what stopped it, then continue or abort the cherry-pick.",
+    ],
+  ])("says a pick that left %s couldn't finish, not that it didn't start", async (_name, after, run, call, operation, next) => {
+    let picked = false;
+    const before: HeadInfo = { ...(await fakeRepoClient({}, "empty").getHeadInfo(TEST_REPO_PATH)), headId: "before" };
+    const reject = Object.values(call)[0] as () => Promise<never>;
+    const { error, hint } = await failed(
+      {
+        ...Object.fromEntries(
+          Object.keys(call).map((name) => [
+            name,
+            async () => {
+              picked = true;
+              return reject();
+            },
+          ]),
+        ),
+        getHeadInfo: async () => (picked ? { ...before, ...after } : before),
+      },
+      run,
+    );
+    expect(error).toBe(`${operation}: ${RAW}`);
+    expect(hint).toBe(next);
   });
 });
