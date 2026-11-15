@@ -50,10 +50,13 @@ to do next, for example "Cherry-pick of 4c5beaf didn't start: Commit or unstage 
 changes first." Its buttons sit in the same row: the next steps, if any (a rejected push offers
 **Pull** first, then **Force push…**), then **Details**, which opens the
 [operation log](operation-log.md) on the failed operation with its full error and **Copy
-details** for a bug report. An error you didn't dismiss isn't lost when a later action fails: the
+details** for a bug report. An error with no operation behind it (reading the repository failed)
+has **Copy details** in the banner instead, with the full error. An error you didn't dismiss isn't lost when a later action fails: the
 banner lists it under **1 earlier error** (up to five). The ✕ dismisses the banner with them.
 While a dialog deals with the error (setting your git identity, a hook's output, the force push
-confirm), the banner waits; closing the identity dialog clears it.
+confirm), the banner waits; closing the identity dialog clears it. A dialog that shows why it
+failed (Rename branch, Connect to GitHub, New pull request) keeps the error to itself, also when
+you cancel it.
 
 **Menus.** A menu (right-click, the **⋯** button, or the Menu key or Shift+F10) is split into
 groups by thin lines: in a commit's menu, for example, new branches and tags, applying the commit

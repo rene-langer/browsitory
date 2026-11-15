@@ -6,7 +6,8 @@ or stash the changes to those files first, or use Stash and switch." It stays at
 window until you dismiss it or start another change (stage, commit, switch branches, …);
 refreshing doesn't clear it. **Details** opens the
 [operation log](operation-log.md) on the failed operation: what it was given, its full error and
-the output of the hooks it ran.
+the output of the hooks it ran. When reading the repository failed, there is no operation to
+show: the banner has **Copy details** instead, which copies the full error.
 
 The desktop app writes a log file, `browsitory.log`, to your system's log folder, so a bug
 report doesn't require a live dev session to reproduce. When the file reaches 40 KB, it is

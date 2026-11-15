@@ -22,9 +22,12 @@ a repository is opened another way, the error asks whether to remove it from the
 name or path contains the text. The keyboard focus starts in that field, so you can type right
 away; with nothing to filter it starts on **Open repository…**.
 
-**A folder that isn't a repository.** Opening a folder that holds no repository itself says
-"This folder isn't a Git repository" and lists the repositories in its direct subfolders, each
-with **Open**. Hidden folders and `node_modules` are left out.
+**A folder that isn't a repository.** Opening a folder that holds no repository itself (no
+`.git` folder or file in it) says "This folder isn't a Git repository" and lists the repositories
+in its direct subfolders, each with **Open**. Hidden folders and `node_modules` are left out.
+When Git refuses a folder that does have a `.git` (one owned by another user, a format it doesn't
+support, a broken HEAD), the banner shows Git's message with **Retry**. **Copy details** copies
+Git's message in either case.
 
 Browsitory reopens the tabs you had open last time. To open another repository next to them,
 click **+** at the end of the tab bar: the picker opens as the **Open repository** dialog (**×**
