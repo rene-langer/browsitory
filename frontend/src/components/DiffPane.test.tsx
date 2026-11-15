@@ -323,7 +323,7 @@ describe("DiffPane", () => {
         const dialog = screen.getByRole("dialog", { name: "Discard changes", hidden: true });
         expect(within(dialog).getByText("Discard changes to src/a.ts? Undo can bring them back.")).toBeInTheDocument();
         expect(onDiscardFile).not.toHaveBeenCalled();
-        fireEvent.click(within(dialog).getByText("Discard changes"));
+        fireEvent.click(within(dialog).getByRole("button", { name: "Discard changes", hidden: true }));
 
         expect(onDiscardFile).toHaveBeenCalledWith("src/a.ts");
       });
@@ -569,7 +569,7 @@ describe("DiffPane", () => {
           onCurrentFileChange,
         });
 
-        fireEvent.click(screen.getByText("Discard changes"));
+        fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
 
         expect(onDiscardFile).toHaveBeenCalledWith("src/a.ts");
         expect(onDiscardRequestChange).toHaveBeenCalledWith(null);
@@ -597,13 +597,13 @@ describe("DiffPane", () => {
           );
         }
         const { rerender } = rtlRender(<Harness status={fileStatus} />);
-        expect(screen.getByText("Discard changes")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Discard changes" })).toBeInTheDocument();
 
         rerender(<Harness status={[fileStatus[1]]} />);
-        expect(screen.queryByText("Discard changes")).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Discard changes" })).not.toBeInTheDocument();
 
         rerender(<Harness status={fileStatus} />);
-        expect(screen.queryByText("Discard changes")).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Discard changes" })).not.toBeInTheDocument();
       });
 
       it("clears an all request when nothing is discardable and shows no dialog", () => {

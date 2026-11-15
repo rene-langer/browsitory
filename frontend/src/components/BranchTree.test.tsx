@@ -843,7 +843,7 @@ describe("BranchTree — remotes", () => {
     });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Remove remote" }));
-    expect(await screen.findByText(/clear upstreams for main/)).toBeInTheDocument();
+    expect(await screen.findByText(/clears the upstream of main/)).toBeInTheDocument();
   });
 
   it("the header '+' menu's Add Remote opens the add-remote draft", () => {

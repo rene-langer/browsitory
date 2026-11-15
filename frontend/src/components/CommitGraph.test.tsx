@@ -1622,7 +1622,7 @@ describe("CommitGraph — tag badges", () => {
     fireEvent.contextMenu(screen.getByTitle("Tag v2.0"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete tag…" }));
     const dialog = screen.getByRole("dialog", { name: "Delete local tag v2.0" });
-    expect(dialog).toHaveTextContent("Delete local tag v2.0?");
+    expect(dialog).toHaveTextContent("Removes v2.0 from this repository.");
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete tag" }));
     await waitFor(() => expect(onDeleteTag).toHaveBeenCalledWith("v2.0"));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Delete local tag v2.0" })).toBeNull());
