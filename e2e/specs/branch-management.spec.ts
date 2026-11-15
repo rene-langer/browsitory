@@ -47,10 +47,10 @@ describe("Browsitory branch management", () => {
     // "e2e-branch" leaf row — only that leaf's own text carries the " (current)" suffix. The row
     // itself is the interactive element (a `role="button"` `<li>`, not a nested `<button>` — see
     // `ListRow.tsx`), so it's matched by role rather than tag.
-    const branchButton = await $('//li[@role="button" and contains(., "e2e-branch")]');
-    await browser.waitUntil(
-      async () => (await branchButton.getText()) === "e2e-branch (current)",
-      { timeoutMsg: "expected the new branch to show as current in the tree" },
-    );
+    // The row's text is matched in the DOM, not with getText(): since the current-branch dot
+    // went (#1025), WebKitWebDriver's visible-text algorithm returns "" for a branch name (its
+    // ellipsis span), although the row shows "e2e-branch (current)" (innerText has it).
+    const currentRow = await $('//li[@role="button" and normalize-space(.) = "e2e-branch (current)"]');
+    await currentRow.waitForDisplayed({ timeoutMsg: "expected the new branch to show as current in the tree" });
   });
 });
