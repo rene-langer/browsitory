@@ -36,7 +36,8 @@ interface ForgeRepositorySectionProps {
   onListPullRequests: (remoteName: string, account: string) => Promise<void>;
   /** Resolves to `null` once saved, else the failure the Connect dialog shows. */
   onSaveForgeToken: (provider: ForgeProvider, account: string, token: string) => Promise<string | null>;
-  onForgetForgeToken: (provider: ForgeProvider, account: string) => Promise<void>;
+  /** Resolves to `null` once forgotten, else the failure (the error banner shows it). */
+  onForgetForgeToken: (provider: ForgeProvider, account: string) => Promise<string | null>;
   /** Resolves to `null` once created, else the failure the New pull request dialog shows. */
   onCreatePullRequest: (remoteName: string, account: string, pullRequest: CreatePullRequest) => Promise<string | null>;
   onOpenExternalUrl: (url: string) => Promise<void>;
@@ -47,6 +48,21 @@ interface ForgeRepositorySectionProps {
   // Known local branches: offered as suggestions for the source/target fields and used to
   // default them (current branch, and main/master).
   branches: { name: string; isCurrent: boolean }[];
+}
+
+/**
+ * Connected, a card lists its pull requests by itself (#1012): each time its body opens, so the
+ * list is fresh, and right after connecting. Mounted only in the open body, so a collapsed card
+ * lists nothing and raises no failure banner.
+ */
+function ListWhenOpen({ account, onList }: { account: string; onList: (account: string) => void }) {
+  useEffect(() => {
+    onList(account);
+    // Not on every change of `onList` (a new function each render): a failed listing clears the
+    // list, and must not retry in a loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account]);
+  return null;
 }
 
 // Rendered once outside the sections (see `PullRequestPanel`): WebKitWebDriver cannot compute the
@@ -72,8 +88,8 @@ function ForgeRepositorySection({
   branches,
 }: ForgeRepositorySectionProps) {
   const [account, setAccount] = useForgeAccount(repository.provider);
-  // True while a listing is out; a connected section starts with one (the effect below).
-  const [listing, setListing] = useState(account !== null);
+  // True while a listing is out; an open connected card starts one (`ListWhenOpen`).
+  const [listing, setListing] = useState(false);
   const [dialog, setDialog] = useState<"connect" | "create" | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; returnFocusTo?: HTMLElement } | null>(null);
   const busyReason = operationDisabled ? operationDisabledReason : null;
@@ -87,18 +103,10 @@ function ForgeRepositorySection({
     void listPullRequests(connectedAccount);
   };
 
-  // Connected, the section lists its pull requests by itself (#1012): each time it opens, so the
-  // list is fresh, and right after connecting.
-  useEffect(() => {
-    if (account !== null) void listPullRequests(account);
-    // Not on every change of the list: a failed listing clears it, and must not retry in a loop.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [account]);
-
   const disconnect = async () => {
     if (account === null) return;
-    await onForgetForgeToken(repository.provider, account);
-    setAccount(null);
+    // A token that couldn't be forgotten is still saved: stay connected.
+    if ((await onForgetForgeToken(repository.provider, account)) === null) setAccount(null);
   };
 
   // The card's title — provider, owner/name, and remoteName together, since remoteName is the
@@ -151,6 +159,7 @@ function ForgeRepositorySection({
         </>
       ) : (
         <>
+          <ListWhenOpen account={account} onList={refresh} />
           <Toolbar>
             <button type="button" onClick={() => setDialog("create")}>
               New pull request…
@@ -241,7 +250,6 @@ function ForgeRepositorySection({
             const failure = await onSaveForgeToken(repository.provider, name, token);
             if (failure === null) {
               setDialog(null);
-              setListing(true);
               setAccount(name);
             }
             return failure;
@@ -285,7 +293,7 @@ export function PullRequestPanel({
   pullRequests: Record<string, PullRequestList>;
   onListPullRequests: (remoteName: string, account: string) => Promise<void>;
   onSaveForgeToken: (provider: ForgeProvider, account: string, token: string) => Promise<string | null>;
-  onForgetForgeToken: (provider: ForgeProvider, account: string) => Promise<void>;
+  onForgetForgeToken: (provider: ForgeProvider, account: string) => Promise<string | null>;
   onCreatePullRequest: (remoteName: string, account: string, pullRequest: CreatePullRequest) => Promise<string | null>;
   onOpenExternalUrl: (url: string) => Promise<void>;
   operationDisabled: boolean;
