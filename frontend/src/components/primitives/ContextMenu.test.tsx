@@ -610,7 +610,8 @@ describe("ContextMenu: long menus (#992)", () => {
   it("is never taller than the window: it scrolls instead", () => {
     render(<ContextMenu x={0} y={0} onClose={() => {}} items={[{ label: "One", onSelect: () => {} }]} />);
     const menu = screen.getByRole("menu");
-    expect(menu.style.maxHeight).toBe("calc(100vh - 8px)");
+    // jsdom writes the calc() terms in its own order.
+    expect(["calc(100vh - 8px)", "calc(-8px + 100vh)"]).toContain(menu.style.maxHeight);
     expect(menu.style.overflowY).toBe("auto");
   });
 
