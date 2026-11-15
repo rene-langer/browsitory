@@ -33,7 +33,8 @@ function statusSignature(status: readonly StatusEntry[]): string {
  * - an edit stop's changed files: its status differs from the status when the stop was first
  *   seen. A stop that was already there when the tab opened has no such baseline, so any change
  *   in the working tree counts;
- * - an edit stop's own message, a split's committed parts and the merge editor's unsaved edits.
+ * - an edit stop's own non-empty message, a split's committed parts and the merge editor's
+ *   unsaved edits.
  */
 export function useAbortWork(state: AbortWorkState, mergeEditorEdited: boolean): () => AbortWork {
   const tracked = useRef<{
@@ -85,7 +86,8 @@ export function useAbortWork(state: AbortWorkState, mergeEditorEdited: boolean):
       resolvedFiles,
       mergeEditorEdits: edited,
       changedFiles,
-      messageChanged: now.headInfo.rebase?.editing != null && now.editMessage !== "unchanged",
+      // A cleared (blank) message loses nothing: the commit keeps its own.
+      messageChanged: now.headInfo.rebase?.editing != null && now.editMessage === "changed",
       splitParts: now.headInfo.rebase?.splitParts ?? 0,
     };
   }, []);

@@ -269,6 +269,45 @@ fn commits_only_on_branch_fails_for_a_missing_branch() {
 }
 
 #[test]
+fn commits_only_on_branch_counts_a_tag_as_keeping_them() {
+    // A tag keeps its commit and the history behind it reachable: deleting loses nothing there.
+    let (_dir, repo) = repo_with_feature(3);
+    let feature = repo
+        .find_branch("feature", git2::BranchType::Local)
+        .unwrap()
+        .get()
+        .peel_to_commit()
+        .unwrap();
+    let parent = repo.find_commit(feature.parent_id(0).unwrap()).unwrap();
+    repo.tag_lightweight("v1", parent.as_object(), false)
+        .unwrap();
+
+    assert_eq!(
+        git_core::branch::commits_only_on_branch(&repo, "feature").unwrap(),
+        1
+    );
+}
+
+#[test]
+fn commits_only_on_branch_counts_an_annotated_tag_as_keeping_them() {
+    let (_dir, repo) = repo_with_feature(2);
+    let feature = repo
+        .find_branch("feature", git2::BranchType::Local)
+        .unwrap()
+        .get()
+        .peel_to_commit()
+        .unwrap();
+    let signature = repo.signature().unwrap();
+    repo.tag("v2", feature.as_object(), &signature, "release", false)
+        .unwrap();
+
+    assert_eq!(
+        git_core::branch::commits_only_on_branch(&repo, "feature").unwrap(),
+        0
+    );
+}
+
+#[test]
 fn delete_branch_with_force_deletes_an_unmerged_branch() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "file.txt", "v1");

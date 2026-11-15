@@ -47,7 +47,7 @@ function renderPanel(overrides: Partial<Parameters<typeof PullRequestPanel>[0]> 
       pullRequests={{}}
       onListPullRequests={vi.fn().mockResolvedValue(undefined)}
       onSaveForgeToken={vi.fn().mockResolvedValue(null)}
-      onForgetForgeToken={vi.fn().mockResolvedValue(undefined)}
+      onForgetForgeToken={vi.fn().mockResolvedValue(null)}
       onCreatePullRequest={vi.fn().mockResolvedValue(null)}
       onOpenExternalUrl={vi.fn().mockResolvedValue(undefined)}
       operationDisabled={false}
@@ -191,7 +191,7 @@ describe("PullRequestPanel", () => {
 
   it("Disconnect forgets the token and shows Connect again", async () => {
     connect();
-    const onForgetForgeToken = vi.fn().mockResolvedValue(undefined);
+    const onForgetForgeToken = vi.fn().mockResolvedValue(null);
     renderPanel({ onForgetForgeToken });
 
     openSectionMenu();
@@ -201,6 +201,37 @@ describe("PullRequestPanel", () => {
       expect(onForgetForgeToken).toHaveBeenCalledWith("GitHub", "rene");
     });
     expect(await within(githubSection()).findByRole("button", { name: "Connect to GitHub…" })).toBeInTheDocument();
+  });
+
+  // A11: a token that couldn't be forgotten is still saved, so the card stays connected; the
+  // error banner says why.
+  it("stays connected when the token couldn't be forgotten", async () => {
+    connect();
+    const onForgetForgeToken = vi.fn().mockResolvedValue("Couldn't forget the token: locked");
+    renderPanel({ onForgetForgeToken });
+
+    openSectionMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Disconnect" }));
+
+    await waitFor(() => expect(onForgetForgeToken).toHaveBeenCalledWith("GitHub", "rene"));
+    await Promise.resolve();
+    expect(within(githubSection()).getByRole("button", { name: "New pull request…" })).toBeInTheDocument();
+    expect(within(githubSection()).queryByRole("button", { name: /^Connect to/ })).toBeNull();
+    expect(localStorage.getItem("forge-account.GitHub")).toBe("rene");
+  });
+
+  // A12: a collapsed card lists nothing (and raises no failure banner) until it is opened.
+  it("lists a connected repository's pull requests only once its card is open", async () => {
+    connect();
+    localStorage.setItem("sidebar-pr-origin", "closed");
+    const onListPullRequests = vi.fn().mockResolvedValue(undefined);
+    renderPanel({ onListPullRequests });
+
+    await Promise.resolve();
+    expect(onListPullRequests).not.toHaveBeenCalled();
+    fireEvent.click(within(githubSection()).getByRole("button", { name: /github: acme\/widget \(origin\)/i }));
+    await waitFor(() => expect(onListPullRequests).toHaveBeenCalledWith("origin", "rene"));
+    expect(onListPullRequests).toHaveBeenCalledTimes(1);
   });
 
   it("Cancel closes the Connect dialog without calling any callback", () => {
@@ -324,7 +355,7 @@ describe("PullRequestPanel", () => {
 
   it("stops showing pull requests for a repository once it is disconnected", async () => {
     connect();
-    const onForgetForgeToken = vi.fn().mockResolvedValue(undefined);
+    const onForgetForgeToken = vi.fn().mockResolvedValue(null);
     renderPanel({
       onForgetForgeToken,
       pullRequests: { origin: { pullRequests: [openPullRequest], truncated: false } },

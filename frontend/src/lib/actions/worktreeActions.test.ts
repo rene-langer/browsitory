@@ -8,14 +8,14 @@ const busy = { blocked: true, reason: "A rebase is in progress." };
 describe("worktreeActions", () => {
   it("labels a worktree's actions plainly in its row menu and by name in the palette (#1011)", () => {
     const actions = worktreeActions(free, linked);
-    expect(actions.open).toEqual({ label: "Open in new tab", paletteLabel: "Open worktree wt", enabled: true, reason: undefined });
+    expect(actions.open).toEqual({ label: "Open in new tab", paletteLabel: "Open worktree wt in new tab", enabled: true, reason: undefined });
     expect(actions.remove).toMatchObject({ label: "Remove…", paletteLabel: "Remove worktree wt…", enabled: true });
   });
 
   it("names the main worktree's open in the palette without its name (#561)", () => {
     expect(worktreeActions(free, { ...linked, name: "main", path: "/repo", isMain: true }).open).toEqual({
       label: "Open in new tab",
-      paletteLabel: "Open main worktree",
+      paletteLabel: "Open main worktree in new tab",
       enabled: true,
       reason: undefined,
     });

@@ -9,20 +9,20 @@ import { chooseCommitMenuItem, commitMenuItems } from "../test/commitMenu";
 
 describe("CommitBox", () => {
   it("Commit button is disabled when disabled=true", () => {
-    render(<CommitBox onCommit={vi.fn(async () => true)} disabled={true} onAbortMerge={vi.fn()} />);
+    render(<CommitBox onCommit={vi.fn(async () => true)} disabled={true} />);
 
     expect(screen.getByText("Commit")).toBeDisabled();
   });
 
   it("Commit button is disabled with an empty message even when disabled=false", () => {
-    render(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={vi.fn()} />);
+    render(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} />);
 
     expect(screen.getByText("Commit")).toBeDisabled();
   });
 
   it("typing a message and clicking Commit calls onCommit and clears the textarea", async () => {
     const onCommit = vi.fn(async () => true);
-    render(<CommitBox onCommit={onCommit} disabled={false} onAbortMerge={vi.fn()} />);
+    render(<CommitBox onCommit={onCommit} disabled={false} />);
 
     const textarea = screen.getByPlaceholderText("Commit message");
     fireEvent.change(textarea, { target: { value: "my message" } });
@@ -35,7 +35,7 @@ describe("CommitBox", () => {
   // Issue #109: the message used to be cleared before the commit's result was known.
   it("keeps the message when the commit fails and clears it when it succeeds", async () => {
     const onCommit = vi.fn<(message: string) => Promise<boolean>>().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
-    render(<CommitBox onCommit={onCommit} disabled={false} onAbortMerge={() => {}} />);
+    render(<CommitBox onCommit={onCommit} disabled={false} />);
     const box = screen.getByLabelText("Commit message");
     fireEvent.change(box, { target: { value: "feat: x" } });
 
@@ -51,7 +51,7 @@ describe("CommitBox", () => {
   it("keeps text typed while the commit was running", async () => {
     let finish: (ok: boolean) => void = () => {};
     const onCommit = vi.fn(() => new Promise<boolean>((resolve) => (finish = resolve)));
-    render(<CommitBox onCommit={onCommit} disabled={false} onAbortMerge={() => {}} />);
+    render(<CommitBox onCommit={onCommit} disabled={false} />);
     const box = screen.getByLabelText("Commit message");
     fireEvent.change(box, { target: { value: "first" } });
     fireEvent.click(screen.getByRole("button", { name: "Commit" }));
@@ -69,13 +69,13 @@ describe("CommitBox", () => {
     const onToggleSkip = vi.fn();
     const hooks = { installed: true, skip: false, onToggleSkip, running: null, onCancel: () => {} };
     const { rerender } = render(
-      <CommitBox onCommit={async () => true} disabled={false} onAbortMerge={() => {}} hooks={hooks} />,
+      <CommitBox onCommit={async () => true} disabled={false} hooks={hooks} />,
     );
     fireEvent.click(screen.getByLabelText("Skip hooks"));
     expect(onToggleSkip).toHaveBeenCalledWith(true);
 
     rerender(
-      <CommitBox onCommit={async () => true} disabled={false} onAbortMerge={() => {}} hooks={{ ...hooks, installed: false }} />,
+      <CommitBox onCommit={async () => true} disabled={false} hooks={{ ...hooks, installed: false }} />,
     );
     expect(screen.queryByLabelText("Skip hooks")).toBeNull();
   });
@@ -83,14 +83,14 @@ describe("CommitBox", () => {
   it("names pre-merge-commit in the Skip hooks tooltip while a merge is staged", () => {
     const hooks = { installed: true, skip: false, onToggleSkip: () => {}, running: null, onCancel: () => {} };
     const { rerender } = render(
-      <CommitBox onCommit={async () => true} disabled={false} onAbortMerge={() => {}} hooks={{ ...hooks, merging: true }} />,
+      <CommitBox onCommit={async () => true} disabled={false} hooks={{ ...hooks, merging: true }} />,
     );
     expect(screen.getByText("Skip hooks").closest("label")).toHaveAttribute(
       "title",
       "Skip the pre-merge-commit and commit-msg hooks for the next commit (--no-verify)",
     );
 
-    rerender(<CommitBox onCommit={async () => true} disabled={false} onAbortMerge={() => {}} hooks={hooks} />);
+    rerender(<CommitBox onCommit={async () => true} disabled={false} hooks={hooks} />);
     expect(screen.getByText("Skip hooks").closest("label")).toHaveAttribute(
       "title",
       "Skip the pre-commit and commit-msg hooks for the next commit (--no-verify)",
@@ -103,7 +103,7 @@ describe("CommitBox", () => {
       <CommitBox
         onCommit={async () => true}
         disabled={false}
-        onAbortMerge={() => {}}
+       
         hooks={{
           installed: true,
           skip: false,
@@ -126,7 +126,7 @@ describe("CommitBox", () => {
       <CommitBox
         onCommit={async () => true}
         disabled={false}
-        onAbortMerge={() => {}}
+       
         hooks={{
           installed: true,
           skip: false,
@@ -147,7 +147,7 @@ describe("CommitBox", () => {
       <CommitBox
         onCommit={async () => true}
         disabled={false}
-        onAbortMerge={() => {}}
+       
         hooks={{
           installed: false,
           skip: false,
@@ -164,14 +164,14 @@ describe("CommitBox", () => {
 
   it("clears the message on a one-shot request only if it still holds the committed text", () => {
     const onClearMessageHandled = vi.fn();
-    const { rerender } = render(<CommitBox onCommit={async () => true} disabled={false} onAbortMerge={() => {}} />);
+    const { rerender } = render(<CommitBox onCommit={async () => true} disabled={false} />);
     const box = screen.getByLabelText("Commit message");
     fireEvent.change(box, { target: { value: "committed, then edited" } });
     rerender(
       <CommitBox
         onCommit={async () => true}
         disabled={false}
-        onAbortMerge={() => {}}
+       
         clearMessage="committed"
         onClearMessageHandled={onClearMessageHandled}
       />,
@@ -180,12 +180,12 @@ describe("CommitBox", () => {
     expect(onClearMessageHandled).toHaveBeenCalledTimes(1);
 
     fireEvent.change(box, { target: { value: "committed" } });
-    rerender(<CommitBox onCommit={async () => true} disabled={false} onAbortMerge={() => {}} clearMessage={null} />);
+    rerender(<CommitBox onCommit={async () => true} disabled={false} clearMessage={null} />);
     rerender(
       <CommitBox
         onCommit={async () => true}
         disabled={false}
-        onAbortMerge={() => {}}
+       
         clearMessage="committed"
         onClearMessageHandled={onClearMessageHandled}
       />,
@@ -200,14 +200,14 @@ describe("CommitBox", () => {
   // explicit `aria-label` makes it robust regardless of how a given assistive-tech implementation
   // computes fallback names.
   it("exposes the textarea as a labeled 'Commit message' textbox", () => {
-    render(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={vi.fn()} />);
+    render(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} />);
 
     expect(screen.getByRole("textbox", { name: "Commit message" })).toBeInTheDocument();
   });
 
   it("Cmd/Ctrl+Enter in the textarea commits", () => {
     const onCommit = vi.fn(async () => true);
-    render(<CommitBox onCommit={onCommit} disabled={false} onAbortMerge={vi.fn()} />);
+    render(<CommitBox onCommit={onCommit} disabled={false} />);
 
     const textarea = screen.getByPlaceholderText("Commit message");
     fireEvent.change(textarea, { target: { value: "my message" } });
@@ -218,7 +218,7 @@ describe("CommitBox", () => {
 
   it("Cmd/Ctrl+Enter does nothing when disabled", () => {
     const onCommit = vi.fn(async () => true);
-    render(<CommitBox onCommit={onCommit} disabled={true} onAbortMerge={vi.fn()} />);
+    render(<CommitBox onCommit={onCommit} disabled={true} />);
 
     const textarea = screen.getByPlaceholderText("Commit message");
     fireEvent.change(textarea, { target: { value: "my message" } });
@@ -228,21 +228,21 @@ describe("CommitBox", () => {
   });
 
   it("pre-fills the message from initialMessage", () => {
-    render(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={vi.fn()} initialMessage="Merge branch 'feature'" />);
+    render(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} initialMessage="Merge branch 'feature'" />);
 
     expect(screen.getByDisplayValue("Merge branch 'feature'")).toBeInTheDocument();
   });
 
   it("does not clobber a user edit if initialMessage is passed again unchanged", () => {
     const { rerender } = render(
-      <CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={vi.fn()} initialMessage="Merge branch 'feature'" />,
+      <CommitBox onCommit={vi.fn(async () => true)} disabled={false} initialMessage="Merge branch 'feature'" />,
     );
     fireEvent.change(screen.getByPlaceholderText("Commit message"), {
       target: { value: "edited by user" },
     });
 
     rerender(
-      <CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={vi.fn()} initialMessage="Merge branch 'feature'" />,
+      <CommitBox onCommit={vi.fn(async () => true)} disabled={false} initialMessage="Merge branch 'feature'" />,
     );
 
     expect(screen.getByDisplayValue("edited by user")).toBeInTheDocument();
@@ -253,13 +253,13 @@ describe("CommitBox", () => {
       <CommitBox
         onCommit={vi.fn(async () => true)}
         disabled={false}
-        onAbortMerge={vi.fn()}
+       
         initialMessage="Merge branch 'feature'"
       />,
     );
     expect(screen.getByDisplayValue("Merge branch 'feature'")).toBeInTheDocument();
 
-    rerender(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={vi.fn()} />);
+    rerender(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} />);
 
     expect(screen.getByPlaceholderText("Commit message")).toHaveValue("");
   });
@@ -269,14 +269,14 @@ describe("CommitBox", () => {
       <CommitBox
         onCommit={vi.fn(async () => true)}
         disabled={false}
-        onAbortMerge={vi.fn()}
+       
         initialMessage="Merge branch 'A'"
       />,
     );
     expect(screen.getByDisplayValue("Merge branch 'A'")).toBeInTheDocument();
 
     // Merge A aborts.
-    rerender(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={vi.fn()} />);
+    rerender(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} />);
     expect(screen.getByPlaceholderText("Commit message")).toHaveValue("");
 
     // Merge B starts.
@@ -284,7 +284,7 @@ describe("CommitBox", () => {
       <CommitBox
         onCommit={vi.fn(async () => true)}
         disabled={false}
-        onAbortMerge={vi.fn()}
+       
         initialMessage="Merge branch 'B'"
       />,
     );
@@ -298,13 +298,13 @@ describe("CommitBox", () => {
       <CommitBox
         onCommit={vi.fn(async () => true)}
         disabled={false}
-        onAbortMerge={vi.fn()}
+       
         initialMessage="Merge branch 'A'"
       />,
     );
 
     // Merge A aborts.
-    rerender(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={vi.fn()} />);
+    rerender(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} />);
     // User types something of their own before merge B starts.
     fireEvent.change(screen.getByPlaceholderText("Commit message"), {
       target: { value: "my own draft message" },
@@ -315,7 +315,7 @@ describe("CommitBox", () => {
       <CommitBox
         onCommit={vi.fn(async () => true)}
         disabled={false}
-        onAbortMerge={vi.fn()}
+       
         initialMessage="Merge branch 'B'"
       />,
     );
@@ -328,7 +328,7 @@ describe("CommitBox", () => {
       <CommitBox
         onCommit={vi.fn(async () => true)}
         disabled={false}
-        onAbortMerge={vi.fn()}
+       
         initialMessage="Merge branch 'feature'"
       />,
     );
@@ -338,7 +338,7 @@ describe("CommitBox", () => {
     fireEvent.click(screen.getByText("Commit"));
 
     // Merge ends (mergeMessage goes back to null after the commit).
-    rerender(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={vi.fn()} />);
+    rerender(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} />);
 
     // The SAME branch is merged again, producing the identical merge message. Without also
     // clearing `lastSeeded` on commit, `message` ("") would no longer equal the stale
@@ -348,32 +348,12 @@ describe("CommitBox", () => {
       <CommitBox
         onCommit={vi.fn(async () => true)}
         disabled={false}
-        onAbortMerge={vi.fn()}
+       
         initialMessage="Merge branch 'feature'"
       />,
     );
 
     expect(screen.getByDisplayValue("Merge branch 'feature'")).toBeInTheDocument();
-  });
-
-  it("renders an Abort merge button only when initialMessage is set, and calls onAbortMerge", () => {
-    const onAbortMerge = vi.fn();
-    const { rerender } = render(
-      <CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={onAbortMerge} />,
-    );
-    expect(screen.queryByText("Abort merge")).not.toBeInTheDocument();
-
-    rerender(
-      <CommitBox
-        onCommit={vi.fn(async () => true)}
-        disabled={false}
-        onAbortMerge={onAbortMerge}
-        initialMessage="Merge branch 'feature'"
-      />,
-    );
-    fireEvent.click(screen.getByText("Abort merge"));
-
-    expect(onAbortMerge).toHaveBeenCalled();
   });
 
   it("starts from initialDraft and reports every change through onDraftChange", async () => {
@@ -382,7 +362,7 @@ describe("CommitBox", () => {
       <CommitBox
         onCommit={vi.fn(async () => true)}
         disabled={false}
-        onAbortMerge={vi.fn()}
+       
         initialDraft={{ message: "restored", lastSeeded: "" }}
         onDraftChange={onDraftChange}
       />,
@@ -420,20 +400,20 @@ describe("CommitBox", () => {
       <CommitBox
         onCommit={vi.fn(async () => true)}
         disabled={false}
-        onAbortMerge={vi.fn()}
+       
         initialMessage={seeded}
         initialDraft={{ message: seeded, lastSeeded: seeded }}
       />,
     );
     expect(screen.getByRole("textbox", { name: "Commit message" })).toHaveValue(seeded);
 
-    rerender(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={vi.fn()} initialDraft={{ message: seeded, lastSeeded: seeded }} />);
+    rerender(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} initialDraft={{ message: seeded, lastSeeded: seeded }} />);
 
     expect(screen.getByRole("textbox", { name: "Commit message" })).toHaveValue("");
   });
 
   it("shows why Commit is disabled and ties it to the button", () => {
-    render(<CommitBox onCommit={vi.fn(async () => true)} disabled disabledReason="Stage changes to commit" onAbortMerge={vi.fn()} />);
+    render(<CommitBox onCommit={vi.fn(async () => true)} disabled disabledReason="Stage changes to commit" />);
     expect(screen.getByRole("button", { name: "Commit" })).toHaveAccessibleDescription("Stage changes to commit");
   });
 });
@@ -458,7 +438,7 @@ describe("amend", () => {
         onCommit={onCommit}
         disabled={true}
         disabledReason="Stage changes to commit"
-        onAbortMerge={() => {}}
+       
         initialDraft={draft === undefined ? undefined : { message: draft, lastSeeded: "" }}
         amend={amend}
       />,
@@ -482,7 +462,7 @@ describe("amend", () => {
   });
 
   it("restores the typed draft exactly when toggled off", () => {
-    const props = { onCommit: vi.fn(), disabled: true, onAbortMerge: () => {} };
+    const props = { onCommit: vi.fn(), disabled: true };
     const amend = {
       available: true,
       headMessage: "previous message",
@@ -507,7 +487,7 @@ describe("amend", () => {
 
   it("focuses the message field once the amend prefill is in, then reports it handled", () => {
     const onFocusMessageHandled = vi.fn();
-    const props = { onCommit: vi.fn(), disabled: true, onAbortMerge: () => {}, focusMessage: true, onFocusMessageHandled };
+    const props = { onCommit: vi.fn(), disabled: true, focusMessage: true, onFocusMessageHandled };
     const amend = { available: true, on: true, pushed: false, onToggle: vi.fn(), onAmend: vi.fn() };
     const { rerender } = render(<CommitBox {...props} amend={{ ...amend, headMessage: null }} />);
     expect(screen.getByLabelText("Commit message")).not.toHaveFocus();
@@ -525,7 +505,7 @@ describe("amend", () => {
 });
 
 describe("amend draft safety", () => {
-  const base = { onCommit: vi.fn(async () => true), disabled: true, onAbortMerge: () => {} };
+  const base = { onCommit: vi.fn(async () => true), disabled: true };
   const amend = {
     available: true,
     headMessage: "previous message",
@@ -597,22 +577,7 @@ describe("amend draft safety", () => {
   });
 });
 
-describe("CommitBox showAbort", () => {
-  it("hides the abort button for a seeded message when showAbort is false", () => {
-    render(
-      <CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={vi.fn()} initialMessage="Squashed commit" showAbort={false} />,
-    );
-
-    expect(screen.getByPlaceholderText("Commit message")).toHaveValue("Squashed commit");
-    expect(screen.queryByRole("button", { name: "Abort merge" })).toBeNull();
-  });
-
-  it("shows the abort button for a seeded message by default", () => {
-    render(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={vi.fn()} initialMessage="Merge branch" />);
-
-    expect(screen.getByRole("button", { name: "Abort merge" })).toBeInTheDocument();
-  });
-
+describe("CommitBox message aids", () => {
   describe("summary counter and ruler", () => {
     it("counts summary characters and warns past the soft limit without blocking", async () => {
       const onCommit = vi.fn(async () => true);
@@ -620,7 +585,7 @@ describe("CommitBox showAbort", () => {
         <CommitBox
           onCommit={onCommit}
           disabled={false}
-          onAbortMerge={vi.fn()}
+         
           messageSettings={{ summaryLimit: 10, bodyRuler: 72, showRuler: true }}
         />,
       );
@@ -642,7 +607,7 @@ describe("CommitBox showAbort", () => {
     });
 
     it("counts code points, not UTF-16 units, of the first line only", () => {
-      render(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={vi.fn()} />);
+      render(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} />);
       const box = screen.getByRole("textbox", { name: "Commit message" });
       fireEvent.change(box, { target: { value: "🎉 ok" } });
       expect(screen.getByLabelText("Summary length")).toHaveTextContent("Summary 4/50");
@@ -655,7 +620,7 @@ describe("CommitBox showAbort", () => {
         <CommitBox
           onCommit={vi.fn(async () => true)}
           disabled={false}
-          onAbortMerge={vi.fn()}
+         
           messageSettings={{ summaryLimit: 50, bodyRuler: 80, showRuler: true }}
         />,
       );
@@ -666,7 +631,7 @@ describe("CommitBox showAbort", () => {
         <CommitBox
           onCommit={vi.fn(async () => true)}
           disabled={false}
-          onAbortMerge={vi.fn()}
+         
           messageSettings={{ summaryLimit: 50, bodyRuler: 80, showRuler: false }}
         />,
       );
@@ -683,7 +648,7 @@ describe("CommitBox showAbort", () => {
 
     it("adds co-authors from recent authors and commits them as trailers", async () => {
       const onCommit = vi.fn(async () => true);
-      render(<CommitBox onCommit={onCommit} disabled={false} onAbortMerge={vi.fn()} loadRecentAuthors={recent} />);
+      render(<CommitBox onCommit={onCommit} disabled={false} loadRecentAuthors={recent} />);
       fireEvent.change(screen.getByRole("textbox", { name: "Commit message" }), { target: { value: "Fix" } });
       chooseCommitMenuItem("Add co-author…");
       const list = await screen.findByRole("listbox", { name: "Recent authors" });
@@ -706,7 +671,7 @@ describe("CommitBox showAbort", () => {
         <CommitBox
           onCommit={onCommit}
           disabled={false}
-          onAbortMerge={vi.fn()}
+         
           loadRecentAuthors={recent}
           initialDraft={{ message: "x", lastSeeded: "", coAuthors: [{ name: "Ada", email: "ada@x.org" }] }}
         />,
@@ -722,7 +687,7 @@ describe("CommitBox showAbort", () => {
         <CommitBox
           onCommit={vi.fn(async () => true)}
           disabled={false}
-          onAbortMerge={vi.fn()}
+         
           loadRecentAuthors={recent}
           onDraftChange={onDraftChange}
           initialDraft={{ message: "", lastSeeded: "", coAuthors: [{ name: "Ada", email: "ADA@x.org" }] }}
@@ -762,7 +727,7 @@ describe("CommitBox showAbort", () => {
         <CommitBox
           onCommit={vi.fn(async () => true)}
           disabled={false}
-          onAbortMerge={vi.fn()}
+         
           loadRecentAuthors={async () => {
             throw new Error("boom");
           }}
@@ -777,7 +742,7 @@ describe("CommitBox showAbort", () => {
         <CommitBox
           onCommit={vi.fn(async () => true)}
           disabled={false}
-          onAbortMerge={vi.fn()}
+         
           initialDraft={{ message: "x", lastSeeded: "", coAuthors: [{ name: "Ada", email: "ada@x.org" }] }}
           loadRecentAuthors={async () => []}
         />,
@@ -792,7 +757,7 @@ describe("CommitBox showAbort", () => {
         <CommitBox
           onCommit={onCommit}
           disabled={false}
-          onAbortMerge={vi.fn()}
+         
           initialMessage="Merge branch 'x'"
           initialDraft={{ message: "", lastSeeded: "", coAuthors: [{ name: "Ada", email: "ada@x.org" }] }}
           loadRecentAuthors={async () => []}
@@ -812,10 +777,10 @@ describe("CommitBox showAbort", () => {
         <CommitBox
           onCommit={onCommit}
           disabled={false}
-          onAbortMerge={vi.fn()}
+         
           initialMessage="Squashed commit"
           initialMessageIsSquash
-          showAbort={false}
+         
           initialDraft={{ message: "", lastSeeded: "", coAuthors: [{ name: "Ada", email: "ada@x.org" }] }}
           loadRecentAuthors={async () => []}
         />,
@@ -831,7 +796,6 @@ describe("CommitBox showAbort", () => {
       const props = {
         onCommit: async () => true,
         disabled: false,
-        onAbortMerge: () => {},
         loadRecentAuthors: async () => [],
         initialDraft: { message: "Fix", lastSeeded: "", coAuthors: [{ name: "Ada", email: "ada@x.org" }] },
       };
@@ -849,7 +813,7 @@ describe("CommitBox showAbort", () => {
       extra: Partial<React.ComponentProps<typeof CommitBox>> = {},
     ) {
       const amend = { available: true, on: true, headMessage: "Old", pushed: false, onToggle: vi.fn(), onAmend, headAuthor };
-      const utils = render(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={vi.fn()} amend={amend} {...extra} />);
+      const utils = render(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} amend={amend} {...extra} />);
       return { onAmend, amend, ...utils };
     }
 
@@ -891,7 +855,6 @@ describe("CommitBox showAbort", () => {
       const base = {
         onCommit: vi.fn(async () => true),
         disabled: false,
-        onAbortMerge: vi.fn(),
         loadRecentAuthors: async () => [{ name: "Bob", email: "bob@x.org" }],
         initialDraft: { message: "draft", lastSeeded: "", coAuthors: [{ name: "Ada", email: "ada@x.org" }] },
       };
@@ -928,14 +891,14 @@ describe("CommitBox showAbort", () => {
     ];
 
     it("is hidden without a history source", () => {
-      render(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={() => {}} />);
+      render(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} />);
       expect(screen.queryByRole("button", { name: "Recent messages" })).toBeNull();
     });
 
     it("lists the entries as a menu and fills the box with the picked full message", async () => {
       const load = vi.fn(entries);
       render(
-        <CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={() => {}} loadMessageHistory={load} />,
+        <CommitBox onCommit={vi.fn(async () => true)} disabled={false} loadMessageHistory={load} />,
       );
       fireEvent.focus(screen.getByLabelText("Commit message"));
       const button = screen.getByRole("button", { name: "Recent messages" });
@@ -965,7 +928,7 @@ describe("CommitBox showAbort", () => {
         <CommitBox
           onCommit={vi.fn(async () => true)}
           disabled={false}
-          onAbortMerge={() => {}}
+         
           loadMessageHistory={() => []}
         />,
       );
@@ -976,7 +939,7 @@ describe("CommitBox showAbort", () => {
 
     it("undoes the replacement with Ctrl/Cmd+Z or Restore message, until the field is edited", async () => {
       render(
-        <CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={() => {}} loadMessageHistory={entries} />,
+        <CommitBox onCommit={vi.fn(async () => true)} disabled={false} loadMessageHistory={entries} />,
       );
       const box = screen.getByLabelText("Commit message");
       fireEvent.change(box, { target: { value: "half-typed" } });
@@ -1013,7 +976,7 @@ describe("CommitBox showAbort", () => {
         <CommitBox
           onCommit={vi.fn(async () => true)}
           disabled={false}
-          onAbortMerge={() => {}}
+         
           loadMessageHistory={() => [
             { summary: "Gone", source: "branch", shortId: "deadbee", load: () => Promise.reject(new Error("x")) },
           ]}
@@ -1027,7 +990,7 @@ describe("CommitBox showAbort", () => {
 
     it("Escape closes the menu and returns focus to its button", () => {
       render(
-        <CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={() => {}} loadMessageHistory={entries} />,
+        <CommitBox onCommit={vi.fn(async () => true)} disabled={false} loadMessageHistory={entries} />,
       );
       fireEvent.focus(screen.getByLabelText("Commit message"));
       const button = screen.getByRole("button", { name: "Recent messages" });
@@ -1056,7 +1019,7 @@ describe("CommitBox target and Commit and push (#651)", () => {
       <CommitBox
         onCommit={onCommit}
         disabled={false}
-        onAbortMerge={() => {}}
+       
         stagedCount={3}
         branchName="main"
         commitAndPush={{ onCommitAndPush, disabledReason: null }}
@@ -1075,7 +1038,7 @@ describe("CommitBox target and Commit and push (#651)", () => {
   it("says one file, and leaves out the branch on a detached HEAD", () => {
     const { rerender } = renderTarget({ stagedCount: 1 });
     expect(screen.getByRole("button", { name: "Commit 1 file to main" })).toBeInTheDocument();
-    rerender(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={() => {}} stagedCount={2} branchName={null} />);
+    rerender(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} stagedCount={2} branchName={null} />);
     expect(screen.getByRole("button", { name: "Commit 2 files" })).toBeInTheDocument();
   });
 

@@ -463,11 +463,7 @@ export function WorkspaceDialogs({
               return;
             }
             // HEAD (#981): its message only, staged changes stay staged; one undo step.
-            void announce(`Reworded ${rewordShortId}`, appState.amendCommit, { undoable: true })(message, false, {
-              author: null,
-              trailers: [],
-              messageOnly: true,
-            });
+            void announce(`Reworded ${rewordShortId}`, appState.rewordHead, { undoable: true })(commitId, message);
           }}
           onCancel={() => closeDialog("reword")}
         />

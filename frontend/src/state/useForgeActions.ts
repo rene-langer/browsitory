@@ -2,13 +2,15 @@ import { useCallback } from "react";
 import type { CreatePullRequest, ForgeProvider, PullRequestList, RepoClient } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
 import { errorAfterOwnSuccess, type OwnError } from "./ownError";
-import { failureError, type RunMutation, type RunMutationWithMessage } from "./useMutationRunner";
+import { failureError, type RunMutationWithMessage } from "./useMutationRunner";
 
 export interface ForgeActions {
   listPullRequests(remoteName: string, account: string): Promise<void>;
   // Resolves to `null` once saved, else why not: the Connect dialog shows it (#1012).
   saveForgeToken(provider: ForgeProvider, account: string, token: string): Promise<string | null>;
-  forgetForgeToken(provider: ForgeProvider, account: string): Promise<void>;
+  // Resolves to `null` once forgotten, else the failure (also in `state.error`): the card then
+  // stays connected, since the token is still saved.
+  forgetForgeToken(provider: ForgeProvider, account: string): Promise<string | null>;
   // Resolves to `null` once created, else the failure, which the New pull request dialog shows
   // with the typed fields kept (#1012); the failure also goes to `state.error`, as before.
   createPullRequest(remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<string | null>;
@@ -18,7 +20,6 @@ export interface ForgeActions {
 export function useForgeActions(
   client: RepoClient,
   repoPath: string,
-  runMutation: RunMutation,
   runMutationWithMessage: RunMutationWithMessage,
   setState: (updater: (prev: AppState) => AppState) => void,
   // The error a failed pull request list set: a later successful list clears that one only, never
@@ -61,8 +62,8 @@ export function useForgeActions(
   );
   const forgetForgeToken = useCallback(
     (provider: ForgeProvider, account: string) =>
-      runMutation(() => client.forgetForgeToken(repoPath, provider, account)),
-    [client, runMutation, repoPath],
+      runMutationWithMessage(() => client.forgetForgeToken(repoPath, provider, account)),
+    [client, runMutationWithMessage, repoPath],
   );
   const createPullRequest = useCallback(
     (remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<string | null> =>

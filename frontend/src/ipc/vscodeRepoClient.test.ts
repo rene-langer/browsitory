@@ -201,6 +201,9 @@ describe("vscodeRepoClient", () => {
       [() => vscodeRepoClient.setCommitMessageSettings({ summaryLimit: 60, bodyRuler: 80, showRuler: false }), "set_commit_message_settings", { settings: { summaryLimit: 60, bodyRuler: 80, showRuler: false } }, null],
       [() => vscodeRepoClient.commit("/r", "m", false, [{ key: "Co-authored-by", value: "Ada <ada@x.org>" }]), "commit", { repoPath: "/r", message: "m", noVerify: false, trailers: [{ key: "Co-authored-by", value: "Ada <ada@x.org>" }] }, { kind: "Committed", commitId: "c" }],
       [() => vscodeRepoClient.amendCommit("/r", "m", true, { author: { name: "Ada", email: "ada@x.org" }, trailers: [] }), "amend_commit", { repoPath: "/r", message: "m", noVerify: true, author: { name: "Ada", email: "ada@x.org" }, trailers: [] }, { kind: "Committed", commitId: "c" }],
+      // Reword… on HEAD (#981).
+      [() => vscodeRepoClient.amendCommit("/r", "m", false, { author: null, trailers: [], messageOnly: true }), "amend_commit", { repoPath: "/r", message: "m", noVerify: false, author: null, trailers: [], messageOnly: true }, { kind: "Committed", commitId: "c" }],
+      [() => vscodeRepoClient.amendCommit("/r", "m", false, { author: null, trailers: [], messageOnly: false }), "amend_commit", { repoPath: "/r", message: "m", noVerify: false, author: null, trailers: [] }, { kind: "Committed", commitId: "c" }],
       [() => vscodeRepoClient.getDiffSettings(), "get_diff_settings", {}, { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Minimal" as const, showWhitespace: false, expandUntracked: true }],
       [() => vscodeRepoClient.getFetchSettings(), "get_fetch_settings", {}, { autoFetchMinutes: 0 }],
       [() => vscodeRepoClient.setFetchSettings({ autoFetchMinutes: 10 }), "set_fetch_settings", { settings: { autoFetchMinutes: 10 } }, null],

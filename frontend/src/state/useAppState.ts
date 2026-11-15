@@ -889,12 +889,12 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
 
   const mergeRebase = useMergeRebaseActions(client, repoPath, runMutation, setState);
 
-  const history = useHistoryActions(client, repoPath, runMutation, runMutationWithOutcome, setState);
+  const history = useHistoryActions(client, repoPath, runMutation, runMutationWithOutcome, setState, state.headInfo.headId);
   const hooks = useHookActions(client, repoPath, state.hookRun, setState);
   // The slice objects are new on every render, their actions are not: the callback depends on
   // the actions, so it stays as stable as they are.
   const { commit } = staging;
-  const { amendCommit, continueSequence } = history;
+  const { amendCommit, rewordHead, continueSequence } = history;
   const { pushCurrentBranch, forcePushCurrentBranch, pushTags, pushBranch, deleteRemoteBranch, deleteRemoteTag } =
     remoteTransfer;
   const retryWithoutHooks = useCallback(
@@ -910,6 +910,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         // pre-amend draft back into the CommitBox.
         return amendCommit(retry.message, true, retry.options);
       }
+      if (retry.kind === "reword") return rewordHead(retry.commitId, retry.message, true);
       if (retry.kind === "continueSequence") return (await continueSequence(true)) !== null;
       // A pick's `prepare-commit-msg` can't be skipped; the dialog offers no retry for it.
       if (retry.kind === "pick" || retry.kind === "applyPatch") return false;
@@ -924,12 +925,12 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       else await deleteRemoteBranch(push.remoteName, push.branchName, true);
       return true;
     },
-    [commit, amendCommit, continueSequence, pushCurrentBranch, forcePushCurrentBranch, pushTags, pushBranch, deleteRemoteBranch, deleteRemoteTag, setState],
+    [commit, amendCommit, rewordHead, continueSequence, pushCurrentBranch, forcePushCurrentBranch, pushTags, pushBranch, deleteRemoteBranch, deleteRemoteTag, setState],
   );
 
   const undoActions = useUndoActions(client, repoPath, runMutationWithOutcome, setState, afterUndoStep);
 
-  const forge = useForgeActions(client, repoPath, runMutation, mutationRunner.runMutationWithMessage, setState, forgeError);
+  const forge = useForgeActions(client, repoPath, mutationRunner.runMutationWithMessage, setState, forgeError);
   const dismissError = useCallback(() => {
     setState((prev) => ({
       ...prev,

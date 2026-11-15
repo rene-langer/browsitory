@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import {
   errorKind,
   type AmendOptions,
@@ -7,12 +7,13 @@ import {
   type RepoClient,
   type ResetMode,
   type SequenceAbort,
+  type SequenceKind,
   type SequenceOutcome,
 } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
 import type { RunMutation, RunMutationWithOutcome } from "./useMutationRunner";
 import { hookFailedMessage, type HookRetry } from "../lib/hookFailure";
-import { failedOperation, FailureWithNextStep, hookNextStep, type FailedOperation } from "../lib/operationErrors";
+import { failedOperation, FailureWithNextStep, hookNextStep } from "../lib/operationErrors";
 import { failureError } from "./useMutationRunner";
 
 const NO_AMEND_OPTIONS: AmendOptions = { author: null, trailers: [] };
@@ -38,6 +39,11 @@ export interface HistoryActions {
   checkoutCommit(commitId: string): Promise<void>;
   // Resolves `true` once amended; see `StagingActions.commit`.
   amendCommit(message: string, noVerify: boolean, options?: AmendOptions): Promise<boolean>;
+  /**
+   * The Reword dialog on HEAD (#981): replaces its message only, staged changes stay staged.
+   * Not an amend: amend mode and Skip hooks stay as they are. Resolves `true` once reworded.
+   */
+  rewordHead(commitId: string, message: string, noVerify?: boolean): Promise<boolean>;
   setAmendMode(on: boolean): void;
 }
 
@@ -50,7 +56,13 @@ export function useHistoryActions(
   runMutation: RunMutation,
   runMutationWithOutcome: RunMutationWithOutcome,
   setState: (updater: (prev: AppState) => AppState) => void,
+  /** HEAD as last read, to tell whether a failed pick changed anything. */
+  headId: string | null,
 ): HistoryActions {
+  const headBefore = useRef(headId);
+  useEffect(() => {
+    headBefore.current = headId;
+  }, [headId]);
   // Runs `call` as a mutation and hands back its result; `null` when it threw (runMutation has
   // put the error into `state.error`).
   const withOutcome = useCallback(
@@ -77,12 +89,13 @@ export function useHistoryActions(
     async <T extends PickOutcome | SequenceOutcome>(
       call: () => Promise<T>,
       retry: HookRetry,
-      /** What a refusal says first ("Cherry-pick of 4c5beaf didn't start", #997, #1032). */
-      refused?: FailedOperation,
+      /** The pick a failure names ("Cherry-pick of 4c5beaf didn't start", #997, #1032). */
+      pick?: { kind: SequenceKind; commitIds: readonly string[] },
     ): Promise<T | null> => {
       let outcome: T | null = null;
       let failure: unknown = undefined;
       let failed = false;
+      const before = headBefore.current;
       await runMutation(async () => {
         try {
           outcome = await call();
@@ -93,8 +106,23 @@ export function useHistoryActions(
       });
       setState((prev) => ({ ...prev, hookRun: null }));
       if (failed) {
-        const { error, errorHint } = failureError(failure, refused);
-        setState((prev) => ({ ...prev, error, errorHint }));
+        setState((prev) => {
+          // The refresh has run: a pick that failed after some steps (`SequenceRun::stopped`)
+          // left a paused sequence or step, or moved HEAD. It did start, so it couldn't finish.
+          const info = prev.headInfo;
+          const started =
+            info.sequence !== null ||
+            info.operation === "CherryPick" ||
+            info.operation === "Revert" ||
+            info.headId !== before;
+          const operation =
+            pick === undefined
+              ? undefined
+              : started
+                ? failedOperation.pickStopped(pick.kind, pick.commitIds)
+                : failedOperation.pick(pick.kind, pick.commitIds);
+          return { ...prev, ...failureError(failure, operation) };
+        });
         return null;
       }
       const settled = outcome as T | null;
@@ -116,7 +144,7 @@ export function useHistoryActions(
       runRepoChanging(
         () => client.cherryPick(repoPath, commitId, mainline ?? null),
         { kind: "pick" },
-        failedOperation.pick("CherryPick", [commitId]),
+        { kind: "CherryPick", commitIds: [commitId] },
       ),
     [client, runRepoChanging, repoPath],
   );
@@ -125,7 +153,7 @@ export function useHistoryActions(
       runRepoChanging(
         () => client.revertCommit(repoPath, commitId, mainline ?? null),
         { kind: "pick" },
-        failedOperation.pick("Revert", [commitId]),
+        { kind: "Revert", commitIds: [commitId] },
       ),
     [client, runRepoChanging, repoPath],
   );
@@ -134,7 +162,7 @@ export function useHistoryActions(
       runRepoChanging(
         () => client.cherryPickMany(repoPath, commitIds),
         { kind: "continueSequence" },
-        failedOperation.pick("CherryPick", commitIds),
+        { kind: "CherryPick", commitIds: commitIds },
       ),
     [client, runRepoChanging, repoPath],
   );
@@ -143,7 +171,7 @@ export function useHistoryActions(
       runRepoChanging(
         () => client.revertMany(repoPath, commitIds),
         { kind: "continueSequence" },
-        failedOperation.pick("Revert", commitIds),
+        { kind: "Revert", commitIds: commitIds },
       ),
     [client, runRepoChanging, repoPath],
   );
@@ -199,6 +227,34 @@ export function useHistoryActions(
     },
     [client, runMutationWithOutcome, repoPath, setState],
   );
+  const rewordHead = useCallback(
+    async (commitId: string, message: string, noVerify = false) => {
+      const ok = await runMutationWithOutcome(async () => {
+        const options: AmendOptions = { ...NO_AMEND_OPTIONS, messageOnly: true };
+        const outcome = await client.amendCommit(repoPath, message, noVerify, options).catch((error: unknown) => {
+          // No `user.name`/`user.email`: the identity dialog offers to set them (#689).
+          if (errorKind(error) === "MissingIdentity") setState((prev) => ({ ...prev, identityRequired: "amend" }));
+          throw error;
+        });
+        if (outcome.kind === "HookFailed") {
+          setState((prev) => ({
+            ...prev,
+            hookFailure: {
+              hook: outcome.hook,
+              output: outcome.output,
+              retry: { kind: "reword", commitId, message },
+              dialogOpen: true,
+            },
+          }));
+          throw new FailureWithNextStep(hookFailedMessage(outcome.hook), hookNextStep("reword it again"));
+        }
+        setState((prev) => ({ ...prev, hookFailure: null }));
+      }, failedOperation.historyEdit("Reword", commitId));
+      setState((prev) => ({ ...prev, hookRun: null }));
+      return ok;
+    },
+    [client, runMutationWithOutcome, repoPath, setState],
+  );
   const setAmendMode = useCallback(
     (on: boolean) => setState((prev) => ({ ...prev, amendMode: on })),
     [setState],
@@ -213,6 +269,7 @@ export function useHistoryActions(
     resetToCommit,
     checkoutCommit,
     amendCommit,
+    rewordHead,
     setAmendMode,
   };
 }

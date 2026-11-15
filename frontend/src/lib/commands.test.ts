@@ -188,6 +188,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     resetToCommit: vi.fn(),
     checkoutCommit: vi.fn(),
     amendCommit: vi.fn(),
+    rewordHead: vi.fn(),
     setAmendMode: vi.fn(),
     cancelForcePush: vi.fn(),
     forcePushCurrentBranch: vi.fn(),
@@ -821,13 +822,13 @@ describe("buildCommands", () => {
     const onOpenRepoTab = vi.fn();
     const commands = commandsFor(appState, { tabs: tabs({ onOpenRepoTab: onOpenRepoTab }) });
     const openMain = commands.find((c) => c.id === "open-worktree:/repo");
-    expect(openMain?.label).toBe("Open main worktree");
+    expect(openMain?.label).toBe("Open main worktree in new tab");
     openMain?.run();
     expect(onOpenRepoTab).toHaveBeenCalledWith("/repo");
     expect(commands.some((c) => c.id === "remove-worktree:main")).toBe(false);
 
     const openCmd = commands.find((c) => c.id === "open-worktree:/repo-wt1");
-    expect(openCmd?.label).toBe("Open worktree wt1");
+    expect(openCmd?.label).toBe("Open worktree wt1 in new tab");
   });
 
   it("opening a worktree calls onOpenRepoTab instead of a state mutation", () => {
@@ -1593,11 +1594,19 @@ describe("history commands", () => {
       expect(nothingStaged).not.toContain("fold-staged-selected");
     });
 
+    // #981: HEAD's Reword… is the Reword dialog too, which changes its message only.
+    it("offers Reword for HEAD, opening the Reword dialog without a base", () => {
+      const appState = makeAppState({ ...editState, selectedRow: { commitId: "c1" } });
+      const reword = commandsFor(appState).find((command) => command.id === "reword-selected")!;
+      expect(reword.label).toBe("Reword c1…");
+      reword.run();
+      expect(appState.openDialog).toHaveBeenCalledWith({ kind: "reword", commitId: "c1", onto: null });
+    });
+
     it("leaves out edits the menu disables", () => {
       const head = commandsFor(makeAppState({ ...editState, selectedRow: { commitId: "c1" } })).map((c) => c.id);
-      // HEAD: no Move up; its Reword… is Amend last commit.
+      // HEAD: no Move up.
       expect(head).not.toContain("move-up-selected");
-      expect(head).not.toContain("reword-selected");
       expect(head).toContain("drop-selected");
       const dirty = commandsFor(makeAppState({ ...editState, status: [{ path: "a", oldPath: null, staged: false, kind: "Modified" }] })).map((c) => c.id);
       for (const id of EDIT_IDS) expect(dirty).not.toContain(id);
