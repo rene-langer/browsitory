@@ -280,7 +280,9 @@ describe("a failed operation's banner (#1032)", () => {
     expect(hint).toBe("Fix what the hook reports, then apply the patch again.");
   });
 
-  it("says what to do about a fast-forward-only merge that couldn't fast-forward", async () => {
+  // Without a typed kind (#1033) a diverged branch can't be told from other failures, so a
+  // fast-forward-only merge adds no next step of its own: git's text says what happened.
+  it("adds no guessed next step to a fast-forward-only merge that failed", async () => {
     const { error, hint } = await failed(
       {
         setMergeOptions: async () => {},
@@ -291,7 +293,7 @@ describe("a failed operation's banner (#1032)", () => {
       (app) => app.mergeBranch("feature", { fastForward: "Only", squash: false }),
     );
     expect(error).toBe("Couldn't merge feature: Can't fast-forward: 'feature' has diverged from the current branch.");
-    expect(hint).toBe("Pick “Fast-forward if possible” and merge again, or rebase first.");
+    expect(hint).toBeNull();
   });
 
   it("adds no next step when the history changed under a history edit: the message is the remediation", async () => {

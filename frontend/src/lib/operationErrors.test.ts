@@ -105,10 +105,8 @@ describe("failedOperation", () => {
     [
       "merge fast-forward only",
       failedOperation.merge("feature", true),
-      {
-        failed: "Couldn't merge feature",
-        next: "Pick “Fast-forward if possible” and merge again, or rebase first.",
-      },
+      // Its failure may be a diverged branch or anything else; git's text says which (#1033).
+      { failed: "Couldn't merge feature", next: null },
     ],
     [
       "rebase",
