@@ -1230,11 +1230,14 @@ describe("ConflictResolutionPane pane widths (#931)", () => {
   function layoutOf(row: Element): Record<string, Placement> {
     const container = row.closest<HTMLElement>('[style*="--merge-gutter"]');
     if (container === null) throw new Error("no merge panes around the row");
-    const vars = Object.fromEntries(
-      [...container.style]
-        .filter((name) => name.startsWith("--"))
-        .map((name) => [name, container.style.getPropertyValue(name)]),
+    // The custom properties the stylesheet declares on the panes, then those set inline.
+    const declared = rulesFor(paneRules, container, ["panes"]).flatMap(({ body }) =>
+      [...body.matchAll(/(--[\w-]+)\s*:\s*([^;]+)/g)].map(([, name, value]) => [name, value.trim()]),
     );
+    const inline = [...container.style]
+      .filter((name) => name.startsWith("--"))
+      .map((name) => [name, container.style.getPropertyValue(name)]);
+    const vars: Record<string, string> = Object.fromEntries([...declared, ...inline]);
     const rowRules = rulesFor(paneRules, row, ["row"]);
     const tracks = tracksOf(cascadedValue(rowRules, "grid-template-columns") ?? "none", vars);
     const gap = widthOf(cascadedValue(rowRules, "gap") ?? "0", vars);
@@ -1245,6 +1248,7 @@ describe("ConflictResolutionPane pane widths (#931)", () => {
       cells.map((cell) => ({ rules: rulesFor(paneRules, cell, classes(cell)) })),
       tracks,
       gap,
+      vars,
     );
     return Object.fromEntries(
       cells.map((cell, i) => [cell.getAttribute("data-pane") ?? cell.getAttribute("data-pane-header") ?? "?", placed[i]]),

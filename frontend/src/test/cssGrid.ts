@@ -137,7 +137,12 @@ export interface Placement {
  * Places a row's cells, in order, one after the other on the row's tracks (auto-placement in a
  * single row), and works out each one's content width.
  */
-export function placeRow(cells: { rules: Rule[] }[], tracks: Width[], gap: Width): Placement[] {
+export function placeRow(
+  cells: { rules: Rule[] }[],
+  tracks: Width[],
+  gap: Width,
+  vars: Record<string, string> = {},
+): Placement[] {
   let next = 0;
   return cells.map(({ rules }) => {
     const span = spanOf(cascadedValue(rules, "grid-column"), tracks.length);
@@ -148,11 +153,11 @@ export function placeRow(cells: { rules: Rule[] }[], tracks: Width[], gap: Width
     content = plus(content, gap, span - 1);
     for (const property of ["padding-left", "padding-right"]) {
       const value = cascadedValue(rules, property);
-      if (value !== null) content = plus(content, widthOf(value), -1);
+      if (value !== null) content = plus(content, widthOf(value, vars), -1);
     }
     for (const property of ["border-left", "border-right"]) {
       const value = cascadedValue(rules, property);
-      if (value !== null) content = plus(content, widthOf(value.split(/\s+/)[0]), -1);
+      if (value !== null) content = plus(content, widthOf(value.split(/\s+/)[0], vars), -1);
     }
     return { start, span, content };
   });
