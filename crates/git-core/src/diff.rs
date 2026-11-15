@@ -9,11 +9,14 @@ pub enum DiffError {
     Diff(#[from] git2::Error),
     #[error("There is no commit checked out to compare with.")]
     UnbornHead,
-    /// The short ref name (without `refs/heads/` / `refs/remotes/`).
+    /// The short ref name (without `refs/heads/` / `refs/remotes/` / `refs/tags/`).
     #[error("{0} and HEAD have no common ancestor.")]
     NoMergeBase(String),
     #[error("No branch named \"{0}\".")]
     UnknownRef(String),
+    /// A `refs/tags/` ref that doesn't exist, by its short name (#872).
+    #[error("No tag named \"{0}\".")]
+    UnknownTag(String),
     #[error("path must be relative to the repository: {0}")]
     InvalidPath(String),
     #[error("{0}")]
@@ -394,11 +397,13 @@ pub fn compare_working_tree(
     hunks_from_diff(&diff, &wanted)
 }
 
-/// `merge-base(HEAD, ref)..ref`: what `ref_name` (a full `refs/heads/…` or `refs/remotes/…`
-/// name) changed since it diverged from HEAD. A detached HEAD is used as is.
+/// `merge-base(HEAD, ref)..ref`: what `ref_name` (a full `refs/heads/…`, `refs/remotes/…` or
+/// `refs/tags/…` name; a tag peels to its commit) changed since it diverged from HEAD. A detached
+/// HEAD is used as is.
 pub fn branch_compare_range(repo: &Repository, ref_name: &str) -> Result<CompareRange, DiffError> {
-    let short = ref_name
-        .strip_prefix("refs/heads/")
+    let tag = ref_name.strip_prefix("refs/tags/");
+    let short = tag
+        .or_else(|| ref_name.strip_prefix("refs/heads/"))
         .or_else(|| ref_name.strip_prefix("refs/remotes/"))
         .unwrap_or(ref_name)
         .to_string();
@@ -417,7 +422,11 @@ pub fn branch_compare_range(repo: &Repository, ref_name: &str) -> Result<Compare
     let tip = match repo.find_reference(ref_name) {
         Ok(reference) => reference.peel_to_commit()?.id(),
         Err(e) if e.code() == git2::ErrorCode::NotFound => {
-            return Err(DiffError::UnknownRef(short))
+            return Err(if tag.is_some() {
+                DiffError::UnknownTag(short)
+            } else {
+                DiffError::UnknownRef(short)
+            })
         }
         Err(e) => return Err(e.into()),
     };
