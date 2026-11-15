@@ -65,7 +65,18 @@ dialog.dialog[open] {
 .panes {
   min-height: 0;
   overflow-y: auto;
+  /* The scrollbar's room is kept even while nothing scrolls, so fields never slide under it or
+     change width when a group gets long enough to scroll (#1017). */
+  scrollbar-gutter: stable;
   padding-right: var(--space-1);
+}
+
+/* A setting whose label holds the filter text (#1017). */
+.panel label[data-filter-match] {
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+  box-shadow: 0 0 0 2px var(--color-warning-bg);
 }
 
 /* Narrow window: the list above the group, its tabs in rows. */
@@ -153,8 +164,9 @@ dialog.dialog[open] {
   overflow-wrap: anywhere;
 }
 
+/* Room for the "Default" placeholder beside the number field's spin buttons (#1017). */
 .number {
-  width: 6em;
+  width: 8em;
 }
 
 .checkbox {

@@ -74,6 +74,29 @@ describe("CompareDiffPane", () => {
     );
   });
 
+  it("Escape anywhere in the pane closes it and returns focus to what opened it (#1001)", () => {
+    const opener = document.createElement("button");
+    document.body.appendChild(opener);
+    opener.focus();
+    const { props } = renderPane();
+
+    const swap = screen.getByRole("button", { name: "Swap sides" });
+    swap.focus();
+    fireEvent.keyDown(swap, { key: "Escape" });
+
+    expect(props.onClose).toHaveBeenCalledOnce();
+    expect(opener).toHaveFocus();
+    opener.remove();
+  });
+
+  it("leaves an Escape that a control inside already handled (#1001)", () => {
+    const { props } = renderPane();
+    const swap = screen.getByRole("button", { name: "Swap sides" });
+    swap.addEventListener("keydown", (event) => event.preventDefault());
+    fireEvent.keyDown(swap, { key: "Escape" });
+    expect(props.onClose).not.toHaveBeenCalled();
+  });
+
   it("Swap and × call back; only two-commit compares can swap", () => {
     const { props, unmount } = renderPane();
     fireEvent.click(screen.getByRole("button", { name: "Swap sides" }));
