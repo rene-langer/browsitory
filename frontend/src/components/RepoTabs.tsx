@@ -66,7 +66,6 @@ export function RepoTabs({
   const [menu, setMenu] = useState<{ path: string; x: number; y: number } | null>(null);
   const [tabList, setTabList] = useState<{ x: number; y: number } | null>(null);
   if (openRepos.length === 0) return null;
-  const changedPaths = changedCounts === undefined ? undefined : new Set(changedCounts.keys());
 
   // Roving tabindex: only the selected tab (or the first, when none is) is a tab stop; arrow keys
   // move the focus between tabs, and Enter or Space (the tab is a button) shows the focused one
@@ -233,7 +232,7 @@ export function RepoTabs({
           openRepos={openRepos}
           activePath={activePath}
           workspaceNames={workspaceNames}
-          changedPaths={changedPaths}
+          changedCounts={changedCounts}
           onSwitchTo={onSwitchTo}
           onClose={() => setTabList(null)}
           trigger={listButtonRef}

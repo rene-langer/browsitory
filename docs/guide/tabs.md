@@ -63,7 +63,7 @@ workspace editor. Hovering a tab still shows its full path.
 ## Finding a tab
 
 When many tabs are open, the **⌄** button at the end of the tab bar (next to
-**+**) lists them all, grouped by workspace, with the uncommitted-changes dot
+**+**) lists them all, grouped by workspace, with the **±N** of uncommitted changes
 where it applies. Type to filter by name, folder name or path, move with
 **↑**/**↓**, and press **Enter** or click to switch; **Esc** closes the list. In
 the command palette, **Switch to tab…** does the same for the other open tabs.
