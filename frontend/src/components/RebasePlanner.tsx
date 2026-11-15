@@ -360,8 +360,16 @@ export function RebasePlanner({
   // The combined message each group leader starts with: typed, or the default.
   const combinedMessageAt = (index: number): string | null =>
     isLeader(rows, index) ? (rows[index].combinedMessage ?? defaultCombinedMessage(rows, index, messages)) : null;
+  // The plan replays first parents only, so a merge commit in it can't be replayed (#982):
+  // Start is unavailable, and says so, as the multi-select menu does.
+  const mergeRow = rows.find((row) => row.commit.merge);
+  const mergeReason =
+    mergeRow === undefined
+      ? null
+      : `${mergeRow.commit.shortId} is a merge commit, which a rebase can't replay. Rebase onto it or a newer commit instead.`;
+  const startReason = blockedReason ?? mergeReason;
   const startDisabled =
-    blockedReason !== null || presetMissing || load.kind !== "ready" || rows.length === 0 || messageLoading;
+    startReason !== null || presetMissing || load.kind !== "ready" || rows.length === 0 || messageLoading;
 
   const start = () => {
     if (startDisabled) return;
@@ -449,26 +457,30 @@ export function RebasePlanner({
                 >
                   Move down
                 </button>
-                <label>
-                  Action
-                  <select
-                    aria-label={`Action for ${name}`}
-                    className={styles.actionSelect}
-                    value={row.actionKind}
-                    onChange={(event) => setActionKind(index, event.target.value as ActionKind)}
-                  >
-                    <option value="Pick">Pick</option>
-                    <option value="Reword">Reword</option>
-                    <option value="Edit">Edit</option>
-                    <option value="Squash" disabled={index === 0}>
-                      Squash
-                    </option>
-                    <option value="Fixup" disabled={index === 0}>
-                      Fixup
-                    </option>
-                    <option value="Drop">Drop</option>
-                  </select>
-                </label>
+                {row.commit.merge ? (
+                  <span className={styles.caption}>Merge commit: can&apos;t be replayed</span>
+                ) : (
+                  <label>
+                    Action
+                    <select
+                      aria-label={`Action for ${name}`}
+                      className={styles.actionSelect}
+                      value={row.actionKind}
+                      onChange={(event) => setActionKind(index, event.target.value as ActionKind)}
+                    >
+                      <option value="Pick">Pick</option>
+                      <option value="Reword">Reword</option>
+                      <option value="Edit">Edit</option>
+                      <option value="Squash" disabled={index === 0}>
+                        Squash
+                      </option>
+                      <option value="Fixup" disabled={index === 0}>
+                        Fixup
+                      </option>
+                      <option value="Drop">Drop</option>
+                    </select>
+                  </label>
+                )}
                 {row.actionKind === "Reword" && (
                   <RewordField
                     row={row}
@@ -504,13 +516,13 @@ export function RebasePlanner({
           they can&apos;t be part of this rebase.
         </p>
       )}
-      <BlockedReason id={reasonId} reason={blockedReason} />
+      <BlockedReason id={reasonId} reason={startReason} />
       <Toolbar>
         <button
           onClick={start}
           disabled={startDisabled}
-          title={blockedReason ?? undefined}
-          aria-describedby={describedBy(reasonId, blockedReason)}
+          title={startReason ?? undefined}
+          aria-describedby={describedBy(reasonId, startReason)}
         >
           Start rebase
         </button>

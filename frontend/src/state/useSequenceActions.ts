@@ -1,14 +1,26 @@
 import { type RefObject, useCallback, useState } from "react";
-import type { ConfirmedAbort, TerminalSequence } from "../ipc/RepoClient";
-import { abortToast, rebaseAbortSwitchTarget, rebaseAbortToast, sequenceToast, sequenceUndoable } from "../lib/operationStatus";
+import type { ConfirmedAbort, EditRest, TerminalSequence } from "../ipc/RepoClient";
+import { type AbortConfirm, type AbortTarget, type AbortWork, abortConfirm } from "../lib/abortConfirm";
+import {
+  abortToast,
+  editStopAbortToast,
+  editStopDoneToast,
+  editStopKind,
+  operationAbortToast,
+  rebaseAbortSwitchTarget,
+  rebaseAbortToast,
+  sequenceToast,
+  sequenceUndoable,
+} from "../lib/operationStatus";
 import type { useAnnounce } from "./useAnnounce";
 import type { UseAppStateResult } from "./useAppState";
 import type { PushToast, ToastAction } from "./useToasts";
 
 /**
  * `RepoWorkspace`'s cherry-pick/revert toasts and the Continue/Abort routes of a stopped
- * sequence, a rebase, a terminal cherry-pick and a merge, shared by the status strip, the
- * commit dock and the palette.
+ * sequence, a rebase, a terminal cherry-pick and a merge, shared by the status strip and the
+ * palette. An Abort that would lose work Undo can't bring back asks first (#979): `abortWork`
+ * says what it would lose, `abortRequest` is the open confirmation.
  */
 export function useSequenceActions(
   appState: UseAppStateResult,
@@ -16,8 +28,19 @@ export function useSequenceActions(
   mounted: RefObject<boolean>,
   announce: ReturnType<typeof useAnnounce>,
   undoToastAction: () => ToastAction,
+  abortWork: () => AbortWork,
 ) {
   const { dismissError } = appState;
+  // The confirmation an Abort waits for (#979), and what it runs once confirmed.
+  const [abortRequest, setAbortRequest] = useState<{ confirm: AbortConfirm; run: () => void } | null>(null);
+  const guardAbort = useCallback(
+    (target: AbortTarget, run: () => void) => {
+      const confirm = abortConfirm(target, abortWork());
+      if (confirm === null) run();
+      else setAbortRequest({ confirm, run });
+    },
+    [abortWork],
+  );
   // Abort of a terminal cherry-pick that removes its commits waits for this confirmation (#253).
   const [terminalAbortRequest, setTerminalAbortRequest] = useState<{
     sequence: TerminalSequence;
@@ -63,23 +86,30 @@ export function useSequenceActions(
   const continueSequence = useCallback(() => runContinueSequence(false), [runContinueSequence]);
   const abortSequence = useCallback(() => {
     if (sequenceKind === null) return;
-    void runPickAction(abortStoredSequence, (abort) => abortToast(sequenceKind, abort));
-  }, [abortStoredSequence, runPickAction, sequenceKind]);
-  // Abort rebase from the strip, the commit dock and the palette: the toast says whether HEAD
-  // went back to the branch, from the rebase as it was before the abort.
+    guardAbort({ kind: sequenceKind }, () => {
+      void runPickAction(abortStoredSequence, (abort) => abortToast(sequenceKind, abort));
+    });
+  }, [abortStoredSequence, guardAbort, runPickAction, sequenceKind]);
+  // Abort rebase from the strip and the palette: the toast says whether HEAD went back to the
+  // branch, from the rebase as it was before the abort. An Edit commit… or Split commit… stop
+  // is cancelled instead, and says so (#994).
   const { abortRebase: abortStoredRebase } = appState;
   const storedRebase = appState.state.headInfo.rebase;
+  const editKind = editStopKind(storedRebase, appState.state.splitting, appState.state.editing);
   // After aborting a rebase whose branch moved, the toast offers "Switch to {branch}" through the
   // ordinary branch switch (a safe checkout that refuses rather than overwrite local changes).
   const { switchBranch: switchToBranch } = appState;
-  const abortRebase = useCallback(async () => {
+  const runAbortRebase = useCallback(async () => {
     const before = storedRebase;
+    const kind = editKind;
     dismissError();
     const abort = await abortStoredRebase();
     if (abort === null || !mounted.current) return abort;
     const target = rebaseAbortSwitchTarget(abort, before);
     pushToast(
-      rebaseAbortToast(abort, before),
+      abort.restored && kind !== null && before?.editing != null
+        ? editStopAbortToast(kind, before.editing)
+        : rebaseAbortToast(abort, before),
       target === null
         ? undefined
         : {
@@ -92,7 +122,32 @@ export function useSequenceActions(
           },
     );
     return abort;
-  }, [abortStoredRebase, announce, dismissError, pushToast, storedRebase, switchToBranch, mounted]);
+  }, [abortStoredRebase, announce, dismissError, editKind, pushToast, storedRebase, switchToBranch, mounted]);
+  const abortRebase = useCallback(async () => {
+    const target: AbortTarget =
+      editKind !== null && storedRebase?.editing != null
+        ? { kind: editKind, commitId: storedRebase.editing }
+        : { kind: "Rebase" };
+    const confirm = abortConfirm(target, abortWork());
+    if (confirm === null) return runAbortRebase();
+    setAbortRequest({ confirm, run: () => void runAbortRebase() });
+    return null;
+  }, [abortWork, editKind, runAbortRebase, storedRebase]);
+  // Continue rebase from the strip, the palette and the rest dialog: an Edit commit… or Split
+  // commit… stop that finished the rebase says so (#994), as one undo step.
+  const { rebaseContinue } = appState;
+  const continueRebase = useCallback(
+    async (rest?: EditRest) => {
+      const kind = editKind;
+      const commitId = storedRebase?.editing ?? null;
+      const step = await rebaseContinue(rest);
+      if (step?.kind === "Done" && kind !== null && commitId !== null && mounted.current) {
+        pushToast(editStopDoneToast(kind, commitId), { action: undoToastAction() });
+      }
+      return step;
+    },
+    [editKind, mounted, pushToast, rebaseContinue, storedRebase, undoToastAction],
+  );
   // A `git cherry-pick A B C` started in a terminal (#258): Abort works like `git cherry-pick
   // --abort` through `abortSequence` (#253). When it would remove the commits the sequence made,
   // it asks first.
@@ -125,19 +180,30 @@ export function useSequenceActions(
   // A stored sequence first (its file must never outlive it), then a terminal sequence's paused
   // step (a merge paused during one is a plain merge), then the merge or single pick.
   const isTerminalStep = terminalSequence !== null && appState.state.headInfo.operation !== "Merge";
+  const operation = appState.state.headInfo.operation ?? "Merge";
+  // A leftover's changes are already in HEAD: its abort loses nothing (#240).
+  const leftover = appState.state.headInfo.operationLeftover;
   const abortMergeOrSequence = useCallback(() => {
     if (sequenceKind !== null) abortSequence();
     else if (isTerminalStep) abortTerminalSequence();
-    else void abortMerge();
-  }, [abortSequence, abortMerge, abortTerminalSequence, isTerminalStep, sequenceKind]);
+    else {
+      // "Aborted merge" once it worked (#979).
+      const run = () => void announce(operationAbortToast(operation), abortMerge)();
+      if (leftover) run();
+      else guardAbort({ kind: operation }, run);
+    }
+  }, [abortSequence, abortMerge, abortTerminalSequence, announce, guardAbort, isTerminalStep, leftover, operation, sequenceKind]);
   // The palette's Abort entries take the same routes.
   const paletteAbortSequence = useCallback(async () => {
-    if (sequenceKind !== null) return abortStoredSequence();
-    abortTerminalSequence();
+    if (sequenceKind !== null) abortSequence();
+    else abortTerminalSequence();
     return null;
-  }, [abortStoredSequence, abortTerminalSequence, sequenceKind]);
+  }, [abortSequence, abortTerminalSequence, sequenceKind]);
   const paletteAbortMerge = useCallback(async () => abortMergeOrSequence(), [abortMergeOrSequence]);
   return {
+    abortRequest,
+    setAbortRequest,
+    continueRebase,
     terminalAbortRequest,
     setTerminalAbortRequest,
     runPickAction,

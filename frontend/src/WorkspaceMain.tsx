@@ -321,7 +321,6 @@ export function WorkspaceMain({
             discardBlockedReason={discardDropBlockedReason}
             selectionBusyReason={appState.state.pending ? "Another action is in progress." : null}
             mergeMessage={appState.state.mergeMessage}
-            sequencePending={appState.state.pending}
             amendMode={appState.state.amendMode}
             headInfo={appState.state.headInfo}
             focusCommitMessage={focusCommitMessage}

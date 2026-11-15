@@ -7,11 +7,13 @@ import { BlockedReason } from "./primitives/BlockedReason";
 import { describedBy } from "../lib/ariaDescribedBy";
 
 /**
- * "Reword…" of a commit below HEAD (#442): edits its full message, then the caller runs it as a
- * one-step rebase. HEAD's own Reword… uses the amend box instead.
+ * "Reword…" of a commit (#442): edits its full message, then the caller runs it as a one-step
+ * rebase, or for HEAD (`head`) as an amend of the message only that leaves staged changes
+ * staged (#981).
  */
 export function RewordDialog({
   shortId,
+  head = false,
   loadMessage,
   disabled,
   disabledReason,
@@ -19,6 +21,8 @@ export function RewordDialog({
   onCancel,
 }: {
   shortId: string;
+  /** The latest commit: only its message changes, nothing after it is rewritten (#981). */
+  head?: boolean;
   /** The commit's full message, to start from. */
   loadMessage: () => Promise<string>;
   /** A repository operation is running: rewording is blocked until it ends. */
@@ -64,7 +68,10 @@ export function RewordDialog({
         }}
       >
         <p className={styles.message}>
-          Reword commit <code>{shortId}</code>. The commits after it are rewritten too.
+          Reword commit <code>{shortId}</code>.{" "}
+          {head
+            ? "Only the message changes: staged changes stay staged and out of the commit."
+            : "The commits after it are rewritten too."}
         </p>
         <Field label="Commit message">
           {(props) => (

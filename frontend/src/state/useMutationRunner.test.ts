@@ -43,6 +43,8 @@ const BASE_STATE: AppState = {
   switchConflict: null,
   editRest: null,
   splitting: null,
+  editing: null,
+  editMessage: "unchanged",
   stashSwitchOutcome: null,
   identityRequired: null,
   pullOutcome: null,

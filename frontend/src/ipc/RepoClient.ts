@@ -156,6 +156,11 @@ export interface SignatureInput {
 export interface AmendOptions {
   author: SignatureInput | null;
   trailers: Trailer[];
+  /**
+   * Reword… on HEAD (#981): only the message changes; HEAD's tree stays, so staged changes stay
+   * staged and out of the commit. `author` and `trailers` are then ignored.
+   */
+  messageOnly?: boolean;
 }
 
 /**

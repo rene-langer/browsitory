@@ -5,8 +5,10 @@ planner as an overlay, where you can reorder/pick/squash/drop commits
 before running it. Commit or stash your changes first: like `git rebase`, a rebase won't start
 while tracked files have staged or unstaged changes ("You have uncommitted changes to …").
 Untracked files are fine. Conflicts, once they happen, are resolved inline in the
-diff pane; a paused rebase shows its progress and lets you continue or
-abort.
+diff pane. A paused rebase shows in the status strip, which names the branch, what it is rebased
+onto and the step ("Rebasing main onto feature/x, step 1 of 2"), with **Continue** and **Abort
+rebase**; the toolbar says "Rebasing main" instead of a detached HEAD. Abort asks first when it
+would throw away conflict resolutions or changes made at an edit stop.
 
 **Onto a branch.** Right-click a local or remote branch in **Branches** and choose **Rebase
 current branch onto ⟨branch⟩…**, or type "rebase onto" in the command palette (local branches).
@@ -27,13 +29,16 @@ row, bodies included, one after another; a Fixup row's message is left out. Edit
 the text you type stays until the group itself changes. **Start rebase** waits until the commits
 and the messages it needs have loaded; if the commits can't be listed, the planner says why and
 offers **Retry**, and a message that can't be read is replaced by its summary, with a note.
+A merge commit can't be replayed (the rebase follows first parents only): its row says "Merge
+commit: can't be replayed" and has no action, and **Start rebase** is unavailable and says why.
+Rebase onto the merge commit or a newer one instead.
 
 **Edit** stops the rebase at that commit as **Edit commit…** does (see [Editing older
 commits](rewriting-commits.md)): HEAD is the commit's parent, the commit's changes are staged,
 and the status strip says "Editing 1a2b3c4: change the files, then Continue". Change, stage or
 unstage files, edit the message in the commit area if you like, or commit the changes as
-several commits with **Commit part**; **Continue** commits what is staged and goes on with the
-next row. Changes left unstaged make Continue ask whether to commit or discard them.
+several commits with **Commit part**; the strip's **Continue** commits what is staged and goes
+on with the next row. Changes left unstaged make Continue ask whether to commit or discard them.
 
 **Selecting several commits.** Ctrl/Cmd+click (mouse) toggles individual commits, which is how you
 select non-adjacent ones; Shift+click or Shift+Arrow selects a range. With two or more selected, a

@@ -14,6 +14,8 @@ export interface MergeEditorSummary {
   path: string;
   canGoPrevious: boolean;
   canGoNext: boolean;
+  /** It holds edits not saved yet, which Abort would lose (#979). */
+  edited: boolean;
 }
 
 /** One repo tab's merge editor (there is at most one), so the palette's commands act on it. */
@@ -67,12 +69,13 @@ export function useRegisterMergeEditor(summary: MergeEditorSummary | null, contr
   const path = summary?.path;
   const canGoPrevious = summary?.canGoPrevious;
   const canGoNext = summary?.canGoNext;
+  const edited = summary?.edited;
   useEffect(() => {
     if (register === undefined) return;
     const next =
-      path === undefined || canGoPrevious === undefined || canGoNext === undefined
+      path === undefined || canGoPrevious === undefined || canGoNext === undefined || edited === undefined
         ? null
-        : { path, canGoPrevious, canGoNext };
+        : { path, canGoPrevious, canGoNext, edited };
     return register(next, latest);
-  }, [register, path, canGoPrevious, canGoNext]);
+  }, [register, path, canGoPrevious, canGoNext, edited]);
 }

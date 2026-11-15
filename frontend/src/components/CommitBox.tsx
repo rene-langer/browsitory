@@ -58,7 +58,7 @@ export function CommitBox({
   abortLabel = "Abort merge",
   initialMessage,
   initialMessageIsSquash = false,
-  showAbort = initialMessage !== undefined,
+  showAbort = initialMessage !== undefined && onAbortMerge !== undefined,
   initialDraft,
   onDraftChange,
   amend,
@@ -91,7 +91,8 @@ export function CommitBox({
   disabled: boolean;
   /** Visible explanation shown while `disabled` blocks Commit. */
   disabledReason?: string;
-  onAbortMerge: () => void;
+  /** Abort merge / cherry-pick / revert; the commit dock leaves it to the status strip (#995). */
+  onAbortMerge?: () => void;
   abortLabel?: string;
   initialMessage?: string;
   /**

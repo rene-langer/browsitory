@@ -98,6 +98,8 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       switchConflict: null,
       editRest: null,
       splitting: null,
+      editing: null,
+      editMessage: "unchanged",
       stashSwitchOutcome: null,
       identityRequired: null,
       pullOutcome: null,

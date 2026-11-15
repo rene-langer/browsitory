@@ -94,7 +94,6 @@ export function UncommittedDiffPane({
   focusCommitMessage = false,
   clearCommitMessage = null,
   rebaseProgress,
-  sequencePending = false,
   refreshGeneration,
   discardRequest,
   onDiscardRequestChange: setDiscardRequest,
@@ -137,8 +136,6 @@ export function UncommittedDiffPane({
   // One-shot CommitBox clear request (see its `clearMessage`).
   clearCommitMessage?: string | null;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
-  // An action is running: the sequence's Continue/Abort are disabled (no double submit).
-  sequencePending?: boolean;
 }) {
   const actions = useWorkspaceActions();
   const {
@@ -396,6 +393,11 @@ export function UncommittedDiffPane({
     }
   }
   const currentKey = currentEntry === undefined ? null : entryKey(currentEntry);
+  // A conflicted file is open (#980): the file list collapses to the conflicts, and the diff
+  // options (which don't apply to the merge editor) go, until "Show all changes" for this file.
+  const conflictOpen = currentEntry !== undefined && currentEntry.kind === "Conflicted";
+  const [fileListExpandedFor, setFileListExpandedFor] = useState<string | null>(null);
+  const fileListCollapsed = conflictOpen && fileListExpandedFor !== currentKey;
 
   // A row the window leaves out is scrolled to by its place in the list.
   const scrollToCurrent = useRef<() => void>(() => {});
@@ -973,7 +975,7 @@ export function UncommittedDiffPane({
         </div>
       )}
       {status.length > 0 && (
-        <div className={styles.fileGroups}>
+        <div className={styles.fileGroups} data-collapsed={conflictOpen ? String(fileListCollapsed) : undefined}>
           <div className={styles.fileListBar}>
             <input
               type="search"
@@ -1007,6 +1009,15 @@ export function UncommittedDiffPane({
               <span className={styles.conflictBadge}>
                 {conflictCount} conflict{conflictCount === 1 ? "" : "s"}
               </span>
+            )}
+            {conflictOpen && (
+              <button
+                type="button"
+                aria-expanded={!fileListCollapsed}
+                onClick={() => setFileListExpandedFor(fileListCollapsed ? currentKey : null)}
+              >
+                Show all changes
+              </button>
             )}
             {/* One group (#832): it wraps as a whole under the title, never one button alone. */}
             <div role="group" aria-label="Changes actions" className={styles.groupActions}>
@@ -1105,7 +1116,7 @@ export function UncommittedDiffPane({
       )}
       {currentEntry !== undefined && currentEntry.untrackedFolder !== true && (
         <>
-          <DiffOptionsToolbar sticky />
+          {!conflictOpen && <DiffOptionsToolbar sticky />}
           <UncommittedFileViewer
             key={currentKey}
             repoPath={repoPath}
@@ -1236,7 +1247,6 @@ export function UncommittedDiffPane({
         amendMode={amendMode}
         headInfo={headInfo}
         rebaseProgress={rebaseProgress}
-        sequencePending={sequencePending}
         stagedCount={stagedCount}
         conflictCount={conflictCount}
         initialCommitDraft={initialCommitDraft}

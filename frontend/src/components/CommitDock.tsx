@@ -2,17 +2,20 @@ import { IdentityDialog } from "./IdentityDialog";
 import { useCallback, useEffect, useState } from "react";
 import type { GraphCommit, HeadInfo, RepoClient } from "../ipc/RepoClient";
 import { messageHistoryEntries, readCommitMessages, recentBranchCommits } from "../lib/commitMessageHistory";
-import { conflictReason, isSplitting, rebaseInterruption, sequenceNoun } from "../lib/operationStatus";
+import { conflictReason, isSplitting, rebaseInterruption } from "../lib/operationStatus";
 import { useCommitMessageSettingsContext } from "../state/useCommitMessageSettings";
 import { useWorkspaceActions } from "../state/useWorkspaceActions";
 import { CommitBox, type CommitDraft } from "./CommitBox";
 import styles from "./DiffPane.module.css";
-import { RebaseProgressPanel } from "./RebaseProgressPanel";
+import { EditStopPanel } from "./EditStopPanel";
+import { HookStatus } from "./HookStatus";
 
 /**
- * The working tree's commit dock: the commit box (message, options, then Commit), or
- * Continue/Abort while a cherry-pick/revert sequence or a rebase is paused. Stash is in the
- * repository toolbar (#637). Its actions come from `WorkspaceActionsContext` (#491).
+ * The working tree's commit dock: the commit box (message, options, then Commit). While a
+ * cherry-pick/revert sequence or a rebase is paused, the operation status strip alone shows its
+ * status, Continue and Abort (#995): the dock keeps only an edit stop's message (and a
+ * sequence Continue's running hook). While conflicts remain it is one line (#980). Stash is in
+ * the repository toolbar (#637). Its actions come from `WorkspaceActionsContext` (#491).
  */
 export function CommitDock({
   repoPath,
@@ -23,7 +26,6 @@ export function CommitDock({
   amendMode,
   headInfo,
   rebaseProgress,
-  sequencePending,
   stagedCount,
   conflictCount,
   initialCommitDraft,
@@ -41,7 +43,6 @@ export function CommitDock({
   amendMode: boolean;
   headInfo: HeadInfo;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
-  sequencePending: boolean;
   stagedCount: number;
   conflictCount: number;
   initialCommitDraft?: CommitDraft;
@@ -49,15 +50,10 @@ export function CommitDock({
   clearCommitMessage: string | null;
 }) {
   const {
-    onSequenceContinue,
-    onSequenceAbort,
-    onRebaseContinue,
     onRebaseEditMessage,
     onRebaseCommitPart,
     splittingCommit = null,
-    onRebaseAbort,
     onCommit,
-    onAbortMerge,
     onCommitDraftChange,
     onCommitMessageFocused,
     onCommitMessageCleared,
@@ -124,13 +120,7 @@ export function CommitDock({
   }, [editing, client, repoPath, onRebaseEditMessage]);
   const shownEditMessage = editMessage !== null && editMessage.commitId === editing ? editMessage : null;
   const emptyEditMessage = shownEditMessage !== null && shownEditMessage.text.trim() === "";
-  // Split a commit (#884): after a part, an empty box continues without a message of its own.
-  const splitParts = headInfo.rebase?.splitParts ?? 0;
   const splitting = isSplitting(headInfo.rebase, splittingCommit);
-  const rebaseBlockedReason =
-    rebaseInterruption(headInfo.rebase) ??
-    conflictReason(conflictCount) ??
-    (emptyEditMessage && splitParts === 0 ? "Write a commit message." : undefined);
   const commitPart = async () => {
     if (shownEditMessage === null || onRebaseCommitPart === undefined) return;
     const committed = await onRebaseCommitPart(shownEditMessage.text);
@@ -142,53 +132,37 @@ export function CommitDock({
   return (
     <div className={styles.commitDock} role="group" aria-label="Commit actions">
       {headInfo.sequence !== null ? (
-        // A stopped cherry-pick/revert sequence: no editable message per step; Continue
-        // commits the resolved step with its MERGE_MSG, like rebase continue.
-        <RebaseProgressPanel
-          currentStep={headInfo.sequence.currentStep}
-          totalSteps={headInfo.sequence.totalSteps}
-          disabled={sequencePending || conflictCount > 0}
-          disabledReason={conflictReason(conflictCount)}
-          onContinue={onSequenceContinue}
-          onAbort={onSequenceAbort}
-          abortDisabled={sequencePending}
-          title={headInfo.sequence.kind === "CherryPick" ? "Cherry-pick in progress" : "Revert in progress"}
-          continueLabel={`Continue ${sequenceNoun(headInfo.sequence.kind)}`}
-          abortLabel={`Abort ${sequenceNoun(headInfo.sequence.kind)}`}
-          hooks={
-            commitHooks === undefined ? undefined : { running: commitHooks.running, onCancel: commitHooks.onCancel }
-          }
-        />
+        // A stopped cherry-pick/revert sequence: its Continue commits the resolved step with its
+        // MERGE_MSG; while that runs the commit hooks, they show here with Cancel.
+        commitHooks?.running != null && <HookStatus running={commitHooks.running} onCancel={commitHooks.onCancel} />
       ) : rebaseProgress !== null ? (
-        // An interrupted rebase (changed outside Browsitory) can only be aborted.
-        <RebaseProgressPanel
-          currentStep={rebaseProgress.currentStep}
-          totalSteps={rebaseProgress.totalSteps}
-          disabled={rebaseBlockedReason !== undefined}
-          disabledReason={rebaseBlockedReason}
-          onContinue={onRebaseContinue}
-          onAbort={onRebaseAbort}
-          title={editing === null ? undefined : `${splitting ? "Splitting" : "Editing"} ${editing.slice(0, 7)}`}
-          message={
-            shownEditMessage === null
-              ? undefined
-              : {
-                  value: shownEditMessage.text,
-                  onChange: (text) => {
-                    setEditMessage({ ...shownEditMessage, text });
-                    onRebaseEditMessage?.(text === shownEditMessage.original ? null : text);
-                  },
-                }
-          }
-          commitPart={
-            shownEditMessage === null || onRebaseCommitPart === undefined
-              ? undefined
-              : {
-                  onCommit: () => void commitPart(),
-                  disabled: emptyEditMessage || rebaseInterruption(headInfo.rebase) !== undefined,
-                }
-          }
-        />
+        // An edit stop's message for the recommit (#882); nothing at any other stop.
+        editing !== null &&
+        shownEditMessage !== null && (
+          <EditStopPanel
+            label={`${splitting ? "Splitting" : "Editing"} ${editing.slice(0, 7)}`}
+            splitting={splitting}
+            message={{
+              value: shownEditMessage.text,
+              onChange: (text) => {
+                setEditMessage({ ...shownEditMessage, text });
+                onRebaseEditMessage?.(text === shownEditMessage.original ? null : text);
+              },
+            }}
+            commitPart={
+              onRebaseCommitPart === undefined
+                ? undefined
+                : {
+                    onCommit: () => void commitPart(),
+                    disabled: emptyEditMessage || rebaseInterruption(headInfo.rebase) !== undefined,
+                  }
+            }
+          />
+        )
+      ) : conflictCount > 0 ? (
+        // Until the conflicts are resolved the commit box is one line, and the merge editor gets
+        // the room (#980); the strip says how many are left and offers Abort (#995).
+        <p className={styles.commitDockNote}>Commit once every conflict is resolved.</p>
       ) : (
         <CommitBox
           onCommit={onCommit}
@@ -201,21 +175,10 @@ export function CommitDock({
           }
           disabled={stagedCount === 0 || conflictCount > 0}
           disabledReason={conflictCount > 0 ? conflictReason(conflictCount) : "Stage changes to commit"}
-          onAbortMerge={onAbortMerge}
-          abortLabel={
-            headInfo.operation === "CherryPick"
-              ? "Abort cherry-pick"
-              : headInfo.operation === "Revert"
-                ? "Abort revert"
-                : "Abort merge"
-          }
           // A pending squash merge pre-fills the message too, but there is no merge to abort.
           initialMessage={seededMergeMessage ?? headInfo.squashMessage ?? undefined}
           // Co-authors for a squash message, not for git's merge/pick/revert message (#142).
           initialMessageIsSquash={seededMergeMessage === null && headInfo.squashMessage !== null}
-          // A terminal rebase's step writes MERGE_MSG (and a merge step MERGE_HEAD) too; only the
-          // terminal ends it (#263).
-          showAbort={mergeMessage !== null && headInfo.terminalRebase === null}
           initialDraft={initialCommitDraft}
           onDraftChange={onCommitDraftChange}
           focusMessage={focusCommitMessage}

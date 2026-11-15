@@ -45,7 +45,6 @@ function DiffPaneContent({
   focusCommitMessage = false,
   clearCommitMessage = null,
   rebaseProgress,
-  sequencePending = false,
   commits,
   branchCommits,
   refreshGeneration = 0,
@@ -108,8 +107,6 @@ function DiffPaneContent({
   // One-shot CommitBox clear request (see its `clearMessage`).
   clearCommitMessage?: string | null;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
-  // An action is running: the sequence's Continue/Abort are disabled (no double submit).
-  sequencePending?: boolean;
 }) {
   const { stashActions } = useWorkspaceActions();
   // A commit's Changes / All files view (#446), kept while moving between commits.
@@ -126,7 +123,6 @@ function DiffPaneContent({
         focusCommitMessage={focusCommitMessage}
         clearCommitMessage={clearCommitMessage}
         rebaseProgress={rebaseProgress}
-        sequencePending={sequencePending}
         refreshGeneration={refreshGeneration}
         initialCommitDraft={initialCommitDraft}
         discardRequest={discardRequest}

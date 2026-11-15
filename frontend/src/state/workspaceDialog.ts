@@ -25,8 +25,9 @@ export type WorkspaceDialog =
   | { kind: "remote"; action: "edit" | "credentials" | "remove"; remoteName: string }
   // The merge options dialog for that branch.
   | { kind: "merge"; branchName: string }
-  // Reword an older commit (#442); `onto` is its parent.
-  | { kind: "reword"; commitId: string; onto: string }
+  // Reword a commit (#442); `onto` is its parent, `null` for HEAD, whose message alone is
+  // amended (#981).
+  | { kind: "reword"; commitId: string; onto: string | null }
   // The stash options dialog; `paths` non-empty for a file stash.
   | { kind: "stash"; paths: string[] }
   // "Apply patch…"'s preview of the patch file picked (#658): Apply, Apply and stage, Apply as
