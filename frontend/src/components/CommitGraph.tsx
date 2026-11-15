@@ -33,7 +33,7 @@ import { useCopyToClipboard } from "../state/useCopyToClipboard";
 import { useCommitDrag } from "../state/useCommitDrag";
 import { CommitLaneGraphic, WorkingTreeLaneGraphic } from "./CommitLaneGraphic";
 import { createLaneHover } from "../lib/laneHover";
-import { formatAbsoluteDate, formatCompactAge } from "../lib/formatDate";
+import { formatAbsoluteDate, formatCompactAge, formatRelativeDate } from "../lib/formatDate";
 import { useDateFormat } from "../state/useDateFormat";
 import { ListRow } from "./primitives/ListRow";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
@@ -1004,13 +1004,16 @@ function CommitGraphContent({
           <span className={styles.author} title={commit.authorEmail}>
             {commit.authorName}
           </span>
+          {/* "3d" on screen, "3 days ago" for screen readers. */}
           <span
             className={styles.date}
             data-testid="commit-date"
+            aria-hidden="true"
             title={formatAbsoluteDate(commit.timestamp, dateFormat)}
           >
             {formatCompactAge(commit.timestamp)}
           </span>
+          <span className={styles.srOnly}>{formatRelativeDate(commit.timestamp)}</span>
         </ListRow>
         );
       })}
