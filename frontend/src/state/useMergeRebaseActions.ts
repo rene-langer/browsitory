@@ -23,6 +23,7 @@ import {
   type HistoryEditRequest,
 } from "../lib/historyEdits";
 import { logFailure } from "../lib/logger";
+import { failedOperation, FailureWithNextStep } from "../lib/operationErrors";
 import { shortRefName } from "../lib/shortRefName";
 import type { PresetAction } from "../lib/rebaseSelection";
 import type { AppState } from "./useAppState";
@@ -113,7 +114,7 @@ export function useMergeRebaseActions(
         setState((prev) => ({ ...prev, dialog: withoutDialog(prev.dialog, "merge"), mergeOutcome: null }));
         const outcome: MergeOutcome = await client.mergeBranch(repoPath, branchName, options);
         setState((prev) => ({ ...prev, mergeOutcome: { branchName, outcome } }));
-      }),
+      }, failedOperation.merge(branchName, options.fastForward === "Only")),
     [client, runMutation, repoPath, setState],
   );
   const mergeBranch = useCallback(
@@ -149,7 +150,7 @@ export function useMergeRebaseActions(
           const message = `Rebased onto ${shortRefName(upstreamRef)}`;
           setState((prev) => ({ ...prev, historyEditOutcome: { message } }));
         }
-      }),
+      }, failedOperation.rebaseOnto(upstreamRef)),
     [client, runMutation, repoPath, setState],
   );
   const getPullStrategy = useCallback(() => client.getPullStrategy(repoPath), [client, repoPath]);
@@ -188,7 +189,7 @@ export function useMergeRebaseActions(
     [client, runMutation, repoPath],
   );
   const abortMerge = useCallback(
-    () => runMutation(() => client.abortMerge(repoPath)),
+    () => runMutation(() => client.abortMerge(repoPath), failedOperation.abortMerge()),
     [client, runMutation, repoPath],
   );
 
@@ -214,7 +215,7 @@ export function useMergeRebaseActions(
         const result: RebaseStepResult = await client.startRebase(repoPath, onto, plan);
         void result;
         setState((prev) => ({ ...prev, rebaseOnto: null, rebasePreset: null }));
-      }),
+      }, failedOperation.rebaseOnto(onto)),
     [client, runMutation, repoPath, setState],
   );
   const editHistory = useCallback(
@@ -226,7 +227,7 @@ export function useMergeRebaseActions(
         let edit: HistoryEdit;
         if (request.kind === "Squash") {
           // The parent is the span's first commit; `buildHistoryEditPlan` checks the rest.
-          if (span[1]?.id !== commitId) throw new Error(HISTORY_CHANGED);
+          if (span[1]?.id !== commitId) throw new FailureWithNextStep(HISTORY_CHANGED, null);
           const [parentMessage, message] = await Promise.all([
             client.getCommitMessage(repoPath, span[0].id),
             client.getCommitMessage(repoPath, commitId),
@@ -249,7 +250,7 @@ export function useMergeRebaseActions(
           const message = historyEditDoneMessage(request.kind, shortId);
           setState((prev) => ({ ...prev, historyEditOutcome: { message } }));
         }
-      });
+      }, failedOperation.historyEdit(request.kind, commitId));
       return result;
     },
     [client, runMutation, repoPath, setState],
@@ -265,7 +266,7 @@ export function useMergeRebaseActions(
           const message = `Folded staged changes into ${commitId.slice(0, 7)}`;
           setState((prev) => ({ ...prev, historyEditOutcome: { message } }));
         }
-      });
+      }, failedOperation.foldStaged(commitId));
       return result;
     },
     [client, runMutation, repoPath, setState],
@@ -301,7 +302,7 @@ export function useMergeRebaseActions(
         // Landed: the message belonged to that stop, not to the next one.
         rebaseEditMessage.current = null;
         setState((prev) => (prev.editMessage === "unchanged" ? prev : { ...prev, editMessage: "unchanged" }));
-      });
+      }, failedOperation.continueRebase());
       return result;
     },
     [client, runMutation, repoPath, setState],
@@ -315,7 +316,7 @@ export function useMergeRebaseActions(
       await runMutation(async () => {
         await client.rebaseCommitPart(repoPath, message);
         committed = true;
-      });
+      }, failedOperation.commitPart());
       return committed;
     },
     [client, runMutation, repoPath],
@@ -325,7 +326,7 @@ export function useMergeRebaseActions(
       let abort: RebaseAbort | null = null;
       await runMutation(async () => {
         abort = await client.abortRebase(repoPath);
-      });
+      }, failedOperation.abortRebase());
       return abort;
     },
     [client, runMutation, repoPath],

@@ -1,3 +1,4 @@
+import { failedOperation } from "../lib/operationErrors";
 import { useCallback, useEffect, useRef } from "react";
 import { errorKind, type PullOutcome, type RemoteAuthMode, type RepoClient, type TransferProgress } from "../ipc/RepoClient";
 import { recordFetch } from "../lib/autoFetch";
@@ -129,6 +130,7 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
       runOptimisticMutation(
         (prev) => ({ ...prev, tags: prev.tags.filter((tag) => tag.name !== name) }),
         () => client.deleteTag(repoPath, name),
+        failedOperation.deleteTag(name),
       ),
     [client, runOptimisticMutation, repoPath],
   );
@@ -391,6 +393,7 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
                 ],
               },
         () => client.createTag(repoPath, name, message, target),
+        failedOperation.createTag(name),
       );
     },
     [client, refuseTakenName, runOptimisticMutationWithMessage, repoPath],
