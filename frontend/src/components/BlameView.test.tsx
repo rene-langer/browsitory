@@ -1,7 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { BlameLine } from "../ipc/RepoClient";
+import { cascadedValue, rulesOf, subjectOf } from "../test/cssCascade";
 import { BlameView } from "./BlameView";
+import styles from "./BlameView.module.css";
+import blameCss from "./BlameView.module.css?raw";
 
 const lines: BlameLine[] = [
   {
@@ -60,6 +63,18 @@ describe("BlameView layout (#986)", () => {
     expect(screen.getAllByText("2023-11-14")).toHaveLength(1);
     expect(screen.getAllByText("bbb2222")).toHaveLength(1);
     expect(screen.getByText("2020-09-13")).toBeInTheDocument();
+  });
+
+  it("cuts a long author name with an ellipsis: on an inline-block span, as a cell's max-width does nothing (#986)", () => {
+    render(<BlameView lines={run} onSelectRow={vi.fn()} />);
+    const name = screen.getByText("Rene");
+    expect(name.tagName).toBe("SPAN");
+    expect(name.className).toBe(styles.authorName);
+    const rules = rulesOf(blameCss).filter(({ selector }) => subjectOf(selector) === ".authorName");
+    expect(cascadedValue(rules, "display")).toBe("inline-block");
+    expect(cascadedValue(rules, "max-width")).toBe("16ch");
+    expect(cascadedValue(rules, "overflow")).toBe("hidden");
+    expect(cascadedValue(rules, "text-overflow")).toBe("ellipsis");
   });
 
   it("keeps a line's indentation in its code cell", () => {
