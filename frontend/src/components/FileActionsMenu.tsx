@@ -21,7 +21,9 @@ export type FileAction =
   // index, #536), save it as a patch.
   | { kind: "revertCommitFile"; stage: boolean }
   | { kind: "applyCommitFile"; stage: boolean }
-  | { kind: "saveFilePatch" };
+  | { kind: "saveFilePatch" }
+  // The history of the file's folder (#1023): in the read-only file menu, not a header button.
+  | { kind: "folderHistory" };
 
 export const isUntracked = (entry: StatusEntry) => !entry.staged && entry.kind === "New";
 
@@ -197,39 +199,51 @@ export function selectionMenuItems(
 /**
  * The menu of a read-only file section (a commit's or a compare's file). With `patch` (a commit's
  * file, #448), it starts with Revert / Apply in the working tree, each also "and stage" (#536)
- * (disabled with `blockedReason`
- * while repository actions can't run) and "Save file as patch…"; with `tools`, the external
- * tools follow.
+ * (disabled with `blockedReason` while repository actions can't run) and "Save file as patch…";
+ * they name the working tree as the hunk buttons do (#1008). With `folder`, "History of folder …"
+ * (#1023); with `tools`, the external tools follow.
  */
 export function commitFileMenuItems(
   onPick: (action: FileAction) => void,
-  { tools = true, patch = null }: { tools?: boolean; patch?: { blockedReason: string | null } | null } = {},
+  {
+    tools = true,
+    patch = null,
+    folder = null,
+  }: { tools?: boolean; patch?: { blockedReason: string | null } | null; folder?: string | null } = {},
 ): ContextMenuItem[] {
   const items: ContextMenuItem[] = [];
   if (patch !== null) {
     const blocked = { disabled: patch.blockedReason !== null, title: patch.blockedReason ?? undefined };
     items.push(
-      { label: "Revert this file", ...blocked, onSelect: () => onPick({ kind: "revertCommitFile", stage: false }), group: "patch" },
       {
-        label: "Revert this file and stage",
+        label: "Revert file in working tree",
+        ...blocked,
+        onSelect: () => onPick({ kind: "revertCommitFile", stage: false }),
+        group: "patch",
+      },
+      {
+        label: "Revert file in working tree and stage",
         ...blocked,
         onSelect: () => onPick({ kind: "revertCommitFile", stage: true }),
         group: "patch",
       },
       {
-        label: "Apply this file to the working tree",
+        label: "Apply file to working tree",
         ...blocked,
         onSelect: () => onPick({ kind: "applyCommitFile", stage: false }),
         group: "patch",
       },
       {
-        label: "Apply this file and stage",
+        label: "Apply file to working tree and stage",
         ...blocked,
         onSelect: () => onPick({ kind: "applyCommitFile", stage: true }),
         group: "patch",
       },
       { label: "Save file as patch…", onSelect: () => onPick({ kind: "saveFilePatch" }), group: "patch" },
     );
+  }
+  if (folder !== null) {
+    items.push({ label: `History of folder ${folder}`, onSelect: () => onPick({ kind: "folderHistory" }), group: "history" });
   }
   if (tools) {
     items.push(

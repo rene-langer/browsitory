@@ -130,7 +130,8 @@
   color: var(--color-text-muted);
 }
 
-.ref[data-kind="tag"]::before {
-  content: "#";
-  margin-right: 1px;
+/* The graph badge's tag icon (#1024). */
+.refIcon {
+  margin-right: 2px;
+  vertical-align: -1px;
 }

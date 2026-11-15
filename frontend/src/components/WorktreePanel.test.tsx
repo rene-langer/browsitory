@@ -76,10 +76,10 @@ describe("WorktreePanel", () => {
     expect(screen.getByText("/repos/project")).toBeInTheDocument();
     expect(screen.getByText("/repos/project-feature")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Remove /repos/project" }),
+      screen.getByRole("button", { name: "Remove /repos/project…" }),
     ).toHaveAttribute("aria-disabled", "true");
     expect(
-      screen.getByRole("button", { name: "Remove /repos/project-feature" }),
+      screen.getByRole("button", { name: "Remove /repos/project-feature…" }),
     ).toBeEnabled();
   });
 
@@ -108,7 +108,7 @@ describe("WorktreePanel", () => {
     expect(screen.getByRole("form", { name: "Create worktree" })).toHaveTextContent("A merge is in progress.");
     fireEvent.click(screen.getByRole("button", { name: "Prune worktrees" }));
     expect(onPruneWorktrees).not.toHaveBeenCalled();
-    const removeMain = screen.getByRole("button", { name: "Remove /repos/project" });
+    const removeMain = screen.getByRole("button", { name: "Remove /repos/project…" });
     expect(describedByText(removeMain)).toBe("A merge is in progress.");
   });
 
@@ -172,7 +172,7 @@ describe("WorktreePanel", () => {
     const onRemoveWorktree = vi.fn().mockResolvedValue(undefined);
     renderPanel({ onRemoveWorktree });
 
-    fireEvent.click(screen.getByRole("button", { name: "Remove /repos/project-feature" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove /repos/project-feature…" }));
     const dialog = screen.getByRole("dialog", { name: "Remove worktree /repos/project-feature" });
 
     expect(within(dialog).getByText("Remove worktree at /repos/project-feature?")).toBeInTheDocument();
@@ -180,7 +180,7 @@ describe("WorktreePanel", () => {
     expect(onRemoveWorktree).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Remove /repos/project-feature" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove /repos/project-feature…" }));
     fireEvent.click(
       within(screen.getByRole("dialog", { name: "Remove worktree /repos/project-feature" })).getByRole("button", { name: "Remove worktree" }),
     );
@@ -192,7 +192,7 @@ describe("WorktreePanel", () => {
   it("says why the confirmation can't remove once the repository became busy", () => {
     const onRemoveWorktree = vi.fn().mockResolvedValue(undefined);
     const { rerender } = renderPanel({ onRemoveWorktree });
-    fireEvent.click(screen.getByRole("button", { name: "Remove /repos/project-feature" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove /repos/project-feature…" }));
     rerender(
       <WorktreePanel
         worktrees={[mainWorktree, linkedWorktree]}

@@ -84,7 +84,7 @@ describe("Browsitory interactive rebase", () => {
     await browser.execute((el) => {
       el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }));
     }, commitEntry);
-    await clickInPage("button", "Rebase onto here", { contains: true });
+    await clickInPage("button", "Rebase current branch onto here…", { contains: true });
     await waitUntilInPage("[data-drop-scope='rebase-plan-row']", "e2e: rebase commit c (squash target)", {
       contains: true,
     });
@@ -178,7 +178,7 @@ describe("Browsitory interactive rebase", () => {
       );
     }, commitEntry);
 
-    const rebaseButton = await $("button*=Rebase onto here");
+    const rebaseButton = await $("button*=Rebase current branch onto here");
     await rebaseButton.waitForExist();
     await rebaseButton.click();
 
@@ -249,7 +249,7 @@ describe("Browsitory interactive rebase", () => {
       );
     }, ontoEntry);
 
-    const rebaseButton = await $("button*=Rebase onto here");
+    const rebaseButton = await $("button*=Rebase current branch onto here");
     await rebaseButton.waitForExist();
     await rebaseButton.click();
 
@@ -319,7 +319,7 @@ describe("Browsitory interactive rebase", () => {
       );
     }, ontoEntry);
 
-    const rebaseButton = await $("button*=Rebase onto here");
+    const rebaseButton = await $("button*=Rebase current branch onto here");
     await rebaseButton.waitForExist();
     await rebaseButton.click();
 
@@ -377,7 +377,7 @@ describe("Browsitory interactive rebase", () => {
           new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
         );
       }, ontoEntry);
-      const rebaseButton = await $("button*=Rebase onto here");
+      const rebaseButton = await $("button*=Rebase current branch onto here");
       await rebaseButton.waitForExist();
       await rebaseButton.click();
       await $("//li[contains(., 'e2e: dirty tracked file')]//select[starts-with(@aria-label, 'Action for ')]").waitForExist();

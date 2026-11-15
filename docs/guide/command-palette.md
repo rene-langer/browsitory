@@ -4,9 +4,13 @@
 
 Press **Ctrl+K** (**⌘K** on macOS) anywhere to open the command palette, or click
 **Commands** in the header. Before you type, it lists every command it can run now: the ones you
-used last under **Recent**, then the rest in their groups. Type to filter the list. The words you
-type can come in any order and can be shortened: `sw main` finds **Switch to main**, and `ftch`
-finds **Fetch origin**. The best match comes first, and the letters that matched are marked.
+used last under **Recent**, then under **Suggested** what the repository calls for (**Continue**
+or **Abort** while an operation is paused, **Pull** while your branch is behind its upstream,
+**Go to commit message** while changes are staged), then the rest in their groups. Type to
+filter the list. The words you type can come in any order and can be shortened: `sw main` finds
+**Switch to main**, and `ftch` finds **Fetch origin**. A word matches the start of a word in a
+command, any part of it, or its letters in order within one word; letters spread over several
+words don't match. The best match comes first, and the letters that matched are marked.
 
 Use ↑/↓ to pick a command and Enter to run it, or click one. PageUp/PageDown move a page at a
 time, and Ctrl+Home/Ctrl+End (or Home/End before you type) go to the first or last command.
@@ -18,17 +22,24 @@ The palette has almost every action in Browsitory, grouped like this:
 
 - **Branches:** switch to a branch, **Switch branch…** (the list the toolbar's branch button
   opens, see [The main window](main-window.md)), **Create branch…** (the New branch form),
-  merge a branch into the current one, and create, check out or delete a tag.
+  merge a branch into the current one or rebase the current branch onto it.
+- **Tags:** **Create tag at HEAD…** and at the selected commit, check out a tag, push all tags
+  to a remote, and **Delete tag ⟨name⟩…**, here or on a remote; each delete asks first, as the
+  Tags section does.
 - **Remotes:** fetch one or all remotes, pull, **Pull with merge**, **Pull with rebase** and
-  **Pull, fast-forward only** (each also remembered for the repository), push, **Push branch to…**, **Force push current
-  branch…**, push all tags, **Browse branches on ⟨remote⟩**, add, edit or remove a remote,
-  manage its credentials, delete a remote branch, and delete a tag on a remote.
-- **Stash:** stash all, **Stash…**, stash the current file or the selected files, and show,
-  apply, pop or drop a stash.
-- **Diff:** ignore whitespace, show whitespace, more or fewer context lines, syntax
-  highlighting, wrap lines and show whole file in the current diff (see [Diff options](history.md#diff-options)), file
-  history of the current file, stage, unstage or discard the selected files, discard the current
-  file or all unstaged changes, in the merge editor **Previous conflict**, **Next conflict** and
+  **Pull, fast-forward only** (each also remembered for the repository), **Push current branch
+  to ⟨remote⟩**, **Push current branch to…**, **Force push current branch…**, **Browse branches
+  on ⟨remote⟩**, **Add remote…**, edit or remove a remote, manage its credentials, and delete a
+  remote branch.
+- **Stash:** **Stash all changes**, **Stash…**, stash the current file or the selected files,
+  and show, apply, pop or drop a stash (**Drop stash: ⟨name⟩…** asks first).
+- **Diff:** the diff options, each named for what it does now (**Ignore whitespace** or **Stop
+  ignoring whitespace**, **Show whitespace** or **Hide whitespace**, **More context lines**,
+  **Fewer context lines**, **Show syntax highlighting** or **Hide syntax highlighting**, and for
+  the current diff **Wrap lines** or **Stop wrapping lines** and **Show whole file** or **Show
+  changes only**; see [Diff options](history.md#diff-options)), file history of the current
+  file, stage, unstage or discard the selected files, discard the current file or all unstaged
+  changes, in the merge editor **Previous conflict**, **Next conflict** and
   a choice for the current conflict (see [Conflicts](conflicts.md)), open the current file in
   your editor or diff tool, **Apply
   patch…** and **Save staged changes as patch…** (see [Patches and partial
@@ -40,7 +51,8 @@ The palette has almost every action in Browsitory, grouped like this:
   one by name, folder name or path), **Rename tab…**, close the tab, open a terminal, reveal the
   repository in the file manager (see [Multiple repositories](tabs.md)).
 - **General:** **Refresh**, undo and redo, search commits, the selected commit's actions
-  (cherry-pick, revert, reset, check out, reword, edit, split, squash, fixup, move, drop, fold
+  (cherry-pick, revert, reset, check out, **Rebase current branch onto ⟨commit⟩…**,
+  **Interactive rebase from ⟨commit⟩…**, reword, edit, split, squash, fixup, move, drop, fold
   staged changes into it; for a search
   result or file history commit older than the loaded history, all but the history edits),
   worktree and submodule actions, **Preferences…**, **Show keyboard shortcuts**, **Show
@@ -51,8 +63,8 @@ The palette has almost every action in Browsitory, grouped like this:
 Before you type, commands that can't run right now are left out. For example, while a rebase is
 paused, the list offers only the commands that are safe until it is finished. Once you type, the
 matching commands that can't run follow the others under **Unavailable now**, greyed out, each
-with the reason, such as "A rebase is in progress." for **Push to origin**. Choosing one does
-nothing.
+with the reason, such as "A rebase is in progress." for **Push current branch to origin**.
+Choosing one does nothing.
 
 ## Go to a commit, branch, tag or stash
 
@@ -86,26 +98,27 @@ shows a command's shortcut at the right of its row, and the toolbar's tooltips s
 (**Refresh (F5)**). They show your own keys once you change them (see
 [Change the shortcuts](#change-the-shortcuts)).
 
-The global shortcuts work anywhere in the window:
+The global shortcuts work anywhere in the window. The list names each as the command palette
+does:
 
 | Windows and Linux | macOS | What they do |
 |---|---|---|
 | Ctrl+K | ⌘K | Open the command palette |
-| F5 | F5 | Refresh the repository |
+| F5 | F5 | **Refresh** the repository |
 | Shift+F5 | ⇧F5 | Fetch, as the toolbar's **Fetch** does |
-| Ctrl+Shift+L | ⇧⌘L | Pull the current branch |
-| Ctrl+Shift+K | ⇧⌘K | Push the current branch, as the toolbar's **Push** does |
+| Ctrl+Shift+L | ⇧⌘L | **Pull** the current branch |
+| Ctrl+Shift+K | ⇧⌘K | **Push current branch**, as the toolbar's **Push** does |
 | Ctrl+Shift+A | ⇧⌘A | Stage all changes (outside a text field) |
-| Alt+C | ⌥C | Show the working tree and go to the commit message (outside a text field) |
+| Alt+C | ⌥C | **Go to commit message**: show the working tree and its message (outside a text field) |
 | Ctrl+Z | ⌘Z | Undo the last Git operation (outside a text field) |
 | Ctrl+Shift+Z or Ctrl+Y | ⇧⌘Z | Redo |
 | F6, Shift+F6 | F6, ⇧F6 | Move to the next or previous pane: toolbar, sidebar, history, diff |
 | Ctrl+Alt+B | ⌥⌘B | Show or hide the sidebar |
 | Ctrl+Tab, Ctrl+Shift+Tab | ⌃⇥, ⌃⇧⇥ | Switch to the next or previous tab |
 | Ctrl+1 … Ctrl+8, Ctrl+9 | ⌘1 … ⌘8, ⌘9 | Switch to tab 1 to 8, or to the last tab |
-| Ctrl+W | ⌘W | Close the active tab |
-| Ctrl+Shift+T | ⇧⌘T | Reopen the last closed tab |
-| Alt+← / Alt+→ | ⌘[ / ⌘] | Back and forward through the selected commits (outside a text field) |
+| Ctrl+W | ⌘W | **Close tab**: the active one |
+| Ctrl+Shift+T | ⇧⌘T | **Reopen closed tab**: the last one closed |
+| Alt+← / Alt+→ | ⌘[ / ⌘] | **Back to previous commit**, **Forward to next commit** through the selected commits (outside a text field) |
 | ? | ? | Show the keyboard shortcuts (outside a text field) |
 
 A shortcut that can't run says why in a notification, for example "Can't pull now. No upstream

@@ -16,7 +16,14 @@ The planner opens with that branch as the base, and its title names it ("Rebase 
 lists the current branch's commits that the other branch doesn't have. The item isn't there on
 the current branch itself or on a detached HEAD, and while a merge, rebase or cherry-pick is in
 progress it is disabled and says why. **Undo** names the branch too ("Rebase onto main"). To
-rebase onto any commit instead, right-click it in the graph and choose **Rebase onto here**.
+rebase onto any commit instead, right-click it in the graph and choose **Rebase current branch
+onto here…** (in the command palette **Rebase current branch onto ⟨commit⟩…**).
+
+**From a commit.** Right-click a commit of the current branch and choose **Interactive rebase
+from here…** (in the command palette **Interactive rebase from ⟨commit⟩…**): the planner opens
+based on the commit's parent, so it lists that commit and every later one, to reword, reorder,
+squash or drop them. A merge commit or the first commit of the history can't be the start; the
+item is disabled and says why.
 
 **The planner.** Its title names the branch and the target ("Rebase main onto 4c5beaf"), and a
 line under it says how many commits it rewrites. It lists the commits oldest first, in the order

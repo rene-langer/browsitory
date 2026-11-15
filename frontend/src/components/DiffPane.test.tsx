@@ -1812,7 +1812,7 @@ describe("DiffPane patch actions (#448)", () => {
       getCommitMessage: async () => "",
     });
     renderCommit(client, "abcdef1234567890", { patchActions });
-    fireEvent.click(await screen.findByRole("button", { name: "Revert hunk" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Revert hunk in working tree" }));
     expect(patchActions.onApplyCommitChange).toHaveBeenLastCalledWith({
       commitId: "abcdef1234567890",
       path: "src/f.txt",
@@ -1822,7 +1822,7 @@ describe("DiffPane patch actions (#448)", () => {
       stage: false,
     });
     fireEvent.click(screen.getByRole("button", { name: "Actions for src/f.txt" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Apply this file to the working tree" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Apply file to working tree" }));
     expect(patchActions.onApplyCommitChange).toHaveBeenLastCalledWith(
       expect.objectContaining({ hunk: null, reverse: false }),
     );

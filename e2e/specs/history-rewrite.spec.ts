@@ -65,14 +65,14 @@ describe("Browsitory history rewrite", () => {
   });
 
   it("cherry-picks a commit, reverts it, then resets hard back", async () => {
-    await chooseFromCommitMenu(sourceCommit, "Cherry-pick");
+    await chooseFromCommitMenu(sourceCommit, `Cherry-pick onto ${baseBranch}`);
     // Wait on the commit, not the file: checkout writes picked.txt before the commit lands.
     await browser.waitUntil(() => git("log", "-1", "--format=%s") === "e2e: commit to cherry-pick");
     expect(fs.existsSync(path.join(E2E_REPO_PATH, "picked.txt"))).toBe(true);
 
     // The picked copy is HEAD now. (Picked in the same second as the original, it has the same
     // id, as nothing in the commit differs.)
-    await chooseFromCommitMenu(git("rev-parse", "HEAD"), "Revert");
+    await chooseFromCommitMenu(git("rev-parse", "HEAD"), `Revert (new commit on ${baseBranch})`);
     await browser.waitUntil(
       () => git("log", "-1", "--format=%s") === 'Revert "e2e: commit to cherry-pick"',
     );

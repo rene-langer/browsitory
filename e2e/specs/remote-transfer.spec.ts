@@ -294,7 +294,7 @@ describe("Browsitory remote transfer", () => {
     const localHead = git(E2E_REPO_PATH, "rev-parse", "HEAD");
     expect(localHead).not.toBe(remoteHeadBeforePush);
 
-    await clickRemoteContextItem("transfer-origin", "Push current branch here");
+    await clickRemoteContextItem("transfer-origin", "Push current branch to transfer-origin");
     if (needsChoice) {
       const dialog = await $(`dialog[aria-label="Push ${currentBranch}"]`);
       await dialog.waitForExist();
@@ -396,7 +396,7 @@ describe("Browsitory remote transfer", () => {
     // Idempotent re-expand — see the first test's comment.
     await expandSidebarSection("Branches");
 
-    await clickRemoteContextItem("transfer-origin", "Manage credentials");
+    await clickRemoteContextItem("transfer-origin", "Manage credentials…");
     // The `aria-label` naming this dialog now lives on the `<dialog>` itself, not a nested
     // `<form>` (the form carries no attributes of its own).
     const credentialsForm = await $("dialog[aria-label='Credentials for transfer-origin']");

@@ -23,10 +23,17 @@ describe("commitActions", () => {
       expect(action.enabled).toBe(true);
       expect(action.reason).toBeUndefined();
     }
-    expect(actions.cherryPick).toMatchObject({ label: "Cherry-pick", paletteLabel: "Cherry-pick abc1234", needsParent: false });
-    expect(actions.revert).toMatchObject({ label: "Revert", paletteLabel: "Revert abc1234" });
+    expect(actions.cherryPick).toMatchObject({
+      label: "Cherry-pick onto main",
+      paletteLabel: "Cherry-pick abc1234 onto main",
+      needsParent: false,
+    });
+    expect(actions.revert).toMatchObject({
+      label: "Revert (new commit on main)",
+      paletteLabel: "Revert abc1234 (new commit on main)",
+    });
     expect(actions.checkout).toMatchObject({ label: "Switch to (detached)", paletteLabel: "Switch to abc1234 (detached)" });
-    expect(actions.reset).toMatchObject({ label: "Reset main to here…", paletteLabel: "Reset to abc1234…" });
+    expect(actions.reset).toMatchObject({ label: "Reset main to here…", paletteLabel: "Reset main to abc1234…" });
     expect(actions.createTag).toMatchObject({ label: "Create tag…", paletteLabel: "Create tag at abc1234…" });
   });
 
@@ -49,8 +56,48 @@ describe("commitActions", () => {
 
   it("asks for a parent on a merge commit", () => {
     const actions = commitActions({ blockers: free, headId: null, currentBranch: "main" }, commit("abc1234", ["p1", "p2"]));
-    expect(actions.cherryPick).toMatchObject({ label: "Cherry-pick…", paletteLabel: "Cherry-pick abc1234…", needsParent: true });
-    expect(actions.revert).toMatchObject({ label: "Revert…", paletteLabel: "Revert abc1234…", needsParent: true });
+    expect(actions.cherryPick).toMatchObject({
+      label: "Cherry-pick onto main…",
+      paletteLabel: "Cherry-pick abc1234 onto main…",
+      needsParent: true,
+    });
+    expect(actions.revert).toMatchObject({
+      label: "Revert (new commit on main)…",
+      paletteLabel: "Revert abc1234 (new commit on main)…",
+      needsParent: true,
+    });
+  });
+
+  // #991: both open the rebase planner. "Rebase current branch onto here…" rebases onto the
+  // commit; "Interactive rebase from here…" starts at it, so its base is the commit's parent.
+  it("offers rebasing the current branch onto the commit, and an interactive rebase from it", () => {
+    const actions = commitActions({ blockers: free, headId: "head000", currentBranch: "main" }, commit("abc1234", ["p"]));
+    expect(actions.rebaseOnto).toEqual({
+      label: "Rebase current branch onto here…",
+      paletteLabel: "Rebase current branch onto abc1234…",
+      enabled: true,
+      reason: undefined,
+    });
+    expect(actions.interactiveRebase).toEqual({
+      label: "Interactive rebase from here…",
+      paletteLabel: "Interactive rebase from abc1234…",
+      enabled: true,
+      reason: undefined,
+      onto: "p",
+    });
+  });
+
+  it("refuses an interactive rebase from a merge or root commit, and both under the busy rule", () => {
+    const context = { blockers: free, headId: null, currentBranch: "main" };
+    for (const parents of [["p1", "p2"], []]) {
+      expect(commitActions(context, commit("abc1234", parents)).interactiveRebase).toMatchObject({
+        enabled: false,
+        reason: "Merge and root commits can't be rebased.",
+      });
+    }
+    const busyActions = commitActions({ ...context, blockers: busy }, commit("abc1234", ["p"]));
+    expect(busyActions.rebaseOnto).toMatchObject({ enabled: false, reason: busy.reason });
+    expect(busyActions.interactiveRebase).toMatchObject({ enabled: false, reason: busy.reason });
   });
 });
 

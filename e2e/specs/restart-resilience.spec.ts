@@ -102,7 +102,7 @@ describe("Browsitory restart resilience", () => {
     await browser.execute((el) => {
       el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }));
     }, onto);
-    const rebaseButton = await $("button*=Rebase onto here");
+    const rebaseButton = await $("button*=Rebase current branch onto here");
     await rebaseButton.waitForExist();
     await rebaseButton.click();
     const editRow = await $("//li[contains(., 'e2e: restart commit a')]//select[starts-with(@aria-label, 'Action for ')]");

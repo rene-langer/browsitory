@@ -367,6 +367,25 @@ describe("CommandPalette", () => {
       );
     });
 
+    // #1021: what the state calls for, after the recent commands and before the groups.
+    it("lists the suggested commands under Suggested, after Recent, each only once", () => {
+      recordCommandUsed("switch-feature");
+      const commands = makeCommands().map((command) =>
+        command.id === "fetch-origin" || command.id === "switch-feature" ? { ...command, suggested: true } : command,
+      );
+      render(<CommandPalette commands={commands} onRun={vi.fn()} />);
+      const items = Array.from(screen.getByRole("listbox").children).map((li) => li.textContent);
+      expect(items).toEqual(["Recent", "Switch to feature", "Suggested", "Fetch origin", "General", "Switch to main"]);
+    });
+
+    it("drops the Suggested heading once a query is typed", () => {
+      const commands = makeCommands().map((command) => ({ ...command, suggested: true }));
+      render(<CommandPalette commands={commands} onRun={vi.fn()} />);
+      fireEvent.change(screen.getByRole("combobox"), { target: { value: "fetch" } });
+      expect(screen.queryByText("Suggested")).not.toBeInTheDocument();
+      expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(["Fetch origin"]);
+    });
+
     it("skips recent ids that no longer name a command", () => {
       recordCommandUsed("gone");
       render(<CommandPalette commands={makeCommands()} onRun={vi.fn()} />);

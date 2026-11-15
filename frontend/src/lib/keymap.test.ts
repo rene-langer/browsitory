@@ -114,7 +114,7 @@ describe("keymap overrides (#898)", () => {
       group: "Merge editor",
     });
     expect(rebindableShortcuts().find((shortcut) => shortcut.id === "refresh")).toMatchObject({
-      description: "Refresh the repository",
+      description: "Refresh",
       group: "Global",
     });
   });

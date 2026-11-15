@@ -13,6 +13,7 @@ import {
   loadRecentCommandIds,
   recordCommandUsed,
   type Command,
+  COMMAND_GROUPS,
   type PickerItem,
   SWITCH_BRANCH_PICKER_ID,
 } from "./commands";
@@ -30,6 +31,7 @@ import type { SidebarPanelId } from "../state/useSidebarPanelVisibility";
 import type { RootFileName } from "../ipc/RepoClient";
 import { rootFileItems } from "./rootFiles";
 import { describedByText } from "../test/describedBy";
+import { globalShortcut } from "./keybindings";
 
 function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseAppStateResult {
   return {
@@ -289,7 +291,7 @@ describe("buildPaletteCommands (#644)", () => {
 
   it("lists what an operation in progress leaves out, with the blocker's reason", () => {
     const all = paletteFor(makeAppState({ pending: true }));
-    const push = all.find((command) => command.label === "Push branch to…");
+    const push = all.find((command) => command.label === "Push current branch to…");
     expect(push?.disabledReason).toBe("Another action is in progress.");
     const fetchAll = all.find((command) => command.label === "Fetch all remotes");
     expect(fetchAll?.disabledReason).toBe("Another action is in progress.");
@@ -363,7 +365,7 @@ describe("buildPaletteCommands (#644)", () => {
       variables: ["paths" as const],
     };
     const diff = (currentFile: string | null, selection: { staged: boolean; paths: string[] } | null) =>
-      ({ currentFile, selection }) as unknown as NonNullable<CommandContext["diff"]>;
+      ({ currentFile, selection, settings: { ignoreWhitespace: false, showWhitespace: false, syntaxHighlight: true } }) as unknown as NonNullable<CommandContext["diff"]>;
     const palette = (d: NonNullable<CommandContext["diff"]>) =>
       buildPaletteCommands({ appState: makeAppState(), sidebar: sidebar(), tabs: tabs(), diff: d, userCommands: { commands: [lint], run } });
     palette(diff("a.txt", null)).find((command) => command.label === "Run: Lint")?.run();
@@ -404,37 +406,37 @@ describe("buildCommands", () => {
     expect(commandsFor(makeAppState()).some((c) => c.id === "toggle-skip-hooks")).toBe(false);
   });
 
-  it("offers Fetch all remotes, Push branch to… and Delete remote branch… when a remote exists", () => {
+  it("offers Fetch all remotes, Push current branch to… and Delete remote branch… when a remote exists", () => {
     const appState = makeAppState();
     const commands = commandsFor(appState);
     const fetchAll = commands.find((command) => command.label === "Fetch all remotes")!;
     expect(fetchAll.keywords).toEqual(expect.arrayContaining(["fetch", "all", "remotes", "prune"]));
     fetchAll.run();
-    commands.find((command) => command.label === "Push branch to…")!.run();
+    commands.find((command) => command.label === "Push current branch to…")!.run();
     commands.find((command) => command.label === "Delete remote branch…")!.run();
     expect(appState.fetchAllRemotes).toHaveBeenCalled();
     expect(appState.openDialog).toHaveBeenCalledWith({ kind: "push", localBranch: "main" });
     expect(appState.openDialog).toHaveBeenCalledWith({ kind: "deleteRemoteBranch", remoteName: null, branchName: null });
   });
 
-  it("hides the new remote commands without a remote, and Push branch to… on a detached HEAD", () => {
+  it("hides the new remote commands without a remote, and Push current branch to… on a detached HEAD", () => {
     const labels = (overrides: Parameters<typeof makeAppState>[0]) =>
       commandsFor(makeAppState(overrides)).map((command) => command.label);
     expect(labels({ remotes: [] })).not.toContain("Fetch all remotes");
-    expect(labels({ remotes: [] })).not.toContain("Push branch to…");
+    expect(labels({ remotes: [] })).not.toContain("Push current branch to…");
     expect(labels({ remotes: [] })).not.toContain("Delete remote branch…");
     const detached = labels({
       branches: [],
       headInfo: { headId: "abc", detachedAt: "abc1234", headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null },
     });
-    expect(detached).not.toContain("Push branch to…");
+    expect(detached).not.toContain("Push current branch to…");
     expect(detached).toContain("Fetch all remotes");
   });
 
   it("hides the new remote commands while a repository operation runs", () => {
     const labels = commandsFor(makeAppState({ pending: true })).map((command) => command.label);
     expect(labels).not.toContain("Fetch all remotes");
-    expect(labels).not.toContain("Push branch to…");
+    expect(labels).not.toContain("Push current branch to…");
     expect(labels).not.toContain("Delete remote branch…");
   });
 
@@ -914,23 +916,25 @@ describe("buildCommands", () => {
       return { appState, command, revealSection: sidebarCommands.revealSection };
     }
 
-    it("delete-tag reveals the Tags section instead of calling deleteTag", () => {
-      const { appState, revealSection } = run("delete-tag:v1.0");
-      expect(revealSection).toHaveBeenCalledWith("tags");
+    // #993, #990: the panel's own confirmation, opened as a workspace dialog.
+    it("delete-tag opens the tag's delete confirmation instead of calling deleteTag", () => {
+      const { appState, command } = run("delete-tag:v1.0");
+      expect(command?.label).toBe("Delete tag v1.0…");
+      expect(appState.openDialog).toHaveBeenCalledWith({ kind: "deleteTag", tagName: "v1.0" });
       expect(appState.deleteTag).not.toHaveBeenCalled();
     });
 
-    it("drop-stash selects the stash and reveals the Stashes section instead of dropping", () => {
-      const { appState, command, revealSection } = run("drop-stash:0");
-      expect(command?.label).toBe("Drop stash: WIP");
+    it("drop-stash opens the stash's drop confirmation instead of dropping", () => {
+      const { appState, command } = run("drop-stash:0");
+      expect(command?.label).toBe("Drop stash: WIP…");
+      expect(appState.openDialog).toHaveBeenCalledWith({ kind: "dropStash", commitId: "ccc" });
       expect(appState.dropStash).not.toHaveBeenCalled();
-      expect(appState.selectRow).toHaveBeenCalledWith({ commitId: "ccc" });
-      expect(revealSection).toHaveBeenCalledWith("stash");
     });
 
-    it("remove-worktree reveals the Worktrees section instead of calling removeWorktree", () => {
-      const { appState, revealSection } = run("remove-worktree:wt1");
-      expect(revealSection).toHaveBeenCalledWith("worktree");
+    it("remove-worktree opens the worktree's remove confirmation instead of calling removeWorktree", () => {
+      const { appState, command } = run("remove-worktree:wt1");
+      expect(command?.label).toBe("Remove worktree wt1…");
+      expect(appState.openDialog).toHaveBeenCalledWith({ kind: "removeWorktree", name: "wt1" });
       expect(appState.removeWorktree).not.toHaveBeenCalled();
     });
 
@@ -1288,8 +1292,8 @@ describe("history commands", () => {
     const appState = makeAppState({ ...historyState, selectedRow: { commitId: "m1" }, commits: [merge, ...historyState.commits!] });
     const commitCommands = makeCommitCommands();
     const commands = buildWithCommitCommands(appState, commitCommands);
-    expect(commands.find((c) => c.id === "cherry-pick-selected")?.label).toBe("Cherry-pick m1…");
-    expect(commands.find((c) => c.id === "revert-selected")?.label).toBe("Revert m1…");
+    expect(commands.find((c) => c.id === "cherry-pick-selected")?.label).toBe("Cherry-pick m1 onto main…");
+    expect(commands.find((c) => c.id === "revert-selected")?.label).toBe("Revert m1 (new commit on main)…");
     commands.find((c) => c.id === "cherry-pick-selected")!.run();
     expect(commitCommands.onChooseParent).toHaveBeenLastCalledWith("Cherry-pick", "m1");
     commands.find((c) => c.id === "revert-selected")!.run();
@@ -1328,9 +1332,9 @@ describe("history commands", () => {
       const commitCommands = makeCommitCommands();
       const commands = withListed(makeAppState(listedState), commitCommands);
       const label = (id: string) => commands.find((c) => c.id === id)?.label;
-      expect(label("cherry-pick-selected")).toBe("Cherry-pick old1234");
-      expect(label("revert-selected")).toBe("Revert old1234");
-      expect(label("reset-selected")).toBe("Reset to old1234…");
+      expect(label("cherry-pick-selected")).toBe("Cherry-pick old1234 onto main");
+      expect(label("revert-selected")).toBe("Revert old1234 (new commit on main)");
+      expect(label("reset-selected")).toBe("Reset main to old1234…");
       expect(label("checkout-selected")).toBe("Switch to old1234 (detached)");
       expect(label("create-tag-selected")).toBe("Create tag at old1234…");
       commands.find((c) => c.id === "cherry-pick-selected")!.run();
@@ -1347,7 +1351,7 @@ describe("history commands", () => {
       const commands = commandsFor(makeAppState({ ...historyState, selectedRow: { commitId: "m9" } }), {
         commit: { ...commitCommands, listedCommits: [merge] },
       });
-      expect(commands.find((c) => c.id === "revert-selected")?.label).toBe("Revert m9…");
+      expect(commands.find((c) => c.id === "revert-selected")?.label).toBe("Revert m9 (new commit on main)…");
       commands.find((c) => c.id === "revert-selected")!.run();
       expect(commitCommands.onChooseParent).toHaveBeenCalledWith("Revert", "m9");
     });
@@ -1416,11 +1420,13 @@ describe("history commands", () => {
       ["a terminal git am is paused", { headInfo: { ...head, terminalRebase: { kind: "Am", branch: "", onto: "", currentStep: 1, totalSteps: 2 } } }],
       ["HEAD is selected on a detached HEAD", { selectedRow: { commitId: "c1" }, branches: [{ name: "main", isCurrent: false }], headInfo: { ...head, detachedAt: "c1" } }],
     ];
-    const pairs: [string, string][] = [
-      ["Cherry-pick", "cherry-pick-selected"],
-      ["Revert", "revert-selected"],
-      ["Switch to (detached)", "checkout-selected"],
-      ["Create tag…", "create-tag-selected"],
+    const pairs: [RegExp, string][] = [
+      [/^Cherry-pick onto \S+$/, "cherry-pick-selected"],
+      [/^Revert \(new commit on \S+\)$/, "revert-selected"],
+      [/^Switch to \(detached\)$/, "checkout-selected"],
+      [/^Create tag…$/, "create-tag-selected"],
+      [/^Rebase current branch onto here…$/, "rebase-onto-selected"],
+      [/^Interactive rebase from here…$/, "interactive-rebase-selected"],
     ];
 
     it.each(states)("while %s", (_label, overrides) => {
@@ -1455,7 +1461,7 @@ describe("history commands", () => {
         fireEvent.contextMenu(row!);
         const ids = buildWithCommitCommands(appState).map((command) => command.id);
         const resetItem = screen.getByRole("menuitem", { name: /^Reset .* to here…$/ });
-        for (const [label, id] of [...pairs, [resetItem.textContent!, "reset-selected"] as [string, string]]) {
+        for (const [label, id] of [...pairs, [new RegExp(`^${resetItem.textContent!}$`), "reset-selected"] as [RegExp, string]]) {
           const item = screen.getByRole("menuitem", { name: label });
           expect({ label, offered: ids.includes(id) }).toEqual({ label, offered: !item.hasAttribute("disabled") });
           if (item.hasAttribute("disabled") && blockers.blocked) expect(item).toHaveAttribute("title", blockers.reason);
@@ -1662,11 +1668,11 @@ describe("diff option and discard commands", () => {
     const currentDiff = { path: "src/a.ts", canShowWholeFile: true, toggleWrap: vi.fn(), toggleWholeFile: vi.fn() };
     const { commands } = build(makeAppState(), { currentDiff });
     const wrap = commands.find((c) => c.id === "toggle-wrap-lines")!;
-    expect(wrap.label).toBe("Toggle wrap lines (src/a.ts)");
+    expect(wrap.label).toBe("Wrap lines (src/a.ts)");
     wrap.run();
     expect(currentDiff.toggleWrap).toHaveBeenCalled();
     const whole = commands.find((c) => c.id === "toggle-show-whole-file")!;
-    expect(whole.label).toBe("Toggle show whole file (src/a.ts)");
+    expect(whole.label).toBe("Show whole file (src/a.ts)");
     whole.run();
     expect(currentDiff.toggleWholeFile).toHaveBeenCalled();
   });
@@ -2103,7 +2109,7 @@ describe("remote and tag palette entries", () => {
     expect(command?.label).toBe("Switch to tag v1 (detached)");
     command?.run();
     expect(appState.checkoutCommit).toHaveBeenCalledWith("c1");
-    expect(command?.group).toBe("Branches");
+    expect(command?.group).toBe("Tags");
   });
 
   it("opens Delete from remote… for each tag while a remote exists", () => {
@@ -2484,10 +2490,10 @@ describe("agree with the branch, remote, stash and worktree menus (#509)", () =>
     if (state.remotes.length > 0) {
       expectAgreement(menu(branchTree(state), "Actions for remote origin"), ids, [
         ["Fetch", "fetch-remote:origin"],
-        ["Push current branch here", "push-branch:origin"],
-        ["Edit remote", "edit-remote:origin"],
-        ["Manage credentials", "manage-credentials:origin"],
-        ["Remove remote", "remove-remote:origin"],
+        ["Push current branch to origin", "push-branch:origin"],
+        ["Edit remote…", "edit-remote:origin"],
+        ["Manage credentials…", "manage-credentials:origin"],
+        ["Remove remote…", "remove-remote:origin"],
       ], state);
     }
 
@@ -2525,18 +2531,18 @@ describe("agree with the branch, remote, stash and worktree menus (#509)", () =>
       fireEvent.click(screen.getByRole("button", { name: "Worktrees" }));
       for (const [label, id] of [
         ["Open /repo", "open-worktree:/repo"],
-        ["Remove /repo", "remove-worktree:main"],
+        ["Remove /repo…", "remove-worktree:main"],
         ["Open /repo-wt1", "open-worktree:/repo-wt1"],
-        ["Remove /repo-wt1", "remove-worktree:wt1"],
+        ["Remove /repo-wt1…", "remove-worktree:wt1"],
         ["Prune worktrees", "prune-worktrees"],
       ]) {
         // ReasonButtons (#748): aria-disabled, the reason in visible text as their description.
         const button = screen.getByRole("button", { name: label });
         const unavailable = button.getAttribute("aria-disabled") === "true";
         expect({ label, offered: ids.includes(id) }).toEqual({ label, offered: !unavailable });
-        if (unavailable && label !== "Remove /repo") expect(describedByText(button)).toBe(blockers.reason);
+        if (unavailable && label !== "Remove /repo…") expect(describedByText(button)).toBe(blockers.reason);
       }
-      expect(describedByText(screen.getByRole("button", { name: "Remove /repo" }))).toBe(
+      expect(describedByText(screen.getByRole("button", { name: "Remove /repo…" }))).toBe(
         blockers.reason ?? "The main worktree can't be removed.",
       );
     } finally {
@@ -2619,16 +2625,18 @@ describe("command ids and groups", () => {
       ["apply-patch", "Diff"],
       ["browse-remote-branches:origin", "Remotes"],
       ["checkout-selected", "General"],
-      ["checkout-tag:v1.0", "Branches"],
+      ["checkout-tag:v1.0", "Tags"],
       ["cherry-pick-selected", "General"],
       ["clone-repository", "General"],
+      ["interactive-rebase-selected", "General"],
+      ["rebase-onto-selected", "General"],
       ["close-tab", "Repositories"],
-      ["create-tag-head", "Branches"],
-      ["create-tag-selected", "Branches"],
+      ["create-tag-head", "Tags"],
+      ["create-tag-selected", "Tags"],
       ["decrease-context-lines", "Diff"],
       ["delete-remote-branch", "Remotes"],
-      ["delete-remote-tag:v1.0", "Remotes"],
-      ["delete-tag:v1.0", "Branches"],
+      ["delete-remote-tag:v1.0", "Tags"],
+      ["delete-tag:v1.0", "Tags"],
       ["discard-all-unstaged", "Diff"],
       ["discard-current-file", "Diff"],
       ["discard-selected-files", "Diff"],
@@ -2671,7 +2679,7 @@ describe("command ids and groups", () => {
       ["pull-strategy:FastForwardOnly", "Remotes"],
       ["push-branch-to", "Remotes"],
       ["push-branch:origin", "Remotes"],
-      ["push-tags:origin", "Remotes"],
+      ["push-tags:origin", "Tags"],
       ["redo", "General"],
       ["refresh", "General"],
       ["toggle-collapse-merges", "General"],
@@ -2708,8 +2716,8 @@ describe("command ids and groups", () => {
       ["create-branch", "Branches"],
       ["add-remote", "Remotes"],
       ["clone-repository", "General"],
-      ["create-tag-head", "Branches"],
-      ["create-tag-selected", "Branches"],
+      ["create-tag-head", "Tags"],
+      ["create-tag-selected", "Tags"],
       ["decrease-context-lines", "Diff"],
       ["discard-all-unstaged", "Diff"],
       ["discard-current-file", "Diff"],
@@ -2763,8 +2771,8 @@ describe("command ids and groups", () => {
       ["add-remote", "Remotes"],
       ["clone-repository", "General"],
       ["continue-sequence", "General"],
-      ["create-tag-head", "Branches"],
-      ["create-tag-selected", "Branches"],
+      ["create-tag-head", "Tags"],
+      ["create-tag-selected", "Tags"],
       ["decrease-context-lines", "Diff"],
       ["discard-all-unstaged", "Diff"],
       ["discard-current-file", "Diff"],
@@ -2814,8 +2822,8 @@ describe("command ids and groups", () => {
       ["create-branch", "Branches"],
       ["add-remote", "Remotes"],
       ["clone-repository", "General"],
-      ["create-tag-head", "Branches"],
-      ["create-tag-selected", "Branches"],
+      ["create-tag-head", "Tags"],
+      ["create-tag-selected", "Tags"],
       ["decrease-context-lines", "Diff"],
       ["discard-all-unstaged", "Diff"],
       ["discard-current-file", "Diff"],
@@ -2873,14 +2881,14 @@ describe("command ids and groups", () => {
       ["apply-patch", "Diff"],
       ["apply-stash:0", "Stash"],
       ["browse-remote-branches:origin", "Remotes"],
-      ["checkout-tag:v1.0", "Branches"],
+      ["checkout-tag:v1.0", "Tags"],
       ["clone-repository", "General"],
       ["close-tab", "Repositories"],
-      ["create-tag-head", "Branches"],
+      ["create-tag-head", "Tags"],
       ["decrease-context-lines", "Diff"],
       ["delete-remote-branch", "Remotes"],
-      ["delete-remote-tag:v1.0", "Remotes"],
-      ["delete-tag:v1.0", "Branches"],
+      ["delete-remote-tag:v1.0", "Tags"],
+      ["delete-tag:v1.0", "Tags"],
       ["discard-current-file", "Diff"],
       ["discard-selected-files", "Diff"],
       ["drop-stash:0", "Stash"],
@@ -2923,7 +2931,7 @@ describe("command ids and groups", () => {
       ["pull-strategy:FastForwardOnly", "Remotes"],
       ["push-branch-to", "Remotes"],
       ["push-branch:origin", "Remotes"],
-      ["push-tags:origin", "Remotes"],
+      ["push-tags:origin", "Tags"],
       ["redo", "General"],
       ["refresh", "General"],
       ["toggle-collapse-merges", "General"],
@@ -2959,6 +2967,42 @@ describe("command ids and groups", () => {
 
 describe("global shortcuts on palette commands (#646)", () => {
   const shortcutOf = (commands: Command[], id: string) => commands.find((command) => command.id === id)?.shortcut;
+
+  // #990: the shortcut list reuses the palette's names.
+  it("names each shortcut in the shortcut list as the palette names its command", () => {
+    const status = [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" as const }];
+    const goTo: GoToCommands = {
+      onGoToCommit: vi.fn(),
+      onSearchHistory: vi.fn(),
+      onGoToBranch: vi.fn(),
+      onGoToTag: vi.fn(),
+      onGoToStash: vi.fn(),
+      onGoBack: vi.fn(),
+      onGoForward: vi.fn(),
+    };
+    const commands = buildPaletteCommands({
+      appState: makeAppState({ status }),
+      onShowShortcuts: vi.fn(),
+      onFocusCommitMessage: vi.fn(),
+      tabs: tabs(),
+      app: { onReopenClosedTab: vi.fn() },
+      goTo,
+      // "Stage all changes" is one of the diff commands.
+      diff: {
+        settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false, expandUntracked: true },
+        update: vi.fn(),
+        currentFile: null,
+        requestDiscardCurrentFile: vi.fn(),
+        requestDiscardAllUnstaged: vi.fn(),
+        openCurrentFileHistory: vi.fn(),
+      },
+    });
+    const ids = ["show-shortcuts", "refresh", "pull", "stage-all", "focus-commit-message", "close-tab", "reopen-closed-tab", "go-back", "go-forward"] as const;
+    for (const id of ids) {
+      const command = commands.find((candidate) => candidate.shortcut === id);
+      expect({ id, label: command?.label }).toEqual({ id, label: globalShortcut(id).description });
+    }
+  });
 
   it("marks the toolbar's Fetch, Pull and Push, Refresh and the commit message", () => {
     const onFocusCommitMessage = vi.fn();
@@ -2999,5 +3043,121 @@ describe("global shortcuts on palette commands (#646)", () => {
     const commands = buildPaletteCommands({ appState: makeAppState({ pending: true }) });
     const push = commands.find((command) => command.shortcut === "push");
     expect(push?.disabledReason).toBeDefined();
+  });
+});
+
+// #990: one name per action; toggles name the state they set; "…" when a confirmation follows.
+describe("command names (#990)", () => {
+  const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const, showWhitespace: false, expandUntracked: true };
+  const diff = (extra: Record<string, unknown> = {}) => ({
+    settings,
+    update: vi.fn(),
+    currentFile: "a.txt" as string | null,
+    requestDiscardCurrentFile: vi.fn(),
+    requestDiscardAllUnstaged: vi.fn(),
+    openCurrentFileHistory: vi.fn(),
+    ...extra,
+  });
+  const labelOf = (commands: Command[], id: string) => commands.find((command) => command.id === id)?.label;
+  const unstaged = { status: [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" as const }] };
+
+  it("names the state each diff toggle sets, and the context steps as the toolbar does", () => {
+    const off = commandsFor(makeAppState(unstaged), {
+      diff: diff({ currentDiff: { path: "src/a.ts", canShowWholeFile: true, wrapped: false, wholeFile: false, toggleWrap: vi.fn(), toggleWholeFile: vi.fn() } }),
+    });
+    expect(labelOf(off, "toggle-ignore-whitespace")).toBe("Ignore whitespace");
+    expect(labelOf(off, "toggle-show-whitespace")).toBe("Show whitespace");
+    expect(labelOf(off, "toggle-syntax-highlighting")).toBe("Hide syntax highlighting");
+    expect(labelOf(off, "toggle-wrap-lines")).toBe("Wrap lines (src/a.ts)");
+    expect(labelOf(off, "toggle-show-whole-file")).toBe("Show whole file (src/a.ts)");
+    expect(labelOf(off, "increase-context-lines")).toBe("More context lines");
+    expect(labelOf(off, "decrease-context-lines")).toBe("Fewer context lines");
+
+    const on = commandsFor(makeAppState(unstaged), {
+      diff: diff({
+        settings: { ...settings, ignoreWhitespace: true, showWhitespace: true, syntaxHighlight: false },
+        currentDiff: { path: "src/a.ts", canShowWholeFile: true, wrapped: true, wholeFile: true, toggleWrap: vi.fn(), toggleWholeFile: vi.fn() },
+      }),
+    });
+    expect(labelOf(on, "toggle-ignore-whitespace")).toBe("Stop ignoring whitespace");
+    expect(labelOf(on, "toggle-show-whitespace")).toBe("Hide whitespace");
+    expect(labelOf(on, "toggle-syntax-highlighting")).toBe("Show syntax highlighting");
+    expect(labelOf(on, "toggle-wrap-lines")).toBe("Stop wrapping lines (src/a.ts)");
+    expect(labelOf(on, "toggle-show-whole-file")).toBe("Show changes only (src/a.ts)");
+  });
+
+  it("ends the commands that open a confirmation or a form in …", () => {
+    const commands = commandsFor(makeAppState(unstaged), { diff: diff() });
+    expect(labelOf(commands, "discard-current-file")).toBe("Discard changes in current file…");
+    expect(labelOf(commands, "discard-all-unstaged")).toBe("Discard all unstaged changes…");
+    expect(labelOf(commands, "add-remote")).toBe("Add remote…");
+    expect(labelOf(commands, "push-branch-to")).toBe("Push current branch to…");
+    expect(labelOf(commands, "push-branch:origin")).toBe("Push current branch to origin");
+  });
+
+  // #993: tags have their own group, before the remotes.
+  it("lists every tag command under Tags", () => {
+    const tags = [{ name: "v1", targetId: "c1", commitId: "c1", annotated: false, message: null, taggerName: null, timestamp: null }];
+    // A HEAD commit, for "Create tag at HEAD…".
+    const headInfo = { ...makeAppState().state.headInfo, headId: "c1" };
+    const commands = commandsFor(makeAppState({ tags, headInfo }));
+    for (const id of ["create-tag-head", "checkout-tag:v1", "delete-tag:v1", "delete-remote-tag:v1", "push-tags:origin"]) {
+      expect({ id, group: commands.find((command) => command.id === id)?.group }).toEqual({ id, group: "Tags" });
+    }
+    expect(COMMAND_GROUPS.indexOf("Tags")).toBe(COMMAND_GROUPS.indexOf("Branches") + 1);
+  });
+});
+
+// #991: the commit menu's rebase entries in the palette.
+describe("rebase from the selected commit (#991)", () => {
+  const commit = (id: string, parentIds: string[]) => ({ id, shortId: id, summary: `commit ${id}`, authorName: "T", authorEmail: "t@example.com", timestamp: 0, parentIds, branchRefs: [], remoteBranchRefs: [] });
+  const head = { headId: "c1", detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null };
+  const state = (selected: string) => ({ selectedRow: { commitId: selected }, commits: [commit("c1", ["c2"]), commit("c2", ["c3"]), commit("c3", [])], headInfo: head });
+
+  it("offers Rebase current branch onto and Interactive rebase from the selected commit, opening the planner", () => {
+    const appState = makeAppState(state("c2"));
+    const commands = commandsFor(appState);
+    const onto = commands.find((command) => command.id === "rebase-onto-selected");
+    expect(onto?.label).toBe("Rebase current branch onto c2…");
+    onto!.run();
+    expect(appState.openRebasePlanner).toHaveBeenCalledWith("c2");
+    const interactive = commands.find((command) => command.id === "interactive-rebase-selected");
+    expect(interactive?.label).toBe("Interactive rebase from c2…");
+    interactive!.run();
+    expect(appState.openRebaseSelection).toHaveBeenCalledWith("c3", new Map([["c2", "Pick"]]));
+  });
+
+  it("lists an interactive rebase from a root commit as unavailable, saying why", () => {
+    const commands = buildPaletteCommands({ appState: makeAppState(state("c3")), sidebar: sidebar(), tabs: tabs() });
+    expect(commands.find((command) => command.id === "interactive-rebase-selected")?.disabledReason).toBe(
+      "Merge and root commits can't be rebased.",
+    );
+  });
+});
+
+// #1021: what the empty palette suggests first.
+describe("suggested commands (#1021)", () => {
+  const suggested = (overrides: Partial<AppState>, extra: Partial<Omit<CommandContext, "appState">> = {}) =>
+    commandsFor(makeAppState(overrides), extra)
+      .filter((command) => command.suggested === true)
+      .map((command) => command.id);
+  const upstream = { localBranch: "main", remoteName: "origin", remoteBranch: "main" };
+
+  it("suggests nothing in a quiet state", () => {
+    expect(suggested({}, { onFocusCommitMessage: vi.fn() })).toEqual([]);
+  });
+
+  it("suggests Pull while the branch is behind its upstream", () => {
+    expect(suggested({ upstream: { ...upstream, ahead: 0, behind: 2 } })).toEqual(["pull"]);
+  });
+
+  it("suggests writing the commit message while changes are staged", () => {
+    const status = [{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" as const }];
+    expect(suggested({ status }, { onFocusCommitMessage: vi.fn() })).toEqual(["focus-commit-message"]);
+  });
+
+  it("suggests continuing or aborting what is paused", () => {
+    expect(suggested({ rebaseProgress: { currentStep: 1, totalSteps: 2 } }).sort()).toEqual(["rebase-abort", "rebase-continue"]);
+    expect(suggested({ mergeMessage: "Merge x" })).toEqual(["merge-abort"]);
   });
 });

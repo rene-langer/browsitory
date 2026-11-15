@@ -250,7 +250,7 @@ describe("Documentation screenshots", () => {
     await browser.execute((el) => {
       el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }));
     }, remote);
-    await clickInPage("[role='menu'] button", "Push current branch here");
+    await clickInPage("[role='menu'] button", "Push current branch to backup");
     // Push may first ask where to: confirm the suggestion.
     const pushDialog = 'dialog[aria-label="Push main"]';
     await browser.waitUntil(

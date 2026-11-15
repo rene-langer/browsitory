@@ -37,7 +37,7 @@ export interface StashActions {
    */
   applyUnstaged: PaletteAction | null;
   popUnstaged: PaletteAction | null;
-  /** Opens the confirmation (in the palette: shows the stash and opens the Stashes section). */
+  /** Opens the confirmation, in the panel and the palette alike (#990). */
   drop: PaletteAction;
 }
 
@@ -54,7 +54,7 @@ export function stashActions(blockers: StashBlockers, stash: StashEntry): StashA
     popUnstaged: stash.hasStagedChanges
       ? { label: "Pop as unstaged", paletteLabel: `Pop stash as unstaged: ${title}`, ...apply }
       : null,
-    drop: { label: "Drop…", paletteLabel: `Drop stash: ${title}`, ...gate(blockedBy(blockers.drop)) },
+    drop: { label: "Drop…", paletteLabel: `Drop stash: ${title}…`, ...gate(blockedBy(blockers.drop)) },
   };
 }
 

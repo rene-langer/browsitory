@@ -238,6 +238,15 @@ describe("SyncBar leading slot", () => {
     expect(stash.onStashWithOptions).toHaveBeenCalledOnce();
   });
 
+  // #990: the palette's name for it.
+  it("names the menu's stash-everything item as the palette does", () => {
+    const stash = { reason: null, onStash: vi.fn(), onStashWithOptions: vi.fn() };
+    renderBar({ stash });
+    fireEvent.click(screen.getByRole("button", { name: "More stash options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Stash all changes" }));
+    expect(stash.onStash).toHaveBeenCalledOnce();
+  });
+
   it("disables Stash and its menu with the reason", () => {
     renderBar({ stash: { reason: "A rebase is in progress.", onStash: vi.fn(), onStashWithOptions: vi.fn() } });
     const stash = screen.getByRole("button", { name: "Stash" });

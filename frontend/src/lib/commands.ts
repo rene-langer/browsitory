@@ -116,8 +116,8 @@ export interface BranchSwitchCommands {
 /** The id of the "Switch branch…" picker, which the toolbar's branch chip opens directly. */
 export const SWITCH_BRANCH_PICKER_ID = "switch-branch";
 
-/** A command's heading in the palette's unfiltered view, in display order. */
-export const COMMAND_GROUPS = ["Branches", "Remotes", "Stash", "Diff", "Go to", "Repositories", "General"] as const;
+/** A command's heading in the palette's unfiltered view, in display order ("Tags": #993). */
+export const COMMAND_GROUPS = ["Branches", "Tags", "Remotes", "Stash", "Diff", "Go to", "Repositories", "General"] as const;
 export type CommandGroup = (typeof COMMAND_GROUPS)[number];
 
 /** An item to run: a picker's choice ("Go to branch…" → main), and the base of every command. */
@@ -150,6 +150,11 @@ export interface Command extends PickerItem {
    * `useWorkspaceShortcuts` bind nothing for them.
    */
   keys?: string;
+  /**
+   * What the state calls for (#1021): the empty palette lists it under "Suggested", after the
+   * recent commands. Set by `buildAllCommands` (`withSuggestions`).
+   */
+  suggested?: boolean;
 }
 
 /** A second step of the palette: the items to choose from for the typed query (#441). */
@@ -203,6 +208,9 @@ export interface DiffCommands {
   currentDiff?: {
     path: string | null;
     canShowWholeFile: boolean;
+    /** Whether its lines wrap and it shows the whole file now: the toggles name the other state. */
+    wrapped?: boolean;
+    wholeFile?: boolean;
     toggleWrap(): void;
     toggleWholeFile(): void;
   } | null;
@@ -390,7 +398,7 @@ function buildAllCommands(context: CommandContext, blockers: OperationBlockers):
     blocked: blockers.blocked,
     panelVisible: (panel) => visibility?.[panel] ?? true,
   };
-  return withShortcuts(state, [
+  return withSuggestions(state, withShortcuts(state, [
     ...appCommands(ctx),
     ...undoCommands(ctx),
     ...workingTreeCommands(ctx),
@@ -406,7 +414,19 @@ function buildAllCommands(context: CommandContext, blockers: OperationBlockers):
     ...goToCommands(ctx),
     ...repositoryCommands(ctx),
     ...userCommandFamily(ctx),
-  ]);
+  ]));
+}
+
+/** What a paused operation, an upstream with new commits or staged changes call for (#1021). */
+const PAUSED_ESCAPES = new Set(["rebase-continue", "rebase-abort", "continue-sequence", "abort-sequence", "merge-abort"]);
+
+/** Marks the commands the empty palette suggests first (#1021). */
+function withSuggestions(state: AppState, commands: Command[]): Command[] {
+  const behind = (state.upstream?.behind ?? 0) > 0;
+  const staged = state.status.some((entry) => entry.staged);
+  const suggested = (id: string) =>
+    PAUSED_ESCAPES.has(id) || (id === "pull" && behind) || (id === "focus-commit-message" && staged);
+  return commands.map((command) => (suggested(command.id) ? { ...command, suggested: true } : command));
 }
 
 /**
@@ -715,13 +735,26 @@ function historyCommands({ appState, state, blockers, blocked, commit }: FamilyC
     );
     // The keyboard path for the commit menu's "Create tag…" (#438). Only opens the dialog, whose
     // Create button carries the busy rule, so it is offered while an operation runs. Like every
-    // local tag command, it is listed under "Branches" (#583).
+    // tag command, it is listed under "Tags" (#993).
     offer(
       "create-tag-selected",
       actions.createTag,
       ["tag", "create", "new", "release", "commit"],
       () => appState.openDialog({ kind: "createTag", commitId }),
-      "Branches",
+      "Tags",
+    );
+    // The commit menu's rebase entries (#991): the planner onto the commit, or from it.
+    offer("rebase-onto-selected", actions.rebaseOnto, ["rebase", "onto", "branch", "commit"], () =>
+      appState.openRebasePlanner(commitId),
+    );
+    const interactive = actions.interactiveRebase;
+    offer(
+      "interactive-rebase-selected",
+      interactive,
+      ["interactive", "rebase", "edit", "reorder", "squash", "drop", "commit"],
+      () => {
+        if (interactive.onto !== null) appState.openRebaseSelection(interactive.onto, new Map([[commitId, "Pick"]]));
+      },
     );
     // Reset asks for the mode in its dialog.
     if (commit !== undefined) {
@@ -737,7 +770,7 @@ function historyCommands({ appState, state, blockers, blocked, commit }: FamilyC
         keywords: ["tag", "create", "new", "release", "head"],
         run: () => appState.openDialog({ kind: "createTag", commitId: headId }),
       },
-      "Branches",
+      "Tags",
     );
   }
 
@@ -912,12 +945,15 @@ function branchCommands(ctx: FamilyContext): Command[] {
     for (const tag of state.tags) {
       const commitId = tag.commitId;
       if (commitId === null) continue; // a tag of a tree or blob has nothing to check out
-      add({
-        id: `checkout-tag:${tag.name}`,
-        label: `Switch to tag ${tag.name} (detached)`,
-        keywords: ["tag", "checkout", "detached", tag.name],
-        run: () => void appState.checkoutCommit(commitId),
-      });
+      add(
+        {
+          id: `checkout-tag:${tag.name}`,
+          label: `Switch to tag ${tag.name} (detached)`,
+          keywords: ["tag", "checkout", "detached", tag.name],
+          run: () => void appState.checkoutCommit(commitId),
+        },
+        "Tags",
+      );
     }
   }
   return commands;
@@ -929,12 +965,15 @@ function remoteCommands({ appState, state, blockers, blocked, sidebar }: FamilyC
   // The keyboard path for a tag badge's "Delete from remote…" (#439); the dialog confirms.
   if (!blocked && state.remotes.length > 0) {
     for (const tag of state.tags) {
-      add({
-        id: `delete-remote-tag:${tag.name}`,
-        label: `Delete tag ${tag.name} from remote…`,
-        keywords: ["tag", "delete", "remove", "remote", tag.name],
-        run: () => appState.openDialog({ kind: "deleteRemoteTag", tagName: tag.name }),
-      });
+      add(
+        {
+          id: `delete-remote-tag:${tag.name}`,
+          label: `Delete tag ${tag.name} from remote…`,
+          keywords: ["tag", "delete", "remove", "remote", tag.name],
+          run: () => appState.openDialog({ kind: "deleteRemoteTag", tagName: tag.name }),
+        },
+        "Tags",
+      );
     }
   }
   if (!blocked && state.upstream !== null && state.headInfo.detachedAt === null) {
@@ -985,12 +1024,15 @@ function remoteCommands({ appState, state, blockers, blocked, sidebar }: FamilyC
       void appState.pushCurrentBranch(remote.name),
     );
     if (!blocked) {
-      add({
-        id: `push-tags:${remote.name}`,
-        label: `Push all tags to ${remote.name}`,
-        keywords: ["push", "tags", "remote", remote.name],
-        run: () => void appState.pushTags(remote.name, []),
-      });
+      add(
+        {
+          id: `push-tags:${remote.name}`,
+          label: `Push all tags to ${remote.name}`,
+          keywords: ["push", "tags", "remote", remote.name],
+          run: () => void appState.pushTags(remote.name, []),
+        },
+        "Tags",
+      );
     }
     // Checkout/Set-as-upstream for a specific remote-tracking branch (BranchTree's
     // `remoteBranchItems`) have no keyboard path otherwise (AUD-2026-09-05-FE-001): their rows
@@ -1029,21 +1071,19 @@ function remoteCommands({ appState, state, blockers, blocked, sidebar }: FamilyC
 // doesn't render, or silently change state the user can't see. "Branches" is never hidden.
 
 /**
- * Deleting a tag has a real confirmation dialog in TagPanel, which the palette must not skip:
- * the command stays discoverable by tag name but only reveals the Tags section.
- *
- * The palette has no "Tags" group: local tag commands (create, check out, delete) are listed under
- * "Branches" with the other local refs, a remote tag's delete under "Remotes" (#583).
+ * Deleting a tag asks first, as TagPanel and the graph's tag menu do: the command opens the same
+ * confirmation (#993). Every tag command (create, check out, push, delete, here or on a remote) is
+ * listed under "Tags".
  */
-function tagCommands({ state, blocked, sidebar, panelVisible }: FamilyContext): Command[] {
-  const { commands, add } = family("Branches");
+function tagCommands({ appState, state, blocked, sidebar, panelVisible }: FamilyContext): Command[] {
+  const { commands, add } = family("Tags");
   if (blocked || sidebar === undefined || !panelVisible("tags")) return commands;
   for (const tag of state.tags) {
     add({
       id: `delete-tag:${tag.name}`,
-      label: `Delete tag ${tag.name}`,
-      keywords: ["tag", "delete", tag.name],
-      run: () => sidebar.revealSection("tags"),
+      label: `Delete tag ${tag.name}…`,
+      keywords: ["tag", "delete", "remove", tag.name],
+      run: () => appState.openDialog({ kind: "deleteTag", tagName: tag.name }),
     });
   }
   return commands;
@@ -1107,13 +1147,11 @@ function stashCommands({ appState, state, diff, sidebar, panelVisible }: FamilyC
         void appState.popStash(stash.index, false),
       );
     }
-    // Dropping has a confirmation in the Stashes panel and the stash view; like "Delete tag", the
-    // palette only shows the stash and reveals the section, never drops directly.
+    // Dropping asks first, as the Stashes panel and the stash view do: the same confirmation (#990).
     if (sidebar !== undefined) {
-      offer(`drop-stash:${stash.index}`, actions.drop, ["stash", "drop", "delete"], () => {
-        appState.selectRow({ commitId: stash.commitId });
-        sidebar.revealSection("stash");
-      });
+      offer(`drop-stash:${stash.index}`, actions.drop, ["stash", "drop", "delete"], () =>
+        appState.openDialog({ kind: "dropStash", commitId: stash.commitId }),
+      );
     }
   }
   return commands;
@@ -1134,11 +1172,10 @@ function worktreeCommands({ appState, state, blockers, tabs, sidebar, panelVisib
         tabs.onOpenRepoTab(worktree.path),
       );
     }
-    // Removing a worktree has a real confirmation dialog in WorktreePanel: reveal it instead of
-    // removing directly from the palette.
+    // Removing a worktree asks first, as WorktreePanel does: the same confirmation (#990).
     if (sidebar !== undefined) {
       offer(`remove-worktree:${worktree.name}`, actions.remove, ["worktree", "remove", "delete", worktree.name], () =>
-        sidebar.revealSection("worktree"),
+        appState.openDialog({ kind: "removeWorktree", name: worktree.name }),
       );
     }
   }
@@ -1202,33 +1239,34 @@ function diffCommands({ appState, state, diff, tools }: FamilyContext): Command[
   }
   if (diff === undefined) return commands;
   const { settings, update } = diff;
+  // Each toggle names the state it sets (#990); the context steps are the toolbar's names.
   add({
     id: "toggle-ignore-whitespace",
-    label: "Toggle ignore whitespace",
+    label: settings.ignoreWhitespace ? "Stop ignoring whitespace" : "Ignore whitespace",
     keywords: ["diff", "whitespace", "ignore"],
     run: () => update({ ignoreWhitespace: !settings.ignoreWhitespace }),
   });
   add({
     id: "toggle-show-whitespace",
-    label: "Toggle whitespace",
+    label: settings.showWhitespace ? "Hide whitespace" : "Show whitespace",
     keywords: ["diff", "whitespace", "show", "spaces", "tabs", "markers", "trailing"],
     run: () => update({ showWhitespace: !settings.showWhitespace }),
   });
   add({
     id: "increase-context-lines",
-    label: "Increase context lines",
+    label: "More context lines",
     keywords: ["diff", "context", "lines", "more"],
     run: () => update({ contextLines: Math.min(settings.contextLines + 1, MAX_CONTEXT_LINES) }),
   });
   add({
     id: "decrease-context-lines",
-    label: "Decrease context lines",
+    label: "Fewer context lines",
     keywords: ["diff", "context", "lines", "fewer", "less"],
     run: () => update({ contextLines: Math.max(settings.contextLines - 1, 0) }),
   });
   add({
     id: "toggle-syntax-highlighting",
-    label: "Toggle syntax highlighting",
+    label: settings.syntaxHighlight ? "Hide syntax highlighting" : "Show syntax highlighting",
     keywords: ["diff", "syntax", "highlight", "colors"],
     run: () => update({ syntaxHighlight: !settings.syntaxHighlight }),
   });
@@ -1238,14 +1276,14 @@ function diffCommands({ appState, state, diff, tools }: FamilyContext): Command[
     const fileKeywords = currentDiff.path === null ? [] : [currentDiff.path];
     add({
       id: "toggle-wrap-lines",
-      label: `Toggle wrap lines${of}`,
+      label: `${currentDiff.wrapped === true ? "Stop wrapping lines" : "Wrap lines"}${of}`,
       keywords: ["diff", "wrap", "lines", "word", "long", ...fileKeywords],
       run: currentDiff.toggleWrap,
     });
     if (currentDiff.canShowWholeFile) {
       add({
         id: "toggle-show-whole-file",
-        label: `Toggle show whole file${of}`,
+        label: `${currentDiff.wholeFile === true ? "Show changes only" : "Show whole file"}${of}`,
         keywords: ["diff", "whole", "file", "full", "context", ...fileKeywords],
         run: currentDiff.toggleWholeFile,
       });
@@ -1341,7 +1379,7 @@ function diffCommands({ appState, state, diff, tools }: FamilyContext): Command[
     if (diff.currentFile !== null) {
       add({
         id: "discard-current-file",
-        label: "Discard changes in current file",
+        label: "Discard changes in current file…",
         keywords: ["discard", "revert", "file"],
         run: diff.requestDiscardCurrentFile,
       });
@@ -1349,7 +1387,7 @@ function diffCommands({ appState, state, diff, tools }: FamilyContext): Command[
     if (state.status.some((entry) => !entry.staged && entry.kind !== "Conflicted")) {
       add({
         id: "discard-all-unstaged",
-        label: "Discard all unstaged changes",
+        label: "Discard all unstaged changes…",
         keywords: ["discard", "revert", "all", "unstaged"],
         run: diff.requestDiscardAllUnstaged,
       });

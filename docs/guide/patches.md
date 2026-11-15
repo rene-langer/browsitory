@@ -9,14 +9,18 @@ away), unless you choose to stage it, or to apply a patch file [as commits](#app
 
 Select a commit in the graph. Each file in its diff has a **…** menu (or right-click its header):
 
-- **Revert this file** takes back what the commit changed in that file.
-- **Apply this file to the working tree** brings that file's change into your working tree, like
-  a cherry-pick of just that file (handy for a commit on another branch).
-- **Revert this file and stage** and **Apply this file and stage** do the same and stage the
-  result too, ready to commit.
+- **Revert file in working tree** takes back, in your working tree, what the commit changed in
+  that file.
+- **Apply file to working tree** brings that file's change into your working tree, like a
+  cherry-pick of just that file (handy for a commit on another branch).
+- **Revert file in working tree and stage** and **Apply file to working tree and stage** do the
+  same and stage the result too, ready to commit.
+- **History of folder ⟨folder⟩** lists the commits that changed the file's folder (see
+  [Folder history](file-history.md#folder-history)).
 - **Save file as patch…** saves the file's change as a patch file.
 
-Each hunk header in a commit's diff has **Revert hunk** and **Apply hunk** for that hunk only;
+Each hunk header in a commit's diff has **Revert hunk in working tree** and **Apply hunk to
+working tree** for that hunk only;
 Shift+click either one to stage the result too. They
 are disabled while **Ignore whitespace** is on (a hunk is identified with whitespace counted, as
 for staging) and while another action, a merge, a rebase or a cherry-pick or revert is in

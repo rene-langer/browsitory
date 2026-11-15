@@ -21,7 +21,7 @@ export interface BranchActions {
   pushToUpstream: MenuAction | null;
   /** The current branch's "Set upstream…", `null` on another branch. */
   setUpstream: MenuAction | null;
-  /** Opens the Push dialog; the palette offers it for the current branch ("Push branch to…"). */
+  /** Opens the Push dialog; the palette offers it as "Push current branch to…". */
   pushTo: PaletteAction;
   delete: MenuAction;
 }
@@ -51,7 +51,7 @@ export function branchActions(context: BranchActionContext, branch: BranchInfo):
     setUpstream: isCurrent ? { label: "Set upstream…", ...gate(blockers) } : null,
     pushTo: {
       label: "Push to…",
-      paletteLabel: "Push branch to…",
+      paletteLabel: "Push current branch to…",
       ...gate(blockers, context.remoteCount === 0 ? NO_REMOTE : undefined),
     },
     delete: { label: "Delete", ...gate(blockers) },

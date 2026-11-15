@@ -528,7 +528,7 @@ describe("BranchTree — remotes", () => {
   it("disables every remote action with the reason while the repository is busy, like the palette", () => {
     renderTree({ remotes: oneRemote, operationDisabled: true, operationDisabledReason: "A transfer is in progress." });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    for (const name of ["Fetch", "Push current branch here", "Edit remote", "Manage credentials", "Remove remote"]) {
+    for (const name of ["Fetch", "Push current branch to origin", "Edit remote…", "Manage credentials…", "Remove remote…"]) {
       const item = screen.getByRole("menuitem", { name });
       expect(item).toBeDisabled();
       expect(item).toHaveAttribute("title", "A transfer is in progress.");
@@ -775,10 +775,10 @@ describe("BranchTree — remotes", () => {
     renderTree({ remotes: oneRemote });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
     expect(screen.getByRole("menuitem", { name: "Fetch" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Push current branch here" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Edit remote" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Manage credentials" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Remove remote" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Push current branch to origin" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Edit remote…" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Manage credentials…" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Remove remote…" })).toBeInTheDocument();
   });
 
   it("Fetch calls onFetchRemote with the remote's name", () => {
@@ -789,11 +789,11 @@ describe("BranchTree — remotes", () => {
     expect(onFetchRemote).toHaveBeenCalledWith("origin");
   });
 
-  it("Push current branch here calls onPushCurrentBranch with the remote's name", () => {
+  it("Push current branch to origin calls onPushCurrentBranch with the remote's name", () => {
     const onPushCurrentBranch = vi.fn().mockResolvedValue(undefined);
     renderTree({ remotes: oneRemote, onPushCurrentBranch });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Push current branch here" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Push current branch to origin" }));
     expect(onPushCurrentBranch).toHaveBeenCalledWith("origin");
   });
 
@@ -801,7 +801,7 @@ describe("BranchTree — remotes", () => {
     const onUpdateRemoteUrls = vi.fn().mockResolvedValue(undefined);
     renderTree({ remotes: oneRemote, onUpdateRemoteUrls });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Edit remote" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit remote…" }));
     const dialog = await screen.findByRole("dialog", { name: "Edit origin" });
     expect(within(dialog).getByDisplayValue("git@github.com:user/repo.git")).toBeInTheDocument();
     expect(within(dialog).getByLabelText("Remote name")).toHaveFocus();
@@ -817,7 +817,7 @@ describe("BranchTree — remotes", () => {
     const onSaveHttpsCredential = vi.fn().mockResolvedValue(undefined);
     renderTree({ remotes: oneRemote, onSetRemoteAuthMode, onSaveHttpsCredential });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Manage credentials" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Manage credentials…" }));
     const dialog = await screen.findByRole("dialog", { name: "Credentials for origin" });
     fireEvent.change(within(dialog).getByLabelText("HTTPS username"), { target: { value: "me" } });
     fireEvent.change(within(dialog).getByLabelText("Access token"), { target: { value: "tok" } });
@@ -832,7 +832,7 @@ describe("BranchTree — remotes", () => {
     const onRemoveRemote = vi.fn().mockResolvedValue(undefined);
     renderTree({ remotes: oneRemote, onRemoveRemote });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Remove remote" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove remote…" }));
     fireEvent.click(await screen.findByRole("button", { name: "Remove remote" }));
     expect(onRemoveRemote).toHaveBeenCalledWith("origin", false);
   });
@@ -843,7 +843,7 @@ describe("BranchTree — remotes", () => {
       remoteUpstreams: { origin: [{ localBranch: "main", remoteName: "origin", remoteBranch: "main" }] },
     });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Remove remote" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove remote…" }));
     expect(await screen.findByText(/clears the upstream of main/)).toBeInTheDocument();
   });
 
@@ -884,10 +884,10 @@ describe("BranchTree — remotes", () => {
   // why (single global credential/edit modals replace the old per-row inline forms, so a few
   // row-isolation and disclosure-default tests no longer have anything to attach to).
 
-  it("disables Push current branch here while another operation is active", () => {
+  it("disables Push current branch to origin while another operation is active", () => {
     renderTree({ remotes: oneRemote, operationDisabled: true });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    expect(screen.getByRole("menuitem", { name: "Push current branch here" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Push current branch to origin" })).toBeDisabled();
   });
 
   it("disables Fetch and the Add-remote submit button while another operation is active", () => {
@@ -922,7 +922,7 @@ describe("BranchTree — remotes", () => {
     });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
     expect(screen.getByRole("menuitem", { name: "Fetch" })).toHaveAttribute("title", "A rebase is in progress.");
-    expect(screen.getByRole("menuitem", { name: "Push current branch here" })).toHaveAttribute(
+    expect(screen.getByRole("menuitem", { name: "Push current branch to origin" })).toHaveAttribute(
       "title",
       "A rebase is in progress.",
     );
@@ -947,7 +947,7 @@ describe("BranchTree — remotes", () => {
       onRemoveRemote,
     });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Remove remote" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove remote…" }));
     expect(await screen.findByText(/clears the upstream of main, topic/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Remove remote" }));
     expect(onRemoveRemote).toHaveBeenCalledWith("origin", true);
@@ -956,7 +956,7 @@ describe("BranchTree — remotes", () => {
   it("focuses Cancel when the remove-remote confirmation opens", async () => {
     renderTree({ remotes: oneRemote });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Remove remote" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove remote…" }));
     const dialog = await screen.findByRole("dialog", { name: "Remove remote origin" });
     await waitFor(() => {
       expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
@@ -966,7 +966,7 @@ describe("BranchTree — remotes", () => {
   it("marks Remove remote as a destructive context-menu item", () => {
     renderTree({ remotes: oneRemote });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    expect(screen.getByRole("menuitem", { name: "Remove remote" })).toHaveAttribute("data-destructive", "true");
+    expect(screen.getByRole("menuitem", { name: "Remove remote…" })).toHaveAttribute("data-destructive", "true");
   });
 });
 
@@ -1284,7 +1284,7 @@ describe("BranchTree — keyboard menus", () => {
     const prevented = !fireEvent.keyDown(header, { key: "ContextMenu" });
     expect(prevented).toBe(true);
     expect(screen.getByRole("menu")).toHaveStyle({ left: "4px", top: "322px" });
-    expect(screen.getByRole("menuitem", { name: "Edit remote" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Edit remote…" })).toBeInTheDocument();
     fireEvent.keyDown(screen.getByRole("menuitem", { name: "Fetch" }), { key: "Escape" });
     expect(header).toHaveFocus();
     // The header's own toggle did not run.
@@ -1305,7 +1305,7 @@ describe("BranchTree — keyboard menus", () => {
     expect(actions).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(actions);
     expect(actions).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("menuitem", { name: "Manage credentials" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Manage credentials…" })).toBeInTheDocument();
   });
 
   // WebKit (macOS) does not focus a button on mouse click, so the menu cannot rely on the focused
@@ -1363,9 +1363,9 @@ describe("BranchTree — remote dialogs belong to the owner", () => {
   beforeEach(() => localStorage.clear());
 
   it.each([
-    ["Edit remote", "edit"],
-    ["Manage credentials", "credentials"],
-    ["Remove remote", "remove"],
+    ["Edit remote…", "edit"],
+    ["Manage credentials…", "credentials"],
+    ["Remove remote…", "remove"],
   ] as const)("%s asks onOpenRemoteDialog for the %s dialog and renders none itself", (item, action) => {
     const onOpenRemoteDialog = vi.fn();
     render(<BranchTree {...treeProps({ remotes: [origin], onOpenRemoteDialog })} />);
@@ -1434,7 +1434,7 @@ describe("BranchTree — copy items (#614)", () => {
     };
     renderTree({ remotes: [remote] });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    expect(menuNames().slice(-3)).toEqual(["Copy fetch URL", "Copy push URL", "Remove remote"]);
+    expect(menuNames().slice(-3)).toEqual(["Copy fetch URL", "Copy push URL", "Remove remote…"]);
     fireEvent.click(screen.getByRole("menuitem", { name: "Copy push URL" }));
     expect(writeText).toHaveBeenCalledWith("git@example.com:r.git");
   });

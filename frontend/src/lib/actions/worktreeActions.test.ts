@@ -9,7 +9,7 @@ describe("worktreeActions", () => {
   it("labels a worktree's actions by path in the panel and by name in the palette", () => {
     const actions = worktreeActions(free, linked);
     expect(actions.open).toEqual({ label: "Open /repo-wt", paletteLabel: "Open worktree wt", enabled: true, reason: undefined });
-    expect(actions.remove).toMatchObject({ label: "Remove /repo-wt", paletteLabel: "Remove worktree wt", enabled: true });
+    expect(actions.remove).toMatchObject({ label: "Remove /repo-wt…", paletteLabel: "Remove worktree wt…", enabled: true });
   });
 
   it("names the main worktree's open in the palette without its name (#561)", () => {
