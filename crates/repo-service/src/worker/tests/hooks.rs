@@ -1104,3 +1104,31 @@ fn amend_with_no_verify_skips_a_failing_pre_commit() {
         git_core::commit::CommitOutcome::Committed { .. }
     ));
 }
+
+/// Reword… on HEAD (#981) reports its pre-commit hook and stops it on Cancel, as an amend does.
+#[cfg(unix)]
+#[test]
+fn cancel_transfer_stops_a_running_pre_commit_of_a_reword_of_head() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a");
+    commit_all(&repo, "first");
+    install_hook(&repo, "pre-commit", "sleep 30");
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let (events_tx, watcher) = watch_hooks(&handle, Some("pre-commit"));
+    let started = std::time::Instant::now();
+
+    let result = handle.reword_head("reworded".into(), false, events_tx);
+
+    let events = watcher.join().unwrap();
+    assert_eq!(
+        result.unwrap_err(),
+        crate::wire::ErrorDto::from("The pre-commit hook was cancelled.")
+    );
+    assert!(
+        matches!(events.first(), Some(HookEvent::Started { hook, .. }) if hook == "pre-commit"),
+        "{events:?}"
+    );
+    // Generous bound: only proves the hook's `sleep 30` was not waited out.
+    assert!(started.elapsed() < Duration::from_secs(25));
+}
