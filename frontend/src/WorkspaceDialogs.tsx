@@ -10,6 +10,7 @@ import { HookFailureDialog } from "./components/HookFailureDialog";
 import { MergeDialog } from "./components/MergeDialog";
 import { ParentPickerDialog } from "./components/ParentPickerDialog";
 import { ConfirmDialog } from "./components/primitives/ConfirmDialog";
+import { DropStashMessage } from "./components/DropStashMessage";
 import { Overlay } from "./components/primitives/Overlay";
 import { PendingPullPrompt } from "./components/PendingPullPrompt";
 import { SwitchConflictDialog } from "./components/SwitchConflictDialog";
@@ -492,7 +493,7 @@ export function WorkspaceDialogs({
         // flight or a transfer blocks a drop (#521).
         <ConfirmDialog
           title={`Drop stash ${stashTitle(dropStashEntry)}`}
-          message={<p>Drop &quot;{stashTitle(dropStashEntry)}&quot;? This cannot be undone.</p>}
+          message={<DropStashMessage />}
           confirmLabel="Drop stash"
           tone="danger"
           confirmReason={busyReason(appState.state)}
