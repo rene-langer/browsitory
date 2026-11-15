@@ -106,7 +106,7 @@ describe("BranchTree — local branches", () => {
       "feat/foo has 1 commit on no other branch. Delete it anyway? Undo can bring it back.",
     );
     expect(props.onDeleteBranch).not.toHaveBeenCalled();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete branch" }));
     expect(props.onDeleteBranch).toHaveBeenCalledOnce();
     expect(props.onDeleteBranch).toHaveBeenCalledWith("feat/foo", true);
   });
@@ -222,7 +222,7 @@ describe("BranchTree — local branches", () => {
     rerender(<BranchTreeWithDialogs {...props} operationDisabled operationDisabledReason="A transfer is in progress." />);
     const dialog = screen.getByRole("dialog", { name: "Delete feat/foo" });
     expect(dialog).toHaveTextContent("A transfer is in progress.");
-    const confirm = within(dialog).getByRole("button", { name: "Delete" });
+    const confirm = within(dialog).getByRole("button", { name: "Delete branch" });
     expect(confirm).toBeDisabled();
     expect(confirm).toHaveAttribute("title", "A transfer is in progress.");
     expect(describedByText(confirm)).toBe("A transfer is in progress.");
