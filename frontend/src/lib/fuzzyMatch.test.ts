@@ -28,6 +28,14 @@ describe("matchItem (#644)", () => {
     expect(matchItem(item("Fetch origin"), "hg")).toBeNull();
   });
 
+  // #1021: a contiguous match ranks first; letters scattered over several words don't match.
+  it("drops letters scattered over several label words", () => {
+    expect(matchItem(item("Save staged changes as patch…"), "stash")).toBeNull();
+    expect(matchItem(item("Fast tech"), "ftch")).toBeNull();
+    expect(matchItem(item("Stash all changes"), "stash")).not.toBeNull();
+    expect(matchItem(item("Checkout branch"), "chkout")).not.toBeNull();
+  });
+
   it("matches keywords, without a highlight in the label", () => {
     expect(matchItem(item("Fetch origin", ["remote"]), "remote")).toEqual({
       score: expect.any(Number) as number,

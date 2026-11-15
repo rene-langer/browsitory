@@ -1763,6 +1763,53 @@ describe("App", () => {
     localStorage.clear();
   });
 
+  // #993, #990: the palette opens the same confirmation as the panel, never deleting directly.
+  describe("palette confirmations for a tag, a stash and a worktree", () => {
+    function confirmClient(overrides: Partial<RepoClient> = {}) {
+      return fakeClient({
+        listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+        openRepo: async () => {},
+        persistOpenRepos: async () => {},
+        getStatus: async () => [],
+        getCommitGraph: async () => graphPage([]),
+        listBranches: async () => [{ name: "main", isCurrent: true }],
+        listTags: async () => [{ name: "v1", targetId: "c1", commitId: "c1", annotated: false, message: null, taggerName: null, timestamp: null }],
+        listStashes: async () => [
+          { index: 0, message: "On main: draft", commitId: "s0", branch: "main", timestamp: 0, fileCount: 1, hasStagedChanges: false },
+        ],
+        listWorktrees: async () => [
+          { name: "main", path: "/repos/a", head: "main", isMain: true, isLocked: false, isPrunable: false },
+          { name: "wt", path: "/repos/a-wt", head: "topic", isMain: false, isLocked: false, isPrunable: false },
+        ],
+        deleteTag: vi.fn().mockResolvedValue(undefined),
+        dropStash: vi.fn().mockResolvedValue(undefined),
+        removeWorktree: vi.fn().mockResolvedValue(undefined),
+        ...overrides,
+      });
+    }
+
+    async function runPaletteCommand(query: string, option: string) {
+      fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+      fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), { target: { value: query } });
+      fireEvent.click(await screen.findByRole("option", { name: option }));
+    }
+
+    it.each([
+      ["delete tag v1", "Delete tag v1…", "Delete local tag v1", "Delete tag", "deleteTag", ["/repos/a", "v1"]],
+      ["drop stash draft", "Drop stash: draft…", "Drop stash draft", "Drop stash", "dropStash", ["/repos/a", 0, "s0"]],
+      ["remove worktree wt", "Remove worktree wt…", "Remove worktree /repos/a-wt", "Remove worktree", "removeWorktree", ["/repos/a", "wt"]],
+    ] as const)("%s opens its confirmation, which then acts", async (query, option, title, confirm, method, args) => {
+      const client = confirmClient();
+      render(<App client={client} />);
+      await screen.findByRole("listbox", { name: "Commit history" });
+      await runPaletteCommand(query, option);
+      const dialog = await screen.findByRole("dialog", { name: title, hidden: true });
+      expect(client[method]).not.toHaveBeenCalled();
+      fireEvent.click(within(dialog).getByRole("button", { name: confirm, hidden: true }));
+      await waitFor(() => expect(client[method]).toHaveBeenCalledWith(...args));
+    });
+  });
+
   describe("merge options", () => {
     function mergeClient(overrides: Partial<RepoClient>) {
       return fakeClient({

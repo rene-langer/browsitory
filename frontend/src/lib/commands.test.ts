@@ -13,6 +13,7 @@ import {
   loadRecentCommandIds,
   recordCommandUsed,
   type Command,
+  COMMAND_GROUPS,
   type PickerItem,
   SWITCH_BRANCH_PICKER_ID,
 } from "./commands";
@@ -30,6 +31,7 @@ import type { SidebarPanelId } from "../state/useSidebarPanelVisibility";
 import type { RootFileName } from "../ipc/RepoClient";
 import { rootFileItems } from "./rootFiles";
 import { describedByText } from "../test/describedBy";
+import { globalShortcut } from "./keybindings";
 
 function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseAppStateResult {
   return {
@@ -1420,6 +1422,8 @@ describe("history commands", () => {
       [/^Revert \(new commit on \S+\)$/, "revert-selected"],
       [/^Switch to \(detached\)$/, "checkout-selected"],
       [/^Create tag…$/, "create-tag-selected"],
+      [/^Rebase current branch onto here…$/, "rebase-onto-selected"],
+      [/^Interactive rebase from here…$/, "interactive-rebase-selected"],
     ];
 
     it.each(states)("while %s", (_label, overrides) => {
@@ -2620,6 +2624,8 @@ describe("command ids and groups", () => {
       ["checkout-tag:v1.0", "Tags"],
       ["cherry-pick-selected", "General"],
       ["clone-repository", "General"],
+      ["interactive-rebase-selected", "General"],
+      ["rebase-onto-selected", "General"],
       ["close-tab", "Repositories"],
       ["create-tag-head", "Tags"],
       ["create-tag-selected", "Tags"],
@@ -2958,6 +2964,33 @@ describe("command ids and groups", () => {
 describe("global shortcuts on palette commands (#646)", () => {
   const shortcutOf = (commands: Command[], id: string) => commands.find((command) => command.id === id)?.shortcut;
 
+  // #990: the shortcut list reuses the palette's names.
+  it("names each shortcut in the shortcut list as the palette names its command", () => {
+    const status = [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" as const }];
+    const goTo: GoToCommands = {
+      onGoToCommit: vi.fn(),
+      onSearchHistory: vi.fn(),
+      onGoToBranch: vi.fn(),
+      onGoToTag: vi.fn(),
+      onGoToStash: vi.fn(),
+      onGoBack: vi.fn(),
+      onGoForward: vi.fn(),
+    };
+    const commands = buildPaletteCommands({
+      appState: makeAppState({ status }),
+      onShowShortcuts: vi.fn(),
+      onFocusCommitMessage: vi.fn(),
+      tabs: tabs(),
+      app: { onReopenClosedTab: vi.fn() },
+      goTo,
+    });
+    const ids = ["show-shortcuts", "refresh", "pull", "stage-all", "focus-commit-message", "close-tab", "reopen-closed-tab", "go-back", "go-forward"] as const;
+    for (const id of ids) {
+      const command = commands.find((candidate) => candidate.shortcut === id);
+      expect({ id, label: command?.label }).toEqual({ id, label: globalShortcut(id).description });
+    }
+  });
+
   it("marks the toolbar's Fetch, Pull and Push, Refresh and the commit message", () => {
     const onFocusCommitMessage = vi.fn();
     const commands = buildPaletteCommands({ appState: makeAppState(), onFocusCommitMessage });
@@ -2997,5 +3030,119 @@ describe("global shortcuts on palette commands (#646)", () => {
     const commands = buildPaletteCommands({ appState: makeAppState({ pending: true }) });
     const push = commands.find((command) => command.shortcut === "push");
     expect(push?.disabledReason).toBeDefined();
+  });
+});
+
+// #990: one name per action; toggles name the state they set; "…" when a confirmation follows.
+describe("command names (#990)", () => {
+  const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const, showWhitespace: false, expandUntracked: true };
+  const diff = (extra: Record<string, unknown> = {}) => ({
+    settings,
+    update: vi.fn(),
+    currentFile: "a.txt" as string | null,
+    requestDiscardCurrentFile: vi.fn(),
+    requestDiscardAllUnstaged: vi.fn(),
+    openCurrentFileHistory: vi.fn(),
+    ...extra,
+  });
+  const labelOf = (commands: Command[], id: string) => commands.find((command) => command.id === id)?.label;
+  const unstaged = { status: [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" as const }] };
+
+  it("names the state each diff toggle sets, and the context steps as the toolbar does", () => {
+    const off = commandsFor(makeAppState(unstaged), {
+      diff: diff({ currentDiff: { path: "src/a.ts", canShowWholeFile: true, wrapped: false, wholeFile: false, toggleWrap: vi.fn(), toggleWholeFile: vi.fn() } }),
+    });
+    expect(labelOf(off, "toggle-ignore-whitespace")).toBe("Ignore whitespace");
+    expect(labelOf(off, "toggle-show-whitespace")).toBe("Show whitespace");
+    expect(labelOf(off, "toggle-syntax-highlighting")).toBe("Hide syntax highlighting");
+    expect(labelOf(off, "toggle-wrap-lines")).toBe("Wrap lines (src/a.ts)");
+    expect(labelOf(off, "toggle-show-whole-file")).toBe("Show whole file (src/a.ts)");
+    expect(labelOf(off, "increase-context-lines")).toBe("More context lines");
+    expect(labelOf(off, "decrease-context-lines")).toBe("Fewer context lines");
+
+    const on = commandsFor(makeAppState(unstaged), {
+      diff: diff({
+        settings: { ...settings, ignoreWhitespace: true, showWhitespace: true, syntaxHighlight: false },
+        currentDiff: { path: "src/a.ts", canShowWholeFile: true, wrapped: true, wholeFile: true, toggleWrap: vi.fn(), toggleWholeFile: vi.fn() },
+      }),
+    });
+    expect(labelOf(on, "toggle-ignore-whitespace")).toBe("Stop ignoring whitespace");
+    expect(labelOf(on, "toggle-show-whitespace")).toBe("Hide whitespace");
+    expect(labelOf(on, "toggle-syntax-highlighting")).toBe("Show syntax highlighting");
+    expect(labelOf(on, "toggle-wrap-lines")).toBe("Stop wrapping lines (src/a.ts)");
+    expect(labelOf(on, "toggle-show-whole-file")).toBe("Show changes only (src/a.ts)");
+  });
+
+  it("ends the commands that open a confirmation or a form in …", () => {
+    const commands = commandsFor(makeAppState(unstaged), { diff: diff() });
+    expect(labelOf(commands, "discard-current-file")).toBe("Discard changes in current file…");
+    expect(labelOf(commands, "discard-all-unstaged")).toBe("Discard all unstaged changes…");
+    expect(labelOf(commands, "add-remote")).toBe("Add remote…");
+    expect(labelOf(commands, "push-branch-to")).toBe("Push current branch to…");
+    expect(labelOf(commands, "push-branch:origin")).toBe("Push current branch to origin");
+  });
+
+  // #993: tags have their own group, before the remotes.
+  it("lists every tag command under Tags", () => {
+    const tags = [{ name: "v1", targetId: "c1", commitId: "c1", annotated: false, message: null, taggerName: null, timestamp: null }];
+    const commands = commandsFor(makeAppState({ tags }));
+    for (const id of ["create-tag-head", "checkout-tag:v1", "delete-tag:v1", "delete-remote-tag:v1", "push-tags:origin"]) {
+      expect({ id, group: commands.find((command) => command.id === id)?.group }).toEqual({ id, group: "Tags" });
+    }
+    expect(COMMAND_GROUPS.indexOf("Tags")).toBe(COMMAND_GROUPS.indexOf("Branches") + 1);
+  });
+});
+
+// #991: the commit menu's rebase entries in the palette.
+describe("rebase from the selected commit (#991)", () => {
+  const commit = (id: string, parentIds: string[]) => ({ id, shortId: id, summary: `commit ${id}`, authorName: "T", authorEmail: "t@example.com", timestamp: 0, parentIds, branchRefs: [], remoteBranchRefs: [] });
+  const head = { headId: "c1", detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null };
+  const state = (selected: string) => ({ selectedRow: { commitId: selected }, commits: [commit("c1", ["c2"]), commit("c2", ["c3"]), commit("c3", [])], headInfo: head });
+
+  it("offers Rebase current branch onto and Interactive rebase from the selected commit, opening the planner", () => {
+    const appState = makeAppState(state("c2"));
+    const commands = commandsFor(appState);
+    const onto = commands.find((command) => command.id === "rebase-onto-selected");
+    expect(onto?.label).toBe("Rebase current branch onto c2…");
+    onto!.run();
+    expect(appState.openRebasePlanner).toHaveBeenCalledWith("c2");
+    const interactive = commands.find((command) => command.id === "interactive-rebase-selected");
+    expect(interactive?.label).toBe("Interactive rebase from c2…");
+    interactive!.run();
+    expect(appState.openRebaseSelection).toHaveBeenCalledWith("c3", new Map([["c2", "Pick"]]));
+  });
+
+  it("lists an interactive rebase from a root commit as unavailable, saying why", () => {
+    const commands = buildPaletteCommands({ appState: makeAppState(state("c3")), sidebar: sidebar(), tabs: tabs() });
+    expect(commands.find((command) => command.id === "interactive-rebase-selected")?.disabledReason).toBe(
+      "Merge and root commits can't be rebased.",
+    );
+  });
+});
+
+// #1021: what the empty palette suggests first.
+describe("suggested commands (#1021)", () => {
+  const suggested = (overrides: Partial<AppState>, extra: Partial<Omit<CommandContext, "appState">> = {}) =>
+    commandsFor(makeAppState(overrides), extra)
+      .filter((command) => command.suggested === true)
+      .map((command) => command.id);
+  const upstream = { localBranch: "main", remoteName: "origin", remoteBranch: "main" };
+
+  it("suggests nothing in a quiet state", () => {
+    expect(suggested({}, { onFocusCommitMessage: vi.fn() })).toEqual([]);
+  });
+
+  it("suggests Pull while the branch is behind its upstream", () => {
+    expect(suggested({ upstream: { ...upstream, ahead: 0, behind: 2 } })).toEqual(["pull"]);
+  });
+
+  it("suggests writing the commit message while changes are staged", () => {
+    const status = [{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" as const }];
+    expect(suggested({ status }, { onFocusCommitMessage: vi.fn() })).toEqual(["focus-commit-message"]);
+  });
+
+  it("suggests continuing or aborting what is paused", () => {
+    expect(suggested({ rebaseProgress: { currentStep: 1, totalSteps: 2 } }).sort()).toEqual(["rebase-abort", "rebase-continue"]);
+    expect(suggested({ mergeMessage: "Merge x" })).toEqual(["merge-abort"]);
   });
 });

@@ -1308,6 +1308,29 @@ describe("CommitGraph — history actions", () => {
     return { ...handlers, openMenu };
   }
 
+  // #991: the single-commit menu's interactive rebase starts at the commit, so the planner
+  // rebases onto its parent with the commit marked Pick.
+  it("opens the planner from the commit's parent for Interactive rebase from here…", () => {
+    const { openMenu, onRebaseSelection, onRebaseFromCommit } = setup();
+    openMenu("B");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Interactive rebase from here…" }));
+    expect(onRebaseSelection).toHaveBeenCalledWith("A", new Map([["B", "Pick"]]));
+    openMenu("B");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rebase current branch onto here…" }));
+    expect(onRebaseFromCommit).toHaveBeenCalledWith("B");
+  });
+
+  it("disables Interactive rebase from here… on a merge or root commit, saying why", () => {
+    const { openMenu } = setup();
+    for (const summary of ["M", "A"]) {
+      openMenu(summary);
+      const item = screen.getByRole("menuitem", { name: "Interactive rebase from here…" });
+      expect(item).toBeDisabled();
+      expect(item).toHaveAccessibleDescription("Merge and root commits can't be rebased.");
+      fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    }
+  });
+
   it("marks Reset to here as a destructive item (#988)", () => {
     const { openMenu } = setup();
     openMenu("B");

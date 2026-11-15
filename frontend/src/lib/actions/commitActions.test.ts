@@ -68,6 +68,37 @@ describe("commitActions", () => {
     });
   });
 
+  // #991: both open the rebase planner. "Rebase current branch onto here…" rebases onto the
+  // commit; "Interactive rebase from here…" starts at it, so its base is the commit's parent.
+  it("offers rebasing the current branch onto the commit, and an interactive rebase from it", () => {
+    const actions = commitActions({ blockers: free, headId: "head000", currentBranch: "main" }, commit("abc1234", ["p"]));
+    expect(actions.rebaseOnto).toEqual({
+      label: "Rebase current branch onto here…",
+      paletteLabel: "Rebase current branch onto abc1234…",
+      enabled: true,
+      reason: undefined,
+    });
+    expect(actions.interactiveRebase).toEqual({
+      label: "Interactive rebase from here…",
+      paletteLabel: "Interactive rebase from abc1234…",
+      enabled: true,
+      reason: undefined,
+      onto: "p",
+    });
+  });
+
+  it("refuses an interactive rebase from a merge or root commit, and both under the busy rule", () => {
+    const context = { blockers: free, headId: null, currentBranch: "main" };
+    for (const parents of [["p1", "p2"], []]) {
+      expect(commitActions(context, commit("abc1234", parents)).interactiveRebase).toMatchObject({
+        enabled: false,
+        reason: "Merge and root commits can't be rebased.",
+      });
+    }
+    const busyActions = commitActions({ ...context, blockers: busy }, commit("abc1234", ["p"]));
+    expect(busyActions.rebaseOnto).toMatchObject({ enabled: false, reason: busy.reason });
+    expect(busyActions.interactiveRebase).toMatchObject({ enabled: false, reason: busy.reason });
+  });
 });
 
 // #744: commits dragged from the graph onto a branch in the sidebar. A cherry-pick lands on the

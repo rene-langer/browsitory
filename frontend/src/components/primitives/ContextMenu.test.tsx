@@ -603,3 +603,128 @@ describe("ContextMenu focus and keys", () => {
     });
   });
 });
+
+// #992: a long menu scrolls inside the window, a reason shared by a group shows once, and the copy
+// actions sit in a submenu.
+describe("ContextMenu: long menus (#992)", () => {
+  it("is never taller than the window: it scrolls instead", () => {
+    render(<ContextMenu x={0} y={0} onClose={() => {}} items={[{ label: "One", onSelect: () => {} }]} />);
+    const menu = screen.getByRole("menu");
+    expect(menu.style.maxHeight).toBe("calc(100vh - 8px)");
+    expect(menu.style.overflowY).toBe("auto");
+  });
+
+  it("shows a reason that every item of a group shares once, as each item's description", () => {
+    const reason = "Check out the commit's branch first.";
+    render(
+      <ContextMenu
+        x={0}
+        y={0}
+        onClose={() => {}}
+        items={[
+          { label: "Branch from here", onSelect: () => {}, group: "refs" },
+          { label: "Squash with parent", onSelect: () => {}, disabled: true, title: reason, group: "edit" },
+          { label: "Fixup into parent", onSelect: () => {}, disabled: true, title: reason, group: "edit" },
+          { label: "Move up", onSelect: () => {}, disabled: true, title: reason, group: "edit" },
+          { label: "Drop", onSelect: () => {}, disabled: true, title: "Another reason.", group: "drop" },
+        ]}
+      />,
+    );
+    const menu = screen.getByRole("menu");
+    expect(within(menu).getAllByText(reason)).toHaveLength(1);
+    for (const name of ["Squash with parent", "Fixup into parent", "Move up"]) {
+      expect(screen.getByRole("menuitem", { name })).toHaveAccessibleDescription(reason);
+    }
+    expect(screen.getByRole("menuitem", { name: "Drop" })).toHaveAccessibleDescription("Another reason.");
+    expect(within(menu).getByText("Another reason.")).toBeInTheDocument();
+  });
+
+  it("keeps a reason per item when the group's items differ", () => {
+    render(
+      <ContextMenu
+        x={0}
+        y={0}
+        onClose={() => {}}
+        items={[
+          { label: "Reword…", onSelect: () => {}, group: "edit" },
+          { label: "Squash with parent", onSelect: () => {}, disabled: true, title: "No parent.", group: "edit" },
+          { label: "Fixup into parent", onSelect: () => {}, disabled: true, title: "No parent.", group: "edit" },
+        ]}
+      />,
+    );
+    expect(within(screen.getByRole("menu")).getAllByText("No parent.")).toHaveLength(2);
+  });
+
+  function renderWithSubmenu(onClose = vi.fn()) {
+    const onCopySha = vi.fn();
+    const onCopyDate = vi.fn();
+    const trigger = document.createElement("button");
+    document.body.appendChild(trigger);
+    trigger.focus();
+    render(
+      <ContextMenu
+        x={0}
+        y={0}
+        onClose={onClose}
+        items={[
+          { label: "Branch from here", onSelect: () => {} },
+          {
+            label: "Copy",
+            onSelect: () => {},
+            submenu: [
+              { label: "Copy SHA", onSelect: onCopySha },
+              { label: "Copy date", onSelect: onCopyDate },
+            ],
+          },
+        ]}
+      />,
+    );
+    return { onCopySha, onCopyDate, onClose, trigger };
+  }
+
+  it("opens a submenu from its item by click, runs a choice and closes the whole menu", () => {
+    const { onCopySha, onClose, trigger } = renderWithSubmenu();
+    const copy = screen.getByRole("menuitem", { name: "Copy" });
+    expect(copy).toHaveAttribute("aria-haspopup", "menu");
+    expect(copy).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("menuitem", { name: "Copy SHA" })).toBeNull();
+    fireEvent.click(copy);
+    expect(copy).toHaveAttribute("aria-expanded", "true");
+    const submenu = screen.getByRole("menu", { name: "Copy" });
+    expect(within(submenu).getByRole("menuitem", { name: "Copy SHA" })).toHaveFocus();
+    fireEvent.click(within(submenu).getByRole("menuitem", { name: "Copy SHA" }));
+    expect(onCopySha).toHaveBeenCalledOnce();
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(trigger).toHaveFocus();
+    trigger.remove();
+  });
+
+  it("opens the submenu with ArrowRight or Enter and goes back with ArrowLeft or Escape", () => {
+    const { onCopyDate, onClose, trigger } = renderWithSubmenu();
+    const copy = screen.getByRole("menuitem", { name: "Copy" });
+    copy.focus();
+    fireEvent.keyDown(copy, { key: "ArrowRight" });
+    const sha = screen.getByRole("menuitem", { name: "Copy SHA" });
+    expect(sha).toHaveFocus();
+    fireEvent.keyDown(sha, { key: "ArrowDown" });
+    expect(screen.getByRole("menuitem", { name: "Copy date" })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Copy date" }), { key: "ArrowLeft" });
+    expect(screen.queryByRole("menu", { name: "Copy" })).toBeNull();
+    expect(copy).toHaveFocus();
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(copy, { key: "Enter" });
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Copy SHA" }), { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "Copy" })).toBeNull();
+    expect(copy).toHaveFocus();
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(copy, { key: "ArrowRight" });
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Copy SHA" }), { key: "ArrowDown" });
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Copy date" }), { key: "Enter" });
+    expect(onCopyDate).toHaveBeenCalledOnce();
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(trigger).toHaveFocus();
+    trigger.remove();
+  });
+});
