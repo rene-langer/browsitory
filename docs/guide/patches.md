@@ -53,7 +53,8 @@ commit). Binary files are included.
 
 ## Apply a patch file
 
-**Apply patch…** in the repository toolbar or the [command palette](command-palette.md) asks for a
+**Apply patch…** in the menu of the toolbar's **Stash** button (the arrow next to it), or in the
+[command palette](command-palette.md), asks for a
 patch file (a plain diff or `git format-patch` mails) and shows what it holds before anything changes: each mail's
 subject, author and date, and the files it changes with the lines added and removed. When the
 patch doesn't apply, the preview says why (for a file with several mails, the first one is checked

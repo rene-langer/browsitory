@@ -619,14 +619,14 @@ describe("UX inventory", () => {
       await h.shoot("sync-after-fetch-diverged");
     });
     it("push-rejected", async () => {
-      await h.clickInPage("button", "Push");
+      await h.clickInPage("[aria-label='Sync'] button", "Push", { contains: true });
       await browser.pause(3000);
       h.note("push-rejected", await h.dialogs());
       h.note("push-rejected-alerts", await h.texts("[role='alert']"));
       await h.shoot("error-push-rejected");
     });
     it("push-rejected-details", async () => {
-      await h.clickInPage("button", "Push");
+      await h.clickInPage("[aria-label='Sync'] button", "Push", { contains: true });
       await browser.pause(3000);
       try {
         await h.clickInPage("button", "Show details", { timeout: 4000 });
@@ -650,7 +650,7 @@ describe("UX inventory", () => {
       await h.refresh();
     });
     it("pull-dirty", async () => {
-      await h.click("//div[@aria-label='Sync']//button[normalize-space()='Pull']");
+      await h.click("//div[@aria-label='Sync']//button[starts-with(normalize-space(), 'Pull')]");
       await browser.pause(3000);
       h.note("pull-dirty", await h.dialogs());
       h.note("pull-dirty-alerts", await h.texts("[role='alert']"));
@@ -1056,7 +1056,7 @@ describe("UX inventory", () => {
       await h.refresh();
       await h.click("//div[@aria-label='Sync']//button[normalize-space()='Fetch']");
       await browser.pause(2500);
-      await h.click("//div[@aria-label='Sync']//button[normalize-space()='Pull']");
+      await h.click("//div[@aria-label='Sync']//button[starts-with(normalize-space(), 'Pull')]");
       await browser.pause(2500);
       h.note("pull-diverged", await h.dialogs());
       await h.shoot("dialog-pull-diverged");

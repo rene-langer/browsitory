@@ -21,3 +21,7 @@
 - Changed: the commit graph starts at about 40% of the window, so a wide window shows longer
   subjects. Its date column is compact ("3h", "2d", "4mo"; the date in the tooltip), and a row
   with several branches and tags shows the first and "+N" for the rest (#1004).
+- Changed: the toolbar keeps a place for "Fetched …", so Fetch, Pull and Push no longer move when it
+  appears. The counts sit on the buttons, `↓n` on **Pull** and `↑n` on **Push**, and only when
+  they aren't zero. **Apply patch…** moved from an icon button into the **Stash** menu, where it
+  stays available when there is nothing to stash (#1006).
