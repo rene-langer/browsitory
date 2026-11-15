@@ -250,7 +250,7 @@ describe("history actions", () => {
       });
       expect(outcome).toBeNull();
       expect(startRebase).not.toHaveBeenCalled();
-      expect(result.current.state.error).toBe("The history changed. Refresh and try again.");
+      expect(result.current.state.error).toBe("Couldn't drop d: The history changed. Refresh and try again.");
     });
 
     it("opens and closes the Reword dialog", () => {

@@ -1058,7 +1058,7 @@ describe("App", () => {
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "pre-commit hook failed" })).toBeNull());
-    expect(screen.getByText("The pre-commit hook failed.")).toBeInTheDocument();
+    expect(screen.getByText("Couldn't commit: The pre-commit hook failed.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Show hook output…" }));
     const reopened = await screen.findByRole("dialog", { name: "pre-commit hook failed" });
 
