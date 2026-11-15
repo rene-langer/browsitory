@@ -27,8 +27,8 @@ selected commit (**Cherry-pick 1a2b3c4 onto main**, **Reset main to 1a2b3c4…**
 split, squash, fixup, move or drop it (**Reword 1a2b3c4…**, **Drop 1a2b3c4** and so on), to fold
 staged changes into it (**Fold staged changes into 1a2b3c4**), and to amend the last commit (where
 the commit menu offers them), plus **Continue cherry-pick** / **Abort cherry-pick** (or revert)
-while a sequence is paused. On screen, a paused cherry-pick or revert has its **Continue** and
-**Abort** in the status strip.
+while a sequence is paused. On screen, a paused cherry-pick or revert has the same **Continue
+cherry-pick** and **Abort cherry-pick** (or revert) in the status strip.
 
 ??? note "Details"
     A pick is refused if it would overwrite unstaged edits or if changes are staged. Picking a
@@ -91,13 +91,14 @@ Commit part](assets/edit-commit.png)
 
 Each one is a small interactive rebase (see [Rebase](rebase.md)): the commits after the edited
 one are rewritten, so they get new ids. A conflict pauses it like any rebase: the status strip
-shows **Continue** and **Abort rebase**, the paused rebase survives a restart, and Abort puts the
+shows **Continue rebase** and **Abort rebase**, the paused rebase survives a restart, and Abort puts the
 branch back as it was. While it is paused the toolbar names the rebase ("Rebasing main") instead
 of the detached HEAD. A finished edit is one **Undo** step named after the edit
 ("Drop 1a2b3c4", "Squash 1a2b3c4 into its parent", "Move 1a2b3c4 up", "Edit 1a2b3c4",
 "Split 1a2b3c4").
 
-**Changes left over when you continue.** At an edit stop, **Continue** commits only what is
+**Changes left over when you continue.** At an edit stop, **Finish editing** (**Continue rebase**
+at a rebase's Edit step) commits only what is
 staged. When a tracked file still has changes that aren't staged, or a file the commit added is
 no longer staged, Continue asks what to do with them: **Commit the rest** stages them and
 commits them with the commit (the last part of a split), **Discard the rest** throws them away
@@ -157,9 +158,9 @@ sidebar's Branches section to cherry-pick it there. On release a small menu offe
 drags the whole selection (**Cherry-pick N commits onto ⟨branch⟩**, oldest first). The commit
 menu and the bar under the graph offer the same actions without dragging.
 
-A conflict pauses the sequence: the status strip shows "Cherry-picking 2/5" and the commit area
-shows **Continue cherry-pick** / **Abort cherry-pick** instead of the message box. Resolve the
-conflicts (see [Resolving conflicts](conflicts.md)), then **Continue**; it commits the resolved
+A conflict pauses the sequence: the status strip shows "Cherry-picking 2/5" with **Continue
+cherry-pick** and **Abort cherry-pick**. Resolve the
+conflicts (see [Resolving conflicts](conflicts.md)), then **Continue cherry-pick**; it commits the resolved
 step and goes on. **Abort** puts the branch back where it was before the first commit was
 applied, keeping unrelated uncommitted edits. A whole sequence is one **Undo** step; an aborted
 one leaves nothing to undo.
@@ -181,7 +182,8 @@ one leaves nothing to undo.
 ??? note "Details: a paused sequence"
     If you resolve a step so that nothing is left to commit (for example **Use ours (whole
     file)** on its only change), that step is skipped. A sequence that stops for another reason
-    (say an untracked file is in the way) also shows **Continue**, which retries the step. The
+    (say an untracked file is in the way) also shows **Continue cherry-pick** (or **Continue
+    revert**), which retries the step. The
     paused sequence is kept on disk, so it is still there after you close and reopen the app.
     While it is paused, other cherry-picks, merges, rebases, commits, amend, reset, checkout,
     branch switching, pull and stash apply/pop are unavailable, and so are saving a stash and
@@ -192,7 +194,7 @@ one leaves nothing to undo.
     sequence keeps its branch under the name it started with.
 
     If you finish a conflicted step yourself in a terminal (`git commit` after resolving),
-    **Continue** recognises it when it is exactly that step: one commit on top of where the
+    Continue recognises it when it is exactly that step: one commit on top of where the
     sequence stopped, with the picked commit's author, message and changes (for a cherry-pick)
     or git's "This reverts commit …" message (for a revert). Any other commit, or any commit
     after a stop that wasn't a conflict, means HEAD moved, and Continue refuses.
@@ -202,7 +204,7 @@ one leaves nothing to undo.
     so. If HEAD is on another commit than where the sequence stopped, Continue refuses too.
     Renaming the branch in a terminal (`git branch -m`) doesn't count as moving HEAD: Continue
     carries on on the renamed branch, and, as with `git cherry-pick --abort`, Abort puts the
-    renamed branch back. The step **Continue** commits runs the commit hooks (see
+    renamed branch back. The step Continue commits runs the commit hooks (see
     [Hooks](hooks.md)); the steps applied by themselves run none, like a single cherry-pick.
 
 ## Started in a terminal

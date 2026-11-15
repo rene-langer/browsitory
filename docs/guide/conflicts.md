@@ -9,7 +9,8 @@ feature/x into main**, **Cherry-picking onto main** or **Rebasing main onto feat
 2**, with the number of conflicts left. It is the only place with the operation's status and its
 buttons: **Go to conflict** shows the first conflicted file, **Abort merge** (or **Abort
 cherry-pick**, **Abort revert**, **Abort rebase**) stops it, and during a rebase or a
-multi-commit cherry-pick or revert **Continue** goes on; it says "Resolve 1 conflict to
+multi-commit cherry-pick or revert **Continue rebase** (**Continue cherry-pick**, **Continue
+revert**) goes on; it says "Resolve 1 conflict to
 continue" until no conflict is left. Abort asks first when it would throw away your
 resolutions or unsaved edits in the merge editor, since Undo can't bring them back; when nothing
 was resolved yet it aborts at once, and a toast says **Aborted merge**.

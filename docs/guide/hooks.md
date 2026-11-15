@@ -4,7 +4,7 @@ Browsitory runs your repository's client-side git hooks the way git does:
 
 | Hook | Runs when you… |
 |---|---|
-| `pre-commit`, `prepare-commit-msg`, `commit-msg`, `post-commit` | commit or amend, or **Continue** a paused multi-commit cherry-pick or revert |
+| `pre-commit`, `prepare-commit-msg`, `commit-msg`, `post-commit` | commit or amend, or continue a paused multi-commit cherry-pick or revert |
 | `pre-merge-commit`, `prepare-commit-msg`, `commit-msg` | commit a merge that had no conflicts (instead of `pre-commit`; no `post-commit`; the message hooks get `.git/MERGE_MSG`, as with `git merge`) |
 | `prepare-commit-msg`, `post-commit` | cherry-pick or revert: for each commit Browsitory creates from a step that applied without conflicts |
 | `pre-push` | push a branch, force push, push tags, **Push to…**, delete a remote branch or a tag on a remote |
@@ -76,14 +76,14 @@ hooks ran."; check the merge and commit again.
 A cherry-pick or revert that applies without conflicts runs what `git cherry-pick` runs for
 each commit it creates: `prepare-commit-msg` (with `COMMIT_EDITMSG` and `message`; it may rewrite
 the message) and `post-commit`, but no `pre-commit` or `commit-msg`. This holds for a single
-pick, every step of a multi-commit cherry-pick or revert, and the steps **Continue** applies after
+pick, every step of a multi-commit cherry-pick or revert, and the steps Continue applies after
 the paused one. If `prepare-commit-msg` fails (or empties the message), that commit is not made:
 it stays staged and paused, as with git. The dialog shows the hook's output (with **Close**
-only: the hook can't be skipped); fix the hook and **Continue**, or commit it from the commit
+only: the hook can't be skipped); fix the hook and continue, or commit it from the commit
 box, or abort. **Cancel** during a step's `post-commit` keeps that commit and stops the
 multi-commit cherry-pick or revert after it ("Stopped after …; its commit was kept. Continue to
-resume."); **Continue** goes on with the next step.
-**Continue** on a paused multi-commit cherry-pick or revert runs the commit hooks for the step it
+resume."); **Continue cherry-pick** (or **Continue revert**) goes on with the next step.
+Continuing a paused multi-commit cherry-pick or revert runs the commit hooks for the step it
 commits (the one you resolved). If one fails, the step stays paused and the dialog offers
 **Continue without hooks**; a running hook shows in the commit area with **Cancel**.
 
@@ -91,7 +91,7 @@ If a commit was created but git's merge or cherry-pick state could not be cleare
 (for example a read-only `.git` folder), the commit still counts and its `post-commit` or
 `post-merge` runs; the leftover state stays in the operation strip, and **Abort** clears it
 without changing the commit. A multi-commit cherry-pick or revert counts that step too: it
-stops on the next step if that one can't be applied either, and **Continue** clears the
+stops on the next step if that one can't be applied either, and continuing clears the
 leftover state and goes on. The next commit after a leftover merge state clears it first, so it
 doesn't become a second merge commit. The next commit after a leftover cherry-pick state also
 clears it first, so you are the commit's author, not the author of the picked commit. If the

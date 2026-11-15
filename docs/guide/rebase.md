@@ -6,8 +6,8 @@ before running it. Commit or stash your changes first: like `git rebase`, a reba
 while tracked files have staged or unstaged changes ("You have uncommitted changes to …").
 Untracked files are fine. Conflicts, once they happen, are resolved inline in the
 diff pane. A paused rebase shows in the status strip, which names the branch, what it is rebased
-onto and the step ("Rebasing main onto feature/x, step 1 of 2"), with **Continue** and **Abort
-rebase**; the toolbar says "Rebasing main" instead of a detached HEAD. Abort asks first when it
+onto and the step ("Rebasing main onto feature/x, step 1 of 2"), with **Continue rebase** and
+**Abort rebase**; the toolbar says "Rebasing main" instead of a detached HEAD. Abort asks first when it
 would throw away conflict resolutions or changes made at an edit stop.
 
 **Onto a branch.** Right-click a local or remote branch in **Branches** and choose **Rebase
@@ -44,9 +44,9 @@ Rebase onto the merge commit or a newer one instead.
 
 **Edit** stops the rebase at that commit as **Edit commit…** does (see [Editing older
 commits](rewriting-commits.md)): HEAD is the commit's parent, the commit's changes are staged,
-and the status strip says "Editing 1a2b3c4: change the files, then Continue". Change, stage or
+and the status strip says "Editing 1a2b3c4: change the files, then Continue rebase". Change, stage or
 unstage files, edit the message in the commit area if you like, or commit the changes as
-several commits with **Commit part**; the strip's **Continue** commits what is staged and goes
+several commits with **Commit part**; the strip's **Continue rebase** commits what is staged and goes
 on with the next row. Changes left unstaged make Continue ask whether to commit or discard them.
 
 **Selecting several commits.** Ctrl/Cmd+click (mouse) toggles individual commits, which is how you

@@ -3,8 +3,8 @@
 For GitHub and Bitbucket remotes, open **Pull requests** in the sidebar. Each remote has its own
 card, titled with the provider, the repository and the remote ("GitHub: acme/widget (origin)").
 
-**Connecting.** Until you connect, a card offers only **Connect to GitHub** (or **Connect to
-Bitbucket**). The dialog asks for your account name and a personal access token; Bitbucket needs
+**Connecting.** Until you connect, a card offers only **Connect to GitHub…** (or **Connect to
+Bitbucket…**). The dialog asks for your account name and a personal access token; Bitbucket needs
 a repository or workspace access token, not an app password. If saving the token fails, the
 dialog says why. The token goes to your system's credential store, and the account name is
 remembered, so every card for that provider is connected from then on.
