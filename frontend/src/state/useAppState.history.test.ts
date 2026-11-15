@@ -90,7 +90,7 @@ describe("history actions", () => {
   });
 
   describe("one-click history edits (#442)", () => {
-    const span = ["p", "c", "d"].map((id) => ({ id, shortId: `${id}123456`, summary: id, authorName: "A", timestamp: 1 }));
+    const span = ["p", "c", "d"].map((id) => ({ id, shortId: `${id}123456`, summary: id, authorName: "A", timestamp: 1, merge: false }));
     const pick = (commitId: string) => ({ commitId, action: { kind: "Pick" }, combinedMessage: null });
 
     it("squashes with the parent's and the commit's full messages, then toasts", async () => {

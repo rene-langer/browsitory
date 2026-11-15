@@ -1342,6 +1342,80 @@ describe("DiffPane", () => {
       expect(onUnstageFile).toHaveBeenCalledWith("b.txt");
     });
 
+    describe("an edit stop's dock: the message, without the strip's controls (#995, #994)", () => {
+      const editHead = (splitParts: number) => ({
+        headId: "c1",
+        detachedAt: "c1",
+        headPushed: false,
+        operation: null,
+        operationLeftover: false,
+        squashMessage: null,
+        commitHooks: [],
+        sequence: null,
+        rebase: { branch: "main", onto: "c0", currentStep: 1, totalSteps: 1, health: { kind: "Paused" as const }, editing: "c2c2c2c2c2", splitParts },
+        bisect: null,
+        terminalSequence: null,
+        terminalRebase: null,
+      });
+
+      it("keeps the message field, with no step, Continue or Abort", async () => {
+        renderUncommitted(fakeClient({ getCommitMessage: async () => "two\n" }), status, {
+          headInfo: editHead(0),
+          rebaseProgress: { currentStep: 1, totalSteps: 1 },
+        });
+        const dock = screen.getByRole("group", { name: "Commit actions" });
+        expect(await within(dock).findByRole("textbox", { name: "Commit message" })).toHaveValue("two\n");
+        expect(within(dock).queryByText(/Step 1 of 1/)).toBeNull();
+        expect(within(dock).queryByRole("button", { name: /Continue|Abort/ })).toBeNull();
+        expect(within(dock).queryByRole("button", { name: "Commit part" })).toBeNull();
+      });
+
+      it("tells a split what to do, with Commit part", async () => {
+        renderUncommitted(fakeClient({ getCommitMessage: async () => "two\n" }), status, {
+          headInfo: editHead(0),
+          rebaseProgress: { currentStep: 1, totalSteps: 1 },
+          splittingCommit: "c2c2c2c2c2",
+          onRebaseCommitPart: vi.fn(async () => true),
+        });
+        const dock = screen.getByRole("group", { name: "Commit actions" });
+        await within(dock).findByRole("textbox", { name: "Commit message" });
+        expect(
+          within(dock).getByText("Unstage what belongs in a later part, write its message, then Commit part. Finish split commits the rest."),
+        ).toBeInTheDocument();
+        expect(within(dock).getByRole("button", { name: "Commit part" })).toBeInTheDocument();
+        expect(within(dock).queryByRole("button", { name: /Continue|Abort/ })).toBeNull();
+      });
+    });
+
+    describe("a conflicted file gives the merge editor the space (#980)", () => {
+      const mixed: StatusEntry[] = [
+        { path: "shared.txt", oldPath: null, staged: false, kind: "Conflicted" },
+        { path: "README.md", oldPath: null, staged: false, kind: "Modified" },
+        { path: "b.txt", oldPath: null, staged: true, kind: "New" },
+      ];
+
+      it("collapses the file list to the conflict and hides the diff options, until asked for all files", async () => {
+        renderUncommitted(fakeClient({ getConflictHunks: async () => [], getWorkingDiff: async () => [] }), mixed, {
+          mergeMessage: "Merge branch 'feature'\n",
+        });
+        await screen.findByText("Save resolution");
+        const showAll = screen.getByRole("button", { name: "Show all changes" });
+        expect(showAll).toHaveAttribute("aria-expanded", "false");
+        const groups = rowLabel("shared.txt (Conflicted)").closest("[data-collapsed]");
+        expect(groups).toHaveAttribute("data-collapsed", "true");
+        expect(screen.queryByRole("group", { name: "Diff view options" })).toBeNull();
+
+        fireEvent.click(showAll);
+        expect(screen.getByRole("button", { name: "Show all changes" })).toHaveAttribute("aria-expanded", "true");
+        expect(rowLabel("README.md (Modified)").closest("[data-collapsed]")).toHaveAttribute("data-collapsed", "false");
+
+        // Another file: the list and the diff options as always.
+        fireEvent.click(rowLabel("README.md (Modified)"));
+        expect(await screen.findByRole("group", { name: "Diff view options" })).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Show all changes" })).toBeNull();
+      });
+    });
+
     it("shows RebaseProgressPanel instead of CommitBox while a rebase is in progress", () => {
       renderUncommitted(fakeClient({}), status, { rebaseProgress: { currentStep: 1, totalSteps: 3 } });
 

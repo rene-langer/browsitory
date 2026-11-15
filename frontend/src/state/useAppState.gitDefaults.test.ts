@@ -94,8 +94,8 @@ describe("useAppState git defaults (#652, #653, #656, #689)", () => {
     const startRebase = vi.fn(async () => ({ kind: "Done" as const }));
     const client = transferClient({
       commitsSince: async () => [
-        { id: "a".repeat(40), shortId: "aaaaaaa", summary: "one", authorName: "A", timestamp: 0 },
-        { id: "b".repeat(40), shortId: "bbbbbbb", summary: "two", authorName: "A", timestamp: 0 },
+        { id: "a".repeat(40), shortId: "aaaaaaa", summary: "one", authorName: "A", timestamp: 0, merge: false },
+        { id: "b".repeat(40), shortId: "bbbbbbb", summary: "two", authorName: "A", timestamp: 0, merge: false },
       ],
       startRebase,
     });

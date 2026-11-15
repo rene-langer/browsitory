@@ -175,7 +175,7 @@ describe("historyEditChecks", () => {
 });
 
 function planCommit(id: string): RebasePlanCommit {
-  return { id, shortId: id, summary: id, authorName: "Rene", timestamp: 1 };
+  return { id, shortId: id, summary: id, authorName: "Rene", timestamp: 1, merge: false };
 }
 
 const pick = (commitId: string) => ({ commitId, action: { kind: "Pick" as const }, combinedMessage: null });
