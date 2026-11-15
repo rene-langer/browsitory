@@ -202,16 +202,16 @@ describe("BranchTree — local branches", () => {
     expect(props.onSwitchBranch).not.toHaveBeenCalled();
   });
 
-  it("blocks an open force-delete confirmation, saying why, once the repository is busy (#521)", async () => {
-    const { props, rerender } = renderTree();
+  it("blocks an open delete confirmation, saying why, once the repository is busy (#521)", async () => {
+    const { props, rerender } = renderTree({ onCountCommitsOnlyOnBranch: vi.fn().mockResolvedValue(1) });
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
-    await screen.findByRole("dialog", { name: "Force delete feat/foo" });
+    await screen.findByRole("dialog", { name: "Delete feat/foo" });
 
     rerender(<BranchTreeWithDialogs {...props} operationDisabled operationDisabledReason="A transfer is in progress." />);
-    const dialog = screen.getByRole("dialog", { name: "Force delete feat/foo" });
+    const dialog = screen.getByRole("dialog", { name: "Delete feat/foo" });
     expect(dialog).toHaveTextContent("A transfer is in progress.");
-    const confirm = within(dialog).getByRole("button", { name: "Force delete" });
+    const confirm = within(dialog).getByRole("button", { name: "Delete" });
     expect(confirm).toBeDisabled();
     expect(confirm).toHaveAttribute("title", "A transfer is in progress.");
     expect(describedByText(confirm)).toBe("A transfer is in progress.");
@@ -388,19 +388,19 @@ describe("BranchTree — local branches", () => {
   });
 
   // Transformation: open-popover-then-click-Delete-twice → right-click-then-click-Delete-menuitem.
-  it("Cancel in the force-delete dialog dismisses it without deleting, leaving Delete in place", async () => {
-    const { props } = renderTree();
+  it("Cancel in the delete dialog dismisses it without deleting, leaving Delete in place", async () => {
+    const { props } = renderTree({ onCountCommitsOnlyOnBranch: vi.fn().mockResolvedValue(2) });
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     await Promise.resolve();
 
-    const dialog = await screen.findByRole("dialog", { name: "Force delete feat/foo" });
+    const dialog = await screen.findByRole("dialog", { name: "Delete feat/foo" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
 
-    expect(props.onDeleteBranch).toHaveBeenCalledTimes(1);
-    expect(props.onDeleteBranch).not.toHaveBeenCalledWith("feat/foo", true);
-    expect(screen.queryByRole("dialog", { name: "Force delete feat/foo" })).not.toBeInTheDocument();
+    // No plain delete is tried first any more (#996): nothing was deleted at all.
+    expect(props.onDeleteBranch).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: "Delete feat/foo" })).not.toBeInTheDocument();
 
     // "leaving Delete in place": right-clicking again still offers Delete, not a stale
     // force-delete state.

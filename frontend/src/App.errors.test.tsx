@@ -131,7 +131,7 @@ describe("the error banner (#984)", () => {
   it("opens the force push dialog from Force push…", async () => {
     const banner = await rejectPush();
     fireEvent.click(within(banner).getByRole("button", { name: "Force push…" }));
-    expect(await screen.findByRole("dialog", { name: /Force push/ })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Confirm force push" })).toBeInTheDocument();
   });
 });
 
