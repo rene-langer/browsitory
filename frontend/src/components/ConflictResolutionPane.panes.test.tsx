@@ -342,6 +342,48 @@ describe("ConflictResolutionPane three-pane view (#875)", () => {
       expect(screen.getByRole("button", { name: "Blocks" })).toHaveAttribute("aria-pressed", "true");
       expect(localStorage.getItem("mergeEditor.view")).toBeNull();
     });
+
+    it("says why there are no panes in visible text tied to the button (#980)", async () => {
+      renderPane(unequal);
+      await screen.findByRole("region", { name: "Conflict 1 of 2" });
+      const threePanes = screen.getByRole("button", { name: "Three panes" });
+      expect(threePanes).toHaveAccessibleDescription("The pane is too narrow for side-by-side panes. Widen it to use them.");
+      expect(screen.getByText("The pane is too narrow for side-by-side panes. Widen it to use them.")).toBeVisible();
+    });
+  });
+
+  describe("in a pane too narrow for three panes but not for two (#980)", () => {
+    const width = window.innerWidth;
+    beforeEach(() => {
+      window.innerWidth = 600;
+    });
+    afterEach(() => {
+      window.innerWidth = width;
+    });
+
+    it("shows ours and theirs side by side, each block's result under them", async () => {
+      renderPane(unequal, { client: mergeClient(unequal) });
+      const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+      const layout = screen.getByRole("group", { name: "Merge editor layout" });
+      const twoPanes = within(layout).getByRole("button", { name: "Two panes" });
+      expect(twoPanes).toHaveAttribute("aria-pressed", "true");
+      expect(within(layout).queryByRole("button", { name: "Three panes" })).toBeNull();
+      expect(twoPanes).toHaveAccessibleDescription("Three panes need a wider pane: the result is under ours and theirs.");
+
+      const headers = [...document.querySelectorAll("[data-pane-header]")].map((header) =>
+        header.getAttribute("data-pane-header"),
+      );
+      expect(headers).toEqual(["ours", "theirs"]);
+      // The sides in one row, the result in a row of its own under them.
+      const ours = cellOf(first, "ours");
+      const result = cellOf(first, "result");
+      expect(cellOf(first, "theirs").parentElement).toBe(ours.parentElement);
+      expect(result.parentElement).not.toBe(ours.parentElement);
+      expect(result).toHaveAttribute("data-wide", "true");
+      expect(within(result).getByRole("textbox")).toBeInTheDocument();
+      // An unchanged run shows once, as the result.
+      expect(linesOf("c")).toEqual([["result", 12]]);
+    });
   });
 
   it("keeps the keep/delete choices for a file one side deleted", async () => {
@@ -964,6 +1006,16 @@ describe("ConflictResolutionPane navigation, save and word marks (#879)", () => 
     // The palette's choices act on the block it went to.
     act(() => registry.current!.current!.choose("theirs"));
     expect(within(first).getByLabelText("Result")).toHaveValue("t1\n");
+  });
+
+  it("tells the tab whether it holds unsaved edits, for Abort's confirmation (#979)", async () => {
+    const registry = renderWithRegistry(unequal);
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    await waitFor(() => expect(registry.current?.current).toMatchObject({ edited: false }));
+    fireEvent.click(within(first).getByRole("button", { name: "Accept theirs" }));
+    await waitFor(() => expect(registry.current?.current).toMatchObject({ edited: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(registry.current?.current).toMatchObject({ edited: false }));
   });
 
   it("counts, saves and stages a file resolved with the arrows and an edit", async () => {

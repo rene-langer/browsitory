@@ -87,8 +87,12 @@ const STATE_LABELS: Record<BlockChoice, string> = {
 /** Lines of an unchanged run shown next to a conflict; a longer run is collapsed in between. */
 const CONTEXT_LINES = 3;
 
-/** Below this width the three panes (#875) give way to the block view (a VS Code side panel). */
+/** Below this width the three panes (#875) give way to two (#980). */
 const MERGE_PANES_MIN_WIDTH = 680;
+/** Below this width the panes give way to the block view (a VS Code side panel). */
+const TWO_PANES_MIN_WIDTH = 520;
+const TOO_NARROW_FOR_PANES = "The pane is too narrow for side-by-side panes. Widen it to use them.";
+const TWO_PANES_NOTE = "Three panes need a wider pane: the result is under ours and theirs.";
 
 function sideLabel(side: string, name: string | null): string {
   return name === null ? side : `${side} (${name})`;
@@ -301,7 +305,7 @@ export function ConflictResolutionPane({
   const blocksShown = loaded && error === null && wholeEdit === null && conflictIndices.length > 0;
   useRegisterMergeEditor(
     blocksShown
-      ? { path, canGoPrevious, canGoNext }
+      ? { path, canGoPrevious, canGoNext, edited: history.past.length > 0 }
       : null,
     {
       previous: goToPrevious,
@@ -324,11 +328,17 @@ export function ConflictResolutionPane({
     [segments],
   );
 
-  // The whole file in panes (#875) unless the user chose the blocks or the pane is too narrow.
+  // The whole file in panes (#875) unless the user chose the blocks or the pane is too narrow;
+  // two panes where three don't fit (#980).
   const [view, setView] = useMergeEditorView();
   const [editorElement, setEditorElement] = useState<HTMLDivElement | null>(null);
   const narrow = useNarrowLayout(editorElement, MERGE_PANES_MIN_WIDTH);
-  const panes = view === "panes" && !narrow;
+  const tooNarrow = useNarrowLayout(editorElement, TWO_PANES_MIN_WIDTH);
+  const panes = view === "panes" && !tooNarrow;
+  const twoPanes = narrow && !tooNarrow;
+  // Why the layout is what it is, as visible text tied to the panes button (#980).
+  const layoutNote = tooNarrow ? TOO_NARROW_FOR_PANES : twoPanes ? TWO_PANES_NOTE : null;
+  const layoutNoteId = useId();
 
   // "Ours" is stage 2 (HEAD); "theirs" stage 3, the commit being applied. During a rebase that
   // makes "ours" the branch being rebased onto, which is why the titles name what they replace.
@@ -690,15 +700,16 @@ export function ConflictResolutionPane({
             <span className={styles.segmented} role="group" aria-label="Merge editor layout">
               <button
                 aria-pressed={panes}
-                disabled={narrow}
+                disabled={tooNarrow}
+                aria-describedby={layoutNote === null ? undefined : layoutNoteId}
                 title={
-                  narrow
-                    ? "The pane is too narrow for three panes; widen it to use them."
-                    : "The whole file in three panes: ours, the result and theirs."
+                  layoutNote === null
+                    ? "The whole file in three panes: ours, the result and theirs."
+                    : undefined
                 }
                 onClick={() => setView("panes")}
               >
-                Three panes
+                {twoPanes ? "Two panes" : "Three panes"}
               </button>
               <button
                 aria-pressed={!panes}
@@ -709,6 +720,11 @@ export function ConflictResolutionPane({
               </button>
             </span>
           </Toolbar>
+        )}
+        {conflictIndices.length > 0 && layoutNote !== null && (
+          <p id={layoutNoteId} className={styles.hint}>
+            {layoutNote}
+          </p>
         )}
         {panes ? (
           <MergePanes
@@ -734,6 +750,7 @@ export function ConflictResolutionPane({
             onTake={(index, side) => setStateAt(index, takeSide(stateAt(index), side))}
             blockTitle={blockTitle}
             wordMarks={wordMarks}
+            layout={twoPanes ? "two" : "three"}
           />
         ) : (
           segments.map((segment, index) =>

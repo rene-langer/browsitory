@@ -156,6 +156,11 @@ export interface SignatureInput {
 export interface AmendOptions {
   author: SignatureInput | null;
   trailers: Trailer[];
+  /**
+   * Reword… on HEAD (#981): only the message changes; HEAD's tree stays, so staged changes stay
+   * staged and out of the commit. `author` and `trailers` are then ignored.
+   */
+  messageOnly?: boolean;
 }
 
 /**
@@ -1178,6 +1183,8 @@ export interface RebasePlanCommit {
   summary: string;
   authorName: string;
   timestamp: number;
+  /** A merge commit (#982): the plan replays first parents only, so it can't be replayed. */
+  merge: boolean;
 }
 
 export type RebaseAction =

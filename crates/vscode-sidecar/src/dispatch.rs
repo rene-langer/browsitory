@@ -394,6 +394,9 @@ struct CommitMessageParams {
     /// `amend_commit` only: replaces HEAD's author name and email.
     #[serde(default)]
     author: Option<SignatureInputDto>,
+    /// `amend_commit` only: Reword… on HEAD (#981), the message only.
+    #[serde(default)]
+    message_only: bool,
 }
 
 /// A hook event channel relayed as `hookProgress` notifications for `repo_path`.

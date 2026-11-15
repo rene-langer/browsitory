@@ -16,15 +16,18 @@ Right-click a commit in the graph:
   **Hard** discards changes to tracked files; untracked files are kept. The button names the
   mode (**Reset mixed**); **Reset hard** is marked as a danger and asks for a second
   confirmation. Not available on a detached HEAD.
-- **Reword…** on the latest commit opens the amend box with that commit's message filled in and
-  the cursor in the message field. On an older commit it opens a dialog with the full message
-  (see [Editing older commits](#editing-older-commits) below).
+- **Reword…** opens a dialog with the commit's full message. On the latest commit it changes
+  only the message: staged changes stay staged and out of the commit (to fold them in, use
+  [Amend last commit](#amending-the-last-commit)). It is one **Undo** step, and the toast says
+  **Reworded 1a2b3c4**. On an older commit see [Editing older commits](#editing-older-commits)
+  below.
 
 The command palette also has commands to cherry-pick, revert, check out and reset to the
 selected commit, to reword, edit, split, squash, fixup, move or drop it (**Reword 1a2b3c4…**,
 **Drop 1a2b3c4** and so on), to fold staged changes into it (**Fold staged changes into
 1a2b3c4**), and to amend the last commit (where the commit menu offers them), plus
-**Continue cherry-pick** / **Abort cherry-pick** (or revert) while a sequence is paused.
+**Continue cherry-pick** / **Abort cherry-pick** (or revert) while a sequence is paused. On
+screen, a paused cherry-pick or revert has its **Continue** and **Abort** in the status strip.
 
 ??? note "Details"
     A pick is refused if it would overwrite unstaged edits or if changes are staged. Picking a
@@ -59,17 +62,21 @@ The commit menu has eight one-click edits for commits of the current branch:
 
 - **Reword…** changes the commit's message.
 - **Edit commit…** stops at the commit with its changes staged on its parent. The status strip
-  says "Editing 1a2b3c4: change the files, then Continue". Change, stage or unstage files, edit
-  the message in the commit area if you like, then **Continue**: the staged result is committed
-  with that message (and the commit's author), and the commits after it are replayed.
-  **Abort rebase** puts the branch back as it was.
-- **Split commit…** stops the same way, to commit the changes as several commits. Unstage what
-  belongs in a later commit, write the first commit's message in the commit area (it offers the
+  says "Editing 1a2b3c4: change the files, then Finish editing". Change, stage or unstage files,
+  edit the message in the commit area if you like, then **Finish editing** in the strip: the
+  staged result is committed with that message (and the commit's author), the commits after it
+  are replayed, and a toast says **Edited 1a2b3c4**. **Cancel edit** puts the branch back as it
+  was ("Cancelled the edit of 1a2b3c4"); when you changed files or the message, it asks first.
+- **Split commit…** stops the same way, to commit the changes as several commits. The commit
+  area says what to do: "Unstage what belongs in a later part, write its message, then Commit
+  part. Finish split commits the rest." Write the first part's message (the box offers the
   original one) and click **Commit part**; the box is then empty for the next part. Stage the
-  next part, write its message, and so on. **Continue** commits what is still staged as the
-  last part, or nothing more when every change went into a part, then replays the commits after
-  it. Every part keeps the original commit's author. The status strip says "Splitting 1a2b3c4:
-  commit each part, then Continue". Edit commit… has **Commit part** too.
+  next part, write its message, and so on. **Finish split** in the status strip commits what is
+  still staged as the last part, or nothing more when every change went into a part, then
+  replays the commits after it ("Split 1a2b3c4"). Every part keeps the original commit's author.
+  The status strip says "Splitting 1a2b3c4: commit each part, then Finish split"; **Cancel
+  split** asks first once a part is committed. Edit commit… has **Commit part** too: a part
+  turns the edit into a split.
 - **Squash with parent** combines the commit with the one below it. The result keeps the
   parent's author and has both messages, the parent's first.
 - **Fixup into parent** combines them too, but keeps only the parent's message.
@@ -79,9 +86,10 @@ The commit menu has eight one-click edits for commits of the current branch:
 ![Edit commit… stopped at a commit: the status strip, the staged change and the commit area with Commit part](assets/edit-commit.png)
 
 Each one is a small interactive rebase (see [Rebase](rebase.md)): the commits after the edited
-one are rewritten, so they get new ids. A conflict pauses it like any rebase: the progress panel
-shows **Continue rebase** and **Abort rebase**, the paused rebase survives a restart, and Abort
-puts the branch back as it was. A finished edit is one **Undo** step named after the edit
+one are rewritten, so they get new ids. A conflict pauses it like any rebase: the status strip
+shows **Continue** and **Abort rebase**, the paused rebase survives a restart, and Abort puts the
+branch back as it was. While it is paused the toolbar names the rebase ("Rebasing main") instead
+of the detached HEAD. A finished edit is one **Undo** step named after the edit
 ("Drop 1a2b3c4", "Squash 1a2b3c4 into its parent", "Move 1a2b3c4 up", "Edit 1a2b3c4",
 "Split 1a2b3c4").
 
@@ -107,8 +115,9 @@ files have to be staged or stashed first (untracked files are fine). It runs no 
     An edit is disabled, with the reason as its tooltip, when:
 
     - the commit isn't on the current branch (or HEAD is detached);
-    - it is a merge commit, or a merge commit comes after it (use **Rebase onto here…**
-      instead);
+    - it is a merge commit, or a merge commit comes after it ("Can't edit: a merge commit comes
+      after this one."): the edits replay the branch's first-parent history, which can't
+      replay a merge;
     - it is the first commit of the history; Squash, Fixup and Move down also need a parent
       that isn't the first commit or a merge commit;
     - Move up is on the latest commit;

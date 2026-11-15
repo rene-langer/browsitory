@@ -37,10 +37,13 @@ import {
   busyReason,
   operationBlockers,
   pickToast,
+  rebaseOntoName,
+  rebasingBranch,
   sequenceToast,
   sequenceUndoable,
   stashBlockReason,
 } from "./lib/operationStatus";
+import { useAbortWork } from "./state/useAbortWork";
 import { CommitDragContext, useCommitDragSession } from "./state/useCommitDrag";
 import { stashBlockers } from "./lib/actions/stashActions";
 import { useCommitSearch } from "./state/useCommitSearch";
@@ -473,7 +476,12 @@ export function RepoWorkspace({
     busy: discardDropBlockedReason !== null,
     checkForChanges: appState.checkForChanges,
   });
+  // What an Abort would lose, for its confirmation (#979).
+  const abortWork = useAbortWork(appState.state, mergeEditor.current?.edited ?? false);
   const {
+    abortRequest,
+    setAbortRequest,
+    continueRebase,
     terminalAbortRequest,
     setTerminalAbortRequest,
     runPickAction,
@@ -487,7 +495,7 @@ export function RepoWorkspace({
     abortMergeOrSequence,
     paletteAbortSequence,
     paletteAbortMerge,
-  } = useSequenceActions(appState, pushToast, mounted, announce, undoToastAction);
+  } = useSequenceActions(appState, pushToast, mounted, announce, undoToastAction, abortWork);
   // Cherry-pick, revert and reset of one commit, shared by the commit menu and the palette
   // (#507): the toast comes from the outcome (#107).
   const cherryPickCommit = (commitId: string, mainline: number | null) =>
@@ -608,7 +616,13 @@ export function RepoWorkspace({
   // The palette's commands, built only while it is open.
   const paletteCommands = () =>
     buildPaletteCommands({
-      appState: { ...appState, abortRebase, abortSequence: paletteAbortSequence, abortMerge: paletteAbortMerge },
+      appState: {
+        ...appState,
+        abortRebase,
+        abortSequence: paletteAbortSequence,
+        abortMerge: paletteAbortMerge,
+        rebaseContinue: continueRebase,
+      },
       onShowShortcuts: () => setShortcutsOpen(true),
       onShowOperationLog: () => setOperationLog("latest"),
       onFocusCommitMessage: () => {
@@ -794,7 +808,7 @@ export function RepoWorkspace({
     onAbortMerge: abortMergeOrSequence,
     onSaveStash: announce("Changes stashed", () => appState.saveStash()),
     onOpenStashDialog: (paths) => openDialog({ kind: "stash", paths }),
-    onRebaseContinue: () => void appState.rebaseContinue(),
+    onRebaseContinue: () => void continueRebase(),
     onRebaseEditMessage: appState.setRebaseEditMessage,
     onRebaseCommitPart: appState.rebaseCommitPart,
     splittingCommit: appState.state.splitting,
@@ -899,6 +913,18 @@ export function RepoWorkspace({
         rebaseProgress={appState.state.rebaseProgress}
         rebase={appState.state.headInfo.rebase}
         splittingCommit={appState.state.splitting}
+        editingCommit={appState.state.editing}
+        rebaseOnto={
+          appState.state.headInfo.rebase === null
+            ? null
+            : rebaseOntoName(appState.state.headInfo.rebase.onto, appState.state.commits)
+        }
+        // An edit stop's message box left empty, before any part (#995): as the dock said.
+        continueBlockedReason={
+          appState.state.editMessage === "blank" && (appState.state.headInfo.rebase?.splitParts ?? 0) === 0
+            ? "Write a commit message."
+            : null
+        }
         sequence={appState.state.headInfo.sequence}
         bisect={appState.state.headInfo.bisect}
         terminalSequence={terminalSequence}
@@ -913,7 +939,7 @@ export function RepoWorkspace({
         mergeMessage={appState.state.mergeMessage}
         currentBranch={appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null}
         onGoToConflict={goToConflict}
-        onContinueRebase={() => void appState.rebaseContinue()}
+        onContinueRebase={() => void continueRebase()}
       />
       <HookRunStrip running={appState.state.hookRun} onCancel={() => void appState.cancelHookRun()} />
       {externalTools.error !== null && (
@@ -1003,6 +1029,9 @@ export function RepoWorkspace({
         terminalAbortRequest={terminalAbortRequest}
         onTerminalAbortRequestChange={setTerminalAbortRequest}
         runTerminalAbort={runTerminalAbort}
+        abortRequest={abortRequest}
+        onAbortRequestChange={setAbortRequest}
+        onRebaseContinue={continueRebase}
         commitDialog={commitDialog}
         onCommitDialogChange={setCommitDialog}
         onCherryPick={cherryPickCommit}
@@ -1027,6 +1056,7 @@ export function RepoWorkspace({
         branch={{
           current: currentBranch,
           detachedAt: appState.state.headInfo.detachedAt,
+          rebasing: rebasingBranch(appState.state.headInfo),
           unbornBranch: appState.state.headInfo.unbornBranch ?? null,
           upstream: appState.state.upstream,
           onOpenSwitcher: openBranchSwitcher,
@@ -1139,9 +1169,9 @@ export function RepoWorkspace({
             runPickAction={runPickAction}
             onOpenCommitDialog={openCommitDialog}
             onEditHeadMessage={() => {
-              appState.selectRow("uncommitted");
-              appState.setAmendMode(true);
-              setFocusCommitMessage(true);
+              // Reword… on HEAD (#981): the Reword dialog, which changes the message only.
+              const headId = appState.state.headInfo.headId;
+              if (headId !== null) openDialog({ kind: "reword", commitId: headId, onto: null });
             }}
             onOpenFolderHistory={openFolderHistory}
             externalTools={externalTools}

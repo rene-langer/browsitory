@@ -63,6 +63,9 @@ export function WorkspaceDialogs({
   terminalAbortRequest,
   onTerminalAbortRequestChange: setTerminalAbortRequest,
   runTerminalAbort,
+  abortRequest,
+  onAbortRequestChange: setAbortRequest,
+  onRebaseContinue,
   commitDialog,
   onCommitDialogChange: setCommitDialog,
   onCherryPick: cherryPickCommit,
@@ -90,6 +93,11 @@ export function WorkspaceDialogs({
   terminalAbortRequest: SequenceActions["terminalAbortRequest"];
   onTerminalAbortRequestChange: SequenceActions["setTerminalAbortRequest"];
   runTerminalAbort: SequenceActions["runTerminalAbort"];
+  // An Abort that would lose work, waiting for its confirmation (#979).
+  abortRequest: SequenceActions["abortRequest"];
+  onAbortRequestChange: SequenceActions["setAbortRequest"];
+  // Continue rebase with its toast for a finished edit stop (#994).
+  onRebaseContinue: SequenceActions["continueRebase"];
   commitDialog: CommitDialogRequest | null;
   onCommitDialogChange: (request: CommitDialogRequest | null) => void;
   onCherryPick: (commitId: string, mainline: number | null) => void;
@@ -144,6 +152,11 @@ export function WorkspaceDialogs({
   const deleteRemoteTagDialog = dialogOf(dialog, "deleteRemoteTag");
   const remoteDialog = dialogOf(dialog, "remote");
   const rewordDialog = dialogOf(dialog, "reword");
+  const rewordShortId =
+    rewordDialog === null
+      ? ""
+      : (appState.state.commits.find((commit) => commit.id === rewordDialog.commitId)?.shortId ??
+        rewordDialog.commitId.slice(0, 7));
   // Read from `dialog` itself, not `rewordDialog`: the React Compiler cannot keep the memoization
   // below on a value a helper call returned.
   const rewordCommitId = dialog?.kind === "reword" ? dialog.commitId : null;
@@ -212,6 +225,22 @@ export function WorkspaceDialogs({
             runTerminalAbort(request.sequence, request.headId);
           }}
           onCancel={() => setTerminalAbortRequest(null)}
+        />
+      )}
+      {active && abortRequest !== null && (
+        // Abort that would lose work Undo can't bring back (#979); Cancel has the focus.
+        <ConfirmDialog
+          title={abortRequest.confirm.title}
+          message={<p>{abortRequest.confirm.body}</p>}
+          confirmLabel={abortRequest.confirm.confirmLabel}
+          cancelLabel={abortRequest.confirm.cancelLabel}
+          tone="danger"
+          onConfirm={() => {
+            const request = abortRequest;
+            setAbortRequest(null);
+            request.run();
+          }}
+          onCancel={() => setAbortRequest(null)}
         />
       )}
       {active && mergeDialogBranch !== null && (
@@ -324,7 +353,7 @@ export function WorkspaceDialogs({
           onChoose={(rest) => {
             // Allowed during the paused rebase it continues; only an action in flight blocks it.
             if (busyReason(appState.state) !== null) return;
-            void appState.rebaseContinue(rest);
+            void onRebaseContinue(rest);
           }}
           onCancel={appState.closeEditRest}
         />
@@ -408,17 +437,24 @@ export function WorkspaceDialogs({
       {active && rewordDialog !== null && (
         <RewordDialog
           key={rewordDialog.commitId}
-          shortId={
-            appState.state.commits.find((commit) => commit.id === rewordDialog.commitId)?.shortId ??
-            rewordDialog.commitId.slice(0, 7)
-          }
+          shortId={rewordShortId}
+          head={rewordDialog.onto === null}
           loadMessage={loadRewordMessage}
           disabled={repositoryOperationDisabled}
           disabledReason={operationDisabledReason}
           onReword={(message) => {
             const { commitId, onto } = rewordDialog;
             closeDialog("reword");
-            void appState.editHistory(commitId, onto, { kind: "Reword", message });
+            if (onto !== null) {
+              void appState.editHistory(commitId, onto, { kind: "Reword", message });
+              return;
+            }
+            // HEAD (#981): its message only, staged changes stay staged; one undo step.
+            void announce(`Reworded ${rewordShortId}`, appState.amendCommit, { undoable: true })(message, false, {
+              author: null,
+              trailers: [],
+              messageOnly: true,
+            });
           }}
           onCancel={() => closeDialog("reword")}
         />

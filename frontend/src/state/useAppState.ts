@@ -176,6 +176,13 @@ export interface AppState {
   // The commit Split commit… stopped at in this session, so the stop reads "Splitting" before
   // its first part (#884).
   splitting: string | null;
+  // The commit Edit commit… stopped at in this session, so the stop's controls and toasts are
+  // named after the edit (#994).
+  editing: string | null;
+  // An edit stop's message box (#882): the commit's own message, one of the user's, or blank.
+  // Only the kind is state: the strip's Continue says why a blank one can't go on (#995), and
+  // Abort asks before a typed one is lost (#979).
+  editMessage: "unchanged" | "changed" | "blank";
   // The last Stash and switch, for its toast (#653).
   stashSwitchOutcome: { branchName: string; outcome: StashSwitchOutcome } | null;
   // A commit or amend refused for lack of a git identity: the identity dialog shows (#689).
@@ -345,6 +352,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     switchConflict: null,
     editRest: null,
     splitting: null,
+    editing: null,
+    editMessage: "unchanged",
     stashSwitchOutcome: null,
     identityRequired: null,
     mergeOutcome: null,

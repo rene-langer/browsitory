@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import styles from "./App.module.css";
-import { RepoError, type CommitOutcome, type HostRequest, type HookProgress, type OperationKind, type RepoClient, type RootFileName, type SequenceOutcome, type TerminalSequence } from "./ipc/RepoClient";
+import { RepoError, type CommitOutcome, type HeadInfo, type HostRequest, type HookProgress, type OperationKind, type RebaseInfo, type RepoClient, type RootFileName, type SequenceOutcome, type StatusEntry, type TerminalSequence } from "./ipc/RepoClient";
 import { credentialRemediation } from "./lib/errorMessages";
 import { publishTransportStatus } from "./ipc/transportStatus";
 import type { ReleaseNotesEntry } from "./components/ReleaseNotesModal";
@@ -1172,8 +1172,10 @@ describe("App", () => {
     });
     render(<App client={client} />);
 
-    const continueButton = await screen.findByRole("button", { name: "Continue cherry-pick" });
-    await waitFor(() => expect(continueButton).toBeEnabled());
+    // The status strip's Continue: the dock has none since #995.
+    const strip = await screen.findByRole("status", { name: "Operation status" });
+    const continueButton = within(strip).getByRole("button", { name: "Continue" });
+    await waitFor(() => expect(continueButton).not.toHaveAttribute("aria-disabled", "true"));
     fireEvent.click(continueButton);
 
     const dialog = await screen.findByRole("dialog", { name: "pre-commit hook failed" });
@@ -2410,7 +2412,7 @@ describe("App", () => {
         expect(await screen.findByText("Stopped the revert. HEAD had moved, so it was left where it is.")).toBeInTheDocument();
       });
 
-      it("the commit box's Abort cherry-pick on a paused step takes the same path", async () => {
+      it("a paused step's Abort cherry-pick is the strip's only, and asks the same (#995)", async () => {
         const abortSequence = vi.fn(async () => ({ rewound: true }));
         const abortMerge = vi.fn(async () => {});
         render(
@@ -2427,10 +2429,11 @@ describe("App", () => {
         );
         const strip = await screen.findByRole("status", { name: "Operation status" });
         expect(strip).toHaveTextContent("Cherry-picking (started in a terminal)");
+        await screen.findByRole("group", { name: "Commit actions" });
         const buttons = await screen.findAllByRole("button", { name: "Abort cherry-pick" });
-        const commitBoxAbort = buttons.find((button) => !strip.contains(button));
-        expect(commitBoxAbort).toBeDefined();
-        fireEvent.click(commitBoxAbort!);
+        expect(buttons).toHaveLength(1);
+        expect(strip).toContainElement(buttons[0]);
+        fireEvent.click(buttons[0]);
         const dialog = await screen.findByRole("dialog", { name: "Abort the whole cherry-pick?" });
         expect(dialog).toHaveTextContent("This also removes the commit it made");
         fireEvent.click(within(dialog).getByRole("button", { name: "Abort cherry-pick" }));
@@ -2450,6 +2453,233 @@ describe("App", () => {
         await waitFor(() => expect(cherryPick).toHaveBeenCalled());
         // The banner names the cherry-pick and its commit first (#997).
         expect(await screen.findByText(`Cherry-pick of c1 didn't start: ${refusal}`)).toBeInTheDocument();
+      });
+    });
+
+    describe("paused operations and history edits (#979, #981, #994, #995)", () => {
+      const head = (overrides: Partial<HeadInfo> = {}): HeadInfo => ({
+        headId: "c2",
+        detachedAt: null,
+        headPushed: false,
+        operation: null,
+        operationLeftover: false,
+        squashMessage: null,
+        commitHooks: [],
+        sequence: null,
+        rebase: null,
+        bisect: null,
+        terminalSequence: null,
+        terminalRebase: null,
+        ...overrides,
+      });
+      const conflicted = (path: string): StatusEntry => ({ path, oldPath: null, staged: false, kind: "Conflicted" });
+      const mergeMessage = "Merge branch 'feature'\n\n# Conflicts:\n#\ta.txt\n#\tb.txt\n";
+
+      it("aborts a merge nothing was resolved in at once, and says so", async () => {
+        const abortMerge = vi.fn(async () => {});
+        render(
+          <App
+            client={pickClient({
+              getStatus: async () => [conflicted("a.txt"), conflicted("b.txt")],
+              getMergeMessage: async () => mergeMessage,
+              getConflictHunks: async () => [],
+              getHeadInfo: async () => head({ operation: "Merge" }),
+              abortMerge,
+            })}
+          />,
+        );
+        const strip = await screen.findByRole("status", { name: "Operation status" });
+        fireEvent.click(within(strip).getByRole("button", { name: "Abort merge" }));
+        await waitFor(() => expect(abortMerge).toHaveBeenCalledWith("/repos/a"));
+        expect(screen.queryByRole("dialog")).toBeNull();
+        expect(await screen.findByText("Aborted merge")).toBeInTheDocument();
+      });
+
+      it("asks before Abort merge throws away a resolved file, and Cancel aborts nothing", async () => {
+        const abortMerge = vi.fn(async () => {});
+        render(
+          <App
+            client={pickClient({
+              // b.txt was conflicted (MERGE_MSG lists it) and is resolved now.
+              getStatus: async () => [conflicted("a.txt"), { path: "b.txt", oldPath: null, staged: true, kind: "Modified" }],
+              getMergeMessage: async () => mergeMessage,
+              getConflictHunks: async () => [],
+              getHeadInfo: async () => head({ operation: "Merge" }),
+              abortMerge,
+            })}
+          />,
+        );
+        const strip = await screen.findByRole("status", { name: "Operation status" });
+        fireEvent.click(within(strip).getByRole("button", { name: "Abort merge" }));
+        let dialog = await screen.findByRole("dialog", { name: "Abort the merge?" });
+        expect(dialog).toHaveTextContent("Your resolutions in 1 file are lost, and Undo can't bring them back.");
+        expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
+        fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+        await waitFor(() => expect(screen.queryByRole("dialog", { name: "Abort the merge?" })).toBeNull());
+        expect(abortMerge).not.toHaveBeenCalled();
+
+        fireEvent.click(within(strip).getByRole("button", { name: "Abort merge" }));
+        dialog = await screen.findByRole("dialog", { name: "Abort the merge?" });
+        fireEvent.click(within(dialog).getByRole("button", { name: "Abort merge" }));
+        await waitFor(() => expect(abortMerge).toHaveBeenCalledTimes(1));
+        expect(await screen.findByText("Aborted merge")).toBeInTheDocument();
+      });
+
+      it("keeps a merge's Abort and conflict count out of the commit dock, which shrinks to one line (#995, #980)", async () => {
+        render(
+          <App
+            client={pickClient({
+              getStatus: async () => [conflicted("a.txt")],
+              getMergeMessage: async () => mergeMessage,
+              getConflictHunks: async () => [],
+              getHeadInfo: async () => head({ operation: "Merge" }),
+            })}
+          />,
+        );
+        await screen.findByRole("status", { name: "Operation status" });
+        const dock = await screen.findByRole("group", { name: "Commit actions" });
+        await waitFor(() => expect(dock).toHaveTextContent("Commit once every conflict is resolved."));
+        expect(within(dock).queryByRole("button", { name: "Abort merge" })).toBeNull();
+        expect(within(dock).queryByText("Resolve 1 conflict to continue")).toBeNull();
+        expect(within(dock).queryByRole("textbox", { name: "Commit message" })).toBeNull();
+      });
+
+      it("rewords the latest commit's message only, through the Reword dialog (#981)", async () => {
+        const amendCommit = vi.fn<RepoClient["amendCommit"]>(async () => ({ kind: "Committed", commitId: "c2b" }));
+        render(
+          <App
+            client={pickClient({
+              getStatus: async () => [{ path: "staged.txt", oldPath: null, staged: true, kind: "Modified" }],
+              getCommitMessage: async () => "two\n",
+              amendCommit,
+            })}
+          />,
+        );
+        fireEvent.contextMenu((await screen.findByText(/c2 two/)).closest("li")!);
+        fireEvent.click(screen.getByRole("menuitem", { name: "Reword…" }));
+        const dialog = await screen.findByRole("dialog", { name: "Reword commit c2" });
+        const field = await within(dialog).findByDisplayValue("two");
+        fireEvent.change(field, { target: { value: "two, reworded" } });
+        fireEvent.click(within(dialog).getByRole("button", { name: "Reword" }));
+        await waitFor(() =>
+          expect(amendCommit).toHaveBeenCalledWith("/repos/a", "two, reworded\n", false, {
+            author: null,
+            trailers: [],
+            messageOnly: true,
+          }),
+        );
+        expect(await screen.findByText("Reworded c2")).toBeInTheDocument();
+        // The amend box was never involved.
+        expect(screen.queryByRole("button", { name: "Amend" })).toBeNull();
+      });
+
+      it("names an Edit commit… stop after the edit: strip, toolbar, confirm and toasts (#994, #995, #979)", async () => {
+        let rebase: RebaseInfo | null = null;
+        let status: StatusEntry[] = [];
+        const stop: RebaseInfo = { branch: "main", onto: "c1", currentStep: 1, totalSteps: 1, health: { kind: "Paused" }, editing: "c2", splitParts: 0 };
+        const startRebase = vi.fn(async () => {
+          rebase = stop;
+          status = [{ path: "README.md", oldPath: null, staged: true, kind: "Modified" }];
+          return { kind: "PausedForEdit" as const };
+        });
+        const rebaseContinue = vi.fn(async () => {
+          rebase = null;
+          status = [];
+          return { kind: "Done" as const };
+        });
+        const abortRebase = vi.fn(async () => {
+          rebase = null;
+          status = [];
+          return { restored: true };
+        });
+        render(
+          <App
+            client={pickClient({
+              getStatus: async () => status,
+              getHeadInfo: async () =>
+                head(rebase === null ? {} : { headId: "c1", detachedAt: "c1", operation: null, rebase }),
+              commitsSince: async () => [{ id: "c2", shortId: "c2", summary: "two", authorName: "A", timestamp: 2, merge: false }],
+              getCommitMessage: async () => "two\n",
+              startRebase,
+              rebaseContinue,
+              abortRebase,
+            })}
+          />,
+        );
+        fireEvent.contextMenu((await screen.findByText(/c2 two/)).closest("li")!);
+        fireEvent.click(screen.getByRole("menuitem", { name: "Edit commit…" }));
+        await waitFor(() => expect(startRebase).toHaveBeenCalled());
+
+        const strip = await screen.findByRole("status", { name: "Operation status" });
+        await waitFor(() => expect(strip).toHaveTextContent("Editing c2: change the files, then Finish editing"));
+        expect(strip).not.toHaveTextContent("Step 1 of 1");
+        // The toolbar names the rebase instead of a detached HEAD.
+        const toolbar = screen.getByRole("group", { name: "Repository" });
+        expect(toolbar).toHaveTextContent("Rebasing main");
+        expect(toolbar).not.toHaveTextContent("detached");
+        const dock = await screen.findByRole("group", { name: "Commit actions" });
+        expect(within(dock).queryByRole("button", { name: /Continue|Abort|Finish|Cancel/ })).toBeNull();
+        expect(within(dock).queryByText(/Step 1 of 1/)).toBeNull();
+
+        // Nothing changed since the stop: Cancel edit asks nothing.
+        fireEvent.click(within(strip).getByRole("button", { name: "Cancel edit" }));
+        await waitFor(() => expect(abortRebase).toHaveBeenCalledTimes(1));
+        expect(screen.queryByRole("dialog")).toBeNull();
+        expect(await screen.findByText("Cancelled the edit of c2")).toBeInTheDocument();
+      });
+
+      it("asks before Cancel edit throws away changes made at the stop, then finishes with Edited (#979, #994)", async () => {
+        let rebase: RebaseInfo | null = null;
+        let status: StatusEntry[] = [];
+        const stop: RebaseInfo = { branch: "main", onto: "c1", currentStep: 1, totalSteps: 1, health: { kind: "Paused" }, editing: "c2", splitParts: 0 };
+        const startRebase = vi.fn(async () => {
+          rebase = stop;
+          status = [{ path: "README.md", oldPath: null, staged: true, kind: "Modified" }];
+          return { kind: "PausedForEdit" as const };
+        });
+        const rebaseContinue = vi.fn(async () => {
+          rebase = null;
+          status = [];
+          return { kind: "Done" as const };
+        });
+        const abortRebase = vi.fn(async () => ({ restored: true }));
+        render(
+          <App
+            client={pickClient({
+              getStatus: async () => status,
+              getHeadInfo: async () =>
+                head(rebase === null ? {} : { headId: "c1", detachedAt: "c1", operation: null, rebase }),
+              commitsSince: async () => [{ id: "c2", shortId: "c2", summary: "two", authorName: "A", timestamp: 2, merge: false }],
+              getCommitMessage: async () => "two\n",
+              startRebase,
+              rebaseContinue,
+              abortRebase,
+            })}
+          />,
+        );
+        fireEvent.contextMenu((await screen.findByText(/c2 two/)).closest("li")!);
+        fireEvent.click(screen.getByRole("menuitem", { name: "Edit commit…" }));
+        const strip = await screen.findByRole("status", { name: "Operation status" });
+        await waitFor(() => expect(strip).toHaveTextContent("Editing c2"));
+
+        // A file changed at the stop.
+        status = [
+          { path: "README.md", oldPath: null, staged: true, kind: "Modified" },
+          { path: "src/a.js", oldPath: null, staged: false, kind: "Modified" },
+        ];
+        fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+        await screen.findByText(/src\/a\.js/);
+
+        fireEvent.click(within(strip).getByRole("button", { name: "Cancel edit" }));
+        const dialog = await screen.findByRole("dialog", { name: "Cancel the edit of c2?" });
+        expect(dialog).toHaveTextContent("Your changes to the files are lost, and Undo can't bring them back.");
+        fireEvent.click(within(dialog).getByRole("button", { name: "Keep editing" }));
+        await waitFor(() => expect(screen.queryByRole("dialog", { name: "Cancel the edit of c2?" })).toBeNull());
+        expect(abortRebase).not.toHaveBeenCalled();
+
+        fireEvent.click(within(strip).getByRole("button", { name: "Finish editing" }));
+        await waitFor(() => expect(rebaseContinue).toHaveBeenCalled());
+        expect(await screen.findByText("Edited c2")).toBeInTheDocument();
       });
     });
 
@@ -2505,9 +2735,10 @@ describe("App", () => {
         />,
       );
       const strip = await screen.findByRole("status", { name: "Operation status" });
-      expect(strip).toHaveTextContent("Rebasing, step 1 of 2");
+      expect(strip).toHaveTextContent("Rebasing main onto c1, step 1 of 2");
       const dock = await screen.findByRole("group", { name: "Commit actions" });
-      expect(within(dock).getByRole("button", { name: "Continue rebase" })).toBeEnabled();
+      expect(within(dock).queryByRole("button", { name: "Continue rebase" })).toBeNull();
+      expect(within(strip).getByRole("button", { name: "Continue" })).not.toHaveAttribute("aria-disabled", "true");
       fireEvent.click(within(strip).getByRole("button", { name: "Abort rebase" }));
       expect(await screen.findByText("Aborted rebase")).toBeInTheDocument();
     });
@@ -2537,10 +2768,11 @@ describe("App", () => {
       fireEvent.click(within(strip).getByRole("button", { name: "Continue" }));
       await waitFor(() => expect(rebaseContinue).toHaveBeenCalledWith("/repos/a", "two, edited\n"));
 
-      // An empty message can't be continued with from the dock.
+      // An empty message can't be continued with: the strip's Continue says why (#995).
       fireEvent.change(message, { target: { value: "  " } });
-      expect(within(dock).getByRole("button", { name: "Continue rebase" })).toBeDisabled();
-      expect(within(dock).getByText("Write a commit message.")).toBeInTheDocument();
+      const blocked = within(strip).getByRole("button", { name: "Continue" });
+      await waitFor(() => expect(blocked).toHaveAttribute("aria-disabled", "true"));
+      expect(blocked).toHaveAccessibleDescription("Write a commit message.");
     });
 
     it("an edit stop commits a part from the dock, then offers an empty box for the next (#884)", async () => {
@@ -2560,7 +2792,7 @@ describe("App", () => {
         />,
       );
       const dock = await screen.findByRole("group", { name: "Commit actions" });
-      // The rebase panel, not the commit box the dock shows before the head info has loaded.
+      // The edit stop's message, not the commit box the dock shows before the head info has loaded.
       const panel = await within(dock).findByRole("region", { name: "Editing c2" });
       const message = await within(panel).findByRole("textbox", { name: "Commit message" });
       await waitFor(() => expect(message).toHaveValue("two\n"));
@@ -2571,8 +2803,8 @@ describe("App", () => {
       await waitFor(() => expect(rebaseCommitPart).toHaveBeenCalledWith("/repos/a", "two, part 1\n"));
       await waitFor(() => expect(message).toHaveValue(""));
       const strip = await screen.findByRole("status", { name: "Operation status" });
-      await waitFor(() => expect(strip).toHaveTextContent("Splitting c2: commit each part, then Continue"));
-      expect(within(dock).getByText("Splitting c2")).toBeInTheDocument();
+      await waitFor(() => expect(strip).toHaveTextContent("Splitting c2: commit each part, then Finish split"));
+      expect(within(dock).getByRole("region", { name: "Splitting c2" })).toBeInTheDocument();
       // An empty box commits no part.
       expect(within(dock).getByRole("button", { name: "Commit part" })).toBeDisabled();
     });
@@ -2594,7 +2826,8 @@ describe("App", () => {
         />,
       );
       const strip = await screen.findByRole("status", { name: "Operation status" });
-      fireEvent.click(within(strip).getByRole("button", { name: "Continue" }));
+      // Parts committed: a split, its Continue named after it (#994).
+      fireEvent.click(within(strip).getByRole("button", { name: "Finish split" }));
 
       const dialog = await screen.findByRole("dialog", { name: "Changes not staged" });
       expect(within(dialog).getByText("c.txt")).toBeInTheDocument();

@@ -85,7 +85,7 @@ multi-commit cherry-pick or revert after it ("Stopped after …; its commit was 
 resume."); **Continue** goes on with the next step.
 **Continue** on a paused multi-commit cherry-pick or revert runs the commit hooks for the step it
 commits (the one you resolved). If one fails, the step stays paused and the dialog offers
-**Continue without hooks**; a running hook shows on the panel with **Cancel**.
+**Continue without hooks**; a running hook shows in the commit area with **Cancel**.
 
 If a commit was created but git's merge or cherry-pick state could not be cleared afterwards
 (for example a read-only `.git` folder), the commit still counts and its `post-commit` or

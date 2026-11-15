@@ -83,7 +83,7 @@ export interface MergeRebaseActions {
    * the rest dialog (`state.editRest`) instead; Continue again with `rest` says what to do with
    * them (#884).
    */
-  rebaseContinue(rest?: EditRest): Promise<void>;
+  rebaseContinue(rest?: EditRest): Promise<RebaseStepResult | null>;
   /** Closes the rest dialog without continuing (#884). */
   closeEditRest(): void;
   /**
@@ -238,9 +238,11 @@ export function useMergeRebaseActions(
         const plan = buildHistoryEditPlan(edit, commitId, span);
         const step = await client.startRebase(repoPath, onto, plan, { kind: request.kind, commitId });
         result = step;
-        // Split commit… stops like Edit commit…; the stop says "Splitting" (#884).
+        // Split commit… stops like Edit commit…; the stop says "Splitting" (#884). Both name
+        // the stop's controls and toasts after the edit (#994).
         const splitting = request.kind === "Split" && step.kind !== "Done" ? commitId : null;
-        setState((prev) => ({ ...prev, splitting }));
+        const editing = request.kind === "Edit" && step.kind !== "Done" ? commitId : null;
+        setState((prev) => ({ ...prev, splitting, editing }));
         // A pause shows in the rebase progress panel instead.
         if (step.kind === "Done") {
           const shortId = span.find((commit) => commit.id === commitId)?.shortId ?? commitId.slice(0, 7);
@@ -270,18 +272,25 @@ export function useMergeRebaseActions(
   );
   // Not state: only Continue reads it, and typing in the message box re-renders nothing else.
   const rebaseEditMessage = useRef<string | null>(null);
-  const setRebaseEditMessage = useCallback((message: string | null) => {
-    rebaseEditMessage.current = message;
-  }, []);
+  const setRebaseEditMessage = useCallback(
+    (message: string | null) => {
+      rebaseEditMessage.current = message;
+      const kind = message === null ? "unchanged" : message.trim() === "" ? "blank" : "changed";
+      // Typing re-renders nothing else unless the kind changes.
+      setState((prev) => (prev.editMessage === kind ? prev : { ...prev, editMessage: kind }));
+    },
+    [setState],
+  );
   const rebaseContinue = useCallback(
-    (rest?: EditRest): Promise<void> =>
-      runMutation(async () => {
+    async (rest?: EditRest): Promise<RebaseStepResult | null> => {
+      let result: RebaseStepResult | null = null;
+      await runMutation(async () => {
         const message = rebaseEditMessage.current;
         setState((prev) => ({ ...prev, editRest: null }));
         try {
-          if (rest !== undefined) await client.rebaseContinue(repoPath, message ?? undefined, rest);
-          else if (message === null) await client.rebaseContinue(repoPath);
-          else await client.rebaseContinue(repoPath, message);
+          if (rest !== undefined) result = await client.rebaseContinue(repoPath, message ?? undefined, rest);
+          else if (message === null) result = await client.rebaseContinue(repoPath);
+          else result = await client.rebaseContinue(repoPath, message);
         } catch (error) {
           if (errorKind(error) !== "RestLeft") throw error;
           // Not an error: the dialog asks what to do with the files (#884).
@@ -291,7 +300,10 @@ export function useMergeRebaseActions(
         }
         // Landed: the message belonged to that stop, not to the next one.
         rebaseEditMessage.current = null;
-      }),
+        setState((prev) => (prev.editMessage === "unchanged" ? prev : { ...prev, editMessage: "unchanged" }));
+      });
+      return result;
+    },
     [client, runMutation, repoPath, setState],
   );
   const closeEditRest = useCallback(() => {

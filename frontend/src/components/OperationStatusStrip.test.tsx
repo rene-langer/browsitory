@@ -228,7 +228,7 @@ describe("OperationStatusStrip", () => {
   describe("a stored rebase", () => {
     const rebase = (health: RebaseInfo["health"]): RebaseInfo => ({ branch: "topic", onto: "o", currentStep: 1, totalSteps: 2, health, editing: null, splitParts: 0 });
 
-    it("keeps \"Rebasing, step N of M\" while paused", () => {
+    it("keeps \"Rebasing <branch> onto <target>, step N of M\" while paused", () => {
       render(
         <OperationStatusStrip
           merging
@@ -240,7 +240,7 @@ describe("OperationStatusStrip", () => {
           onAbortRebase={noop}
         />,
       );
-      expect(screen.getByRole("status")).toHaveTextContent("Rebasing, step 1 of 2");
+      expect(screen.getByRole("status")).toHaveTextContent("Rebasing topic onto o, step 1 of 2");
       expect(screen.queryByText(/interrupted/)).toBeNull();
     });
 
@@ -266,6 +266,106 @@ describe("OperationStatusStrip", () => {
       fireEvent.click(within(strip).getByRole("button", { name: "Abort rebase" }));
       expect(onContinueRebase).toHaveBeenCalledTimes(1);
       expect(onAbortRebase).toHaveBeenCalledTimes(1);
+    });
+
+    it("names the branch and what it is rebased onto, and the step (#995)", () => {
+      const { rerender } = render(
+        <OperationStatusStrip
+          merging={false}
+          operation={null}
+          rebaseProgress={{ currentStep: 1, totalSteps: 2 }}
+          rebase={{ ...rebase({ kind: "Paused" }), branch: "main" }}
+          rebaseOnto="feature/x"
+          conflictCount={1}
+          onAbortMerge={noop}
+          onAbortRebase={noop}
+        />,
+      );
+      expect(screen.getByRole("status")).toHaveTextContent("Rebasing main onto feature/x, step 1 of 2");
+      // A one-step rebase has no step to count (#994).
+      rerender(
+        <OperationStatusStrip
+          merging={false}
+          operation={null}
+          rebaseProgress={{ currentStep: 1, totalSteps: 1 }}
+          rebase={{ ...rebase({ kind: "Paused" }), branch: "main", totalSteps: 1 }}
+          rebaseOnto="feature/x"
+          conflictCount={1}
+          onAbortMerge={noop}
+          onAbortRebase={noop}
+        />,
+      );
+      expect(screen.getByText("Rebasing main onto feature/x")).toBeInTheDocument();
+      expect(screen.getByRole("status")).not.toHaveTextContent("step");
+    });
+
+    it("names an Edit commit… stop's controls after the edit (#994)", () => {
+      const onContinueRebase = vi.fn();
+      const onAbortRebase = vi.fn();
+      render(
+        <OperationStatusStrip
+          merging
+          operation="CherryPick"
+          rebaseProgress={{ currentStep: 1, totalSteps: 1 }}
+          rebase={{ ...rebase({ kind: "Paused" }), editing: "1a2b3c4d5e6f7081", totalSteps: 1 }}
+          editingCommit="1a2b3c4d5e6f7081"
+          conflictCount={0}
+          onAbortMerge={noop}
+          onAbortRebase={onAbortRebase}
+          onContinueRebase={onContinueRebase}
+        />,
+      );
+      const strip = screen.getByRole("status");
+      expect(strip).toHaveTextContent("Editing 1a2b3c4: change the files, then Finish editing");
+      expect(within(strip).queryByRole("button", { name: "Continue" })).toBeNull();
+      expect(within(strip).queryByRole("button", { name: "Abort rebase" })).toBeNull();
+      fireEvent.click(within(strip).getByRole("button", { name: "Finish editing" }));
+      fireEvent.click(within(strip).getByRole("button", { name: "Cancel edit" }));
+      expect(onContinueRebase).toHaveBeenCalledTimes(1);
+      expect(onAbortRebase).toHaveBeenCalledTimes(1);
+    });
+
+    it("names a Split commit… stop's controls after the split (#994)", () => {
+      render(
+        <OperationStatusStrip
+          merging
+          operation="CherryPick"
+          rebaseProgress={{ currentStep: 1, totalSteps: 1 }}
+          rebase={{ ...rebase({ kind: "Paused" }), editing: "1a2b3c4d5e6f7081", totalSteps: 1 }}
+          splittingCommit="1a2b3c4d5e6f7081"
+          conflictCount={0}
+          onAbortMerge={noop}
+          onAbortRebase={noop}
+          onContinueRebase={noop}
+        />,
+      );
+      const strip = screen.getByRole("status");
+      expect(strip).toHaveTextContent("Splitting 1a2b3c4: commit each part, then Finish split");
+      expect(within(strip).getByRole("button", { name: "Finish split" })).toBeInTheDocument();
+      expect(within(strip).getByRole("button", { name: "Cancel split" })).toBeInTheDocument();
+    });
+
+    it("says why an edit stop can't go on without a message, as the dock did (#995)", () => {
+      const onContinueRebase = vi.fn();
+      render(
+        <OperationStatusStrip
+          merging
+          operation="CherryPick"
+          rebaseProgress={{ currentStep: 1, totalSteps: 1 }}
+          rebase={{ ...rebase({ kind: "Paused" }), editing: "1a2b3c4d5e6f7081", totalSteps: 1 }}
+          editingCommit="1a2b3c4d5e6f7081"
+          continueBlockedReason="Write a commit message."
+          conflictCount={0}
+          onAbortMerge={noop}
+          onAbortRebase={noop}
+          onContinueRebase={onContinueRebase}
+        />,
+      );
+      const finish = screen.getByRole("button", { name: "Finish editing" });
+      expect(finish).toHaveAttribute("aria-disabled", "true");
+      expect(finish).toHaveAccessibleDescription("Write a commit message.");
+      fireEvent.click(finish);
+      expect(onContinueRebase).not.toHaveBeenCalled();
     });
 
     it("shows the interrupted label and reason for a diverged rebase", () => {

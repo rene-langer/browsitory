@@ -31,6 +31,8 @@ export function RepoToolbar({
   branch: {
     current: string | null;
     detachedAt: string | null;
+    /** The branch a paused rebase rebases (#995): named instead of the detached HEAD. */
+    rebasing?: string | null;
     /** The branch of a repository with no commits yet (#983). */
     unbornBranch?: string | null;
     upstream: UpstreamInfo | null;
@@ -49,6 +51,8 @@ export function RepoToolbar({
   return (
     <SyncBar
       {...sync}
+      // A paused rebase's detached HEAD is the rebase's, which the branch chip names (#995).
+      detachedAt={branch.rebasing == null ? sync.detachedAt : null}
       ariaLabel="Repository"
       pane
       leading={
@@ -101,23 +105,27 @@ export function RepoToolbar({
 function BranchChip({
   current,
   detachedAt,
+  rebasing = null,
   unbornBranch = null,
   upstream,
   onOpenSwitcher,
 }: {
   current: string | null;
   detachedAt: string | null;
+  rebasing?: string | null;
   unbornBranch?: string | null;
   upstream: UpstreamInfo | null;
   onOpenSwitcher: () => void;
 }) {
   const name =
-    current ??
-    (detachedAt !== null
-      ? `detached at ${detachedAt}`
-      : unbornBranch !== null
-        ? `${unbornBranch} (no commits yet)`
-        : "no branch");
+    rebasing !== null
+      ? `Rebasing ${rebasing}`
+      : (current ??
+        (detachedAt !== null
+          ? `detached at ${detachedAt}`
+          : unbornBranch !== null
+            ? `${unbornBranch} (no commits yet)`
+            : "no branch"));
   const tracking = current !== null && upstream !== null ? `${upstream.remoteName}/${upstream.remoteBranch}` : null;
   const label = `Current branch ${name}${tracking === null ? "" : `, tracking ${tracking}`}. Switch branch…`;
   return (

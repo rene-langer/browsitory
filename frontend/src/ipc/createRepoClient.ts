@@ -408,6 +408,8 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
         noVerify,
         author: options?.author ?? null,
         trailers: options?.trailers ?? [],
+        // Sent only for Reword… on HEAD (#981); absent, the backend amends with the index.
+        ...(options?.messageOnly === true ? { messageOnly: true } : {}),
       }),
     getFileSides: (repoPath: string, path: string, source: DiffSource) =>
       call<FileSides>("get_file_sides", { repoPath, path, source }),

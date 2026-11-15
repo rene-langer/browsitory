@@ -263,7 +263,8 @@ describe("Browsitory merge with conflict resolution", () => {
     const conflictedRow = await $("span=abort.txt (Conflicted)");
     await conflictedRow.waitForExist();
 
-    // The commit box offers "Abort merge" too; this is the operation status strip's.
+    // Abort merge is the operation status strip's alone (#995); nothing was resolved, so it asks
+    // nothing (#979).
     const abortMergeButton = await $("div[aria-label='Operation status']").$("button=Abort merge");
     await abortMergeButton.waitForExist();
     await browser.execute((el) => (el as HTMLElement).click(), abortMergeButton);

@@ -20,21 +20,21 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
 }
 
 const commits: RebasePlanCommit[] = [
-  { id: "aaa", shortId: "aaa1111", summary: "add a", authorName: "Rene", timestamp: 1 },
-  { id: "bbb", shortId: "bbb2222", summary: "add b", authorName: "Rene", timestamp: 2 },
+  { id: "aaa", shortId: "aaa1111", summary: "add a", authorName: "Rene", timestamp: 1, merge: false },
+  { id: "bbb", shortId: "bbb2222", summary: "add b", authorName: "Rene", timestamp: 2, merge: false },
 ];
 
 const threeCommits: RebasePlanCommit[] = [
-  { id: "aaa", shortId: "aaa1111", summary: "add a", authorName: "Rene", timestamp: 1 },
-  { id: "bbb", shortId: "bbb2222", summary: "add b", authorName: "Rene", timestamp: 2 },
-  { id: "ccc", shortId: "ccc3333", summary: "add c", authorName: "Rene", timestamp: 3 },
+  { id: "aaa", shortId: "aaa1111", summary: "add a", authorName: "Rene", timestamp: 1, merge: false },
+  { id: "bbb", shortId: "bbb2222", summary: "add b", authorName: "Rene", timestamp: 2, merge: false },
+  { id: "ccc", shortId: "ccc3333", summary: "add c", authorName: "Rene", timestamp: 3, merge: false },
 ];
 
 const fourCommits: RebasePlanCommit[] = [
-  { id: "aaa", shortId: "aaa1111", summary: "add a", authorName: "Rene", timestamp: 1 },
-  { id: "bbb", shortId: "bbb2222", summary: "add b", authorName: "Rene", timestamp: 2 },
-  { id: "ccc", shortId: "ccc3333", summary: "add c", authorName: "Rene", timestamp: 3 },
-  { id: "ddd", shortId: "ddd4444", summary: "add d", authorName: "Rene", timestamp: 4 },
+  { id: "aaa", shortId: "aaa1111", summary: "add a", authorName: "Rene", timestamp: 1, merge: false },
+  { id: "bbb", shortId: "bbb2222", summary: "add b", authorName: "Rene", timestamp: 2, merge: false },
+  { id: "ccc", shortId: "ccc3333", summary: "add c", authorName: "Rene", timestamp: 3, merge: false },
+  { id: "ddd", shortId: "ddd4444", summary: "add d", authorName: "Rene", timestamp: 4, merge: false },
 ];
 
 describe("RebasePlanner", () => {
@@ -58,6 +58,40 @@ describe("RebasePlanner", () => {
     expect(screen.getByText("Start rebase")).toHaveAttribute("title", "A merge is in progress.");
     expect(describedByText(screen.getByText("Start rebase"))).toBe("A merge is in progress.");
     expect(screen.getByText("A merge is in progress.")).toBeInTheDocument();
+  });
+
+  // #982: the plan replays first parents only, so a merge commit in it can't be replayed.
+  it("marks a merge commit's row, offers it no action and says why Start rebase can't run", async () => {
+    const withMerge: RebasePlanCommit[] = [
+      commits[0],
+      { id: "mmm", shortId: "mmm5555", summary: "Merge branch 'x'", authorName: "Rene", timestamp: 3, merge: true },
+      commits[1],
+    ];
+    const onStartRebase = vi.fn();
+    render(
+      <RebasePlanner
+        repoPath={TEST_REPO_PATH}
+        client={fakeClient({ commitsSince: async () => withMerge })}
+        onto="base"
+        onStartRebase={onStartRebase}
+        onCancel={vi.fn()}
+      />,
+    );
+    await screen.findByText(/add a/);
+
+    expect(screen.getByText("Merge commit: can't be replayed")).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Action for mmm5555 Merge branch 'x'" })).toBeNull();
+    // The other rows keep their actions.
+    expect(screen.getByRole("combobox", { name: "Action for aaa1111 add a" })).toBeEnabled();
+
+    const start = screen.getByRole("button", { name: "Start rebase" });
+    expect(start).toBeDisabled();
+    const reason =
+      "mmm5555 is a merge commit, which a rebase can't replay. Rebase onto it or a newer commit instead.";
+    expect(describedByText(start)).toBe(reason);
+    expect(screen.getByText(reason)).toBeInTheDocument();
+    fireEvent.click(start);
+    expect(onStartRebase).not.toHaveBeenCalled();
   });
 
   // #619: opened from a branch menu, the planner names the branch, not a ref or an id.

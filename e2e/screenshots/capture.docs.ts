@@ -316,25 +316,22 @@ describe("Documentation screenshots", () => {
     await block.waitForExist();
     await waitUntilInPage('button[aria-pressed="true"]', "Three panes");
     // Scroll to the editor's toolbar ("0 of 1 resolved", Previous conflict), not to the block:
-    // the block at the top cut the toolbar off (#944). The block still fits below it. The pane's
-    // sticky "Diff view options" row covers the top of the scroll area: stop below it.
+    // the block at the top cut the toolbar off (#944). The block still fits below it. A
+    // conflicted file hides the pane's sticky "Diff view options" row (#980); if one is there,
+    // it covers the top of the scroll area: stop below it.
     const toolbar = await $('[role="group"][aria-label="Conflicts"]');
     await toolbar.waitForExist();
-    const options = await $('[role="group"][aria-label="Diff view options"]');
-    await browser.execute(
-      (el, sticky) => {
-        const target = el as HTMLElement;
-        target.scrollIntoView({ block: "start" });
-        let scroller = target.parentElement;
-        while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) {
-          scroller = scroller.parentElement;
-        }
-        const below = (sticky as HTMLElement).getBoundingClientRect().bottom + 2;
-        scroller?.scrollBy(0, target.getBoundingClientRect().top - below);
-      },
-      toolbar,
-      options,
-    );
+    await browser.execute((el) => {
+      const target = el as HTMLElement;
+      target.scrollIntoView({ block: "start" });
+      let scroller = target.parentElement;
+      while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) {
+        scroller = scroller.parentElement;
+      }
+      const sticky = document.querySelector('[role="group"][aria-label="Diff view options"]');
+      const below = (sticky ?? scroller)?.getBoundingClientRect()[sticky === null ? "top" : "bottom"] ?? 0;
+      scroller?.scrollBy(0, target.getBoundingClientRect().top - below - 2);
+    }, toolbar);
     await shoot("merge-editor");
     await browser.setWindowSize(WINDOW.width, WINDOW.height);
   });

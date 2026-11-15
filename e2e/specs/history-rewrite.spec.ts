@@ -164,7 +164,8 @@ describe("Browsitory one-click history edits", () => {
     });
     fs.writeFileSync(path.join(E2E_REPO_PATH, "edit-older.txt"), "first, edited\n");
     git("add", "edit-older.txt");
-    await clickInPage("[role='status'][aria-label='Operation status'] button", "Continue");
+    // Edit commit…'s Continue is named after the edit (#994).
+    await clickInPage("[role='status'][aria-label='Operation status'] button", "Finish editing");
 
     await browser.waitUntil(() => git("rev-parse", "--abbrev-ref", "HEAD") !== "HEAD", {
       timeout: SLOW_UI_TIMEOUT,
@@ -183,14 +184,18 @@ describe("Browsitory one-click history edits", () => {
     const tipBefore = git("rev-parse", "HEAD");
     await browser.refresh();
 
-    // "second" changes the line "first" wrote: replayed before it, it conflicts.
+    // "second" changes the line "first" wrote: replayed before it, it conflicts. The status
+    // strip alone shows the paused rebase and its Abort (#995); nothing is resolved, so Abort
+    // asks nothing (#979).
     await chooseFromCommitMenu(idOf("e2e: move second"), "Move down");
-    const panel = await $("section[aria-label='Rebase in progress']");
-    await panel.waitForExist({ timeout: SLOW_UI_TIMEOUT });
+    await waitUntilInPage("[role='status'][aria-label='Operation status']", "Rebasing ", {
+      contains: true,
+      timeout: SLOW_UI_TIMEOUT,
+    });
     await waitUntilInPage("span", "edit-move.txt (Conflicted)", { contains: true });
 
-    await clickInPage("section[aria-label='Rebase in progress'] button", "Abort rebase");
-    await waitUntilGoneInPage("section[aria-label='Rebase in progress']");
+    await clickInPage("[role='status'][aria-label='Operation status'] button", "Abort rebase");
+    await waitUntilGoneInPage("[role='status'][aria-label='Operation status']");
     await browser.waitUntil(() => git("rev-parse", "HEAD") === tipBefore);
     expect(git("rev-parse", "--abbrev-ref", "HEAD")).not.toBe("HEAD");
     expect(fs.readFileSync(path.join(E2E_REPO_PATH, "edit-move.txt"), "utf8")).toBe("three\n");

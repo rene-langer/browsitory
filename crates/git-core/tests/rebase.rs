@@ -698,6 +698,26 @@ fn commits_since_does_not_walk_into_a_merged_side_branch() {
     assert_eq!(summaries, vec!["add a", "merge side branch"]);
 }
 
+/// The planner marks a merge commit's row (#982): it can't be replayed.
+#[test]
+fn commits_since_marks_merge_commits() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "add a");
+    make_merge_commit(&repo);
+
+    let commits = git_core::rebase::commits_since(&repo, &onto).unwrap();
+
+    let merges: Vec<(&str, bool)> = commits
+        .iter()
+        .map(|c| (c.summary.as_str(), c.merge))
+        .collect();
+    assert_eq!(merges, vec![("add a", false), ("merge side branch", true)]);
+}
+
 /// Commits `contents` at `path` on top of `parent` without moving any ref — a side commit to
 /// build plans around that isn't on the current branch.
 fn detached_commit_adding(

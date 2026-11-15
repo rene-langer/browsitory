@@ -749,6 +749,8 @@ pub(crate) enum Command {
         /// Replaces the author's name and email (the author time is kept).
         author: Option<git_core::commit::SignatureInput>,
         trailers: Vec<git_core::commit::Trailer>,
+        /// Reword… on HEAD (#981): HEAD's tree stays, only the message changes.
+        message_only: bool,
         operation_id: cancel::OperationId,
         events: Sender<HookEvent>,
         reply: Sender<Result<git_core::commit::CommitOutcome, ErrorDto>>,

@@ -34,6 +34,15 @@ describe("RewordDialog", () => {
     expect(onReword).toHaveBeenCalledWith("New summary\n\nNew body\n");
   });
 
+  it("says that rewording the latest commit changes only its message (#981)", async () => {
+    renderDialog({ head: true });
+    await screen.findByDisplayValue(/Old summary/);
+
+    const dialog = screen.getByRole("dialog", { name: "Reword commit abc1234" });
+    expect(dialog).toHaveTextContent("Only the message changes: staged changes stay staged and out of the commit.");
+    expect(dialog).not.toHaveTextContent("The commits after it are rewritten too.");
+  });
+
   it("refuses an empty message", async () => {
     renderDialog();
     const field = await screen.findByDisplayValue(/Old summary/);
