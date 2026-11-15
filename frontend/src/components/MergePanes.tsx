@@ -28,6 +28,19 @@ const MERGE_PANES_WITH_BASE: readonly MergePane[] = ["base", ...MERGE_PANES];
 /** The columns of the two-pane layout (#980): the result and the base go across both. */
 const TWO_PANE_SIDES: readonly MergePane[] = ["ours", "theirs"];
 
+/**
+ * The grid's columns (#931): an equal share for each pane's lines, and next to the result, after
+ * ours and before theirs, a track for the take-side arrows that ours and theirs span. So every
+ * pane's lines are equally wide and an unchanged line wraps onto as many rows in each pane.
+ */
+function paneColumns(panes: readonly MergePane[]): string {
+  const share = "minmax(0, 1fr)";
+  const arrow = "var(--merge-arrow-track)";
+  return panes
+    .map((pane) => (pane === "ours" ? `${share} ${arrow}` : pane === "theirs" ? `${arrow} ${share}` : share))
+    .join(" ");
+}
+
 /** Where a result line came from (#878): a side taken, typed, or a block still in conflict. */
 export type LineOrigin = "ours" | "theirs" | "base" | "edited" | "conflict";
 
@@ -235,7 +248,7 @@ export function MergePanes({
   const panes = twoPanes ? TWO_PANE_SIDES : showBase ? MERGE_PANES_WITH_BASE : MERGE_PANES;
   const headings: Record<MergePane, string> = { base: "Base", ...labels };
   const gridStyle = {
-    "--merge-panes": panes.length,
+    "--merge-columns": paneColumns(panes),
     // Room for the numbers, the space after them and the origin bar before them (#878).
     "--merge-gutter": `calc(${Math.max(digits, 2) + 1}ch + 4px)`,
   } as CSSProperties;
