@@ -2,8 +2,10 @@ import { useState, useId } from "react";
 import type { RemoteInfo } from "../ipc/RepoClient";
 import { branchNameProblem } from "../lib/refName";
 import { Field } from "./primitives/Field";
+import { describedBy } from "../lib/ariaDescribedBy";
+import { BlockedReason } from "./primitives/BlockedReason";
+import { DialogActions } from "./primitives/DialogActions";
 import { FormDialog } from "./primitives/FormDialog";
-import formStyles from "./primitives/FormDialog.module.css";
 import styles from "./PushBranchDialog.module.css";
 
 /** The branch's upstream remote, else `origin` if it exists, else the first remote. */
@@ -59,7 +61,7 @@ export function PushBranchDialog({
   const blocked = trimmed === "" || problem !== null || remoteName === "" || blockedReason !== null;
 
   return (
-    <FormDialog ariaLabel={`Push ${localBranch}`} onCancel={onCancel}>
+    <FormDialog title={`Push ${localBranch}`} onCancel={onCancel}>
       <form
         className={styles.form}
         onSubmit={(event) => {
@@ -93,15 +95,21 @@ export function PushBranchDialog({
           <input type="checkbox" checked={setUpstream} onChange={(event) => setSetUpstream(event.target.checked)} />
           Set as upstream
         </label>
-        {blockedReason !== null && <p id={reasonId} className={formStyles.blocked}>{blockedReason}</p>}
-        <div className={styles.actions}>
-          <button type="submit" disabled={blocked} title={blockedReason ?? undefined} aria-describedby={blockedReason !== null ? reasonId : undefined}>
+        <BlockedReason id={reasonId} reason={blockedReason} />
+        <DialogActions>
+          <button
+            type="submit"
+            data-tone="primary"
+            disabled={blocked}
+            title={blockedReason ?? undefined}
+            aria-describedby={describedBy(reasonId, blockedReason)}
+          >
             Push
           </button>
           <button type="button" onClick={onCancel}>
             Cancel
           </button>
-        </div>
+        </DialogActions>
       </form>
     </FormDialog>
   );

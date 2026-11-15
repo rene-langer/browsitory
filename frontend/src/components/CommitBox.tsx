@@ -574,7 +574,11 @@ export function CommitBox({
             {amendOn ? "Amend" : commitLabel(stagedCount, branchName)}
           </button>
         )}
-        {showAbort && <button onClick={onAbortMerge}>{abortLabel}</button>}
+        {showAbort && (
+          <button data-tone="danger" onClick={onAbortMerge}>
+            {abortLabel}
+          </button>
+        )}
       </Toolbar>
     </div>
   );

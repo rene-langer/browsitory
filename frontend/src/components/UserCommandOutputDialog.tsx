@@ -1,5 +1,6 @@
 import type { UserCommandRun } from "../ipc/RepoClient";
 import type { UserCommandOutput } from "../state/useUserCommandRunner";
+import { DialogActions } from "./primitives/DialogActions";
 import { FormDialog } from "./primitives/FormDialog";
 import styles from "./UserCommandOutputDialog.module.css";
 
@@ -26,8 +27,7 @@ export function UserCommandOutputDialog({
   const { command, result, error } = output;
   const running = result === null && error === null;
   return (
-    <FormDialog ariaLabel={command.name} onCancel={onClose} className={styles.dialog}>
-      <h2 className={styles.title}>{command.name}</h2>
+    <FormDialog title={command.name} onCancel={onClose} className={styles.dialog}>
       {error !== null ? (
         <p role="alert" className={styles.problem}>
           {error}
@@ -45,7 +45,7 @@ export function UserCommandOutputDialog({
             {result.output}
           </pre>
         ))}
-      <div className={styles.buttons}>
+      <DialogActions>
         {running && (
           <button type="button" onClick={onStop}>
             Stop
@@ -54,7 +54,7 @@ export function UserCommandOutputDialog({
         <button type="button" data-autofocus onClick={onClose}>
           Close
         </button>
-      </div>
+      </DialogActions>
     </FormDialog>
   );
 }

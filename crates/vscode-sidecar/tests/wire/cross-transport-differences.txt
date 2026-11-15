@@ -76,6 +76,7 @@ HeadInfo/everything key-order
 HeadInfo/operation-CherryPick key-order
 HeadInfo/operation-Merge key-order
 HeadInfo/operation-Revert key-order
+HeadInfo/unborn key-order
 HookProgress/Finished-Commit key-order
 HookProgress/Started-Checkout key-order
 HookProgress/Started-Commit key-order

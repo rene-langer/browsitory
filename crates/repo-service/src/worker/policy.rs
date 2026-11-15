@@ -240,6 +240,7 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         | Command::GetHeadInfo { .. }
         | Command::DetectForgeRepository { .. }
         | Command::GetSwitchConflicts { .. }
+        | Command::CountCommitsOnlyOnBranch { .. }
         | Command::GetPullDefaults { .. }
         | Command::GetUndoState { .. } => P::read(),
 
@@ -586,6 +587,7 @@ pub(super) fn reply_of(command: &mut Command) -> Option<&mut dyn Reply> {
         ListBranches,
         CreateBranch,
         GetSwitchConflicts,
+        CountCommitsOnlyOnBranch,
         StashAndSwitch,
         SetIdentity,
         GetPullDefaults,

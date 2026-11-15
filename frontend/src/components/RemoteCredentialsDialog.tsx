@@ -1,5 +1,6 @@
 import { useId, useRef, useState } from "react";
 import type { RemoteAuthMode, RemoteInfo } from "../ipc/RepoClient";
+import { DialogActions } from "./primitives/DialogActions";
 import { FormDialog } from "./primitives/FormDialog";
 import styles from "./BranchTree.module.css";
 import { BlockedReason } from "./primitives/BlockedReason";
@@ -33,6 +34,9 @@ export function RemoteCredentialsDialog({
   const [username, setUsername] = useState(remote.authUsername ?? "");
   const accessTokenRef = useRef<HTMLInputElement>(null);
   const remoteName = remote.name;
+  // The app saves an HTTPS credential only together with the HTTPS mode and its username, so a
+  // remote without them has none it saved: no Forget then (#1014).
+  const credentialSaved = remote.authMode === "HttpsToken" && remote.authUsername !== null;
   const blocked = blockedReason !== null;
   const blockedTitle = blockedReason ?? undefined;
   // The visible reason is the buttons' description (#748).
@@ -40,7 +44,7 @@ export function RemoteCredentialsDialog({
   const reasonRef = describedBy(reasonId, blockedReason);
 
   return (
-    <FormDialog ariaLabel={`Credentials for ${remoteName}`} onCancel={onClose}>
+    <FormDialog title={`Credentials for ${remoteName}`} onCancel={onClose}>
       <form
         onSubmit={async (event) => {
           event.preventDefault();
@@ -84,20 +88,27 @@ export function RemoteCredentialsDialog({
               <input ref={accessTokenRef} type="password" autoComplete="off" />
             </label>
             <BlockedReason id={reasonId} reason={blockedReason} />
-            <button type="submit" disabled={blocked} title={blockedTitle} aria-describedby={reasonRef}>
-              Save HTTPS credential
-            </button>
-            <button
-              type="button"
-              disabled={blocked}
-              title={blockedTitle}
-              aria-describedby={reasonRef}
-              onClick={() => {
-                if (!blocked) void onForgetHttpsCredential(remoteName);
-              }}
-            >
-              Forget HTTPS credential
-            </button>
+            <DialogActions>
+              <button type="submit" data-tone="primary" disabled={blocked} title={blockedTitle} aria-describedby={reasonRef}>
+                Save HTTPS credential
+              </button>
+              {credentialSaved && (
+                <button
+                  type="button"
+                  disabled={blocked}
+                  title={blockedTitle}
+                  aria-describedby={reasonRef}
+                  onClick={() => {
+                    if (!blocked) void onForgetHttpsCredential(remoteName);
+                  }}
+                >
+                  Forget HTTPS credential
+                </button>
+              )}
+              <button type="button" onClick={onClose}>
+                Cancel
+              </button>
+            </DialogActions>
           </>
         ) : (
           <>
@@ -106,14 +117,16 @@ export function RemoteCredentialsDialog({
               <code>ssh-add</code>) before fetching or pushing.
             </p>
             <BlockedReason id={reasonId} reason={blockedReason} />
-            <button type="submit" disabled={blocked} title={blockedTitle} aria-describedby={reasonRef}>
-              Use SSH agent
-            </button>
+            <DialogActions>
+              <button type="submit" data-tone="primary" disabled={blocked} title={blockedTitle} aria-describedby={reasonRef}>
+                Use SSH agent
+              </button>
+              <button type="button" onClick={onClose}>
+                Cancel
+              </button>
+            </DialogActions>
           </>
         )}
-        <button type="button" onClick={onClose}>
-          Cancel credentials
-        </button>
       </form>
     </FormDialog>
   );

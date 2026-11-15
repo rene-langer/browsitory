@@ -106,6 +106,21 @@ export function RepoPicker({
       .catch((err: unknown) => setError(String(err)));
   };
 
+  // Locate… (#998): the folder of a missing recent repository moved. Its new place replaces the
+  // entry (pinned again if the old one was) and opens.
+  const locate = (path: string) => {
+    client
+      .pickRepoFolder()
+      .then(async (picked) => {
+        if (picked === null) return;
+        await client.removeRecentRepo(path);
+        if (pinnedRepos.has(path)) await client.pinRecentRepo(picked);
+        setRecentRepos((prev) => prev.filter((recent) => recent !== path));
+        onOpenRepo(picked);
+      })
+      .catch((err: unknown) => setError(String(err)));
+  };
+
   const nameOf = (path: string) => aliases?.get(path) ?? repoNameOf(path);
   const query = filter.trim().toLowerCase();
   const matches = (...texts: string[]) => query === "" || texts.some((text) => text.toLowerCase().includes(query));
@@ -234,33 +249,47 @@ export function RepoPicker({
                 const openInTab = openPaths?.has(path) === true && onSwitchToTab !== undefined;
                 return (
                   <ListRow key={path} className={styles.recentRow}>
-                    <button
-                      type="button"
-                      className={missing ? `${styles.repoRow} ${styles.missing}` : styles.repoRow}
-                      onClick={() => (openInTab ? onSwitchToTab(path) : onOpenRepo(path))}
-                    >
-                      <span className={styles.repoName}>
-                        {name}
-                        {missing && (
-                          <>
-                            {" "}
-                            <span className={styles.missingBadge}>Folder not found</span>
-                          </>
-                        )}
+                    {missing ? (
+                      // Opening it could only fail (#998): not a button; Locate… or Remove it.
+                      <span className={`${styles.repoRow} ${styles.missing}`}>
+                        <span className={styles.repoName}>
+                          {name} <span className={styles.missingBadge}>Folder not found</span>
+                        </span>
+                        <span className={styles.repoPath}>{path}</span>
                       </span>
-                      <span className={styles.repoPath}>{path}</span>
-                      {openInTab && <span className={styles.openBadge}>Open in a tab</span>}
-                    </button>
-                    <button
-                      type="button"
-                      className={pinned ? `${styles.rowButton} ${styles.pinned}` : styles.rowButton}
-                      aria-label={pinned ? `Unpin ${name}` : `Pin ${name}`}
-                      aria-pressed={pinned}
-                      title={pinned ? "Unpin: list it with the recent repositories again" : "Pin to the top of the list"}
-                      onClick={() => setPinned(path, !pinned)}
-                    >
-                      <Pin size={14} aria-hidden="true" fill={pinned ? "currentColor" : "none"} />
-                    </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className={styles.repoRow}
+                        onClick={() => (openInTab ? onSwitchToTab(path) : onOpenRepo(path))}
+                      >
+                        <span className={styles.repoName}>{name}</span>
+                        <span className={styles.repoPath}>{path}</span>
+                        {openInTab && <span className={styles.openBadge}>Open in a tab</span>}
+                      </button>
+                    )}
+                    {missing ? (
+                      <button
+                        type="button"
+                        className={styles.locate}
+                        aria-label={`Locate ${name}…`}
+                        title="Pick the folder's new place"
+                        onClick={() => locate(path)}
+                      >
+                        Locate…
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className={pinned ? `${styles.rowButton} ${styles.pinned}` : styles.rowButton}
+                        aria-label={pinned ? `Unpin ${name}` : `Pin ${name}`}
+                        aria-pressed={pinned}
+                        title={pinned ? "Unpin: list it with the recent repositories again" : "Pin to the top of the list"}
+                        onClick={() => setPinned(path, !pinned)}
+                      >
+                        <Pin size={14} aria-hidden="true" fill={pinned ? "currentColor" : "none"} />
+                      </button>
+                    )}
                     <button
                       type="button"
                       className={styles.rowButton}
@@ -336,7 +365,7 @@ export function RepoPicker({
         )}
         {deleteConfirmation !== null && (
           <ConfirmDialog
-            ariaLabel={`Delete workspace ${deleteConfirmation.name}`}
+            title={`Delete workspace ${deleteConfirmation.name}`}
             message={
               <p>
                 Delete workspace {deleteConfirmation.name}? Its member repos stay open if currently open; only the

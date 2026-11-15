@@ -258,16 +258,17 @@ describe("Documentation screenshots", () => {
         browser.execute(
           (dialogSelector: string) =>
             document.querySelector(dialogSelector) !== null ||
-            Array.from(document.querySelectorAll("[role='alert']")).some((el) =>
-              (el.textContent ?? "").includes("The pre-push hook failed."),
-            ),
+            document.querySelector("dialog[aria-label='pre-push hook failed']") !== null,
           pushDialog,
         ),
       { timeout: SLOW_UI_TIMEOUT, timeoutMsg: "expected the push to ask where to, or to fail" },
     );
     if (await (await $(pushDialog)).isExisting()) await clickInPage(`${pushDialog} button`, "Push");
+    // The error banner waits until the hook failure dialog is closed (#996).
+    await $("dialog[aria-label='pre-push hook failed']").waitForExist({ timeout: SLOW_UI_TIMEOUT });
+    await clickInPage("dialog[aria-label='pre-push hook failed'] button", "Close");
     await waitUntilInPage("[role='alert']", "The pre-push hook failed.", { contains: true, timeout: SLOW_UI_TIMEOUT });
-    await clickInPage("button", "Show details");
+    await clickInPage("[role='alert'] button", "Details");
     await waitUntilInPage("pre[aria-label='Output of pre-push']", PRE_PUSH_OUTPUT, {
       contains: true,
       timeout: SLOW_UI_TIMEOUT,

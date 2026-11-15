@@ -122,8 +122,19 @@
   overflow-wrap: anywhere;
 }
 
+/* Why it failed, in the app's words (#1022), first. */
+.cause {
+  margin: 0 0 var(--space-2);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* Git's own text, under the cause and above the facts. */
 .message {
-  margin: var(--space-3) 0 0;
+  margin: 0 0 var(--space-3);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
   overflow-wrap: anywhere;
   user-select: text;
 }
@@ -177,5 +188,5 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
-  margin-bottom: var(--space-2);
+  margin-top: var(--space-3);
 }

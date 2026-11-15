@@ -314,6 +314,8 @@ export interface HeadInfo {
    * ends. `operation` stays `null` even when git wrote `MERGE_MSG` for a conflicted step.
    */
   terminalRebase: TerminalRebase | null;
+  /** The branch HEAD names while it has no commit yet (a new repository, #983); absent otherwise. */
+  unbornBranch?: string;
 }
 /**
  * A terminal rebase (`kind: "Rebase"`) or `git am` (`"Am"`). `branch` is the rebased branch's short
@@ -1573,6 +1575,8 @@ export interface RepoClient {
   stashAndSwitch(repoPath: string, name: string, reapply: boolean): Promise<StashSwitchOutcome>;
   /** Sets `user.name`/`user.email` for this repository, or with `global` for every one (#689). */
   setIdentity(repoPath: string, name: string, email: string, global: boolean): Promise<void>;
+  /** How many commits of `name` no other branch has: what deleting it would leave on no branch (#996). */
+  countCommitsOnlyOnBranch(repoPath: string, name: string): Promise<number>;
   deleteBranch(repoPath: string, name: string, force: boolean): Promise<void>;
   renameBranch(repoPath: string, oldName: string, newName: string): Promise<void>;
   listWorktrees(repoPath: string): Promise<WorktreeInfo[]>;

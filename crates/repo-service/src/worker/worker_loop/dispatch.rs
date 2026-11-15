@@ -60,6 +60,7 @@ where
             | Command::PreviewPatch { .. }
             | Command::ListBranches { .. }
             | Command::GetSwitchConflicts { .. }
+            | Command::CountCommitsOnlyOnBranch { .. }
             | Command::GetPullDefaults { .. }
             | Command::ListWorktrees { .. }
             | Command::ListSubmodules { .. }

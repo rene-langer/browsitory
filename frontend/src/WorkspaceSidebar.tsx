@@ -79,6 +79,7 @@ export function WorkspaceSidebar({
           onSwitchBranch={announce((name) => `Switched to ${name}`, appState.switchBranch, { undoable: true })}
           onCreateBranch={appState.createBranch}
           onDeleteBranch={announce((...[name]) => `Deleted branch ${name}`, appState.deleteBranch, { undoable: true })}
+          onCountCommitsOnlyOnBranch={appState.countCommitsOnlyOnBranch}
           onRenameBranch={appState.renameBranch}
           onOpenCreateBranchDraft={appState.openCreateBranchDraft}
           onCloseCreateBranchDraft={appState.closeCreateBranchDraft}

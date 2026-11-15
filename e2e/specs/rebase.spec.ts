@@ -467,7 +467,7 @@ describe("Browsitory interactive rebase", () => {
     await rebaseItem.waitForExist();
     await rebaseItem.click();
 
-    await $("h2=Rebase onto e2e-rebase-onto-target").waitForExist();
+    await $("h2*=onto e2e-rebase-onto-target").waitForExist();
     const row = await $("//li[contains(., 'e2e: rebase-onto my commit')]//select[starts-with(@aria-label, 'Action for ')]");
     await row.waitForExist();
     const startButton = await $("button=Start rebase");

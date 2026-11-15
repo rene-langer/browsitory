@@ -382,6 +382,12 @@ pub(crate) enum Command {
         name: String,
         reply: Sender<Result<Vec<String>, ErrorDto>>,
     },
+    /// How many commits of local branch `name` no other branch has: what deleting it would leave
+    /// on no branch (#996).
+    CountCommitsOnlyOnBranch {
+        name: String,
+        reply: Sender<Result<usize, ErrorDto>>,
+    },
     /// Stashes the local changes, switches to `name` and, with `reapply`, pops them there (#653).
     /// `operation_id` and `events` as for `SwitchBranch`.
     StashAndSwitch {

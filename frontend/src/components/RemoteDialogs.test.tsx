@@ -95,7 +95,7 @@ describe("RemoteDialogs", () => {
   it.each([
     ["edit", "Edit origin"],
     ["credentials", "Credentials for origin"],
-    ["remove", "Remove remote confirmation"],
+    ["remove", "Remove remote origin"],
   ] as const)("renders the %s dialog for the open remote dialog", async (kind, name) => {
     render(<RemoteDialogs {...props({ remoteDialog: { kind: "remote", action: kind, remoteName: "origin" } })} />);
     expect(await screen.findByRole("dialog", { name, hidden: true })).toBeInTheDocument();
@@ -108,18 +108,26 @@ describe("RemoteDialogs", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it("says what Remove remote removes and that Undo can't bring it back (#989)", () => {
+    render(<RemoteDialogs {...props({ remoteDialog: { kind: "remote", action: "remove", remoteName: "origin" } })} />);
+    const dialog = screen.getByRole("dialog", { name: "Remove remote origin", hidden: true });
+    expect(within(dialog).getByRole("heading", { name: "Remove remote origin", hidden: true })).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("Undo can't bring the remote back.");
+    expect(within(dialog).getByRole("button", { name: "Remove remote", hidden: true })).toBeInTheDocument();
+  });
+
   it("asks to clear upstreams based on the upstreams when the confirmation renders", () => {
     const base = props({ remoteDialog: { kind: "remote", action: "remove", remoteName: "origin" } });
     const { rerender } = render(<RemoteDialogs {...base} />);
-    expect(screen.getByText("Remove remote origin?")).toBeInTheDocument();
+    expect(screen.getByText(/^Removes origin and its remote-tracking branches/)).toBeInTheDocument();
     rerender(
       <RemoteDialogs
         {...base}
         remoteUpstreams={{ origin: [{ localBranch: "main", remoteName: "origin", remoteBranch: "main" }] }}
       />,
     );
-    expect(screen.getByText(/clear upstreams for main/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Confirm remove", hidden: true }));
+    expect(screen.getByText(/clears the upstream of main/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove remote", hidden: true }));
     expect(base.onRemoveRemote).toHaveBeenCalledWith("origin", true);
   });
 
@@ -128,7 +136,7 @@ describe("RemoteDialogs", () => {
     const base = props({ remoteDialog: { kind: "remote", action: "remove", remoteName: "origin" } });
     const { rerender } = render(<RemoteDialogs {...base} />);
     rerender(<RemoteDialogs {...base} blockedReason="A merge is in progress." />);
-    const confirm = screen.getByRole("button", { name: "Confirm remove", hidden: true });
+    const confirm = screen.getByRole("button", { name: "Remove remote", hidden: true });
     expect(confirm).toBeDisabled();
     expect(confirm).toHaveAttribute("title", "A merge is in progress.");
     expect(describedByText(confirm)).toBe("A merge is in progress.");
@@ -155,7 +163,11 @@ describe("RemoteDialogs", () => {
   });
 
   it("does not change credentials once the repository became busy", () => {
-    const base = props({ remoteDialog: { kind: "remote", action: "credentials", remoteName: "origin" } });
+    // Forget shows only for a remote with a saved HTTPS credential (#1014).
+    const base = props({
+      remotes: [{ ...origin, authMode: "HttpsToken", authUsername: "me" }],
+      remoteDialog: { kind: "remote", action: "credentials", remoteName: "origin" },
+    });
     const { rerender } = render(<RemoteDialogs {...base} />);
     const dialog = screen.getByRole("dialog", { name: "Credentials for origin", hidden: true });
     fireEvent.change(within(dialog).getByLabelText("HTTPS username"), { target: { value: "me" } });
@@ -189,7 +201,7 @@ describe("RemoteDialogs", () => {
   it.each([
     ["edit", "Edit origin", "removed"],
     ["credentials", "Credentials for origin", "removed"],
-    ["remove", "Remove remote confirmation", "removed"],
+    ["remove", "Remove remote origin", "removed"],
     ["edit", "Edit origin", "renamed"],
     ["credentials", "Credentials for origin", "renamed"],
   ] as const)("the %s dialog closes with a notice when its remote is %s elsewhere", async (kind, name, change) => {
@@ -272,9 +284,9 @@ describe("RemoteDialogs", () => {
   it.each([true, false])("confirming Remove closes without a notice (succeeds: %s)", async (result) => {
     const onRemoteGone = vi.fn();
     render(<Harness initial={{ kind: "remote", action: "remove", remoteName: "origin" }} result={result} onRemoteGone={onRemoteGone} />);
-    fireEvent.click(screen.getByRole("button", { name: "Confirm remove", hidden: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove remote", hidden: true }));
     await waitFor(() =>
-      expect(screen.queryByRole("dialog", { name: "Remove remote confirmation", hidden: true })).toBeNull(),
+      expect(screen.queryByRole("dialog", { name: "Remove remote origin", hidden: true })).toBeNull(),
     );
     expect(onRemoteGone).not.toHaveBeenCalled();
   });

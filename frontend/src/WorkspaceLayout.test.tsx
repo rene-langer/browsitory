@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { RepoError, type FileDropEvent, type RepoClient } from "./ipc/RepoClient";
-import { fakeRepoClient, graphPage } from "./test/fakeRepoClient";
+import { EMPTY_RESULTS, fakeRepoClient, graphPage } from "./test/fakeRepoClient";
 
 // Whole-App renders, like App.test.tsx (#217's slow-machine budget).
 vi.setConfig({ testTimeout: 20_000 });
@@ -68,11 +68,11 @@ describe("the diverged-pull prompt (#636)", () => {
     const pull = within(toolbar()).getByRole("button", { name: "Pull" });
     await waitFor(() => expect(pull).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(pull);
-    const dialog = await screen.findByRole("dialog", { name: "Pull has diverged" });
+    const dialog = await screen.findByRole("dialog", { name: "main and origin/main have diverged" });
     expect(dialog).toHaveTextContent("origin/main");
     expect(pull).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Pull has diverged" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "main and origin/main have diverged" })).toBeNull());
     expect(pull).not.toHaveAttribute("aria-disabled");
   });
 
@@ -83,7 +83,7 @@ describe("the diverged-pull prompt (#636)", () => {
     const pull = within(toolbar()).getByRole("button", { name: "Pull" });
     await waitFor(() => expect(pull).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(pull);
-    const dialog = await screen.findByRole("dialog", { name: "Pull has diverged" });
+    const dialog = await screen.findByRole("dialog", { name: "main and origin/main have diverged" });
     // `showModal()` inside a hidden ancestor is an invisible modal that makes the page inert.
     expect(dialog.closest("[hidden]")).toBeNull();
   });
@@ -107,7 +107,7 @@ describe("a pull git config wants as a merge commit (#740)", () => {
       expect(mergeBranch).toHaveBeenCalledWith("/repos/a", "refs/remotes/origin/main", { fastForward: "Never", squash: false }),
     );
     expect(mergeBranch).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("dialog", { name: "Pull has diverged" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "main and origin/main have diverged" })).toBeNull();
   });
 });
 
@@ -256,6 +256,20 @@ describe("the current-branch switcher (#638)", () => {
     expect(options).not.toContain("fix/login");
     fireEvent.click(screen.getByRole("option", { name: "feature" }));
     await waitFor(() => expect(switchBranch).toHaveBeenCalledWith("/repos/a", "feature"));
+  });
+
+  it("names the branch of a repository with no commits yet (#983)", async () => {
+    const headInfo = await EMPTY_RESULTS.getHeadInfo!("/repos/a");
+    await renderApp(
+      layoutClient({
+        listBranches: async () => [],
+        getCurrentUpstream: async () => null,
+        getHeadInfo: async () => ({ ...headInfo, unbornBranch: "main" }),
+      }),
+    );
+    const chip = await within(toolbar()).findByRole("button", { name: /^Current branch main \(no commits yet\)/ });
+    expect(chip).toHaveTextContent("main (no commits yet)");
+    expect(chip).not.toHaveTextContent("no branch");
   });
 
   it("lists recently switched branches first", async () => {

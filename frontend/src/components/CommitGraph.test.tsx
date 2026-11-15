@@ -1308,6 +1308,12 @@ describe("CommitGraph — history actions", () => {
     return { ...handlers, openMenu };
   }
 
+  it("marks Reset to here as a destructive item (#988)", () => {
+    const { openMenu } = setup();
+    openMenu("B");
+    expect(screen.getByRole("menuitem", { name: "Reset main to here…" })).toHaveAttribute("data-destructive", "true");
+  });
+
   it("offers cherry-pick, revert, checkout and reset on a single commit", () => {
     const { openMenu, onCherryPick, onRevert, onCheckoutCommit, onRequestReset } = setup();
     openMenu("B");
@@ -1616,7 +1622,7 @@ describe("CommitGraph — tag badges", () => {
     fireEvent.contextMenu(screen.getByTitle("Tag v2.0"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete tag…" }));
     const dialog = screen.getByRole("dialog", { name: "Delete local tag v2.0" });
-    expect(dialog).toHaveTextContent("Delete local tag v2.0?");
+    expect(dialog).toHaveTextContent("Removes v2.0 from this repository.");
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete tag" }));
     await waitFor(() => expect(onDeleteTag).toHaveBeenCalledWith("v2.0"));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Delete local tag v2.0" })).toBeNull());

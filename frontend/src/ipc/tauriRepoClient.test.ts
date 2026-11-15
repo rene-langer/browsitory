@@ -812,6 +812,12 @@ describe("tauriRepoClient commit search", () => {
     expect(invoke).toHaveBeenLastCalledWith("get_branch_compare_range", { repoPath: "/repo", refName: "refs/heads/feature" });
   });
 
+  it("wires countCommitsOnlyOnBranch (#996)", async () => {
+    vi.mocked(invoke).mockResolvedValue(2);
+    await expect(tauriRepoClient.countCommitsOnlyOnBranch("/repo", "feature")).resolves.toBe(2);
+    expect(invoke).toHaveBeenLastCalledWith("count_commits_only_on_branch", { repoPath: "/repo", name: "feature" });
+  });
+
   it("wires locateCommit (#441)", async () => {
     const location = { commitId: "c", position: null, branches: ["feature"], remoteBranches: [] };
     vi.mocked(invoke).mockResolvedValue(location);

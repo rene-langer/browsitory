@@ -14,6 +14,8 @@ import { useToasts } from "./state/useToasts";
 import { useFileDrops } from "./state/useFileDrops";
 import { requestWorkspace } from "./lib/workspaceRequests";
 import { InlineError } from "./components/primitives/InlineError";
+import { OpenErrorBanner } from "./components/OpenErrorBanner";
+import { describeOpenFailure, type OpenFailure } from "./lib/openFailure";
 import { ConfirmDialog } from "./components/primitives/ConfirmDialog";
 import { CloneDialog } from "./components/CloneDialog";
 import { Overlay } from "./components/primitives/Overlay";
@@ -170,7 +172,7 @@ function AppContent({
   // to open (bad path, a stale recent-repo entry, permissions). Nothing else catches that now
   // that `App` has no `useAppState` of its own, so a failed open would look like nothing
   // happened — the same trap the pre-tabs `App` carried a comment about.
-  const [openError, setOpenError] = useState<{ message: string; path: string } | null>(null);
+  const [openError, setOpenError] = useState<OpenFailure | null>(null);
   const [transportError, setTransportError] = useState<string | null>(null);
   useEffect(
     () => subscribeTransportStatus((status) => setTransportError(status.message)),
@@ -183,10 +185,11 @@ function AppContent({
     (path: string) => {
       return openRepo(path).then(
         () => setOpenError(null),
-        (error: unknown) => setOpenError({ message: String(error), path }),
+        // Why it failed decides what the banner offers (#973, #998).
+        (error: unknown) => describeOpenFailure(client, path, error).then(setOpenError),
       );
     },
-    [openRepo],
+    [client, openRepo],
   );
 
   // "Browsitory: Open", its menus and the contributed shortcut keys in VSCode (#677).
@@ -211,7 +214,7 @@ function AppContent({
           setExistingRepoPrompt(result.path);
         }
       },
-      (error: unknown) => setOpenError({ message: String(error instanceof Error ? error.message : error), path: "" }),
+      (error: unknown) => setOpenError({ kind: "failed", message: String(error instanceof Error ? error.message : error), path: "" }),
     );
   }, [client, openRepoTab, pushAppToast]);
   const openPreferences = useCallback((group?: PreferencesGroupId) => setPreferences({ group }), []);
@@ -272,6 +275,7 @@ function AppContent({
       setOpenError({
         message: failures.map((failure) => `Couldn't reopen ${repoNameOf(failure.path)}: ${failure.message}`).join("\n"),
         path: "",
+        kind: "failed",
       });
     });
   }, [reopenClosedRepo]);
@@ -283,7 +287,7 @@ function AppContent({
       client
         .runHostGitCommand(command)
         .catch((error: unknown) =>
-          setOpenError({ message: String(error instanceof Error ? error.message : error), path: "" }),
+          setOpenError({ kind: "failed", message: String(error instanceof Error ? error.message : error), path: "" }),
         );
     },
     [client],
@@ -428,7 +432,7 @@ function AppContent({
     if (patches.length === 0) return;
     if (activePath === null) {
       const names = patches.map((path) => path.split(/[\\/]/).pop() ?? path).join(", ");
-      setOpenError({ message: `Open a repository to apply ${names} to.`, path: "" });
+      setOpenError({ kind: "failed", message: `Open a repository to apply ${names} to.`, path: "" });
     } else {
       requestWorkspace({ kind: "applyPatches", paths: patches });
     }
@@ -458,7 +462,6 @@ function AppContent({
     <OpenPreferencesContext.Provider value={openPreferences}>
       <main>
         {dropHint}
-        <UpdateCheckContext.Provider value={updateCheckRegistry}>{updateBanner}</UpdateCheckContext.Provider>
         <header className={styles.headerRow}>
           <h1>Browsitory</h1>
           <RepoTabs
@@ -571,11 +574,16 @@ function AppContent({
               />
             )}
             {openError !== null && (
-              <InlineError
-                message={openError.message}
-                hint={openError.path !== "" ? "Check that the folder exists and is a Git repository." : undefined}
-                onRetry={openError.path !== "" ? () => void openRepoTab(openError.path) : undefined}
-                copyDetails
+              <OpenErrorBanner
+                failure={openError}
+                onOpen={(path) => void openRepoTab(path)}
+                onRemoveRecent={(path) =>
+                  client.removeRecentRepo(path).then(
+                    () => setOpenError(null),
+                    (error: unknown) =>
+                      setOpenError({ kind: "failed", path: "", message: error instanceof Error ? error.message : String(error) }),
+                  )
+                }
                 onDismiss={() => setOpenError(null)}
               />
             )}
@@ -660,7 +668,7 @@ function AppContent({
         )}
         {existingRepoPrompt !== null && (
           <ConfirmDialog
-            ariaLabel="Repository already exists"
+            title="Repository already exists"
             message={<p>{existingRepoPrompt} is already a repository. Open it?</p>}
             confirmLabel="Open"
             onConfirm={() => {
@@ -670,7 +678,10 @@ function AppContent({
             onCancel={() => setExistingRepoPrompt(null)}
           />
         )}
-        <ToastRegion toasts={appToasts.toasts} onDismiss={appToasts.dismiss} onPauseChange={appToasts.setPaused} />
+        {/* The update notice shares the toasts' region, so the two stack (#1000). */}
+        <ToastRegion toasts={appToasts.toasts} onDismiss={appToasts.dismiss} onPauseChange={appToasts.setPaused}>
+          <UpdateCheckContext.Provider value={updateCheckRegistry}>{updateBanner}</UpdateCheckContext.Provider>
+        </ToastRegion>
         {openRepos.openRepos.length === 0 ? (
           <RepoPicker
             client={client}

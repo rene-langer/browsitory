@@ -140,7 +140,7 @@ describe("CommitTreeBrowser", () => {
     const { onRestoreFileVersion } = renderBrowser();
     fireEvent.click(await screen.findByRole("button", { name: /README\.txt/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Restore…" }));
-    const dialog = screen.getByRole("dialog", { name: "Confirm restore" });
+    const dialog = screen.getByRole("dialog", { name: "Restore README.txt" });
     expect(dialog).toHaveTextContent("Replace README.txt in the working tree with its version from 0123456?");
     fireEvent.click(within(dialog).getByRole("button", { name: "Restore" }));
     expect(onRestoreFileVersion).toHaveBeenCalledWith(COMMIT, "README.txt");
@@ -161,7 +161,7 @@ describe("CommitTreeBrowser", () => {
     fireEvent.click(await screen.findByRole("button", { name: /README\.txt/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Restore…" }));
     rerenderWith({ restoreBlockedReason: "A merge is in progress." });
-    const dialog = screen.getByRole("dialog", { name: "Confirm restore" });
+    const dialog = screen.getByRole("dialog", { name: "Restore README.txt" });
     const confirm = within(dialog).getByRole("button", { name: "Restore" });
     expect(confirm).toBeDisabled();
     expect(describedByText(confirm)).toBe("A merge is in progress.");

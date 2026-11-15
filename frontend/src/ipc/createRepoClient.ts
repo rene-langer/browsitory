@@ -292,6 +292,8 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
       call<StashSwitchOutcome>("stash_and_switch", { repoPath, name, reapply }),
     setIdentity: (repoPath: string, name: string, email: string, global: boolean) =>
       call<void>("set_identity", { repoPath, name, email, global }),
+    countCommitsOnlyOnBranch: (repoPath: string, name: string) =>
+      call<number>("count_commits_only_on_branch", { repoPath, name }),
     deleteBranch: (repoPath: string, name: string, force: boolean) =>
       call<void>("delete_branch", { repoPath, name, force }),
     renameBranch: (repoPath: string, oldName: string, newName: string) =>

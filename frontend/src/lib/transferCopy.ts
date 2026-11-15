@@ -23,7 +23,7 @@ function plural(count: number, one: string, many = `${one}s`): string {
   return `${count} ${count === 1 ? one : many}`;
 }
 
-function tagsLabel(names: string[]): string {
+export function tagsLabel(names: string[]): string {
   if (names.length === 0) return "all tags";
   if (names.length === 1) return `tag ${names[0]}`;
   return plural(names.length, "tag");
@@ -59,6 +59,8 @@ export interface TransferToast {
   tone: "success" | "info";
   /** The toast offers Pull: a fetch left the current branch behind its upstream. */
   offerPull: boolean;
+  /** The toast offers Push: a fetch left the current branch only ahead of its upstream (#999). */
+  offerPush?: true;
 }
 
 /**
@@ -82,12 +84,28 @@ export function transferToast(subject: TransferSubject, upstream: UpstreamInfo |
       const covers = upstream !== null && (subject.kind === "fetchAll" || upstream.remoteName === subject.remoteName);
       if (!covers || upstream.behind == null) return done(fetched);
       const tracking = `${upstream.remoteName}/${upstream.remoteBranch}`;
-      if (upstream.behind === 0) return done(`${fetched} ${upstream.localBranch} is up to date with ${tracking}.`);
-      return {
-        message: `${fetched} ${upstream.localBranch} is ${plural(upstream.behind, "commit")} behind ${tracking}.`,
-        tone: "success",
-        offerPull: true,
-      };
+      const { localBranch, behind } = upstream;
+      const ahead = upstream.ahead ?? 0;
+      // Ahead and behind: a pull has to merge or rebase, which its dialog asks (#999).
+      if (behind > 0 && ahead > 0) {
+        return {
+          message: `${fetched} ${localBranch} and ${tracking} have diverged: ${plural(ahead, "commit")} ahead, ${behind} behind.`,
+          tone: "success",
+          offerPull: true,
+        };
+      }
+      if (behind > 0) {
+        return { message: `${fetched} ${localBranch} is ${plural(behind, "commit")} behind ${tracking}.`, tone: "success", offerPull: true };
+      }
+      if (ahead > 0) {
+        return {
+          message: `${fetched} ${localBranch} is ${plural(ahead, "commit")} ahead of ${tracking}.`,
+          tone: "success",
+          offerPull: false,
+          offerPush: true,
+        };
+      }
+      return done(`${fetched} ${localBranch} is up to date with ${tracking}.`);
     }
     case "pull":
       return null;

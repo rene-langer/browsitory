@@ -41,8 +41,8 @@ mod wire_snapshots;
 mod worktree;
 
 pub use branch::{
-    create_branch, delete_branch, get_switch_conflicts, list_branches, rename_branch,
-    stash_and_switch, switch_branch,
+    count_commits_only_on_branch, create_branch, delete_branch, get_switch_conflicts,
+    list_branches, rename_branch, stash_and_switch, switch_branch,
 };
 pub use clone::{cancel_clone, clone_repo, init_repo, CloneState};
 pub use compare::{

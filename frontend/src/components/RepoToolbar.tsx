@@ -33,6 +33,8 @@ export function RepoToolbar({
     detachedAt: string | null;
     /** The branch a paused rebase rebases (#995): named instead of the detached HEAD. */
     rebasing?: string | null;
+    /** The branch of a repository with no commits yet (#983). */
+    unbornBranch?: string | null;
     upstream: UpstreamInfo | null;
     onOpenSwitcher: () => void;
   };
@@ -104,19 +106,26 @@ function BranchChip({
   current,
   detachedAt,
   rebasing = null,
+  unbornBranch = null,
   upstream,
   onOpenSwitcher,
 }: {
   current: string | null;
   detachedAt: string | null;
   rebasing?: string | null;
+  unbornBranch?: string | null;
   upstream: UpstreamInfo | null;
   onOpenSwitcher: () => void;
 }) {
   const name =
     rebasing !== null
       ? `Rebasing ${rebasing}`
-      : (current ?? (detachedAt !== null ? `detached at ${detachedAt}` : "no branch"));
+      : (current ??
+        (detachedAt !== null
+          ? `detached at ${detachedAt}`
+          : unbornBranch !== null
+            ? `${unbornBranch} (no commits yet)`
+            : "no branch"));
   const tracking = current !== null && upstream !== null ? `${upstream.remoteName}/${upstream.remoteBranch}` : null;
   const label = `Current branch ${name}${tracking === null ? "" : `, tracking ${tracking}`}. Switch branch…`;
   return (

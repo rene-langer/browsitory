@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { CircleAlert, CircleCheck, CircleX, Info, X, type LucideIcon } from "lucide-react";
 import { toastActions, type Toast, type ToastTone } from "../../state/useToasts";
 import styles from "./ToastRegion.module.css";
@@ -29,15 +29,20 @@ const TONE_PREFIX: Record<ToastTone, string | null> = {
  * screen readers register the region before the first message arrives. Fixed-position, so showing
  * a toast never shifts the layout. A toast never takes focus; its buttons are in the Tab order,
  * and every toast's clock stops while the pointer is over one or focus is in one.
+ *
+ * `children` stay above the toasts until they go themselves: the desktop app's update notice
+ * (#1000), so the two never cover each other.
  */
 export function ToastRegion({
   toasts,
   onDismiss,
   onPauseChange,
+  children,
 }: {
   toasts: Toast[];
   onDismiss: (id: number) => void;
   onPauseChange: (paused: boolean) => void;
+  children?: ReactNode;
 }) {
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -68,6 +73,7 @@ export function ToastRegion({
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false);
       }}
     >
+      {children}
       {toasts.map((toast) => (
         <div
           key={toast.id}

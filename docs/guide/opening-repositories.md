@@ -15,8 +15,15 @@ stay there however many others you open, and don't count against the ten. Click 
 to unpin it; it then goes back on top of the recent ones. The **×** takes a repository off the
 list, pinned or not (the folder stays where it is); opening the repository again puts it back.
 A repository whose folder is gone (moved, deleted, or on a drive that isn't connected) is marked
-**Folder not found**; a pinned one stays pinned until you unpin or remove it. Type in **Filter repositories and workspaces** to
-show only the recent repositories and workspaces whose name or path contains the text.
+**Folder not found** and doesn't open. **Locate…** in place of the pin lets you pick the folder's
+new place, which replaces the entry (pinned again if it was) and opens; **×** removes it. If such
+a repository is opened another way, the error asks whether to remove it from the list. Type in
+**Filter repositories and workspaces** to show only the recent repositories and workspaces whose
+name or path contains the text.
+
+**A folder that isn't a repository.** Opening a folder that holds no repository itself says
+"This folder isn't a Git repository" and lists the repositories in its direct subfolders, each
+with **Open**. Hidden folders and `node_modules` are left out.
 
 Browsitory reopens the tabs you had open last time. To open another repository next to them,
 click **+** at the end of the tab bar: the picker opens as the **Open repository** dialog (**×**
@@ -51,4 +58,5 @@ Progress shows while cloning; **Cancel clone** stops it and removes what was dow
 
 **New repository…** — pick (or create) a folder; Browsitory runs the equivalent of `git init`
 there, on your `init.defaultBranch` (or `main`), and opens it. Picking a folder that already
-is a repository offers to open it instead.
+is a repository offers to open it instead. Until the first commit, the toolbar's branch button
+reads "main (no commits yet)".

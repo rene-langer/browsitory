@@ -4,12 +4,6 @@
   gap: var(--space-3);
 }
 
-.title {
-  margin: 0;
-  font-size: var(--text-md);
-}
-
-.summary,
 .note {
   margin: 0;
   color: var(--color-text-muted);
@@ -96,10 +90,4 @@
   background: var(--color-danger-bg);
   color: var(--color-danger-text);
   overflow-wrap: anywhere;
-}
-
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
 }

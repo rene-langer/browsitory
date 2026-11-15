@@ -141,7 +141,12 @@ export function OperationStatusStrip({
         <strong>Rebase of {rebase.branch} interrupted</strong>
         <span>{interruption}</span>
         <span className={styles.spacer} />
-        <ReasonButton reason={pendingReason} title="Stops the rebase. HEAD stays where it is." onClick={onAbortRebase}>
+        <ReasonButton
+          reason={pendingReason}
+          data-tone="danger"
+          title="Stops the rebase. HEAD stays where it is."
+          onClick={onAbortRebase}
+        >
           Abort rebase
         </ReasonButton>
       </div>
@@ -255,6 +260,7 @@ export function OperationStatusStrip({
       )}
       <button
         type="button"
+        data-tone="danger"
         onClick={rebaseProgress !== null ? onAbortRebase : terminalStep ? onAbortTerminalSequence : onAbortMerge}
       >
         {editKind === "Edit"

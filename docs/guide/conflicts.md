@@ -15,8 +15,8 @@ resolutions or unsaved edits in the merge editor, since Undo can't bring them ba
 was resolved yet it aborts at once, and a toast says **Aborted merge**.
 
 While a conflicted file is open, the merge editor gets the room: the file list shrinks to the
-conflicts (**Show all changes** brings the rest back), the diff options are hidden, and the
-commit box is one line ("Commit once every conflict is resolved.") until no conflict is left.
+conflicts (**Show all changes** brings the rest back) and the diff options are hidden. While any
+conflict is left, the commit box is one line: "Commit once every conflict is resolved."
 
 A conflicted file opens the **Resolve conflict** pane:
 

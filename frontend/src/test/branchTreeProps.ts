@@ -30,6 +30,7 @@ export function treeProps(overrides: Partial<BranchTreeProps>): BranchTreeProps 
     onSwitchBranch: vi.fn(),
     onCreateBranch: vi.fn().mockResolvedValue(null),
     onDeleteBranch: vi.fn().mockResolvedValue(undefined),
+    onCountCommitsOnlyOnBranch: vi.fn().mockResolvedValue(0),
     onRenameBranch: vi.fn(),
     onOpenCreateBranchDraft: vi.fn(),
     onCloseCreateBranchDraft: vi.fn(),

@@ -11,10 +11,11 @@ Right-click a commit in the graph:
 - **Switch to (detached)** checks the commit out without a branch. The toolbar shows **HEAD
   detached at …** and push and pull are disabled until you check out a branch. The commit's row
   in the graph has a **HEAD** badge.
-- **Reset ⟨branch⟩ to here…** moves your branch to that commit. **Soft** keeps your changes
-  staged, **Mixed** (the default) keeps them unstaged, **Hard** discards changes to tracked
-  files; untracked files are kept. Hard asks for a second confirmation (**Reset hard**). Not
-  available on a detached HEAD.
+- **Reset ⟨branch⟩ to here…** moves your branch to that commit. Under **What happens to your
+  changes**, **Soft** keeps your changes staged, **Mixed** (the default) keeps them unstaged,
+  **Hard** discards changes to tracked files; untracked files are kept. The button names the
+  mode (**Reset mixed**); **Reset hard** is marked as a danger and asks for a second
+  confirmation. Not available on a detached HEAD.
 - **Reword…** opens a dialog with the commit's full message. On the latest commit it changes
   only the message: staged changes stay staged and out of the commit (to fold them in, use
   [Amend last commit](#amending-the-last-commit)). It is one **Undo** step, and the toast says
@@ -127,10 +128,11 @@ files have to be staged or stashed first (untracked files are fine). It runs no 
 
 ## Force push
 
-When a push is rejected because the remote has commits you don't, the error offers **Force push
-(with lease)…**. The command palette has it too, as **Force push current branch…** in the
+When a push is rejected because the remote has commits you don't, the error offers **Pull** first,
+then **Force push…** (with lease). The command palette has it too, as **Force push current branch…** in the
 Remotes group; it is hidden on a detached HEAD or when the branch has no upstream. It always
-asks for confirmation.
+asks for confirmation, which says how many commits the remote branch loses (when the counts are
+known) and that Undo can't take back a push.
 
 ??? note "Details"
     The push is refused if the remote branch changed since your last fetch ("⟨remote⟩/⟨branch⟩

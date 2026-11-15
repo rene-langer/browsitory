@@ -1,6 +1,7 @@
 import type { PatchApply, PatchFileStatus, PatchPreview } from "../ipc/RepoClient";
 import { formatAbsoluteDate } from "../lib/formatDate";
 import { useDateFormat } from "../state/useDateFormat";
+import { DialogActions } from "./primitives/DialogActions";
 import { FormDialog } from "./primitives/FormDialog";
 import styles from "./ApplyPatchDialog.module.css";
 
@@ -45,20 +46,28 @@ export function ApplyPatchDialog({
   const mails = preview.parts.filter((part) => part.mail !== null).length;
   const reason = blockedReason ?? (preview.problem === null ? null : "The patch doesn't apply");
   const commitsReason = reason ?? commitsBlockedReason(preview, hasStagedChanges);
-  const button = (how: PatchApply, label: string, why: string | null) => (
-    <button type="button" disabled={why !== null} title={why ?? undefined} onClick={() => why === null && onApply(how)}>
+  const button = (how: PatchApply, label: string, why: string | null, primary = false) => (
+    <button
+      type="button"
+      data-tone={primary ? "primary" : undefined}
+      disabled={why !== null}
+      title={why ?? undefined}
+      onClick={() => why === null && onApply(how)}
+    >
       {label}
     </button>
   );
   return (
-    <FormDialog ariaLabel="Apply patch" onCancel={onCancel}>
+    <FormDialog
+      title="Apply patch"
+      description={
+        mails > 0
+          ? `${mails} ${mails === 1 ? "commit" : "commits"} as git format-patch ${mails === 1 ? "mail" : "mails"}`
+          : "A plain diff (no author or message)"
+      }
+      onCancel={onCancel}
+    >
       <div className={styles.body}>
-        <h2 className={styles.title}>Apply patch</h2>
-        <p className={styles.summary}>
-          {mails > 0
-            ? `${mails} ${mails === 1 ? "commit" : "commits"} as git format-patch ${mails === 1 ? "mail" : "mails"}`
-            : "A plain diff (no author or message)"}
-        </p>
         <ol className={styles.parts} aria-label="Patch contents">
           {preview.parts.map((part, index) => (
             <li key={index} className={styles.part}>
@@ -109,14 +118,14 @@ export function ApplyPatchDialog({
           )
         )}
         {blockedReason !== null && <p className={styles.note}>{blockedReason}</p>}
-        <div className={styles.actions}>
-          {button("WorkTree", "Apply", reason)}
+        <DialogActions>
+          {button("WorkTree", "Apply", reason, true)}
           {button("Stage", "Apply and stage", reason)}
           {button("Commits", mails > 1 ? `Apply as ${mails} commits` : "Apply as commit", commitsReason)}
           <button type="button" data-autofocus onClick={onCancel}>
             Cancel
           </button>
-        </div>
+        </DialogActions>
       </div>
     </FormDialog>
   );

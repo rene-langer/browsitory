@@ -9,7 +9,7 @@ function ConfirmHost() {
   return (
     <>
       <button onClick={() => setOpen(true)}>Trigger</button>
-      {open && <ConfirmDialog ariaLabel="Sure" message="Sure?" confirmLabel="Yes" onConfirm={() => setOpen(false)} onCancel={() => setOpen(false)} />}
+      {open && <ConfirmDialog title="Sure" message="Sure?" confirmLabel="Yes" onConfirm={() => setOpen(false)} onCancel={() => setOpen(false)} />}
     </>
   );
 }
@@ -22,7 +22,7 @@ function FormHost({ returnToOther = false }: { returnToOther?: boolean }) {
       <button onClick={() => setOpen(true)}>Trigger</button>
       <button ref={setOther}>Other</button>
       {open && (
-        <FormDialog ariaLabel="Form" onCancel={() => setOpen(false)} returnFocusTo={returnToOther ? other : undefined}>
+        <FormDialog title="Form" onCancel={() => setOpen(false)} returnFocusTo={returnToOther ? other : undefined}>
           <input aria-label="field" />
           <button onClick={() => setOpen(false)}>Done</button>
         </FormDialog>

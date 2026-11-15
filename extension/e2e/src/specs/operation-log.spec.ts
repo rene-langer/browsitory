@@ -5,7 +5,7 @@ import { gitWith } from "../support/git";
 import { connectToWebview } from "../support/webviewPage";
 
 // The operation log over the sidecar transport (#887-#891): `list_operations` and the
-// `operationLog` notifications. A commit fails on its pre-commit hook; the error's "Show details"
+// `operationLog` notifications. A commit fails on its pre-commit hook; the error's "Details"
 // opens the log on that commit, with the hook's output.
 describe("Browsitory VSCode extension operation log", () => {
   const FILE = "vscode-oplog.txt";
@@ -40,7 +40,7 @@ describe("Browsitory VSCode extension operation log", () => {
     await vscode.commands.executeCommand("workbench.action.closeAllEditors");
   });
 
-  it("shows a failed commit and its hook's output from the error's Show details", async function () {
+  it("shows a failed commit and its hook's output from the error's Details", async function () {
     this.timeout(120000);
     fs.writeFileSync(hookPath, `#!/bin/sh\necho "${HOOK_OUTPUT}" >&2\nexit 1\n`, { mode: 0o755 });
     fs.writeFileSync(path.join(cwd, FILE), "logged\n");
@@ -56,7 +56,7 @@ describe("Browsitory VSCode extension operation log", () => {
       await webview.clickBySelector('button[data-action="commit"]');
       await webview.waitForSelector('dialog[aria-label="pre-commit hook failed"]', 20000);
       await webview.clickByText("button", "Close");
-      await webview.clickByText("button", "Show details");
+      await webview.clickByText("button", "Details");
 
       await webview.waitForSelector('dialog[aria-label="Operation log"]', 15000);
       await webview.waitForText('section[aria-label="Operation details"] h3', `Commit ${SUMMARY}`, 15000);
