@@ -12,6 +12,7 @@ import {
 import type { AppState } from "./useAppState";
 import type { RunMutation, RunMutationWithOutcome } from "./useMutationRunner";
 import { hookFailedMessage, type HookRetry } from "../lib/hookFailure";
+import { failedOperation, FailureWithNextStep, hookNextStep, type FailedOperation } from "../lib/operationErrors";
 import { failureError } from "./useMutationRunner";
 
 const NO_AMEND_OPTIONS: AmendOptions = { author: null, trailers: [] };
@@ -76,8 +77,8 @@ export function useHistoryActions(
     async <T extends PickOutcome | SequenceOutcome>(
       call: () => Promise<T>,
       retry: HookRetry,
-      /** What a refusal says first ("Cherry-pick of 4c5beaf didn't start", #997). */
-      refused?: string,
+      /** What a refusal says first ("Cherry-pick of 4c5beaf didn't start", #997, #1032). */
+      refused?: FailedOperation,
     ): Promise<T | null> => {
       let outcome: T | null = null;
       let failure: unknown = undefined;
@@ -92,8 +93,8 @@ export function useHistoryActions(
       });
       setState((prev) => ({ ...prev, hookRun: null }));
       if (failed) {
-        const { error, errorHint } = failureError(failure);
-        setState((prev) => ({ ...prev, error: refused === undefined ? error : `${refused}: ${error}`, errorHint }));
+        const { error, errorHint } = failureError(failure, refused);
+        setState((prev) => ({ ...prev, error, errorHint }));
         return null;
       }
       const settled = outcome as T | null;
@@ -115,7 +116,7 @@ export function useHistoryActions(
       runRepoChanging(
         () => client.cherryPick(repoPath, commitId, mainline ?? null),
         { kind: "pick" },
-        `Cherry-pick of ${commitId.slice(0, 7)} didn't start`,
+        failedOperation.pick("CherryPick", [commitId]),
       ),
     [client, runRepoChanging, repoPath],
   );
@@ -124,17 +125,26 @@ export function useHistoryActions(
       runRepoChanging(
         () => client.revertCommit(repoPath, commitId, mainline ?? null),
         { kind: "pick" },
-        `Revert of ${commitId.slice(0, 7)} didn't start`,
+        failedOperation.pick("Revert", [commitId]),
       ),
     [client, runRepoChanging, repoPath],
   );
   const cherryPickMany = useCallback(
     (commitIds: string[]) =>
-      runRepoChanging(() => client.cherryPickMany(repoPath, commitIds), { kind: "continueSequence" }),
+      runRepoChanging(
+        () => client.cherryPickMany(repoPath, commitIds),
+        { kind: "continueSequence" },
+        failedOperation.pick("CherryPick", commitIds),
+      ),
     [client, runRepoChanging, repoPath],
   );
   const revertMany = useCallback(
-    (commitIds: string[]) => runRepoChanging(() => client.revertMany(repoPath, commitIds), { kind: "continueSequence" }),
+    (commitIds: string[]) =>
+      runRepoChanging(
+        () => client.revertMany(repoPath, commitIds),
+        { kind: "continueSequence" },
+        failedOperation.pick("Revert", commitIds),
+      ),
     [client, runRepoChanging, repoPath],
   );
   const continueSequence = useCallback(
@@ -155,11 +165,11 @@ export function useHistoryActions(
     [client, withOutcome, repoPath],
   );
   const resetToCommit = useCallback(
-    (commitId: string, mode: ResetMode) => runMutation(() => client.resetToCommit(repoPath, commitId, mode)),
+    (commitId: string, mode: ResetMode) => runMutation(() => client.resetToCommit(repoPath, commitId, mode), failedOperation.reset(commitId)),
     [client, runMutation, repoPath],
   );
   const checkoutCommit = useCallback(
-    (commitId: string) => runMutation(() => client.checkoutCommit(repoPath, commitId)),
+    (commitId: string) => runMutation(() => client.checkoutCommit(repoPath, commitId), failedOperation.switchDetached(commitId)),
     [client, runMutation, repoPath],
   );
   const amendCommit = useCallback(
@@ -180,10 +190,10 @@ export function useHistoryActions(
               dialogOpen: true,
             },
           }));
-          throw new Error(hookFailedMessage(outcome.hook));
+          throw new FailureWithNextStep(hookFailedMessage(outcome.hook), hookNextStep("amend again"));
         }
         setState((prev) => ({ ...prev, amendMode: false, skipHooks: false, hookFailure: null }));
-      });
+      }, failedOperation.amend());
       setState((prev) => ({ ...prev, hookRun: null }));
       return ok;
     },

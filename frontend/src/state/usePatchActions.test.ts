@@ -76,7 +76,7 @@ describe("usePatchActions", () => {
   it("shows a failed save in the error banner and says nothing when the dialog is cancelled", async () => {
     const failing = setup({ getPatch: vi.fn(async () => Promise.reject(new Error("There are no staged changes."))) });
     await failing.actions.savePatch({ kind: "Staged" }, "staged.patch");
-    expect(failing.state().error).toBe("There are no staged changes.");
+    expect(failing.state().error).toBe("Couldn't save the patch: There are no staged changes.");
 
     const cancelled = setup({ savePatchFile: vi.fn(async () => null) });
     await cancelled.actions.savePatch({ kind: "Staged" }, "staged.patch");
@@ -100,7 +100,7 @@ describe("usePatchActions", () => {
   it("shows an unreadable patch file in the error banner instead of a preview", async () => {
     const failing = setup({ previewPatch: vi.fn(async () => Promise.reject(new Error("The file holds no patch."))) });
     await failing.actions.applyPatchFile();
-    expect(failing.state().error).toBe("The file holds no patch.");
+    expect(failing.state().error).toBe("Couldn't read the patch file: The file holds no patch.");
     expect(failing.state().dialog).toBeNull();
   });
 

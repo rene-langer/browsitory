@@ -210,8 +210,8 @@ describe("useAppState", () => {
     await act(async () => {
       outcome = await result.current.createBranch("bad", "HEAD");
     });
-    expect(outcome).toBe("branch already exists");
-    expect(result.current.state.error).toBe("branch already exists");
+    expect(outcome).toBe("Couldn't create branch bad: branch already exists");
+    expect(result.current.state.error).toBe("Couldn't create branch bad: branch already exists");
   });
 
   it("createWorktree resolves to null on success and to the failure message on failure", async () => {
@@ -231,8 +231,8 @@ describe("useAppState", () => {
     await act(async () => {
       outcome = await result.current.createWorktree("bad", "/repo-bad", "bad", null);
     });
-    expect(outcome).toBe("worktree path already exists");
-    expect(result.current.state.error).toBe("worktree path already exists");
+    expect(outcome).toBe("Couldn't create worktree bad: worktree path already exists");
+    expect(result.current.state.error).toBe("Couldn't create worktree bad: worktree path already exists");
   });
 
   it("createWorktree adds the worktree to state before the backend call resolves", async () => {
@@ -273,7 +273,7 @@ describe("useAppState", () => {
     await act(() => result.current.removeWorktree("feature"));
 
     expect(result.current.state.worktrees).toEqual([worktreeA]);
-    expect(result.current.state.error).toBe("worktree has uncommitted changes");
+    expect(result.current.state.error).toBe("Couldn't remove worktree feature: worktree has uncommitted changes");
   });
 
   it("createTag resolves to null on success and to the failure message on failure", async () => {
@@ -293,8 +293,8 @@ describe("useAppState", () => {
     await act(async () => {
       outcome = await result.current.createTag("bad", null, null);
     });
-    expect(outcome).toBe("tag already exists");
-    expect(result.current.state.error).toBe("tag already exists");
+    expect(outcome).toBe("Couldn't create tag bad: tag already exists");
+    expect(result.current.state.error).toBe("Couldn't create tag bad: tag already exists");
   });
 
   it("createTag adds the tag to state before the backend call resolves", async () => {
@@ -335,7 +335,7 @@ describe("useAppState", () => {
     await act(() => result.current.deleteTag("v1.0.0"));
 
     expect(result.current.state.tags).toEqual([tagA]);
-    expect(result.current.state.error).toBe("delete failed");
+    expect(result.current.state.error).toBe("Couldn't delete tag v1.0.0: delete failed");
   });
 
   // The global banner's dismiss control (issue #30/UX-002): without it, `state.error` only ever
@@ -350,7 +350,7 @@ describe("useAppState", () => {
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
 
     await act(() => result.current.createTag("bad", null, null));
-    expect(result.current.state.error).toBe("tag already exists");
+    expect(result.current.state.error).toBe("Couldn't create tag bad: tag already exists");
 
     act(() => result.current.dismissError());
 

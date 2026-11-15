@@ -18,7 +18,7 @@ describe("git hooks", () => {
 
     expect(ok).toBe(false);
     expect(commit).toHaveBeenCalledWith(TEST_REPO_PATH, "msg", false, []);
-    expect(result.current.state.error).toBe("The pre-commit hook failed.");
+    expect(result.current.state.error).toBe("Couldn't commit: The pre-commit hook failed.");
     expect(result.current.state.hookFailure).toEqual({
       hook: "pre-commit",
       output: "lint\n",
@@ -271,7 +271,7 @@ describe("git hooks", () => {
     expect(outcome).toBeNull();
     expect(getHeadInfo.mock.calls.length).toBeGreaterThan(headInfoCalls);
     expect(getStatus.mock.calls.length).toBeGreaterThan(statusCalls);
-    expect(result.current.state.error).toBe("could not write CHERRY_PICK_HEAD");
+    expect(result.current.state.error).toBe("Cherry-pick of 3 commits didn't start: could not write CHERRY_PICK_HEAD");
     expect(result.current.state.pending).toBe(false);
   });
 

@@ -1,3 +1,4 @@
+import { failedOperation } from "../lib/operationErrors";
 import { useCallback, useEffect, useRef } from "react";
 import { coversEveryBranch, withRenamedBranch, withoutBranch } from "../lib/graphSelection";
 import { errorKind, type RepoClient, type StashSwitchOutcome, type UndoOutcome } from "../ipc/RepoClient";
@@ -171,6 +172,7 @@ export function useBranchActions(
           await client.createBranch(repoPath, name, startPoint, checkout);
           setState((prev) => ({ ...prev, createBranchDraft: null, selectedRow: "uncommitted" }));
         },
+        failedOperation.createBranch(name),
       );
     },
     [client, refuseTaken, runOptimisticMutationWithMessage, repoPath, setState],
@@ -189,7 +191,7 @@ export function useBranchActions(
           throw error;
         }
         setState((prev) => ({ ...prev, selectedRow: "uncommitted", pullOutcome: null }));
-      }),
+      }, failedOperation.switchBranch(name)),
     [client, runMutation, repoPath, setState],
   );
   const stashAndSwitch = useCallback(
@@ -205,7 +207,7 @@ export function useBranchActions(
           pullOutcome: null,
           stashSwitchOutcome: { branchName: name, outcome },
         }));
-      });
+      }, failedOperation.stashAndSwitch(name));
       return result;
     },
     [client, runMutation, repoPath, setState],
@@ -225,6 +227,7 @@ export function useBranchActions(
           await client.deleteBranch(repoPath, name, force);
           await dropFromSelection(name);
         },
+        failedOperation.deleteBranch(name),
       ),
     [client, runOptimisticMutation, repoPath, dropFromSelection],
   );
@@ -247,6 +250,7 @@ export function useBranchActions(
           const next = withRenamedBranch(selectionRef.current, oldName, newName);
           if (next !== null) await updateSelection(next, "a branch rename");
         },
+        failedOperation.renameBranch(oldName, newName),
       );
     },
     [client, refuseTaken, runOptimisticMutation, repoPath, updateSelection],

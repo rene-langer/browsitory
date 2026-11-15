@@ -1,3 +1,4 @@
+import { failedOperation } from "../lib/operationErrors";
 import { useCallback, type RefObject } from "react";
 import type { RepoClient } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
@@ -62,7 +63,10 @@ export function useReflogActions(
       selectedReflogReference.current = reference;
       reflogRequestGeneration.current += 1;
       setState((prev) => ({ ...prev, selectedReflogReference: reference }));
-      return runMutation(() => client.restoreReflogEntry(repoPath, reference, newId));
+      return runMutation(
+        () => client.restoreReflogEntry(repoPath, reference, newId),
+        failedOperation.restoreReflog(reference, newId),
+      );
     },
     [client, runMutation, repoPath, setState, selectedReflogReference, reflogRequestGeneration],
   );

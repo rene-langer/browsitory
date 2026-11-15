@@ -1,3 +1,4 @@
+import { failedOperation } from "../lib/operationErrors";
 import { useCallback, useEffect, useRef } from "react";
 import type { RepoClient, WorktreeInfo } from "../ipc/RepoClient";
 import { comparableWorktreePath, takenNameMessage } from "../lib/takenNames";
@@ -58,6 +59,7 @@ export function useWorktreeActions(
                 worktrees: [...prev.worktrees, { name, path, head: null, isMain: false, isLocked: false, isPrunable: false }],
               },
         () => client.createWorktree(repoPath, name, path, branch, startPoint),
+        failedOperation.createWorktree(name),
       );
     },
     [client, runOptimisticMutationWithMessage, repoPath, setState],
@@ -68,11 +70,12 @@ export function useWorktreeActions(
         // Only linked worktrees are removed: one may be named "main" like the main worktree's label.
         (prev) => ({ ...prev, worktrees: prev.worktrees.filter((worktree) => worktree.isMain || worktree.name !== name) }),
         () => client.removeWorktree(repoPath, name),
+        failedOperation.removeWorktree(name),
       ),
     [client, runOptimisticMutation, repoPath],
   );
   const pruneWorktrees = useCallback(
-    () => runMutation(() => client.pruneWorktrees(repoPath)),
+    () => runMutation(() => client.pruneWorktrees(repoPath), failedOperation.pruneWorktrees()),
     [client, runMutation, repoPath],
   );
 
