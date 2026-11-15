@@ -111,6 +111,14 @@ describe("BranchTree — local branches", () => {
     expect(props.onDeleteBranch).toHaveBeenCalledWith("feat/foo", true);
   });
 
+  it("confirms a delete Undo can take back with a plain \"Delete branch\" button, not a danger one (#988)", async () => {
+    renderTree({ onCountCommitsOnlyOnBranch: vi.fn().mockResolvedValue(2) });
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete feat/foo" });
+    expect(within(dialog).getByRole("button", { name: "Delete branch" })).toHaveAttribute("data-tone", "primary");
+  });
+
   // Before #996 a plain delete was tried first, and its "unmerged commits" failure showed as an
   // error banner beside the Force delete confirm. A branch whose commits another branch still
   // has loses nothing, so it goes without asking.
