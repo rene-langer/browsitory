@@ -344,6 +344,11 @@ pub fn rename_branch(repo: &Repository, old_name: &str, new_name: &str) -> Resul
     Ok(())
 }
 
+/// How many commits of local branch `name` no other local or remote-tracking branch has (#996).
+pub fn commits_only_on_branch(_repo: &Repository, _name: &str) -> Result<usize, BranchError> {
+    todo!("#996")
+}
+
 pub fn delete_branch(repo: &Repository, name: &str, force: bool) -> Result<(), BranchError> {
     crate::repo::check_branch_not_rebased(repo, name)?;
     if let Some(held) = crate::repo::branch_held(repo, name, crate::repo::HoldRule::MoveOrDelete)? {

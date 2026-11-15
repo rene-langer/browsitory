@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TransferErrorKind, TransferOperation, TransferProgress, UpstreamInfo } from "../ipc/RepoClient";
 import type { PushRequest } from "./hookFailure";
+import type { TransferSubject } from "./transferCopy";
 import {
   IDLE_TRANSFER,
   fetchAllFailureMessage,
@@ -335,6 +336,89 @@ describe("transferFailureMessage", () => {
     ["Clone", "TransferFailed", "Couldn't finish the transfer. Try again."],
   ])("%s / %s → %s", (operation, errorKind, message) => {
     expect(transferFailureMessage(operation, errorKind, label)).toBe(message);
+  });
+});
+
+// #997: a failure names the operation and what it worked on, and the next step.
+describe("transferFailureMessage with what the transfer worked on", () => {
+  const pushTo = (force: boolean): TransferSubject => ({
+    kind: "push",
+    localBranch: "main",
+    target: "origin/main",
+    ahead: 1,
+    setUpstream: false,
+    force,
+  });
+  it.each<[TransferOperation, TransferErrorKind | null, TransferSubject, string]>([
+    [
+      "Fetch",
+      "TransferFailed",
+      { kind: "fetch", remoteName: "broken" },
+      "Couldn't fetch from broken. Check the remote's URL and your connection, then try again.",
+    ],
+    [
+      "FetchAll",
+      null,
+      { kind: "fetchAll", remoteCount: 2 },
+      "Couldn't fetch from the remotes. Check the remote's URL and your connection, then try again.",
+    ],
+    [
+      "Pull",
+      "TransferFailed",
+      { kind: "pull", target: "origin/main" },
+      "Couldn't pull from origin/main. Check the remote and your connection, then pull again.",
+    ],
+    [
+      "PushBranch",
+      "TransferFailed",
+      pushTo(false),
+      "Couldn't push main to origin/main. Check the remote and your connection, then try again.",
+    ],
+    [
+      "ForcePushBranch",
+      "TransferFailed",
+      pushTo(true),
+      "Couldn't force push main to origin/main. Check the remote and your connection, then try again.",
+    ],
+    [
+      "PushTags",
+      "TransferFailed",
+      { kind: "pushTags", remoteName: "origin", names: ["v1"] },
+      "Couldn't push tag v1 to origin. Check the remote and your connection, then try again.",
+    ],
+    [
+      "DeleteRemoteBranch",
+      "TransferFailed",
+      { kind: "deleteRemoteBranch", remoteName: "origin", branchName: "old" },
+      "Couldn't delete origin/old. Check the remote and your connection, then try again.",
+    ],
+    [
+      "DeleteRemoteTag",
+      "TransferFailed",
+      { kind: "deleteRemoteTag", remoteName: "origin", tagName: "v1", deleteLocal: false },
+      "Couldn't delete tag v1 from origin. Check the remote and your connection, then try again.",
+    ],
+    [
+      "PushBranch",
+      "NonFastForward",
+      pushTo(false),
+      "Push was rejected because the remote has newer commits. Pull or reconcile history, then try again.",
+    ],
+  ])("%s / %s on %o → %s", (operation, errorKind, subject, message) => {
+    expect(transferFailureMessage(operation, errorKind, "origin/main", subject)).toBe(message);
+  });
+
+  it("names the remote in a failed transfer's banner", () => {
+    const { session } = feed(
+      requestTransfer(transferRequest("Fetch", { subject: { kind: "fetch", remoteName: "broken" } })),
+      [event("op-1", "Fetch", "Starting")],
+      UPSTREAM,
+    );
+    const step = onTransferProgress(session, event("op-1", "Fetch", "Failed", { errorKind: "TransferFailed" }), UPSTREAM);
+    expect(step.effect).toMatchObject({
+      kind: "failed",
+      patch: { error: "Couldn't fetch from broken. Check the remote's URL and your connection, then try again." },
+    });
   });
 });
 

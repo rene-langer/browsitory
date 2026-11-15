@@ -14,6 +14,27 @@ fn unborn_head_has_no_id_and_no_operation() {
 }
 
 #[test]
+fn unborn_head_names_the_branch_its_first_commit_creates() {
+    // The toolbar shows "trunk (no commits yet)" for a new repository (#983).
+    let (_dir, repo) = common::init_repo();
+    repo.set_head("refs/heads/trunk").unwrap();
+    let info = head_info(&repo).unwrap();
+    assert_eq!(info.unborn_branch.as_deref(), Some("trunk"));
+    assert_eq!(info.head_id, None);
+}
+
+#[test]
+fn born_and_detached_heads_have_no_unborn_branch() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "a.txt", "a\n");
+    common::commit_all(&repo, "first");
+    assert_eq!(head_info(&repo).unwrap().unborn_branch, None);
+    let oid = repo.head().unwrap().target().unwrap();
+    repo.set_head_detached(oid).unwrap();
+    assert_eq!(head_info(&repo).unwrap().unborn_branch, None);
+}
+
+#[test]
 fn attached_head_reports_full_id_and_not_detached() {
     let (dir, repo) = common::init_repo();
     common::write_file(dir.path(), "a.txt", "a\n");

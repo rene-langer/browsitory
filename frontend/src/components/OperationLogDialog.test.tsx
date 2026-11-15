@@ -271,3 +271,78 @@ describe("OperationLogDialog's Run again (#890)", () => {
     expect(run).not.toHaveBeenCalled();
   });
 });
+
+describe("OperationLogDialog's details, cause first (#1022)", () => {
+  function renderEntry(logged: OperationLogEntry) {
+    const { repoClient } = client([page([logged])]);
+    render(
+      <OperationLogDialog
+        client={repoClient}
+        repoPath="/repo"
+        focus="latestFailed"
+        onClose={() => {}}
+        runAgain={{ run: vi.fn(), blockedReason: () => null }}
+      />,
+    );
+    return screen.findByRole("region", { name: "Operation details" });
+  }
+
+  /** Where each of `parts` starts in `element`'s text; -1 when missing. */
+  const positions = (element: HTMLElement, parts: string[]) => parts.map((part) => element.textContent!.indexOf(part));
+
+  it("shows the cause in the app's words, then git's own text, then the facts, then Run again", async () => {
+    const details = await renderEntry(
+      entry(1, "Pull", {
+        outcome: "Failed",
+        errorKind: "DirtyWorktree",
+        transferError: "TransferFailed",
+        message: "cannot pull with a dirty worktree",
+        rerun: { kind: "Pull" },
+      }),
+    );
+    await waitFor(() => expect(details).toHaveTextContent("cannot pull with a dirty worktree"));
+    const order = positions(details, [
+      "Commit or stash your changes, then try again.",
+      "cannot pull with a dirty worktree",
+      "Result",
+      "Run again",
+    ]);
+    expect(order.every((position) => position >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  it("names a transfer's own failure as the cause", async () => {
+    const details = await renderEntry(
+      entry(1, "Push", { target: "origin", outcome: "Failed", transferError: "NonFastForward", message: "rejected" }),
+    );
+    await waitFor(() => expect(details).toHaveTextContent("rejected"));
+    const order = positions(details, ["The remote has commits this branch doesn't", "rejected", "Result"]);
+    expect(order.every((position) => position >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  it("copies the details with git's full text, libgit2's codes included", async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    try {
+      const raw = "failed to resolve path '/gone': No such file or directory; class=Os (2); code=NotFound (-3)";
+      const details = await renderEntry(entry(1, "Fetch", { target: "broken", outcome: "Failed", message: raw }));
+      await waitFor(() => expect(details).toHaveTextContent("No such file or directory"));
+      fireEvent.click(within(details).getByRole("button", { name: "Copy details" }));
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringContaining(raw)));
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining("Fetch from broken"));
+    } finally {
+      Reflect.deleteProperty(navigator, "clipboard");
+    }
+  });
+
+  it.each([
+    ["Fetch", "broken", "Fetch from broken"],
+    ["Push", "origin", "Push to origin"],
+    ["Push tags", "origin", "Push tags to origin"],
+    ["Delete branch", "old", "Delete branch old"],
+  ])("labels %s on %s as %s", async (name, target, label) => {
+    await renderEntry(entry(1, name, { target }));
+    expect(await screen.findByRole("heading", { name: label })).toBeInTheDocument();
+  });
+});

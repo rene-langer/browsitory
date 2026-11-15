@@ -154,4 +154,8 @@ impl ReadHandle {
     pub fn switch_conflicts(&self, name: String) -> Result<Vec<String>, ErrorDto> {
         self.read(|reply| Command::GetSwitchConflicts { name, reply })
     }
+    /// How many commits of local branch `name` no other branch has (#996).
+    pub fn count_commits_only_on_branch(&self, _name: String) -> Result<usize, ErrorDto> {
+        todo!("#996")
+    }
 }

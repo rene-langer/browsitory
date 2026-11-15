@@ -56,3 +56,24 @@ describe("describeError", () => {
     expect(result.hint).toBeUndefined();
   });
 });
+
+// #997: libgit2's class and code are for bug reports, not for the banner.
+describe("withoutLibgit2Codes", () => {
+  it.each([
+    [
+      "reference 'refs/heads/main' not found; class=Reference (4); code=UnbornBranch (-9)",
+      "reference 'refs/heads/main' not found",
+    ],
+    [
+      "failed to resolve path '/gone': No such file or directory; class=Os (2); code=NotFound (-3)",
+      "failed to resolve path '/gone': No such file or directory",
+    ],
+    ["could not find repository at '/work'; class=Repository (6); code=NotFound (-3)", "could not find repository at '/work'"],
+    ["failed to connect; class=Net (12)", "failed to connect"],
+    ["object not found; code=NotFound (-3)", "object not found"],
+    ["Commit or unstage your staged changes first.", "Commit or unstage your staged changes first."],
+    ["git operation failed: bad; class=Index (10); code=Conflict (-13). Fetch first.", "git operation failed: bad. Fetch first."],
+  ])("turns %j into %j", (raw, shown) => {
+    expect(withoutLibgit2Codes(raw)).toBe(shown);
+  });
+});
