@@ -2617,6 +2617,41 @@ describe("App", () => {
         expect(await screen.findByText("Aborted merge")).toBeInTheDocument();
       });
 
+      // A2: a cherry-pick started in a terminal, paused on a conflict, that removes no commits on
+      // Abort still asks before throwing away a resolved file.
+      it("asks before Abort of a terminal cherry-pick throws away a resolved file (#979, #253)", async () => {
+        const abortSequence = vi.fn<RepoClient["abortSequence"]>(async () => ({ rewound: false }));
+        render(
+          <App
+            client={pickClient({
+              getStatus: async () => [conflicted("a.txt"), { path: "b.txt", oldPath: null, staged: true, kind: "Modified" }],
+              getMergeMessage: async () => "pick\n\n# Conflicts:\n#\ta.txt\n#\tb.txt\n",
+              getConflictHunks: async () => [],
+              getHeadInfo: async () =>
+                head({
+                  operation: "CherryPick",
+                  terminalSequence: {
+                    kind: "CherryPick",
+                    pausedOnConflict: true,
+                    startedAt: "c1",
+                    startedAtSummary: "one",
+                    rewinds: false,
+                    commitsToRemove: 0,
+                  },
+                }),
+              abortSequence,
+            })}
+          />,
+        );
+        const strip = await screen.findByRole("status", { name: "Operation status" });
+        fireEvent.click(within(strip).getByRole("button", { name: "Abort cherry-pick" }));
+        const dialog = await screen.findByRole("dialog", { name: "Abort the cherry-pick?" });
+        expect(dialog).toHaveTextContent("Your resolutions in 1 file are lost, and Undo can't bring them back.");
+        fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+        await waitFor(() => expect(screen.queryByRole("dialog", { name: "Abort the cherry-pick?" })).toBeNull());
+        expect(abortSequence).not.toHaveBeenCalled();
+      });
+
       it("keeps a merge's Abort and conflict count out of the commit dock, which shrinks to one line (#995, #980)", async () => {
         render(
           <App
