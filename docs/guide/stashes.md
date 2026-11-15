@@ -16,9 +16,9 @@ files](staging-and-committing.md#selecting-several-files)) and use **Stash N fil
 
 ## Getting a stash back
 
-Expand **Stashes** to see everything set aside. Each stash shows its name and, below it, the
-branch it was made on, how long ago, and how many files it holds ("On main · 2 days ago · 3
-files"). The name is the message you gave it, or, for a stash without one, "WIP:" and the commit
+Expand **Stashes** to see everything set aside (with nothing stashed, it points you to **Stash**
+in the toolbar). Each stash shows its name and, below it, the branch it was made on, how long
+ago, and how many files it holds ("On main · 2 days ago · 3 files"). The name is the message you gave it, or, for a stash without one, "WIP:" and the commit
 it was made on. Hover over a stash to read its full message and the date.
 
 Click a stash to see what it holds: **Changes** (diffed against the commit it was made on) and,
