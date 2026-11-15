@@ -84,6 +84,12 @@ describe("colour token contrast (WCAG 2.2 AA)", () => {
     expect(failures({ ...LIGHT, ...DARK })).toEqual([]);
   });
 
+  it("draws the focus ring in another colour than a pressed toggle's accent (#1029)", () => {
+    for (const tokens of [LIGHT, { ...LIGHT, ...DARK }]) {
+      expect(resolveColor(t("focus-ring"), tokens)).not.toEqual(resolveColor(t("accent"), tokens));
+    }
+  });
+
   it("keeps the system dark block identical to the explicit dark theme", () => {
     expect(SYSTEM_DARK).toEqual(DARK);
   });

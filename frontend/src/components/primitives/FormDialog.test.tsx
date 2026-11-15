@@ -16,6 +16,33 @@ describe("FormDialog", () => {
     expect(screen.getByLabelText("first")).toHaveFocus();
   });
 
+  it("starts on the checked radio of a group, not on the frame or the group's first radio (#1029)", () => {
+    render(
+      <FormDialog title="Reset" onCancel={vi.fn()}>
+        <form>
+          <fieldset>
+            <legend>Mode</legend>
+            <input type="radio" name="mode" aria-label="Soft" />
+            <input type="radio" name="mode" aria-label="Mixed" defaultChecked />
+          </fieldset>
+          <button type="submit">Reset</button>
+        </form>
+      </FormDialog>,
+    );
+    expect(screen.getByLabelText("Mixed")).toHaveFocus();
+  });
+
+  it("skips a disabled or hidden field for the first enabled one (#1029)", () => {
+    render(
+      <FormDialog title="Pick" onCancel={vi.fn()}>
+        <input type="hidden" name="token" />
+        <input aria-label="off" disabled />
+        <input aria-label="on" />
+      </FormDialog>,
+    );
+    expect(screen.getByLabelText("on")).toHaveFocus();
+  });
+
   it("prefers a data-autofocus element over the first field", () => {
     render(
       <FormDialog title="Pick" onCancel={vi.fn()}>

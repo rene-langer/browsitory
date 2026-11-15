@@ -245,6 +245,30 @@ describe("RepoPicker recent repositories (#690)", () => {
     expect(screen.getAllByText("Nothing matches “nothing”.")).toHaveLength(2);
   });
 
+  it("starts keyboard focus in the filter once the recent repositories are listed (#1029)", async () => {
+    const client = fakeClient({ listRecentRepos: async () => ["/code/widget"] });
+    render(<RepoPicker client={client} onOpenRepo={vi.fn()} {...workspaceProps()} />);
+    await screen.findByText("/code/widget");
+    expect(screen.getByRole("searchbox", { name: "Filter repositories and workspaces" })).toHaveFocus();
+  });
+
+  it("starts on Open repository… when there is nothing to filter (#1029)", async () => {
+    render(<RepoPicker client={fakeClient()} onOpenRepo={vi.fn()} {...workspaceProps()} />);
+    await screen.findByText("No recent repositories");
+    expect(screen.getByRole("button", { name: "Open repository…" })).toHaveFocus();
+  });
+
+  it("leaves focus where it is when something else already has it (#1029)", async () => {
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    outside.focus();
+    const client = fakeClient({ listRecentRepos: async () => ["/code/widget"] });
+    render(<RepoPicker client={client} onOpenRepo={vi.fn()} {...workspaceProps()} />);
+    await screen.findByText("/code/widget");
+    expect(outside).toHaveFocus();
+    outside.remove();
+  });
+
   it("shows no filter while there is nothing to filter", async () => {
     render(<RepoPicker client={fakeClient()} onOpenRepo={vi.fn()} {...workspaceProps()} />);
     await screen.findByText("No recent repositories");
