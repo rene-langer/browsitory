@@ -108,6 +108,12 @@ export const failedOperation = {
     const what = commitIds.length === 1 ? short(commitIds[0]) : `${commitIds.length} commits`;
     return op(`${noun} of ${what} didn't start`, unlocked("try again"));
   },
+  /** A cherry-pick or revert that failed after it started: some steps or the paused one stay. */
+  pickStopped: (kind: SequenceKind, commitIds: readonly string[]) => {
+    const noun = kind === "CherryPick" ? "cherry-pick" : "revert";
+    const what = commitIds.length === 1 ? short(commitIds[0]) : `${commitIds.length} commits`;
+    return op(`Couldn't finish the ${noun} of ${what}`, `Fix what stopped it, then continue or abort the ${noun}.`);
+  },
   createWorktree: (name: string) =>
     op(
       `Couldn't create worktree ${name}`,

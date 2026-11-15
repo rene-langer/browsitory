@@ -875,7 +875,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
 
   const mergeRebase = useMergeRebaseActions(client, repoPath, runMutation, setState);
 
-  const history = useHistoryActions(client, repoPath, runMutation, runMutationWithOutcome, setState);
+  const history = useHistoryActions(client, repoPath, runMutation, runMutationWithOutcome, setState, state.headInfo.headId);
   const hooks = useHookActions(client, repoPath, state.hookRun, setState);
   // The slice objects are new on every render, their actions are not: the callback depends on
   // the actions, so it stays as stable as they are.
