@@ -11,8 +11,11 @@ import { shortRefName } from "./shortRefName";
 export interface FailedOperation {
   /** "Couldn't create branch feature/x": the operation and its object, no full stop. */
   failed: string;
-  /** What to do for an error only git's text explains: a full sentence. */
-  next: string;
+  /**
+   * What to do for an error only git's text explains: a full sentence; `null` when no guess
+   * fits (git's text says it).
+   */
+  next: string | null;
 }
 
 /**
@@ -44,7 +47,7 @@ function fileName(path: string): string {
 // the repository's lock (`index.lock`).
 const unlocked = (again: string) => `Check that no other Git program is using the repository, then ${again}.`;
 
-const op = (failed: string, next: string): FailedOperation => ({ failed, next });
+const op = (failed: string, next: string | null): FailedOperation => ({ failed, next });
 
 const HISTORY_EDIT: Record<HistoryEditKind, (id: string) => string> = {
   Reword: (id) => `Couldn't reword ${id}`,
@@ -87,12 +90,12 @@ export const failedOperation = {
   reset: (commitId: string) => op(`Couldn't reset to ${short(commitId)}`, unlocked("reset again")),
   commit: () => op("Couldn't commit", "Check the message and the staged changes, then commit again."),
   amend: () => op("Couldn't amend the last commit", "Check the message, then amend again."),
-  /** `fastForwardOnly`: such a merge fails when the branches have diverged. */
+  /**
+   * `fastForwardOnly`: such a merge mostly fails because the branches have diverged, which git's
+   * text says; without a typed kind for it (#1033) neither that step nor the lock one is offered.
+   */
   merge: (ref: string, fastForwardOnly = false) =>
-    op(
-      `Couldn't merge ${shortRefName(ref)}`,
-      fastForwardOnly ? "Pick “Fast-forward if possible” and merge again, or rebase first." : unlocked("merge again"),
-    ),
+    op(`Couldn't merge ${shortRefName(ref)}`, fastForwardOnly ? null : unlocked("merge again")),
   rebaseOnto: (ref: string) => op(`Couldn't rebase onto ${shortRefName(ref)}`, unlocked("rebase again")),
   historyEdit: (kind: HistoryEditKind, commitId: string) => op(HISTORY_EDIT[kind](short(commitId)), unlocked("try again")),
   foldStaged: (commitId: string) =>
