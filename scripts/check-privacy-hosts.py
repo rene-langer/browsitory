@@ -135,14 +135,24 @@ def is_ignored(host: str) -> bool:
     return host in IGNORED_HOSTS or host.endswith(IGNORED_SUFFIXES) or host in NON_NETWORK_HOSTS
 
 
+# What source_files scans, as git pathspecs, so listing the ignored files doesn't walk
+# target/ or node_modules/.
+SCANNED_PATHSPECS = (
+    ":(glob)crates/*/src/**", "frontend/src", "extension/src", "frontend/public",
+    ":(glob)frontend/vite*.ts", "crates/tauri-app/capabilities", "frontend/index.html",
+    "extension/package.json", "crates/tauri-app/tauri.conf.json",
+)
+
+
 def git_ignored_files(root: Path) -> set[Path]:
-    """The untracked files git ignores under `root` (#1030), such as the frontend's generated
-    `src/generated/releaseNotes.json`: build output, not code the app runs. Tracked files are
-    never on it, so a CI checkout scans the same files as before. Outside a git work tree (or
-    without git) nothing is skipped."""
+    """The untracked files git ignores among the scanned paths (#1030), such as the frontend's
+    generated `src/generated/releaseNotes.json`: build output, not code the app runs. Tracked
+    files are never on it, so a CI checkout scans the same files as before. Outside a git work
+    tree (or without git) nothing is skipped."""
     try:
         result = subprocess.run(
-            ["git", "ls-files", "-z", "--others", "--ignored", "--exclude-standard"],
+            ["git", "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--",
+             *SCANNED_PATHSPECS],
             cwd=root, capture_output=True, check=True,
         )
     except (OSError, subprocess.CalledProcessError):
