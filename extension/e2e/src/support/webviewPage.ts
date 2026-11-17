@@ -482,6 +482,9 @@ async function findWebviewTarget(
   const deadline = Date.now() + timeoutMs;
   let lastError: unknown;
   while (Date.now() < deadline) {
+    // Only the last poll's error explains a timeout; an earlier one (a window that was
+    // closing) would point at the wrong cause.
+    lastError = undefined;
     try {
       const { targetInfos } = await connection.send<{ targetInfos: TargetInfo[] }>(
         "Target.getTargets",
