@@ -243,13 +243,17 @@ fn inherited_git_env() -> Vec<std::ffi::OsString> {
 /// process's environment says (#282): every inherited `GIT_*` variable is removed (so the twin
 /// works on `dir`, never a repository a hook's `GIT_DIR` names), `HOME`/`XDG_CONFIG_HOME` are the
 /// hermetic home, `GIT_CONFIG_GLOBAL` is the empty hermetic file, `GIT_CONFIG_NOSYSTEM=1`,
-/// `GNUPGHOME` is an empty directory of its own (no gpg agent of the developer's), and
+/// `GNUPGHOME` is an empty directory of its own (no gpg agent of the developer's),
+/// `SSH_AUTH_SOCK`/`SSH_AGENT_PID` are removed (no SSH agent of theirs either, #805), and
 /// `LC_ALL=C` gives English messages that tests may match. Every test that runs the git CLI
 /// uses this (or [`git`]); only a bare `git --version` availability check may skip it.
 pub fn git_command(dir: &Path) -> std::process::Command {
     let paths = paths();
     let mut command = std::process::Command::new("git");
     for name in inherited_git_env() {
+        command.env_remove(name);
+    }
+    for name in SSH_AGENT_ENV {
         command.env_remove(name);
     }
     command
