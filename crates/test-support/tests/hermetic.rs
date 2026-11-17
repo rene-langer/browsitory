@@ -84,6 +84,52 @@ fn the_guard_clears_inherited_git_env_and_isolates_gpg_before_main() {
     );
 }
 
+/// Not a test on its own: the child process of
+/// `the_guard_hides_the_developers_ssh_agent_before_main`. Prints what the guard left of the SSH
+/// agent variables it was started with.
+#[test]
+#[ignore = "child process of the_guard_hides_the_developers_ssh_agent_before_main"]
+fn ssh_agent_env_child() {
+    if std::env::var_os("BROWSITORY_SSH_AGENT_ENV_CHILD").is_none() {
+        return;
+    }
+    for name in ["SSH_AUTH_SOCK", "SSH_AGENT_PID"] {
+        match std::env::var_os(name) {
+            Some(value) => println!("env: {name}={}", value.to_string_lossy()),
+            None => println!("env: {name} unset"),
+        }
+    }
+}
+
+/// #805: started in a session with an SSH agent, a test binary sees no agent from `main` on, so
+/// the `ssh-keygen -Y sign` that SSH signing starts never asks the developer's agent (a keyring
+/// agent made the signing tests fail at random). A test that wants an agent passes its own
+/// socket to the one command that needs it.
+#[test]
+fn the_guard_hides_the_developers_ssh_agent_before_main() {
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "ssh_agent_env_child",
+            "--ignored",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env("BROWSITORY_SSH_AGENT_ENV_CHILD", "1")
+        .env("SSH_AUTH_SOCK", "/nonexistent/real-agent.sock")
+        .env("SSH_AGENT_PID", "4242")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let env: Vec<&str> = stdout
+        .lines()
+        // The harness's "test ssh_agent_env_child ... " may share the first line.
+        .filter_map(|line| line.split_once("env: ").map(|(_, rest)| rest))
+        .collect();
+    assert_eq!(env, ["SSH_AUTH_SOCK unset", "SSH_AGENT_PID unset"]);
+}
+
 #[test]
 fn libgit2_sees_no_global_xdg_or_system_config() {
     let config = git2::Config::open_default().expect("open default config");

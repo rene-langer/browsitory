@@ -19,7 +19,11 @@
 //! - removes every inherited `GIT_*` variable (a hook's `GIT_DIR`/`GIT_INDEX_FILE`/
 //!   `GIT_WORK_TREE`, `GIT_CONFIG_PARAMETERS`, `GIT_AUTHOR_*`, …), so nothing in the run acts
 //!   on the repository a hook or `git rebase -x` started it in,
-//! - sets `GNUPGHOME` to an empty directory (no gpg agent of the developer's) and `LC_ALL=C`.
+//! - sets `GNUPGHOME` to an empty directory (no gpg agent of the developer's) and `LC_ALL=C`,
+//! - removes `SSH_AUTH_SOCK` and `SSH_AGENT_PID` (no SSH agent of the developer's, #805): the
+//!   `ssh-keygen -Y sign` that SSH signing starts would ask it for the key, and a keyring agent
+//!   made the signing tests fail at random. A test that needs an agent starts its own and passes
+//!   its socket to just the command that uses it (see `signing_ssh.rs`, #153).
 //!
 //! [`git_command`] applies the same isolation to each `git` CLI command a test starts, even
 //! in a binary without the guard or after a test changed the environment (#282).
@@ -196,6 +200,9 @@ pub fn install() {
             std::env::remove_var(name);
         }
         std::env::set_var("GNUPGHOME", &paths.gnupg_home);
+        for name in SSH_AGENT_ENV {
+            std::env::remove_var(name);
+        }
         std::env::set_var("LC_ALL", "C");
         std::env::set_var("HOME", &paths.home);
         std::env::set_var("XDG_CONFIG_HOME", paths.home.join(".config"));
@@ -217,6 +224,10 @@ pub fn install() {
     });
 }
 
+/// What a session's SSH agent hands its processes (#805). `ssh-keygen -Y sign`, which SSH
+/// signing starts, asks that agent for the key first.
+const SSH_AGENT_ENV: [&str; 2] = ["SSH_AUTH_SOCK", "SSH_AGENT_PID"];
+
 /// Every `GIT_*` variable in this process's environment: what a hook or `git rebase -x` hands
 /// its children (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` pointing at the real repository),
 /// config that bypasses `GIT_CONFIG_GLOBAL` (`GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`/
@@ -232,13 +243,17 @@ fn inherited_git_env() -> Vec<std::ffi::OsString> {
 /// process's environment says (#282): every inherited `GIT_*` variable is removed (so the twin
 /// works on `dir`, never a repository a hook's `GIT_DIR` names), `HOME`/`XDG_CONFIG_HOME` are the
 /// hermetic home, `GIT_CONFIG_GLOBAL` is the empty hermetic file, `GIT_CONFIG_NOSYSTEM=1`,
-/// `GNUPGHOME` is an empty directory of its own (no gpg agent of the developer's), and
+/// `GNUPGHOME` is an empty directory of its own (no gpg agent of the developer's),
+/// `SSH_AUTH_SOCK`/`SSH_AGENT_PID` are removed (no SSH agent of theirs either, #805), and
 /// `LC_ALL=C` gives English messages that tests may match. Every test that runs the git CLI
 /// uses this (or [`git`]); only a bare `git --version` availability check may skip it.
 pub fn git_command(dir: &Path) -> std::process::Command {
     let paths = paths();
     let mut command = std::process::Command::new("git");
     for name in inherited_git_env() {
+        command.env_remove(name);
+    }
+    for name in SSH_AGENT_ENV {
         command.env_remove(name);
     }
     command

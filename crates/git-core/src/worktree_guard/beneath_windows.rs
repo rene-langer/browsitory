@@ -1076,13 +1076,16 @@ impl HeldDir for File {
         }
     }
 
-    /// Through its own handle, checked to be the link in this folder. Reports
-    /// `Step::Cleared` even when no link was left to delete (#800).
+    /// Through its own handle, checked to be the link in this folder. `false` when no link was
+    /// left to delete (gone, or swapped for a file or folder, which stays), as on Unix (#800).
     fn clear_link(&self, name: &OsStr) -> io::Result<bool> {
-        if let Some((link, Found::Link)) = open_leaf_in(self, name, Purpose::Delete)? {
-            delete_by_handle(&link)?;
+        match open_leaf_in(self, name, Purpose::Delete)? {
+            Some((link, Found::Link)) => {
+                delete_by_handle(&link)?;
+                Ok(true)
+            }
+            _ => Ok(false),
         }
-        Ok(true)
     }
 }
 
@@ -4195,6 +4198,41 @@ mod tests {
             after & (INTEGRITY_STREAM | NO_SCRUB_DATA),
             INTEGRITY_STREAM | NO_SCRUB_DATA,
             "{after:#x}"
+        );
+    }
+
+    /// #800: as on Unix, clearing reports only a link it removed, so the walk's
+    /// `Step::Cleared` comes at the same moment on both platforms.
+    #[test]
+    fn clearing_a_link_says_whether_it_removed_one() {
+        let dir = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        std::fs::write(outside.path().join("f"), "OUTSIDE").unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        std::fs::write(dir.path().join("d/f"), "inner").unwrap();
+        junction(&dir.path().join("link"), outside.path());
+        let root = OpenOptions::new()
+            .access_mode(FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(dir.path())
+            .unwrap();
+        assert!(root.clear_link(OsStr::new("link")).unwrap());
+        assert!(std::fs::symlink_metadata(dir.path().join("link")).is_err());
+        assert!(!root.clear_link(OsStr::new("link")).unwrap());
+        // A folder is never removed as a link.
+        assert!(!root.clear_link(OsStr::new("d")).unwrap());
+        assert!(dir.path().join("d/f").is_file());
+        // Nor is a file (a link swapped for one meanwhile).
+        std::fs::write(dir.path().join("plain"), "file").unwrap();
+        assert!(!root.clear_link(OsStr::new("plain")).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("plain")).unwrap(),
+            "file"
+        );
+        assert_eq!(
+            std::fs::read_to_string(outside.path().join("f")).unwrap(),
+            "OUTSIDE"
         );
     }
 }
