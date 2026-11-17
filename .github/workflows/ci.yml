@@ -22,7 +22,8 @@ env:
   # (extension/e2e/src/support/vscodeDownload.ts). Pinned so a run with the cached copy asks
   # the update service nothing; that request timed out and failed unrelated pull requests
   # (#918). Renovate proposes each new stable release; it must satisfy
-  # extension/package.json's engines.vscode.
+  # extension/package.json's engines.vscode. Only one-digit patch numbers: test-electron
+  # rejects 1.150.10 (renovate.json's allowedVersions, #921).
   # renovate: datasource=github-releases depName=microsoft/vscode
   BROWSITORY_E2E_VSCODE_VERSION: 1.146.0
   # Set by the dtolnay/rust-toolchain action these jobs used before rust-toolchain.toml pinned
