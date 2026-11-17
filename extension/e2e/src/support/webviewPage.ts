@@ -424,38 +424,51 @@ async function fetchWebSocketDebuggerUrl(cdpHttpUrl: string, timeoutMs: number):
 // panel is one such iframe, and its CDP target's URL is that `src`. Closing a panel removes its
 // iframe from the workbench at once, while the browser can still list the closed panel's target
 // for a moment afterwards (#917), so a webview target is only live if its URL is in this set.
-// One flattened session per workbench window, attached on first use and reused.
+// One flattened session per workbench window, attached on first use and reused. A window that
+// can't be read (closing, reloading, or not a workbench) is skipped for this poll, so it can't
+// hide the others; its session is detached and attached afresh next time. No CDP call starts
+// after `deadline`, and none is allowed to run past it.
 async function workbenchIframeSources(
   connection: CdpConnection,
   targetInfos: TargetInfo[],
   pageSessions: Map<string, string>,
+  deadline: number,
+  onPageError: (error: unknown) => void,
 ): Promise<Set<string>> {
   const sources = new Set<string>();
+  const callTimeout = () => Math.min(CDP_REQUEST_TIMEOUT_MS, deadline - Date.now());
   for (const page of targetInfos.filter((t) => t.type === "page")) {
+    if (callTimeout() <= 0) break;
     let sessionId = pageSessions.get(page.targetId);
-    if (sessionId === undefined) {
-      ({ sessionId } = await connection.send<{ sessionId: string }>("Target.attachToTarget", {
-        targetId: page.targetId,
-        flatten: true,
-      }));
-      pageSessions.set(page.targetId, sessionId);
-    }
-    let response: { result: { value?: string[] } };
     try {
-      response = await connection.send<{ result: { value?: string[] } }>(
+      if (sessionId === undefined) {
+        ({ sessionId } = await connection.send<{ sessionId: string }>(
+          "Target.attachToTarget",
+          { targetId: page.targetId, flatten: true },
+          undefined,
+          callTimeout(),
+        ));
+        pageSessions.set(page.targetId, sessionId);
+      }
+      if (callTimeout() <= 0) break;
+      const response = await connection.send<{ result: { value?: string[] } }>(
         "Runtime.evaluate",
         {
           expression: "Array.from(document.querySelectorAll('iframe'), (f) => f.src)",
           returnByValue: true,
         },
         sessionId,
+        callTimeout(),
       );
+      for (const src of response.result.value ?? []) sources.add(src);
     } catch (error) {
-      // A stale session (window reloaded or closed): attach afresh on the next poll.
+      onPageError(error);
       pageSessions.delete(page.targetId);
-      throw error;
+      if (sessionId !== undefined) {
+        // Best effort: a target that is already gone has detached the session itself.
+        connection.send("Target.detachFromTarget", { sessionId }).catch(() => undefined);
+      }
     }
-    for (const src of response.result.value ?? []) sources.add(src);
   }
   return sources;
 }
@@ -472,6 +485,9 @@ async function findWebviewTarget(
     try {
       const { targetInfos } = await connection.send<{ targetInfos: TargetInfo[] }>(
         "Target.getTargets",
+        {},
+        undefined,
+        Math.min(CDP_REQUEST_TIMEOUT_MS, Math.max(1, deadline - Date.now())),
       );
       const candidates = targetInfos.filter(
         (t) =>
@@ -480,7 +496,15 @@ async function findWebviewTarget(
           !goneTargets.has(t.targetId),
       );
       if (candidates.length > 0) {
-        const live = await workbenchIframeSources(connection, targetInfos, pageSessions);
+        const live = await workbenchIframeSources(
+          connection,
+          targetInfos,
+          pageSessions,
+          deadline,
+          (error) => {
+            lastError = error;
+          },
+        );
         const target = candidates.find((t) => live.has(t.url));
         if (target) return target.targetId;
       }
