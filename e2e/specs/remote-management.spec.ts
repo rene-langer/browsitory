@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { clickInPage } from "../support/dom";
 import { ADD_REMOTE_NAME_INPUT, expandSidebarSection, sidebarRemoteFolder } from "../support/sidebar";
 import { git } from "../support/git";
 
@@ -58,7 +59,11 @@ describe("Browsitory remote management", () => {
         new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
       );
     }, currentBranchButton);
-    await (await $("button=Set upstream…")).click();
+    // Add remote is optimistic: the folder header above shows up at once, while the request and
+    // its refresh still run, and until they finish every branch action is disabled ("Another
+    // action is in progress."). A click on the still-disabled "Set upstream…" did nothing, so the
+    // dialog never opened (#862). `clickInPage` clicks the item once it is enabled.
+    await clickInPage("[role='menu'] button", "Set upstream…");
 
     const upstreamDialog = await $("dialog[aria-label^='Set upstream for']");
     await upstreamDialog.waitForExist();

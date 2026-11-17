@@ -107,7 +107,9 @@ async function openSetUpstreamDialog() {
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
     );
   }, currentBranchButton);
-  await (await $("button=Set upstream…")).click();
+  // Clicked once enabled: while an earlier action and its refresh still run, the item is disabled
+  // and a click on it does nothing (#862, as in remote-management.spec.ts).
+  await clickInPage("[role='menu'] button", "Set upstream…");
   const dialog = await $("dialog[aria-label^='Set upstream for']");
   await dialog.waitForExist();
   return dialog;
