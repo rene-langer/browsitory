@@ -17,7 +17,7 @@ unless noted:
   <https://github.com/libssh2/libssh2>.
 - **OpenSSL** 3.6.3 (through the `openssl-src` crate 300.6.1+3.6.3), Linux and macOS only:
   Apache-2.0. Source: <https://github.com/openssl/openssl>.
-- **zlib** (through the `libz-sys` crate 1.1.31): Zlib. Where the build machine has a system
+- **zlib** (through the `libz-sys` crate 1.1.33): Zlib. Where the build machine has a system
   zlib, the program may use that library instead of this copy. Source: <https://zlib.net>.
 
 The user interface's syntax highlighting runs a WebAssembly build of a C library, embedded in
