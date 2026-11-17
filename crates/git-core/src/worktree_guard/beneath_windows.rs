@@ -4197,4 +4197,32 @@ mod tests {
             "{after:#x}"
         );
     }
+
+    /// #800: as on Unix, clearing reports only a link it removed, so the walk's
+    /// `Step::Cleared` comes at the same moment on both platforms.
+    #[test]
+    fn clearing_a_link_says_whether_it_removed_one() {
+        let dir = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        std::fs::write(outside.path().join("f"), "OUTSIDE").unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        std::fs::write(dir.path().join("d/f"), "inner").unwrap();
+        junction(&dir.path().join("link"), outside.path());
+        let root = OpenOptions::new()
+            .access_mode(FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(dir.path())
+            .unwrap();
+        assert!(root.clear_link(OsStr::new("link")).unwrap());
+        assert!(std::fs::symlink_metadata(dir.path().join("link")).is_err());
+        assert!(!root.clear_link(OsStr::new("link")).unwrap());
+        // A folder is never removed as a link.
+        assert!(!root.clear_link(OsStr::new("d")).unwrap());
+        assert!(dir.path().join("d/f").is_file());
+        assert_eq!(
+            std::fs::read_to_string(outside.path().join("f")).unwrap(),
+            "OUTSIDE"
+        );
+    }
 }
