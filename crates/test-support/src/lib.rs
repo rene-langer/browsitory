@@ -19,7 +19,11 @@
 //! - removes every inherited `GIT_*` variable (a hook's `GIT_DIR`/`GIT_INDEX_FILE`/
 //!   `GIT_WORK_TREE`, `GIT_CONFIG_PARAMETERS`, `GIT_AUTHOR_*`, …), so nothing in the run acts
 //!   on the repository a hook or `git rebase -x` started it in,
-//! - sets `GNUPGHOME` to an empty directory (no gpg agent of the developer's) and `LC_ALL=C`.
+//! - sets `GNUPGHOME` to an empty directory (no gpg agent of the developer's) and `LC_ALL=C`,
+//! - removes `SSH_AUTH_SOCK` and `SSH_AGENT_PID` (no SSH agent of the developer's, #805): the
+//!   `ssh-keygen -Y sign` that SSH signing starts would ask it for the key, and a keyring agent
+//!   made the signing tests fail at random. A test that needs an agent starts its own and passes
+//!   its socket to just the command that uses it (see `signing_ssh.rs`, #153).
 //!
 //! [`git_command`] applies the same isolation to each `git` CLI command a test starts, even
 //! in a binary without the guard or after a test changed the environment (#282).
@@ -196,6 +200,9 @@ pub fn install() {
             std::env::remove_var(name);
         }
         std::env::set_var("GNUPGHOME", &paths.gnupg_home);
+        for name in SSH_AGENT_ENV {
+            std::env::remove_var(name);
+        }
         std::env::set_var("LC_ALL", "C");
         std::env::set_var("HOME", &paths.home);
         std::env::set_var("XDG_CONFIG_HOME", paths.home.join(".config"));
@@ -216,6 +223,10 @@ pub fn install() {
         }
     });
 }
+
+/// What a session's SSH agent hands its processes (#805). `ssh-keygen -Y sign`, which SSH
+/// signing starts, asks that agent for the key first.
+const SSH_AGENT_ENV: [&str; 2] = ["SSH_AUTH_SOCK", "SSH_AGENT_PID"];
 
 /// Every `GIT_*` variable in this process's environment: what a hook or `git rebase -x` hands
 /// its children (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` pointing at the real repository),
