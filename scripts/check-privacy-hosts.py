@@ -22,7 +22,8 @@ Scanned: `crates/*/src/**/*.rs` (except the test-support crate), `frontend/src` 
 `frontend/index.html`, `frontend/public/`, `frontend/vite*.ts`, `extension/package.json`,
 `crates/tauri-app/tauri.conf.json` and `crates/tauri-app/capabilities/`. Skipped: test files
 (`*.test.*`, `*.spec.*`, `tests.rs`, `tests/`, `__tests__/`, `fixtures/`), Rust
-`#[cfg(test)] mod … { … }` blocks and the files of `#[cfg(test)] mod name;` modules.
+`#[cfg(test)] mod … { … }` blocks, the files of `#[cfg(test)] mod name;` modules, and
+untracked files git ignores (generated output such as `frontend/src/generated/`, #1030).
 
 It only finds hosts written into the code. Hosts that come from the user (Git remotes,
 self-hosted forge URLs) are documented in the notice by hand.
@@ -35,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -133,6 +135,21 @@ def is_ignored(host: str) -> bool:
     return host in IGNORED_HOSTS or host.endswith(IGNORED_SUFFIXES) or host in NON_NETWORK_HOSTS
 
 
+def git_ignored_files(root: Path) -> set[Path]:
+    """The untracked files git ignores under `root` (#1030), such as the frontend's generated
+    `src/generated/releaseNotes.json`: build output, not code the app runs. Tracked files are
+    never on it, so a CI checkout scans the same files as before. Outside a git work tree (or
+    without git) nothing is skipped."""
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "-z", "--others", "--ignored", "--exclude-standard"],
+            cwd=root, capture_output=True, check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return set()
+    return {root / name for name in result.stdout.decode("utf-8", "replace").split("\0") if name}
+
+
 def source_files(root: Path) -> list[Path]:
     files: list[Path] = []
     for src in sorted((root / "crates").glob("*/src")):
@@ -148,7 +165,11 @@ def source_files(root: Path) -> list[Path]:
     files.extend((root / "crates/tauri-app/capabilities").glob("*.json"))
     for name in ("frontend/index.html", "extension/package.json", "crates/tauri-app/tauri.conf.json"):
         files.append(root / name)
-    files = [p for p in files if p.is_file() and not is_test_file(p.relative_to(root))]
+    ignored = git_ignored_files(root)
+    files = [
+        p for p in files
+        if p.is_file() and p not in ignored and not is_test_file(p.relative_to(root))
+    ]
     test_modules: set[Path] = set()
     for path in files:
         if path.suffix == ".rs":
