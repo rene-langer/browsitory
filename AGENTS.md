@@ -107,20 +107,24 @@ One-time setup, per clone (linked worktrees share it):
 ```bash
 ln -sf "$(git worktree list --porcelain | sed -n '1s/^worktree //p')/scripts/hooks/pre-push" \
   "$(git rev-parse --git-path hooks)/pre-push"
+test -x "$(git rev-parse --git-path hooks)/pre-push" ||
+  echo "pre-push hook link is broken: link it to a checkout's scripts/hooks/pre-push" >&2
 ```
 
-All worktrees of a clone share one hooks folder, so the link always points into the main
-checkout (the first `git worktree list` entry): a link into a linked worktree dangles once that
-worktree is removed, and pushes then run no checks, without a warning (#1049). The command works
-from any worktree and replaces such a link. The hook checks the worktree you push from.
-
-Wires up `scripts/check-changelog.py` as a `pre-push` hook: blocks a push touching `crates/`,
+This wires up `scripts/check-changelog.py` as a `pre-push` hook: blocks a push touching `crates/`,
 `frontend/src/`, or `e2e/` without a changelog entry (see below). The hook diffs against
 `origin/main` if your clone has it, else `main`; it never fetches, so `git fetch` now and then
 keeps it accurate. Bypass once with `SKIP_CHANGELOG_CHECK=1 git push`. A diff that touches only dependency manifests/lockfiles
 (`Cargo.toml`, `Cargo.lock`, `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`,
 `rust-toolchain.toml`) needs no entry. CI's `changelog` job runs the same check (the
 `skip-changelog` PR label bypasses it).
+
+All worktrees of a clone share one hooks folder, so the link always points into the main
+checkout (the first `git worktree list` entry): a link into a linked worktree dangles once that
+worktree is removed, and pushes then run no checks, without a warning (#1049). The command
+assumes a normal clone, where that entry is a checkout; with a separate git dir, a submodule or
+a bare main repository the `test` line warns, so link a checkout's script by hand. It works from
+any worktree and replaces a dangling link. The hook checks the worktree you push from.
 
 The same hook then runs `cargo fmt --all -- --check`, CI's format check, and blocks the push
 when Rust code isn't formatted; run `cargo fmt --all` and commit. It needs rustfmt (rustup

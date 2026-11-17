@@ -902,6 +902,7 @@ jobs:
       - name: Install the package into VSCode and smoke-test it
         if: env.RUN_STEPS == 'true'
         working-directory: extension/e2e
+        # The screen size is explicit: xvfb-run's default differs by distribution (#1046).
         run: >-
           dbus-run-session -- xvfb-run --auto-servernum -s "-screen 0 1280x1024x24"
           pnpm --ignore-workspace smoke:vsix ../artifacts/browsitory-linux-x64.vsix
