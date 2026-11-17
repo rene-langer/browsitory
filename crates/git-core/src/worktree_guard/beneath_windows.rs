@@ -1076,13 +1076,16 @@ impl HeldDir for File {
         }
     }
 
-    /// Through its own handle, checked to be the link in this folder. Reports
-    /// `Step::Cleared` even when no link was left to delete (#800).
+    /// Through its own handle, checked to be the link in this folder. `false` when no link was
+    /// left to delete (gone, or swapped for a file or folder, which stays), as on Unix (#800).
     fn clear_link(&self, name: &OsStr) -> io::Result<bool> {
-        if let Some((link, Found::Link)) = open_leaf_in(self, name, Purpose::Delete)? {
-            delete_by_handle(&link)?;
+        match open_leaf_in(self, name, Purpose::Delete)? {
+            Some((link, Found::Link)) => {
+                delete_by_handle(&link)?;
+                Ok(true)
+            }
+            _ => Ok(false),
         }
-        Ok(true)
     }
 }
 
