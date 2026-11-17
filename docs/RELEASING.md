@@ -336,7 +336,7 @@ The job then installs that `.vsix` into a downloaded VSCode with `code --install
 (throwaway extensions and user data dirs) and opens a temp repository. It passes when the
 installed copy activates, its bundled sidecar runs, and the repository's commit shows up.
 Run it locally from `extension/e2e`: `pnpm --ignore-workspace smoke:vsix <file.vsix>` (needs a
-display; use `xvfb-run` on a headless machine).
+display; use `xvfb-run -a -s "-screen 0 1280x1024x24"` on a headless machine).
 
 `build-vsix` (main) and `build-vsix-release` run the same check for all four targets;
 `build-vsix-release` checks the tag's version and the `VSIX_PRE_RELEASE` flag before anything is

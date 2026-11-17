@@ -902,8 +902,9 @@ jobs:
       - name: Install the package into VSCode and smoke-test it
         if: env.RUN_STEPS == 'true'
         working-directory: extension/e2e
+        # The screen size is explicit: xvfb-run's default differs by distribution (#1046).
         run: >-
-          dbus-run-session -- xvfb-run --auto-servernum
+          dbus-run-session -- xvfb-run --auto-servernum -s "-screen 0 1280x1024x24"
           pnpm --ignore-workspace smoke:vsix ../artifacts/browsitory-linux-x64.vsix
 
   e2e-vscode:
@@ -1009,7 +1010,10 @@ jobs:
         # --ignore-workspace: same reason as the install step above — extension/e2e isn't a
         # member of extension/'s workspace (before it had its own pnpm-workspace.yaml, pnpm 11
         # hard-errored "packages field missing or empty" walking up to extension/).
-        run: dbus-run-session -- xvfb-run --auto-servernum pnpm --ignore-workspace test
+        # The screen size is explicit: xvfb-run's default differs by distribution (#1046).
+        run: >-
+          dbus-run-session -- xvfb-run --auto-servernum -s "-screen 0 1280x1024x24"
+          pnpm --ignore-workspace test
 
   e2e:
     needs: changes
@@ -1121,8 +1125,11 @@ jobs:
         # tauri-app) a fake display. `dbus-run-session` gives it a session bus: without one,
         # every WebDriver session start waited ~31 s on this runner (about 15 minutes per run);
         # with one it takes under a second (measured in #182; NO_AT_BRIDGE=1,
-        # GTK_USE_PORTAL=0 and WEBKIT_DISABLE_COMPOSITING_MODE=1 made no difference).
-        run: dbus-run-session -- xvfb-run --auto-servernum pnpm test
+        # GTK_USE_PORTAL=0 and WEBKIT_DISABLE_COMPOSITING_MODE=1 made no difference). The screen
+        # size is explicit: xvfb-run's default differs by distribution (#1046).
+        run: >-
+          dbus-run-session -- xvfb-run --auto-servernum -s "-screen 0 1280x1024x24"
+          pnpm test
       # Screenshots a spec saved at a failure (`e2e/support/diagnostics.ts`, #810).
       - uses: actions/upload-artifact@v7
         if: failure() && env.RUN_STEPS == 'true'

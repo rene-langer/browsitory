@@ -58,7 +58,9 @@ it: without the binary it is skipped with a note, and under `CI` it fails instea
 cargo install tauri-driver --locked               # once, if not already installed
 cd frontend && VITE_E2E_REPO_PATH=/tmp/browsitory-e2e-repo pnpm build && cd ..
 cargo build --workspace --features tauri-app/custom-protocol,tauri-app/forge-fixture-override
-cd e2e && pnpm install && pnpm test               # spawns/reaps tauri-driver itself; needs a display (headless: dbus-run-session -- xvfb-run -a pnpm test)
+cd e2e && pnpm install && pnpm test               # spawns/reaps tauri-driver itself; needs a display
+                                                   # (headless: dbus-run-session -- xvfb-run -a
+                                                   # -s "-screen 0 1280x1024x24" pnpm test)
 cd e2e && pnpm test:support                       # unit tests of e2e/support's helpers; no app build needed
 ```
 
@@ -73,8 +75,13 @@ pnpm install --ignore-workspace                    # extension/e2e isn't a membe
                                                     # extension/pnpm-workspace.yaml; its own
                                                     # pnpm-workspace.yaml stops pnpm walking up
                                                     # to extension/, --ignore-workspace too
-pnpm test                                          # spawns the extension under vscode.ExtensionMode.Test; needs a display (xvfb-run on headless CI)
+pnpm test                                          # spawns the extension under vscode.ExtensionMode.Test; needs a display
+                                                    # (headless: dbus-run-session -- xvfb-run -a
+                                                    # -s "-screen 0 1280x1024x24" pnpm test)
 ```
+
+Give `xvfb-run` that screen size, as CI does: its default differs by distribution (Fedora's is
+640x480, too small for the merge editor spec, #1046; Ubuntu's is 1280x1024 at 8 bits).
 
 ### User guide site (Zensical), from repo root
 
@@ -95,19 +102,29 @@ code block, so the site is the reference rendering. Screenshots in `docs/guide/a
 
 ## Git hooks
 
-One-time setup, per clone/worktree:
+One-time setup, per clone (linked worktrees share it):
 
 ```bash
-ln -sf "$(git rev-parse --show-toplevel)/scripts/hooks/pre-push" "$(git rev-parse --git-path hooks)/pre-push"
+ln -sf "$(git worktree list --porcelain | sed -n '1s/^worktree //p')/scripts/hooks/pre-push" \
+  "$(git rev-parse --git-path hooks)/pre-push"
+test -x "$(git rev-parse --git-path hooks)/pre-push" ||
+  echo "pre-push hook link is broken: link it to a checkout's scripts/hooks/pre-push" >&2
 ```
 
-Wires up `scripts/check-changelog.py` as a `pre-push` hook: blocks a push touching `crates/`,
+This wires up `scripts/check-changelog.py` as a `pre-push` hook: blocks a push touching `crates/`,
 `frontend/src/`, or `e2e/` without a changelog entry (see below). The hook diffs against
 `origin/main` if your clone has it, else `main`; it never fetches, so `git fetch` now and then
 keeps it accurate. Bypass once with `SKIP_CHANGELOG_CHECK=1 git push`. A diff that touches only dependency manifests/lockfiles
 (`Cargo.toml`, `Cargo.lock`, `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`,
 `rust-toolchain.toml`) needs no entry. CI's `changelog` job runs the same check (the
 `skip-changelog` PR label bypasses it).
+
+All worktrees of a clone share one hooks folder, so the link always points into the main
+checkout (the first `git worktree list` entry): a link into a linked worktree dangles once that
+worktree is removed, and pushes then run no checks, without a warning (#1049). The command
+assumes a normal clone, where that entry is a checkout; with a separate git dir, a submodule or
+a bare main repository the `test` line warns, so link a checkout's script by hand. It works from
+any worktree and replaces a dangling link. The hook checks the worktree you push from.
 
 The same hook then runs `cargo fmt --all -- --check`, CI's format check, and blocks the push
 when Rust code isn't formatted; run `cargo fmt --all` and commit. It needs rustfmt (rustup
