@@ -15,13 +15,15 @@ by two hosts: a Tauri desktop app (`crates/tauri-app`) and a VSCode extension (`
 
 You need Rust through [rustup](https://rustup.rs) (it installs the version `rust-toolchain.toml`
 pins, the one CI uses, on the first build), Node.js 22 or newer (CI uses 24; packaging the extension with `vsce` needs 22),
-[pnpm](https://pnpm.io) 12.18.0 (the version each `package.json`'s `packageManager` field pins),
-a full Perl, and the [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your
-system.
+[pnpm](https://pnpm.io) (the version the `packageManager` fields in `package.json` pin; a
+newer pnpm switches to it), a full Perl, and the
+[Tauri prerequisites](https://tauri.app/start/prerequisites/) for your system.
 
-- **pnpm:** Node.js from distro packages may come without corepack. Install the pinned version
-  with npm into your home directory, which avoids a root-owned global prefix:
-  `npm install -g --prefix ~/.local pnpm@12.18.0` (with `~/.local/bin` on your `PATH`).
+- **pnpm:** corepack, which comes with Node.js, would install the pinned pnpm by itself, but
+  Node.js from distro packages may come without it. Then install the pinned version with npm
+  into your home directory, which avoids a root-owned global prefix, for example
+  `npm install -g --prefix ~/.local pnpm@12.18.0` (with `~/.local/bin` on your `PATH`; use the
+  version `frontend/package.json` names).
 - **Perl:** `git2` builds OpenSSL from source (`vendored-openssl`), and OpenSSL's `Configure`
   needs Perl's core modules (FindBin, IPC::Cmd and others). Without them, `cargo build` fails
   in `openssl-sys` with "Can't locate FindBin.pm". Debian and Ubuntu's `perl` package has them;
