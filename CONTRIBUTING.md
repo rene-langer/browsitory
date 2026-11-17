@@ -15,11 +15,21 @@ by two hosts: a Tauri desktop app (`crates/tauri-app`) and a VSCode extension (`
 
 You need Rust through [rustup](https://rustup.rs) (it installs the version `rust-toolchain.toml`
 pins, the one CI uses, on the first build), Node.js 22 or newer (CI uses 24; packaging the extension with `vsce` needs 22),
-[pnpm](https://pnpm.io) 11 or newer (it switches to the version each `package.json` pins) and
-the [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your system. The Tauri CLI
-comes with the frontend's dependencies (`@tauri-apps/cli`, locked in `frontend/pnpm-lock.yaml`),
-the same version the release build uses; run it with `node` from `crates/tauri-app`, where it
-finds `tauri.conf.json`.
+[pnpm](https://pnpm.io) 12.18.0 (the version each `package.json`'s `packageManager` field pins),
+a full Perl, and the [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your
+system.
+
+- **pnpm:** Node.js from distro packages may come without corepack. Install the pinned version
+  with npm into your home directory, which avoids a root-owned global prefix:
+  `npm install -g --prefix ~/.local pnpm@12.18.0` (with `~/.local/bin` on your `PATH`).
+- **Perl:** `git2` builds OpenSSL from source (`vendored-openssl`), and OpenSSL's `Configure`
+  needs Perl's core modules (FindBin, IPC::Cmd and others). Without them, `cargo build` fails
+  in `openssl-sys` with "Can't locate FindBin.pm". Debian and Ubuntu's `perl` package has them;
+  on Fedora, where a minimal install has only `perl-interpreter`, run `sudo dnf install perl`.
+
+The Tauri CLI comes with the frontend's dependencies (`@tauri-apps/cli`, locked in
+`frontend/pnpm-lock.yaml`), the same version the release build uses; run it with `node` from
+`crates/tauri-app`, where it finds `tauri.conf.json`.
 
 ```bash
 git clone https://github.com/rene-langer/browsitory.git
