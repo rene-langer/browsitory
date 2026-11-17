@@ -420,26 +420,80 @@ async function fetchWebSocketDebuggerUrl(cdpHttpUrl: string, timeoutMs: number):
   );
 }
 
+// The `src` of every iframe in VSCode's workbench windows (the "page" targets). Each webview
+// panel is one such iframe, and its CDP target's URL is that `src`. Closing a panel removes its
+// iframe from the workbench at once, while the browser can still list the closed panel's target
+// for a moment afterwards (#917), so a webview target is only live if its URL is in this set.
+// One flattened session per workbench window, attached on first use and reused.
+async function workbenchIframeSources(
+  connection: CdpConnection,
+  targetInfos: TargetInfo[],
+  pageSessions: Map<string, string>,
+): Promise<Set<string>> {
+  const sources = new Set<string>();
+  for (const page of targetInfos.filter((t) => t.type === "page")) {
+    let sessionId = pageSessions.get(page.targetId);
+    if (sessionId === undefined) {
+      ({ sessionId } = await connection.send<{ sessionId: string }>("Target.attachToTarget", {
+        targetId: page.targetId,
+        flatten: true,
+      }));
+      pageSessions.set(page.targetId, sessionId);
+    }
+    let response: { result: { value?: string[] } };
+    try {
+      response = await connection.send<{ result: { value?: string[] } }>(
+        "Runtime.evaluate",
+        {
+          expression: "Array.from(document.querySelectorAll('iframe'), (f) => f.src)",
+          returnByValue: true,
+        },
+        sessionId,
+      );
+    } catch (error) {
+      // A stale session (window reloaded or closed): attach afresh on the next poll.
+      pageSessions.delete(page.targetId);
+      throw error;
+    }
+    for (const src of response.result.value ?? []) sources.add(src);
+  }
+  return sources;
+}
+
 async function findWebviewTarget(
   connection: CdpConnection,
   timeoutMs: number,
+  goneTargets: ReadonlySet<string>,
+  pageSessions: Map<string, string>,
 ): Promise<string> {
   const deadline = Date.now() + timeoutMs;
+  let lastError: unknown;
   while (Date.now() < deadline) {
     try {
       const { targetInfos } = await connection.send<{ targetInfos: TargetInfo[] }>(
         "Target.getTargets",
       );
-      const target = targetInfos.find(
-        (t) => t.type === "iframe" && t.url.startsWith("vscode-webview://"),
+      const candidates = targetInfos.filter(
+        (t) =>
+          t.type === "iframe" &&
+          t.url.startsWith("vscode-webview://") &&
+          !goneTargets.has(t.targetId),
       );
-      if (target) return target.targetId;
-    } catch {
+      if (candidates.length > 0) {
+        const live = await workbenchIframeSources(connection, targetInfos, pageSessions);
+        const target = candidates.find((t) => live.has(t.url));
+        if (target) return target.targetId;
+      }
+    } catch (error) {
       // Transient — retry until the deadline.
+      lastError = error;
     }
     await sleep(POLL_INTERVAL_MS);
   }
-  throw new Error(`No vscode-webview:// target found within ${timeoutMs}ms`);
+  throw new Error(
+    `No live vscode-webview:// target found within ${timeoutMs}ms` +
+      (lastError ? ` (last error: ${String(lastError)})` : ""),
+  );
 }
 
 // Polls until the webview's real content frame exists *and* has a usable execution context.
@@ -451,6 +505,7 @@ async function findContentFrameContext(
   sessionId: string,
   executionContextsByFrame: Map<string, number>,
   timeoutMs: number,
+  targetGone: () => boolean,
 ): Promise<number> {
   const deadline = Date.now() + timeoutMs;
   // `Page.createIsolatedWorld` is the fallback for a frame whose default-world
@@ -480,6 +535,8 @@ async function findContentFrameContext(
 
   let lastError: unknown;
   while (Date.now() < deadline) {
+    // The target closed (its session detached): no frame will ever appear in it.
+    if (targetGone()) throw new WebviewTargetGoneError(`session ${sessionId} detached`);
     try {
       const { frameTree } = await connection.send<{ frameTree: FrameTreeNode }>(
         "Page.getFrameTree",
@@ -521,6 +578,10 @@ async function findContentFrameContext(
   );
 }
 
+// The webview target went away while this module was attaching to it (#917). Not a failure of
+// the webview under test: `connectToWebview` drops the target and looks again.
+class WebviewTargetGoneError extends Error {}
+
 export async function connectToWebview(
   cdpHttpUrl: string,
   targetTimeoutMs = TARGET_DISCOVERY_TIMEOUT_MS,
@@ -529,59 +590,130 @@ export async function connectToWebview(
   const webSocketDebuggerUrl = await fetchWebSocketDebuggerUrl(cdpHttpUrl, targetTimeoutMs);
   const connection = await CdpConnection.connect(webSocketDebuggerUrl);
 
+  // #917: a spec that closes the panel and opens a new one (`workbench.action.closeAllEditors`,
+  // then `browsitory.open`) can see the old panel's target still listed while the browser tears
+  // it down. Attaching to it then fails with "No target with given id found", or worse, succeeds
+  // and drives a panel that is about to go away. So discovery only picks a target whose iframe
+  // is still in the workbench (`workbenchIframeSources`), and a target that goes away anyway
+  // between that check and the attach, or while its content frame is polled (its session
+  // detaches), is skipped and discovery runs again, within the same overall budget the two
+  // stages had before.
+  const deadline = Date.now() + targetTimeoutMs + contentFrameTimeoutMs;
+  const goneTargets = new Set<string>();
+  const pageSessions = new Map<string, string>();
+  const detachedSessions = new Set<string>();
+  connection.onEvent((message) => {
+    if (message.method !== "Target.detachedFromTarget") return;
+    const { sessionId } = message.params as { sessionId?: string };
+    if (sessionId) detachedSessions.add(sessionId);
+  });
+
   try {
-    // 1. Find the webview's own CDP target (never a top-level "page" target — see the module
-    // comment above). Own timeout budget.
-    const webviewTargetId = await findWebviewTarget(connection, targetTimeoutMs);
-
-    // 2. Attach to it directly with a dedicated flattened CDP session.
-    const { sessionId } = await connection.send<{ sessionId: string }>("Target.attachToTarget", {
-      targetId: webviewTargetId,
-      flatten: true,
-    });
-
-    // Register the context listener *before* enabling Runtime: `Runtime.enable` replays the
-    // already-existing contexts as `executionContextCreated` events, and those would otherwise
-    // be missed.
-    const executionContextsByFrame = new Map<string, number>();
-    connection.onEvent((message) => {
-      if (message.sessionId !== sessionId) return;
-      const params = message.params as {
-        context?: { id: number; auxData?: { frameId?: string; isDefault?: boolean } };
-        executionContextId?: number;
-      };
-      if (message.method === "Runtime.executionContextCreated" && params.context) {
-        const frameId = params.context.auxData?.frameId;
-        // Prefer the frame's default world context (not an isolated one) — that's the one the
-        // page's own script (React, etc.) actually runs in.
-        if (frameId && params.context.auxData?.isDefault) {
-          executionContextsByFrame.set(frameId, params.context.id);
-        }
-      } else if (message.method === "Runtime.executionContextDestroyed") {
-        for (const [frameId, contextId] of executionContextsByFrame) {
-          if (contextId === params.executionContextId) executionContextsByFrame.delete(frameId);
-        }
-      } else if (message.method === "Runtime.executionContextsCleared") {
-        executionContextsByFrame.clear();
+    for (;;) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        throw new Error(
+          `every vscode-webview:// target went away before its content frame was found ` +
+            `(${goneTargets.size} tried)`,
+        );
       }
-    });
-
-    await connection.send("Page.enable", {}, sessionId);
-    await connection.send("Runtime.enable", {}, sessionId);
-
-    // 3. VSCode's webview-host JS creates the real content frame inside this target's root frame
-    // some time *after* the target itself exists (observed: ~2s to 24s). Poll the frame tree and
-    // the execution-context stream together, against this stage's own timeout budget.
-    const contextId = await findContentFrameContext(
-      connection,
-      sessionId,
-      executionContextsByFrame,
-      contentFrameTimeoutMs,
-    );
-
-    return new CdpWebviewSession(connection, sessionId, contextId);
+      // 1. Find the webview's own CDP target (never a top-level "page" target — see the module
+      // comment above). Own timeout budget.
+      const webviewTargetId = await findWebviewTarget(
+        connection,
+        Math.min(targetTimeoutMs, remaining),
+        goneTargets,
+        pageSessions,
+      );
+      try {
+        return await attachToWebview(
+          connection,
+          webviewTargetId,
+          detachedSessions,
+          Math.min(contentFrameTimeoutMs, deadline - Date.now()),
+        );
+      } catch (error) {
+        if (!(error instanceof WebviewTargetGoneError)) throw error;
+        goneTargets.add(webviewTargetId);
+      }
+    }
   } catch (error) {
     connection.close();
     throw error;
   }
+}
+
+async function targetExists(connection: CdpConnection, targetId: string): Promise<boolean> {
+  const { targetInfos } = await connection.send<{ targetInfos: TargetInfo[] }>("Target.getTargets");
+  return targetInfos.some((t) => t.targetId === targetId);
+}
+
+async function attachToWebview(
+  connection: CdpConnection,
+  webviewTargetId: string,
+  detachedSessions: Set<string>,
+  contentFrameTimeoutMs: number,
+): Promise<WebviewSession> {
+  // 2. Attach to it directly with a dedicated flattened CDP session. A target that is no
+  // longer listed went away between `Target.getTargets` and this call.
+  let sessionId: string;
+  try {
+    ({ sessionId } = await connection.send<{ sessionId: string }>("Target.attachToTarget", {
+      targetId: webviewTargetId,
+      flatten: true,
+    }));
+  } catch (error) {
+    if (!(await targetExists(connection, webviewTargetId))) {
+      throw new WebviewTargetGoneError(String(error));
+    }
+    throw error;
+  }
+  const gone = () => detachedSessions.has(sessionId);
+
+  // Register the context listener *before* enabling Runtime: `Runtime.enable` replays the
+  // already-existing contexts as `executionContextCreated` events, and those would otherwise
+  // be missed.
+  const executionContextsByFrame = new Map<string, number>();
+  connection.onEvent((message) => {
+    if (message.sessionId !== sessionId) return;
+    const params = message.params as {
+      context?: { id: number; auxData?: { frameId?: string; isDefault?: boolean } };
+      executionContextId?: number;
+    };
+    if (message.method === "Runtime.executionContextCreated" && params.context) {
+      const frameId = params.context.auxData?.frameId;
+      // Prefer the frame's default world context (not an isolated one) — that's the one the
+      // page's own script (React, etc.) actually runs in.
+      if (frameId && params.context.auxData?.isDefault) {
+        executionContextsByFrame.set(frameId, params.context.id);
+      }
+    } else if (message.method === "Runtime.executionContextDestroyed") {
+      for (const [frameId, contextId] of executionContextsByFrame) {
+        if (contextId === params.executionContextId) executionContextsByFrame.delete(frameId);
+      }
+    } else if (message.method === "Runtime.executionContextsCleared") {
+      executionContextsByFrame.clear();
+    }
+  });
+
+  try {
+    await connection.send("Page.enable", {}, sessionId);
+    await connection.send("Runtime.enable", {}, sessionId);
+  } catch (error) {
+    if (gone()) throw new WebviewTargetGoneError(String(error));
+    throw error;
+  }
+
+  // 3. VSCode's webview-host JS creates the real content frame inside this target's root frame
+  // some time *after* the target itself exists (observed: ~2s to 24s). Poll the frame tree and
+  // the execution-context stream together, against this stage's own timeout budget.
+  const contextId = await findContentFrameContext(
+    connection,
+    sessionId,
+    executionContextsByFrame,
+    contentFrameTimeoutMs,
+    gone,
+  );
+
+  return new CdpWebviewSession(connection, sessionId, contextId);
 }
