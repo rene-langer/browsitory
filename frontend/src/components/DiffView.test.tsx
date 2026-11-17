@@ -829,8 +829,9 @@ describe("DiffView large and generated diffs (#686)", () => {
 
   // As few lines as show a whole step of 2,000 and a shorter last one (#853): jsdom renders every
   // line, and 4,500 of them took over 10 s on a loaded machine. The window ends inside the second
-  // hunk, and "Show all" is offered only while more than a step is left (2,001, then 1). The role
-  // queries look inside the bar under the window, not through thousands of lines.
+  // hunk, and "Show all" is offered with 2,001 lines left and not with 1 (the next test pins its
+  // threshold). The role queries look inside the bar under the window, not through thousands of
+  // lines.
   it("shows a loaded long diff 2,000 lines at a time", () => {
     render(<DiffView hunks={[addedHunk(1500), addedHunk(2501, 2000)]} path="big.txt" />);
     fireEvent.click(screen.getByRole("button", { name: "Load diff (4,001 lines)" }));
@@ -842,6 +843,17 @@ describe("DiffView large and generated diffs (#686)", () => {
     bar = within(screen.getByText("1 more line not shown.").parentElement!);
     expect(bar.queryByRole("button", { name: "Show all" })).toBeNull();
     expect(bar.getByRole("button", { name: "Show 1 more" })).toBeInTheDocument();
+  });
+
+  // "Show all" only while more than one step is left: not with exactly 2,000 (with 2,001 above).
+  // Only the first window of 2,000 lines renders.
+  it("offers Show all only while more than 2,000 lines are left", () => {
+    render(<DiffView hunks={[addedHunk(4000)]} path="big.txt" />);
+    fireEvent.click(screen.getByRole("button", { name: "Load diff (4,000 lines)" }));
+    expect(renderedLines()).toBe(2000);
+    const bar = within(screen.getByText("2,000 more lines not shown.").parentElement!);
+    expect(bar.getByRole("button", { name: "Show 2,000 more" })).toBeInTheDocument();
+    expect(bar.queryByRole("button", { name: "Show all" })).toBeNull();
   });
 
   it("Show all renders every line", () => {
