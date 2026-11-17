@@ -827,17 +827,21 @@ describe("DiffView large and generated diffs (#686)", () => {
     expect(renderedLines()).toBe(0);
   });
 
+  // As few lines as show a whole step of 2,000 and a shorter last one (#853): jsdom renders every
+  // line, and 4,500 of them took over 10 s on a loaded machine. The window ends inside the second
+  // hunk, and "Show all" is offered only while more than a step is left (2,001, then 1). The role
+  // queries look inside the bar under the window, not through thousands of lines.
   it("shows a loaded long diff 2,000 lines at a time", () => {
-    render(<DiffView hunks={[addedHunk(1500), addedHunk(3000, 2000)]} path="big.txt" />);
-    fireEvent.click(screen.getByRole("button", { name: "Load diff (4,500 lines)" }));
+    render(<DiffView hunks={[addedHunk(1500), addedHunk(2501, 2000)]} path="big.txt" />);
+    fireEvent.click(screen.getByRole("button", { name: "Load diff (4,001 lines)" }));
     expect(renderedLines()).toBe(2000);
-    expect(screen.getByText("2,500 more lines not shown.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Show 2,000 more" }));
+    let bar = within(screen.getByText("2,001 more lines not shown.").parentElement!);
+    expect(bar.getByRole("button", { name: "Show all" })).toBeInTheDocument();
+    fireEvent.click(bar.getByRole("button", { name: "Show 2,000 more" }));
     expect(renderedLines()).toBe(4000);
-    expect(screen.queryByRole("button", { name: "Show all" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Show 500 more" }));
-    expect(renderedLines()).toBe(4500);
-    expect(screen.queryByText(/not shown/)).toBeNull();
+    bar = within(screen.getByText("1 more line not shown.").parentElement!);
+    expect(bar.queryByRole("button", { name: "Show all" })).toBeNull();
+    expect(bar.getByRole("button", { name: "Show 1 more" })).toBeInTheDocument();
   });
 
   it("Show all renders every line", () => {
@@ -879,6 +883,8 @@ describe("DiffView large and generated diffs (#686)", () => {
     const group = screen.getByRole("group", { name: "Diff hunks" });
     fireEvent.keyDown(group, { key: "ArrowDown" });
     expect(renderedLines()).toBe(2001);
+    // Every line shown: the bar under the window is gone (#853 moved this check here).
+    expect(screen.queryByText(/not shown/)).toBeNull();
     expect(group).toHaveAttribute(
       "aria-activedescendant",
       document.querySelector('[data-line-index="2000"]')!.id,
