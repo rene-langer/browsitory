@@ -2,6 +2,7 @@
 """Unit tests for check-privacy-hosts.py (#627). Run: python3 scripts/test_check_privacy_hosts.py"""
 
 import importlib.util
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -118,6 +119,36 @@ class CheckPrivacyHostsTest(unittest.TestCase):
                      "crates/tauri-app/capabilities/default.json"):
             with self.subTest(name=name):
                 self.assert_flags("cdn.io", {name: '{"u": "https://cdn.io/x"}\n'})
+
+    def git_repo(self, files: dict[str, str]) -> Path:
+        root = self.repo(files)
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        return root
+
+    def test_skips_git_ignored_generated_files(self):
+        # #1030: `pnpm run generate:release-notes` writes the changelog's text (URLs included)
+        # to a git-ignored file under frontend/src; it is not code the app runs.
+        root = self.git_repo({
+            "frontend/.gitignore": "src/generated\n",
+            "frontend/src/generated/releaseNotes.json": '{"text": "see https://notes.io and `https://`"}\n',
+        })
+        self.assertEqual(cph.check(root), [])
+
+    def test_still_scans_untracked_files_that_are_not_ignored(self):
+        root = self.git_repo({"frontend/src/new.ts": 'fetch("https://new-file.io");\n'})
+        errors = cph.check(root)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("new-file.io", errors[0])
+
+    def test_scans_tracked_files_even_when_a_gitignore_pattern_matches_them(self):
+        root = self.git_repo({
+            "frontend/.gitignore": "src/forced.ts\n",
+            "frontend/src/forced.ts": 'fetch("https://forced.io");\n',
+        })
+        subprocess.run(["git", "-C", str(root), "add", "-f", "frontend/src/forced.ts"], check=True)
+        errors = cph.check(root)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("forced.io", errors[0])
 
     def test_fails_when_the_notice_does_not_name_an_allowed_host(self):
         root = self.repo({"docs/guide/privacy.md": NOTICE.replace("`api.github.com`", "")})

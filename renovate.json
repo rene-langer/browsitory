@@ -64,6 +64,11 @@
       "minimumReleaseAge": "3 days"
     },
     {
+      "description": "@vscode/test-electron (3.1.0, the newest release) only accepts a stable version with a one-digit patch number (/^[0-9]+\\.[0-9]+\\.[0-9]$/ in its Version.isStable): keep the BROWSITORY_E2E_VSCODE_VERSION pin to versions it accepts, so 1.150.10 is never proposed (#921). Drop this rule once a test-electron release accepts two-digit patches",
+      "matchPackageNames": ["microsoft/vscode"],
+      "allowedVersions": "/^[0-9]+\\.[0-9]+\\.[0-9]$/"
+    },
+    {
       "description": "rust-toolchain.toml pins the one Rust version for local builds, CI and releases (#220): wait a week, so a release that gets a quick point fix (1.99.1) is skipped",
       "matchManagers": ["rust-toolchain"],
       "groupName": "Rust toolchain",
