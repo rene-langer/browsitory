@@ -51,7 +51,12 @@ describe("Browsitory multi-repo tabs", () => {
     // marker once the user has been there and left again (the check on leaving a tab). Since
     // #1028 the marker is "±N" (the number of changed files), said in the tab's accessible name.
     const untracked = path.join(E2E_SECOND_REPO_PATH, "e2e-tab-marker.txt");
-    const marked = async () => (await secondTab.getAttribute("aria-label")) !== null;
+    const expectedLabel = `${path.basename(E2E_SECOND_REPO_PATH)}, uncommitted changes in 2 files`;
+    // The tab is already marked "1 file" (README.md) from the first time it was left, above, and
+    // the marker only changes once a status check answers (`useTabChangeMarkers`: the workspace's
+    // own refresh, or the check on leaving the tab, both asynchronous). So wait for the count this
+    // file makes, not for any label (#1038).
+    const marked = async () => (await secondTab.getAttribute("aria-label")) === expectedLabel;
     try {
       fs.writeFileSync(untracked, "uncommitted\n");
       await browser.execute((el) => (el as HTMLElement).click(), secondTab);
@@ -59,7 +64,9 @@ describe("Browsitory multi-repo tabs", () => {
         timeoutMsg: "expected switching to the second tab",
       });
       await browser.execute((el) => (el as HTMLElement).click(), firstTab);
-      await browser.waitUntil(marked, { timeoutMsg: "expected the inactive second tab to show the changes marker" });
+      await browser.waitUntil(marked, {
+        timeoutMsg: "expected the inactive second tab to show the changes marker for 2 files",
+      });
       // Two files: the fixture's uncommitted README.md (wdio.conf.ts) and this one.
       expect(await secondTab.getAttribute("aria-label")).toBe(
         `${path.basename(E2E_SECOND_REPO_PATH)}, uncommitted changes in 2 files`,
