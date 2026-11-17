@@ -4223,6 +4223,13 @@ mod tests {
         // A folder is never removed as a link.
         assert!(!root.clear_link(OsStr::new("d")).unwrap());
         assert!(dir.path().join("d/f").is_file());
+        // Nor is a file (a link swapped for one meanwhile).
+        std::fs::write(dir.path().join("plain"), "file").unwrap();
+        assert!(!root.clear_link(OsStr::new("plain")).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("plain")).unwrap(),
+            "file"
+        );
         assert_eq!(
             std::fs::read_to_string(outside.path().join("f")).unwrap(),
             "OUTSIDE"
