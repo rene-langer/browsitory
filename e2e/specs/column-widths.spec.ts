@@ -4,8 +4,8 @@ import { waitForAppReady } from "../support/app";
 // #605: the sidebar and history columns keep their width when the window resizes; only the diff
 // column grows or shrinks. The widths are the defaults from RepoWorkspace.tsx (sidebar, 260px)
 // and WorkspaceMain.tsx (history, 40% of the window it opened in, #1004); this spec file starts
-// with empty storage (wdio.conf.ts's `beforeSession`). Window widths stay within xvfb-run's
-// default 1280px screen.
+// with empty storage (wdio.conf.ts's `beforeSession`). Window widths stay within the 1280px
+// xvfb-run screen that ci.yml and AGENTS.md ask for (#1046).
 
 type ColumnWidths = { sidebar: number | null; history: number; diff: number };
 
