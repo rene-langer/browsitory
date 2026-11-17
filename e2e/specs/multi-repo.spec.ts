@@ -56,7 +56,11 @@ describe("Browsitory multi-repo tabs", () => {
     // the marker only changes once a status check answers (`useTabChangeMarkers`: the workspace's
     // own refresh, or the check on leaving the tab, both asynchronous). So wait for the count this
     // file makes, not for any label (#1038).
-    const marked = async () => (await secondTab.getAttribute("aria-label")) === expectedLabel;
+    let lastLabel: string | null = null;
+    const marked = async () => {
+      lastLabel = await secondTab.getAttribute("aria-label");
+      return lastLabel === expectedLabel;
+    };
     try {
       fs.writeFileSync(untracked, "uncommitted\n");
       await browser.execute((el) => (el as HTMLElement).click(), secondTab);
@@ -64,8 +68,12 @@ describe("Browsitory multi-repo tabs", () => {
         timeoutMsg: "expected switching to the second tab",
       });
       await browser.execute((el) => (el as HTMLElement).click(), firstTab);
-      await browser.waitUntil(marked, {
-        timeoutMsg: "expected the inactive second tab to show the changes marker for 2 files",
+      // `timeoutMsg` is fixed when the wait starts, so the label last seen is added on a timeout.
+      await browser.waitUntil(marked).catch((error: unknown) => {
+        throw new Error(
+          `expected the inactive second tab to be labelled "${expectedLabel}", last saw ${JSON.stringify(lastLabel)}`,
+          { cause: error },
+        );
       });
       // Two files: the fixture's uncommitted README.md (wdio.conf.ts) and this one.
       expect(await secondTab.getAttribute("aria-label")).toBe(
