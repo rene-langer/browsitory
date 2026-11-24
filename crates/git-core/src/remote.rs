@@ -637,6 +637,9 @@ pub enum RemoteError {
     /// `core.ignorecase` can't be read, so the case-collision check can't run (#225).
     #[error(transparent)]
     CaseConfig(#[from] crate::CaseConfigUnreadable),
+    /// A file the pull writes uses an external filter driver (#1063); nothing changed.
+    #[error(transparent)]
+    ExternalFilter(#[from] crate::ExternalFilter),
 }
 
 impl RemoteError {
@@ -1384,7 +1387,7 @@ pub fn pull_after_fetch(
     // A checkout that stops part-way (a file another program holds open, a read-only file) is
     // rolled back, so the pull can be tried again (#321).
     let written = crate::partial_checkout::Written::default();
-    written.record(repo, &mut checkout);
+    let filters = written.record(repo, &mut checkout);
     repo.checkout_tree(upstream_commit.as_object(), Some(&mut checkout))
         .map_err(|error| {
             let restored = crate::partial_checkout::roll_back(repo, &written);
@@ -1399,6 +1402,7 @@ pub fn pull_after_fetch(
                 )
             }
         })?;
+    filters.check()?;
     repo.reference(&local_ref, upstream_oid, true, "fast-forward pull")?;
 
     Ok(PullOutcome::FastForwarded { upstream_ref })

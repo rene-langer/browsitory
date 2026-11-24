@@ -159,7 +159,7 @@ pub(crate) fn check_out_as_conflicts<E>(
     how: ConflictCheckout<'_, '_>,
 ) -> Result<git2::Index, E>
 where
-    E: From<git2::Error> + From<crate::HeldOpen>,
+    E: From<git2::Error> + From<crate::HeldOpen> + From<crate::ExternalFilter>,
 {
     let ours = repo.head()?.peel_to_commit()?.tree()?;
     record_as_conflicts(&mut merged, &ours, how.our_label, how.their_label)?;
@@ -170,8 +170,7 @@ where
     let written = crate::partial_checkout::Written::default();
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.safe().allow_conflicts(how.skip_local_changes);
-    crate::hardlink::on_checkout(repo, &mut checkout);
-    written.record(repo, &mut checkout);
+    let filters = written.record(repo, &mut checkout);
     written.expect_conflicts(repo, &merged);
     let mut index = repo.index()?;
     index.clear()?;
@@ -186,6 +185,11 @@ where
             crate::HeldDuring::RolledBack,
             error,
         ));
+    }
+    if let Err(refusal) = filters.check() {
+        // Nothing was written; the repository's index handle drops the entries set above.
+        index.read(true)?;
+        return Err(refusal.into());
     }
     if !untracked_files.is_empty() {
         let untracked: HashSet<Vec<u8>> = untracked_files.iter().map(|entry| entry.path).collect();

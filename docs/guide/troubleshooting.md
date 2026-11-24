@@ -56,3 +56,29 @@ that has such a pair the current commit doesn't, adding such a worktree, a merge
 step, cherry-pick, revert or stash apply that brings one in, a hard reset, starting a rebase and
 discarding one file of the pair. The error names both files. Rename one of them in a commit, then
 try again. Aborting a rebase, cherry-pick or revert always works, even with such a pair.
+
+## Git LFS, git-crypt and other filter drivers
+
+A `.gitattributes` line such as `*.psd filter=lfs` or `secrets/** filter=git-crypt` hands those
+files to a program that git runs when it stores or writes them: Git LFS stores a small pointer
+instead of the file, git-crypt stores it encrypted. Browsitory can't run these programs. So that
+it never commits a secret in plain text or writes an LFS pointer over your file, it refuses, before
+it changes anything, every action that would store or write such a file: staging it (also with
+**Stage all**, hunks and lines), discarding its changes, stashing it or applying a stash that
+holds it, marking its conflict resolved or taking a side, and switching branches, checking out a
+commit, resetting, merging, pulling, cherry-picking, reverting, rebasing, applying a patch or
+undoing when that would write it. The error names the file and the filter, for example
+"'secrets/prod.env' uses the 'git-crypt' filter (for example Git LFS or git-crypt), which
+Browsitory can't run, so it refused this change. Use git on the command line for it instead."
+Actions that don't touch such a file work as usual.
+
+??? note "Details"
+
+    A filter counts when the Git config (of the repository, or your global one: `git lfs install`
+    writes there) sets a command for it (`filter.<name>.clean`, `.smudge` or `.process`) or
+    marks it `required`. A `filter=` attribute without such a setting is ignored, as Git ignores
+    it, and a symbolic link is never filtered. The changes list and the diff compare the file as
+    it is on disk with what is stored, so an encrypted file can show as changed although it
+    isn't. A fresh clone or a new worktree writes such files as they are stored (the LFS pointer,
+    the encrypted bytes), as Git does without the program installed; run `git lfs pull` or
+    `git-crypt unlock` there. Side files for external tools show the stored text too.

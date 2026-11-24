@@ -34,6 +34,7 @@ use std::rc::Rc;
 
 use git2::Repository;
 
+use crate::external_filter::{Drivers, FilterGuard};
 use crate::partial_checkout::Written;
 use crate::worktree_guard;
 
@@ -41,18 +42,31 @@ use crate::worktree_guard;
 /// `repo`'s work tree before libgit2 writes it. Replaces the builder's notify and progress
 /// callbacks; a checkout that is recorded for a rollback uses `Written::record` instead, which
 /// does this too.
-pub(crate) fn on_checkout(repo: &Repository, builder: &mut git2::build::CheckoutBuilder<'_>) {
-    install(repo, builder, None);
+///
+/// Also refuses a file that uses an external filter driver (#1063); the caller checks the
+/// returned guard right after the checkout.
+pub(crate) fn on_checkout(
+    repo: &Repository,
+    builder: &mut git2::build::CheckoutBuilder<'_>,
+) -> FilterGuard {
+    install(repo, builder, None)
 }
 
 /// The callbacks of [`on_checkout`], also recording into `written` (see `Written::record`):
 /// each planned path as it was before (after it was separated, so a rollback doesn't take the
 /// copy for a write), and each path libgit2 reports done.
+///
+/// The notify callback also stops the checkout, before anything is written, at the first
+/// file to write whose `filter` attribute names a configured driver (#1063), and records it
+/// in the returned guard. libgit2 then reports success, so the caller checks the guard.
 pub(crate) fn install(
     repo: &Repository,
     builder: &mut git2::build::CheckoutBuilder<'_>,
     written: Option<Written>,
-) {
+) -> FilterGuard {
+    let guard = FilterGuard::default();
+    // Unreadable config: libgit2's checkout reads it too, and fails on its own.
+    let drivers = Drivers::load(repo).unwrap_or_default();
     let workdir = repo.workdir().map(Path::to_path_buf);
     let planned: Rc<RefCell<Vec<PathBuf>>> = Rc::default();
     {
@@ -79,15 +93,27 @@ pub(crate) fn install(
         });
     }
     let Some(workdir) = workdir else {
-        return;
+        return guard;
     };
     if let Some(written) = &written {
         written.set_workdir(&workdir);
     }
     // Called while libgit2 plans the checkout, before it writes anything.
     builder.notify_on(git2::CheckoutNotificationType::UPDATED);
-    builder.notify(move |_, path, _, _, _| {
+    let refused = guard.clone();
+    builder.notify(move |_, path, _, target, _| {
+        if refused.refused() {
+            return false;
+        }
         if let Some(path) = path {
+            // git doesn't filter a symbolic link.
+            let link = target.is_some_and(|target| target.mode() == git2::FileMode::Link);
+            if !link {
+                if let Ok(Some(refusal)) = drivers.refusal(path) {
+                    refused.refuse(refusal);
+                    return false;
+                }
+            }
             if let Some(written) = &written {
                 written.plan(&workdir, path);
             }
@@ -95,6 +121,7 @@ pub(crate) fn install(
         }
         true
     });
+    guard
 }
 
 /// Before `repo.apply(diff, location)`: separates each work-tree file the patch changes, once a

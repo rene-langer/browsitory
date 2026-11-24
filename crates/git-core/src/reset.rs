@@ -31,6 +31,9 @@ pub enum ResetError {
     /// Windows: a checkout stopped at a file another program holds open (#303).
     #[error(transparent)]
     HeldOpen(#[from] crate::HeldOpen),
+    /// A file to write uses an external filter driver (#1063); nothing changed.
+    #[error(transparent)]
+    ExternalFilter(#[from] crate::ExternalFilter),
 }
 
 /// Moves the current branch (or detached HEAD) to `commit_id`. Soft keeps index + working tree,
@@ -63,13 +66,14 @@ pub fn reset_to(repo: &Repository, commit_id: &str, mode: ResetMode) -> Result<(
             )?;
             let mut checkout = git2::build::CheckoutBuilder::new();
             checkout.force();
-            crate::hardlink::on_checkout(repo, &mut checkout);
+            let filters = crate::hardlink::on_checkout(repo, &mut checkout);
             // A file another program holds open: say so, not libgit2's raw error (#303).
             repo.checkout_tree(tree.as_object(), Some(&mut checkout))
                 .map_err(crate::worktree_guard::held_open::<ResetError>(
                     repo.workdir(),
                     crate::HeldDuring::Reset,
                 ))?;
+            filters.check()?;
         }
         // git's order: the index first, the ref last (#796). Moving HEAD first left a window in
         // which HEAD named the target while the index still held the old tree, and a reset whose

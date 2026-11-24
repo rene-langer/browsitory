@@ -7,6 +7,7 @@ pub mod commit;
 pub mod commit_details;
 pub mod commit_stats;
 pub mod diff;
+mod external_filter;
 mod file_folder;
 pub mod fold;
 pub mod forge;
@@ -48,6 +49,7 @@ mod untracked;
 pub mod user_command;
 pub mod worktree;
 pub(crate) mod worktree_guard;
+pub use external_filter::ExternalFilter;
 pub use file_folder::FileFolderConflict;
 pub use worktree_guard::{
     CaseCollision, CaseConfigUnreadable, CasePair, CasePairBroughtIn, HeldDuring, HeldOpen,

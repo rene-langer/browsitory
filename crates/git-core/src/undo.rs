@@ -107,6 +107,9 @@ pub enum UndoError {
     /// `core.ignorecase` can't be read, so the case-collision check can't run (#225).
     #[error(transparent)]
     CaseConfig(#[from] crate::CaseConfigUnreadable),
+    /// A file to restore uses an external filter driver (#1063); nothing changed.
+    #[error(transparent)]
+    ExternalFilter(#[from] crate::ExternalFilter),
 }
 
 pub fn capture(repo: &Repository, scope: SnapshotScope) -> Result<RepoSnapshot, UndoError> {
@@ -813,7 +816,7 @@ impl WorktreeChange {
         for path in &self.from_index {
             checkout.path(path);
         }
-        crate::hardlink::on_checkout(repo, &mut checkout);
+        let filters = crate::hardlink::on_checkout(repo, &mut checkout);
         let workdir = repo.workdir().ok_or(UndoError::Bare)?;
         // A file another program holds open: the walker's message, not libgit2's raw error
         // (#268). Files checked out before it stay written; trying again finishes the restore.
@@ -828,6 +831,7 @@ impl WorktreeChange {
                     None => UndoError::Git(error),
                 }
             })?;
+        filters.check()?;
         // libgit2 skips a file whose HEAD (its checkout baseline) still has a directory there,
         // as in a dir -> file swap; fall back to the raw blob for anything still missing.
         let config = worktree_config(repo)?;

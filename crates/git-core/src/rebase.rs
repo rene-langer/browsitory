@@ -6,6 +6,9 @@ use thiserror::Error;
 pub enum RebaseError {
     #[error("git operation failed: {0}")]
     Git(#[from] git2::Error),
+    /// A file to write uses an external filter driver (#1063); nothing changed.
+    #[error(transparent)]
+    ExternalFilter(#[from] crate::ExternalFilter),
     #[error("invalid rebase plan: {0}")]
     InvalidPlan(String),
     #[error("no rebase is currently in progress")]
@@ -519,7 +522,7 @@ pub fn start_rebase_with(
     // rolled back, so the rebase can be started again (#321).
     let written = crate::partial_checkout::Written::default();
     let mut checkout = git2::build::CheckoutBuilder::new();
-    written.record(repo, &mut checkout);
+    let filters = written.record(repo, &mut checkout);
     repo.checkout_tree(onto_commit.as_object(), Some(&mut checkout))
         .map_err(|error| {
             let restored = crate::partial_checkout::roll_back(repo, &written);
@@ -530,6 +533,7 @@ pub fn start_rebase_with(
                 error,
             )
         })?;
+    filters.check()?;
     repo.set_head_detached(onto_commit.id())?;
 
     let mut state = RebaseState {
@@ -1054,6 +1058,8 @@ fn advance(
             &crate::worktree_guard::GuardSource::Index(&merged),
             Some(&head_commit.tree()?),
         )?;
+        // libgit2's pick leaves its state files even when its checkout is refused (#1063).
+        crate::external_filter::refuse_merged::<RebaseError>(repo, &head_commit.tree()?, &merged)?;
         if colliding {
             return stop_at_file_folder_conflict(repo, state, merged, &commit);
         }
@@ -1065,11 +1071,17 @@ fn advance(
         let written = crate::partial_checkout::Written::default();
         let mut checkout = git2::build::CheckoutBuilder::new();
         checkout.safe().allow_conflicts(true);
-        written.record(repo, &mut checkout);
+        let filters = written.record(repo, &mut checkout);
         written.expect_conflicts(repo, &merged);
         let mut options = git2::CherrypickOptions::new();
         options.checkout_builder(checkout);
-        if let Err(error) = repo.cherrypick(&commit, Some(&mut options)) {
+        let picked = repo.cherrypick(&commit, Some(&mut options));
+        if let Err(refusal) = filters.check() {
+            // Checked before the step (`refuse_merged`); libgit2 wrote its state files only.
+            let _ = crate::commit::clear_operation_files(repo);
+            return Err(refusal.into());
+        }
+        if let Err(error) = picked {
             let restored = crate::partial_checkout::roll_back(repo, &written);
             // libgit2 removes the pick's state files on an error; make sure.
             let _ = crate::commit::clear_operation_files(repo);
@@ -1508,7 +1520,7 @@ fn check_out_original(
     // rewrites everything, so nothing is rolled back; the message says whether the checkout
     // had already put some files back (#321).
     let written = crate::partial_checkout::Written::default();
-    written.record(repo, &mut checkout);
+    let filters = written.record(repo, &mut checkout);
     repo.checkout_tree(tree.as_object(), Some(&mut checkout))
         .map_err(|error| {
             let during = if written.is_empty() {
@@ -1518,5 +1530,6 @@ fn check_out_original(
             };
             crate::worktree_guard::held_open::<RebaseError>(repo.workdir(), during)(error)
         })?;
+    filters.check()?;
     Ok(())
 }
