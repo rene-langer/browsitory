@@ -1130,6 +1130,48 @@ fn commit_and_range_diffs_refuse_a_file_over_the_size_limit() {
 }
 
 #[test]
+fn the_size_limit_ignores_a_big_file_below_a_path_that_became_a_folder() {
+    // The literal pathspec `d` also matches `d/big.txt` (#116); only `d` itself is asked for.
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "d", "a file\n");
+    commit_all(&repo, "file");
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    let mut index = repo.index().unwrap();
+    index.remove_path(Path::new("d")).unwrap();
+    index.write().unwrap();
+    write_file(dir.path(), "d/big.txt", &text(3000));
+    commit_all(&repo, "folder");
+    let head = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+
+    let hunks = git_core::diff::commit_diff(&repo, &head, "d", &limited(2000)).unwrap();
+    assert_eq!(hunks.len(), 1);
+    assert!(hunks[0]
+        .lines
+        .iter()
+        .all(|line| line.origin == DiffLineOrigin::Remove));
+}
+
+#[test]
+fn a_binary_file_at_the_size_limit_is_binary_not_too_large() {
+    let (dir, repo) = init_repo();
+    std::fs::write(dir.path().join("b.bin"), [0u8; 10]).unwrap();
+    commit_all(&repo, "binary");
+    std::fs::write(dir.path().join("b.bin"), [0u8; 1000]).unwrap();
+
+    assert!(
+        git_core::diff::working_diff(&repo, "b.bin", false, &limited(1000))
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
 fn the_size_limit_only_concerns_the_file_asked_for() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "big.txt", &text(1000));

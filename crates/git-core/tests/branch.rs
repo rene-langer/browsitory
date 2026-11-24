@@ -458,6 +458,78 @@ fn commits_only_on_branch_counts_through_merges() {
     );
 }
 
+/// #1067: a branch whose commits are all dated before every commit of the other branches. The
+/// walk takes the newest commits first, so it meets only hidden ones for a while and must not stop
+/// before it reaches the branch's own.
+#[test]
+fn commits_only_on_branch_counts_a_branch_dated_before_the_others() {
+    let (_dir, repo) = init_repo();
+    let root = commit_at(&repo, &[], "root", 1);
+    let main = line_of_commits(&repo, Some(root), 50, 1_000);
+    let feature = line_of_commits(&repo, Some(root), 10, 100);
+    repo.reference("refs/heads/main", main[49], true, "test")
+        .unwrap();
+    repo.set_head("refs/heads/main").unwrap();
+    repo.reference("refs/heads/feature", feature[9], true, "test")
+        .unwrap();
+
+    assert_eq!(
+        git_core::branch::commits_only_on_branch(&repo, "feature").unwrap(),
+        10
+    );
+}
+
+/// #1067: a commit the branch reaches along two paths (a merge of two of its own lines) counts
+/// once, and stays counted.
+#[test]
+fn commits_only_on_branch_counts_a_commit_reached_twice_once() {
+    let (_dir, repo) = init_repo();
+    let base = commit_at(&repo, &[], "base", 1_000);
+    let fork = commit_at(&repo, &[base], "fork", 1_100);
+    let left = commit_at(&repo, &[fork], "left", 1_200);
+    let right = commit_at(&repo, &[fork], "right", 1_300);
+    let merge = commit_at(&repo, &[left, right], "merge", 1_400);
+    repo.reference("refs/heads/main", base, true, "test")
+        .unwrap();
+    repo.set_head("refs/heads/main").unwrap();
+    repo.reference("refs/heads/feature", merge, true, "test")
+        .unwrap();
+
+    assert_eq!(
+        git_core::branch::commits_only_on_branch(&repo, "feature").unwrap(),
+        4
+    );
+}
+
+/// #1067: the walk stops a few commits past where only hidden ones are left, as git's does,
+/// instead of walking the other branches' whole history. Seen through the object store: a commit
+/// far below the fork point can be missing.
+#[test]
+fn commits_only_on_branch_stops_soon_after_only_hidden_commits_are_left() {
+    let (dir, repo) = init_repo();
+    let main = line_of_commits(&repo, None, 200, 1_000);
+    let feature = line_of_commits(&repo, Some(main[150]), 2, 5_000);
+    repo.reference("refs/heads/main", main[199], true, "test")
+        .unwrap();
+    repo.set_head("refs/heads/main").unwrap();
+    repo.reference("refs/heads/feature", feature[1], true, "test")
+        .unwrap();
+    let old = main[10].to_string();
+    let loose = repo.path().join("objects").join(&old[..2]).join(&old[2..]);
+    let mut permissions = std::fs::metadata(&loose).unwrap().permissions();
+    #[allow(clippy::permissions_set_readonly_false)]
+    permissions.set_readonly(false);
+    std::fs::set_permissions(&loose, permissions).unwrap();
+    std::fs::remove_file(&loose).unwrap();
+    // A fresh handle: the first one has the commit in its object cache.
+    let repo = git2::Repository::open(dir.path()).unwrap();
+
+    assert_eq!(
+        git_core::branch::commits_only_on_branch(&repo, "feature").unwrap(),
+        2
+    );
+}
+
 #[test]
 fn delete_branch_with_force_deletes_an_unmerged_branch() {
     let (dir, repo) = init_repo();
