@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { DiffSource, FileSide, FileSides, RepoClient } from "../ipc/RepoClient";
 import { describeError, type DescribedError } from "../lib/errorMessages";
-import { formatBytes, imageDataUrl } from "../lib/imageTypes";
+import { formatBytes } from "../lib/fileSize";
+import { imageDataUrl } from "../lib/imageTypes";
 import styles from "./ImageDiff.module.css";
 import { InlineError } from "./primitives/InlineError";
 

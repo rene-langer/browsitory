@@ -2,11 +2,10 @@ import { ChevronDown, ChevronRight, File, FileCode, Folder, FolderOpen, History,
 import { startTransition, useEffect, useRef, useState, type ReactNode } from "react";
 import type { FileContent, RepoClient, TreeEntry, TreeListing } from "../ipc/RepoClient";
 import { describeError, type DescribedError } from "../lib/errorMessages";
-import { HIGHLIGHT_LINE_LIMIT, highlightLines, type Token } from "../lib/highlight";
+import { HIGHLIGHT_LINE_LIMIT, highlightLines, logHighlightError, type Token } from "../lib/highlight";
 import { isAbortError } from "../lib/highlightWorkerProtocol";
 import { formatSize } from "../lib/fileSize";
 import { languageForPath } from "../lib/languageForPath";
-import { logFailure } from "../lib/logger";
 import type { SelectedRow } from "../state/useAppState";
 import type { ExternalToolsApi } from "../state/useExternalTools";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
@@ -496,10 +495,6 @@ export function CommitFileView({
       )}
     </section>
   );
-}
-
-function logHighlightError(error: unknown): void {
-  logFailure("Syntax highlighting failed", error);
 }
 
 /** A text file's lines with line numbers, syntax highlighted when the setting is on. */

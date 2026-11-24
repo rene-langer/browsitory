@@ -1,15 +1,9 @@
 import { useState } from "react";
 import type { TransferOperation, TransferProgress } from "../ipc/RepoClient";
+import { formatBytes } from "../lib/fileSize";
 import { runningHookLabel } from "../lib/hookFailure";
 import { type TransferSubject, transferTitle } from "../lib/transferCopy";
 import { type Activity, ActivityIndicator } from "./ActivityIndicator";
-
-function formatBytes(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
 
 /** A title for a transfer without a subject (every transfer the tab starts has one). */
 const OPERATION_TITLE: Record<TransferOperation, string> = {

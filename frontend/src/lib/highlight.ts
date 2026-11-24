@@ -3,6 +3,7 @@ import type { DiffHunk, DiffLine } from "../ipc/RepoClient";
 import { inProcessTransport } from "./highlightInProcess";
 import { abortError, isAbortError, type HighlightTransport } from "./highlightWorkerProtocol";
 import type { HighlightLanguage } from "./languageForPath";
+import { logFailure } from "./logger";
 
 export { withoutExcludedGrammars } from "./excludedGrammars";
 
@@ -12,6 +13,11 @@ export interface Token {
 }
 
 export const HIGHLIGHT_LINE_LIMIT = 2000;
+
+/** Highlight failures are never user-facing: callers log them here and show plain text. */
+export function logHighlightError(error: unknown): void {
+  logFailure("Syntax highlighting failed", error);
+}
 
 /**
  * Where tokenizing runs (#843): the app's entry points hand in a Web Worker

@@ -42,11 +42,11 @@ A heading that only starts with the word, such as `### Internal links`, is still
 ## Checks
 
 `scripts/check-changelog.py` (pre-push hook and CI) accepts a change to `crates/`,
-`frontend/src/` or `e2e/` when it adds or edits a fragment here (or edits `CHANGELOG.md`). It
-also checks that each added or edited fragment starts with a `### ` heading and has at least
-one line under it. This README is never a fragment. Any other file here that isn't a `*.md`
-fragment (for example `240-x.MD` or `240-x.txt`) fails the check, so a misnamed entry is never
-lost.
+`frontend/src/`, `e2e/` or `extension/` when it adds or edits a fragment here (or edits
+`CHANGELOG.md`). It also checks that each added or edited fragment starts with a `### `
+heading and has at least one line under it. This README is never a fragment. Any other file here
+that isn't a `*.md` fragment (for example `240-x.MD` or `240-x.txt`) fails the check, so a
+misnamed entry is never lost.
 
 ## Releasing
 

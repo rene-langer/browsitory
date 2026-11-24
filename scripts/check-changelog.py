@@ -23,7 +23,8 @@ from changelog_fragments import (  # noqa: E402
     is_stray,
 )
 
-WATCHED_PREFIXES = ("crates/", "frontend/src/", "e2e/")
+# extension/ ships in every VSIX (#1057); its e2e/ is watched like the top-level e2e/.
+WATCHED_PREFIXES = ("crates/", "frontend/src/", "e2e/", "extension/")
 CHANGELOG_FILE = "CHANGELOG.md"
 
 # Dependency manifests and lockfiles, matched by file name in any directory. A
@@ -153,8 +154,8 @@ def main() -> int:
 
     if needs_changelog(files):
         print(
-            "check-changelog: code changed under crates/, frontend/src/, or "
-            "e2e/ but there is no changelog entry.\n"
+            f"check-changelog: code changed under {', '.join(WATCHED_PREFIXES)} "
+            "but there is no changelog entry.\n"
             "(Changes limited to dependency manifests/lockfiles are exempt.)\n"
             "Add a fragment, changelog.d/<issue>-<short-slug>.md (see "
             "changelog.d/README.md), or bypass with SKIP_CHANGELOG_CHECK=1 "

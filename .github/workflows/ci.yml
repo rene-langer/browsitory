@@ -1028,6 +1028,10 @@ jobs:
     env:
       RUN_STEPS: ${{ needs.changes.outputs.build != 'false' }}
       E2E_REPO_PATH: /tmp/browsitory-e2e-repo
+      # Pinned so a new release reaches the harness through a Renovate PR, not every PR at once
+      # (#1058). Its version is independent of the other Tauri versions.
+      # renovate: datasource=crate depName=tauri-driver
+      TAURI_DRIVER_VERSION: 2.1.0
     steps:
       # Skipped work still reports success (see the `changes` job); this says why.
       - name: Nothing to do (see the changes job)
@@ -1069,8 +1073,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install tauri-driver
         if: env.RUN_STEPS == 'true'
-        # tauri-driver's version is independent of any other Tauri versions.
-        run: cargo install tauri-driver --locked
+        run: cargo install tauri-driver --locked --version "$TAURI_DRIVER_VERSION"
       - uses: pnpm/action-setup@v6
         if: env.RUN_STEPS == 'true'
         with:

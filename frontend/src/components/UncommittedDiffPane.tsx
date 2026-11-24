@@ -16,7 +16,6 @@ import {
   deleteUntrackedConfirmMessage,
   discardAllConfirmMessage,
   discardConfirmMessage,
-  isUntracked,
   selectionMenuItems,
   type SelectionSummary,
 } from "./FileActionsMenu";
@@ -32,6 +31,7 @@ import {
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { isMenuKey } from "../lib/menuKeys";
 import { stageAllPaths, stageModifiedPaths, untrackedPaths } from "../lib/stagePaths";
+import { isUntracked } from "../lib/statusLetter";
 import { useFileListLayout, writeFileListLayout } from "../lib/fileListLayoutPreference";
 import { buildFileTree, filesUnder, visibleFiles, type FileTreeNode } from "../lib/fileTree";
 import { ChevronDown, ChevronRight, Minus, Plus } from "lucide-react";

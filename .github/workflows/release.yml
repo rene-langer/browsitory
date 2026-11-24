@@ -43,12 +43,14 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     # Observed up to 9 min (uncached cargo test), plus up to 15 min for the apt step's retries
-    # past a slow mirror (#353, #459).
+    # past a slow mirror (#353, #459). Usually cached now (#1061), but a cache miss still
+    # compiles everything.
     timeout-minutes: 45
     env:
-      # Same pin as ci.yml's `licenses` job; keep both in sync (Renovate updates both).
+      # Same pin as ci.yml's `licenses` job (`CARGO_ABOUT_VERSION` there); keep both in sync
+      # (Renovate updates both). No `CARGO_` prefix here, so the rust-cache key below matches.
       # renovate: datasource=crate depName=cargo-about
-      CARGO_ABOUT_VERSION: 0.9.3
+      ABOUT_VERSION: 0.9.3
     steps:
       - uses: actions/checkout@v7
       - name: Validate tag is strict semver (release/MAJOR.MINOR.PATCH)
@@ -74,6 +76,15 @@ jobs:
       # The version rust-toolchain.toml pins (#220), with its components.
       - name: Install Rust
         run: rustup toolchain install
+      # Restores ci.yml's `rust` job Linux cache (#1061), saved on main, which a tag's run may
+      # read; see ci.yml's `mutants` job for the same restore. rust-cache's key is `shared-key`,
+      # OS, arch and a hash of the rustc version and every CARGO*/RUST*/CC*/CFLAGS*/CXX*/CMAKE*
+      # env var, so it matches only while this job sets no env var with those prefixes beyond
+      # the workflow-level ones ci.yml sets too. Never saves: a tag's cache would serve no one.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust
+          save-if: false
       - run: cargo test --workspace
       - uses: pnpm/action-setup@v6
         with:
@@ -95,7 +106,7 @@ jobs:
       # (THIRD_PARTY_NOTICES.md, #301). Same check as ci.yml's `licenses` job.
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-about@${{ env.CARGO_ABOUT_VERSION }}
+          tool: cargo-about@${{ env.ABOUT_VERSION }}
       - run: pnpm --dir extension install --frozen-lockfile --ignore-scripts
       - name: THIRD_PARTY_NOTICES.md is current
         run: python3 scripts/generate-third-party-notices.py --check

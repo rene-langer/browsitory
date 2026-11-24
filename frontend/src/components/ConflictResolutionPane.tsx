@@ -24,7 +24,7 @@ import {
 } from "../lib/conflictMerge";
 import { useConflictTokens } from "../lib/conflictHighlight";
 import { blockWordMarks } from "../lib/conflictWordDiff";
-import type { Token } from "../lib/highlight";
+import { logHighlightError, type Token } from "../lib/highlight";
 import {
   ariaKeyShortcuts,
   chordsFor,
@@ -38,7 +38,6 @@ import {
 } from "../lib/keybindings";
 import { useKeymap } from "../lib/keymap";
 import { languageForPath } from "../lib/languageForPath";
-import { logFailure } from "../lib/logger";
 import { historyOf, record, redo, undo, type History } from "../lib/mergeHistory";
 import type { Segment } from "../lib/wordDiff";
 import { useRegisterMergeEditor } from "../state/useCurrentMergeEditor";
@@ -114,10 +113,6 @@ function lineCount(text: string): number {
 }
 
 const NO_NAMES: ConflictSideNames = { ours: null, theirs: null };
-
-function logHighlightError(error: unknown): void {
-  logFailure("Syntax highlighting failed", error);
-}
 
 /**
  * `text` as it is, its lines coloured with `tokens` when given (#763) and the words that differ

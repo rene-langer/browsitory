@@ -7,6 +7,7 @@ import * as path from "node:path";
  *
  * The frontend's `RepoClient.DiffSource` is duplicated here on purpose: the extension never
  * imports from `frontend/`, the same way the sidecar keeps its own DTO copies.
+ * `frontendTypes.contract.test.ts` fails when the two drift (#1059).
  */
 
 export const FILE_VERSION_SCHEME = "browsitory-file";
