@@ -12,7 +12,7 @@ export function joinPath(parent: string, name: string): string {
 }
 
 /**
- * An `https://` URL with a user name and no password (Bitbucket's copy URL, or a token passed as
+ * An https URL with a user name and no password (Bitbucket's copy URL, or a token passed as
  * the user name), split into the URL without it and the decoded name; null for any other URL.
  * The backend refuses a user name in the URL (#1052): git would keep it in `.git/config`.
  */
