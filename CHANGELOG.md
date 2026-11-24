@@ -8,14 +8,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [0.16.0] - 2026-11-24
 
-0.16.0 is a maintenance release: the bundled zlib picks up the fix for RUSTSEC-2026-0544
-(#1045). The rest is internal: test flakes and test isolation fixes, and CI and hook setup
-changes.
+0.16.0 is a maintenance release: security fixes in the bundled zlib (RUSTSEC-2026-0544) and
+the `url` and `cookie` crates (RUSTSEC-2026-0592, RUSTSEC-2026-0594). The rest is internal:
+test flakes and test isolation fixes, and CI and hook setup changes.
 
 ### Security
 
 - Fixed: updated the bundled zlib (`libz-sys` 1.1.33) to pick up the fix for RUSTSEC-2026-0544,
   a heap buffer overflow (#1045).
+- Fixed: updated `url` to 2.5.9 for RUSTSEC-2026-0592, a stack overflow in `Url::origin()` on
+  nested `blob:` URLs, and `cookie` to 0.18.3 for RUSTSEC-2026-0594, private cookie nonces that
+  can repeat in processes that fork (#1076).
 
 ### Internal
 
