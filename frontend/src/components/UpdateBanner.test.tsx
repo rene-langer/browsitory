@@ -4,6 +4,8 @@ import { UpdateBanner } from "./UpdateBanner";
 import * as updater from "../ipc/updater";
 import { UpdateCheckContext, type UpdateCheck, type UpdateCheckRegistry } from "../state/updateCheck";
 import { UpdateSettingsContext, type UpdateSettingsApi, type UpdateSettingsStatus } from "../state/useUpdateSettings";
+import { installGlobalErrorLogging } from "../lib/logger";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 vi.mock("../ipc/updater", () => ({
   checkForUpdate: vi.fn(),
@@ -121,6 +123,94 @@ describe("UpdateBanner", () => {
 
     expect(installAndRelaunch).toHaveBeenCalledTimes(1);
     // No unhandled rejection should propagate out of the click handler.
+  });
+
+  describe("when installing fails (#1077)", () => {
+    let uninstallLogging: (() => void) | undefined;
+    afterEach(() => uninstallLogging?.());
+
+    async function clickRestart() {
+      const button = await screen.findByRole("button", { name: /restart/i });
+      await act(async () => {
+        button.click();
+      });
+    }
+
+    it("shows the error in the banner and keeps the restart button to try again", async () => {
+      uninstallLogging = installGlobalErrorLogging(fakeRepoClient({ logFrontendError: vi.fn(async () => {}) }));
+      vi.mocked(updater.checkForUpdate).mockResolvedValue({
+        version: "1.2.3",
+        download: vi.fn().mockResolvedValue(undefined),
+        installAndRelaunch: vi.fn().mockRejectedValue(new Error("package verification failed: no signature")),
+      });
+
+      render(<UpdateBanner />);
+      await clickRestart();
+
+      expect(
+        await screen.findByText("Couldn't install update v1.2.3: package verification failed: no signature"),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("Update v1.2.3 ready")).toBeNull();
+      expect(screen.getByRole("button", { name: "Restart to update" })).toBeInTheDocument();
+    });
+
+    it("shows an error the updater rejects with as a plain string", async () => {
+      uninstallLogging = installGlobalErrorLogging(fakeRepoClient({ logFrontendError: vi.fn(async () => {}) }));
+      vi.mocked(updater.checkForUpdate).mockResolvedValue({
+        version: "1.2.3",
+        download: vi.fn().mockResolvedValue(undefined),
+        installAndRelaunch: vi.fn().mockRejectedValue("`rpm` exited with status 1"),
+      });
+
+      render(<UpdateBanner />);
+      await clickRestart();
+
+      expect(await screen.findByText("Couldn't install update v1.2.3: `rpm` exited with status 1")).toBeInTheDocument();
+    });
+
+    it("writes the error to the app log", async () => {
+      const logFrontendError = vi.fn(async (_context: string, _error: unknown) => {});
+      uninstallLogging = installGlobalErrorLogging(fakeRepoClient({ logFrontendError }));
+      const failure = new Error("package verification failed: no signature");
+      vi.mocked(updater.checkForUpdate).mockResolvedValue({
+        version: "1.2.3",
+        download: vi.fn().mockResolvedValue(undefined),
+        installAndRelaunch: vi.fn().mockRejectedValue(failure),
+      });
+
+      render(<UpdateBanner />);
+      await clickRestart();
+
+      await waitFor(() => expect(logFrontendError).toHaveBeenCalledWith("Installing update v1.2.3 failed", failure));
+      expect(logFrontendError).toHaveBeenCalledTimes(1);
+    });
+
+    it("goes back to the ready notice when trying again", async () => {
+      uninstallLogging = installGlobalErrorLogging(fakeRepoClient({ logFrontendError: vi.fn(async () => {}) }));
+      let finishSecondTry: () => void = () => {};
+      const installAndRelaunch = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("authentication cancelled"))
+        .mockReturnValueOnce(new Promise<void>((resolve) => (finishSecondTry = resolve)));
+      vi.mocked(updater.checkForUpdate).mockResolvedValue({
+        version: "1.2.3",
+        download: vi.fn().mockResolvedValue(undefined),
+        installAndRelaunch,
+      });
+
+      render(<UpdateBanner />);
+      await clickRestart();
+      expect(await screen.findByText("Couldn't install update v1.2.3: authentication cancelled")).toBeInTheDocument();
+
+      await clickRestart();
+
+      expect(installAndRelaunch).toHaveBeenCalledTimes(2);
+      expect(screen.queryByText(/Couldn't install update/)).toBeNull();
+      expect(screen.getByText("Update v1.2.3 ready")).toBeInTheDocument();
+      await act(async () => {
+        finishSecondTry();
+      });
+    });
   });
 
   it("stays hidden when download fails", async () => {
