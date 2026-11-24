@@ -119,6 +119,7 @@ fn hunk_options() -> DiffOptions {
         ignore_whitespace: false,
         context_lines: 3,
         algorithm: git_core::diff::DiffAlgorithm::Default,
+        max_file_bytes: None,
     }
 }
 
