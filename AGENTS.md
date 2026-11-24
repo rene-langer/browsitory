@@ -55,7 +55,8 @@ it: without the binary it is skipped with a note, and under `CI` it fails instea
 ### E2E: Tauri app (tauri-driver + WebdriverIO), from repo root
 
 ```bash
-cargo install tauri-driver --locked               # once, if not already installed
+cargo install tauri-driver --locked --version \
+  "$(sed -n 's/^ *TAURI_DRIVER_VERSION: //p' .github/workflows/ci.yml)"  # once: CI's pin (#1058)
 cd frontend && VITE_E2E_REPO_PATH=/tmp/browsitory-e2e-repo pnpm build && cd ..
 cargo build --workspace --features tauri-app/custom-protocol,tauri-app/forge-fixture-override
 cd e2e && pnpm install && pnpm test               # spawns/reaps tauri-driver itself; needs a display
@@ -152,7 +153,8 @@ three open at a time, labelled `maintainability`, and never automerges — merge
 is green. Covered: the Cargo workspace, all four pnpm projects (`frontend/`, `extension/`,
 `e2e/`, `extension/e2e/`, each with its own lockfile), GitHub Actions,
 `rust-toolchain.toml`, the VSCode release the extension E2E jobs run in (`ci.yml`'s
-`BROWSITORY_E2E_VSCODE_VERSION`, #918), and the user guide site's Python tools
+`BROWSITORY_E2E_VSCODE_VERSION`, #918), the Tauri E2E job's tauri-driver (`TAURI_DRIVER_VERSION`,
+#1058), and the user guide site's Python tools
 (`docs/requirements.in`, locked with hashes in `docs/requirements.txt` by Renovate's
 `pip-compile` manager). Minor/patch updates
 are grouped per ecosystem (Rust, JS, Python docs tools, GitHub Actions); Tauri crates and `@tauri-apps/*` packages share one group;
