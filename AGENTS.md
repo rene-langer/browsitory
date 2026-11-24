@@ -161,7 +161,8 @@ is green. Covered: the Cargo workspace, all four pnpm projects (`frontend/`, `ex
 (`docs/requirements.in`, locked with hashes in `docs/requirements.txt` by Renovate's
 `pip-compile` manager). Minor/patch updates
 are grouped per ecosystem (Rust, JS, Python docs tools, GitHub Actions); Tauri crates and `@tauri-apps/*` packages share one group;
-`tauri-apps/tauri-action` (pinned by commit in `release.yml`, #399) gets its own PR. Majors and
+`tauri-apps/tauri-action` (pinned by commit in `release.yml`, #399) and tauri-driver (#1095) get
+their own PRs. Majors and
 `git2`/`libgit2-sys` wait for approval on the Dependency Dashboard issue (libgit2 bumps change
 behaviour the tests and `docs/ARCHITECTURE.md` characterize). Security fixes skip the
 schedule; lockfiles get a monthly maintenance PR. npm versions wait a day before Renovate proposes
