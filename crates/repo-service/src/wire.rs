@@ -1922,6 +1922,7 @@ pub enum UndoOutcomeDto {
     Nothing,
     RepositoryChanged { label: String },
     BranchHeld { label: String, message: String },
+    FileNotSaved { label: String, message: String },
     OperationInProgress,
 }
 
@@ -1933,6 +1934,7 @@ impl From<crate::worker::UndoOutcome> for UndoOutcomeDto {
             UndoOutcome::Nothing => Self::Nothing,
             UndoOutcome::RepositoryChanged { label } => Self::RepositoryChanged { label },
             UndoOutcome::BranchHeld { label, message } => Self::BranchHeld { label, message },
+            UndoOutcome::FileNotSaved { label, message } => Self::FileNotSaved { label, message },
             UndoOutcome::OperationInProgress => Self::OperationInProgress,
         }
     }
@@ -3100,6 +3102,11 @@ pub struct DiffOptionsDto {
     pub ignore_whitespace: bool,
     pub context_lines: u32,
     pub algorithm: DiffAlgorithmDto,
+    /// "Load diff anyway" (#1066): diff the file whatever its size. Absent is `false`: a file
+    /// over `git_core::diff::DIFF_SIZE_LIMIT` is then the `DiffTooLarge` error.
+    #[serde(default)]
+    #[cfg_attr(any(test, feature = "ts"), ts(optional))]
+    pub no_size_limit: Option<bool>,
 }
 
 impl From<DiffOptionsDto> for git_core::diff::DiffOptions {
@@ -3108,6 +3115,8 @@ impl From<DiffOptionsDto> for git_core::diff::DiffOptions {
             ignore_whitespace: dto.ignore_whitespace,
             context_lines: dto.context_lines,
             algorithm: dto.algorithm.into(),
+            max_file_bytes: (!dto.no_size_limit.unwrap_or(false))
+                .then_some(git_core::diff::DIFF_SIZE_LIMIT),
         }
     }
 }
@@ -3801,6 +3810,9 @@ pub enum ErrorKind {
     /// Continue at an edit stop refused because changes aren't staged (#884); `get_edit_rest`
     /// names them, and Continue with a `rest` choice commits or discards them.
     RestLeft,
+    /// A file's diff over the size limit (#1066); the diff view offers to load it anyway
+    /// (`noSizeLimit`).
+    DiffTooLarge,
 }
 
 impl ErrorKind {
@@ -3835,6 +3847,10 @@ impl ErrorKind {
             Some(Self::MissingIdentity)
         } else if let Some(RebaseError::RestLeft { .. }) = error.downcast_ref::<RebaseError>() {
             Some(Self::RestLeft)
+        } else if let Some(git_core::diff::DiffError::TooLarge { .. }) =
+            error.downcast_ref::<git_core::diff::DiffError>()
+        {
+            Some(Self::DiffTooLarge)
         } else if let Some(error) = error.downcast_ref::<RemoteError>() {
             match error {
                 RemoteError::DirtyWorktree => Some(Self::DirtyWorktree),

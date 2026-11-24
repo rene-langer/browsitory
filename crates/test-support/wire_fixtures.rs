@@ -186,6 +186,13 @@ pub fn errors() -> Cases<repo_service::wire::ErrorDto> {
                 paths: vec!["c.txt".into()],
             }),
         ),
+        case(
+            "DiffTooLarge",
+            ErrorDto::from_error(git_core::diff::DiffError::TooLarge {
+                size: 25 * 1024 * 1024 + 300 * 1024,
+                limit: git_core::diff::DIFF_SIZE_LIMIT,
+            }),
+        ),
     ];
     assert_every_variant!(
         cases
@@ -205,6 +212,7 @@ pub fn errors() -> Cases<repo_service::wire::ErrorDto> {
         ErrorKind::LocalChanges,
         ErrorKind::MissingIdentity,
         ErrorKind::RestLeft,
+        ErrorKind::DiffTooLarge,
     );
     cases
 }
@@ -1951,6 +1959,15 @@ pub fn undo_outcomes() -> Cases<repo_service::worker::UndoOutcome> {
                 message: "main is checked out in another worktree".to_string(),
             },
         ),
+        case(
+            "FileNotSaved",
+            UndoOutcome::FileNotSaved {
+                label: "Switch to main".to_string(),
+                message: "dump.sql is larger than 50 MB, so its contents weren't saved for \
+                          undo, and it has changed since."
+                    .to_string(),
+            },
+        ),
         case("OperationInProgress", UndoOutcome::OperationInProgress),
     ];
     assert_every_variant!(
@@ -1959,6 +1976,7 @@ pub fn undo_outcomes() -> Cases<repo_service::worker::UndoOutcome> {
         UndoOutcome::Nothing,
         UndoOutcome::RepositoryChanged { .. },
         UndoOutcome::BranchHeld { .. },
+        UndoOutcome::FileNotSaved { .. },
         UndoOutcome::OperationInProgress,
     );
     cases

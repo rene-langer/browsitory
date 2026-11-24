@@ -89,6 +89,8 @@ function showAllBranchesItems(filter: GraphFilter): ContextMenuItem[] {
   return filter.active ? [showAllBranchesItem(filter)] : [];
 }
 
+const COUNTING_REASON = "Counting the commits only this branch has…";
+
 /** The menu of a local branch row. */
 export function localBranchMenuItems({
   branch,
@@ -109,6 +111,7 @@ export function localBranchMenuItems({
   graphFilter,
   onCopy,
   onDelete,
+  counting = false,
 }: {
   branch: BranchInfo;
   branches: BranchInfo[];
@@ -131,6 +134,8 @@ export function localBranchMenuItems({
   onCopy: CopyToClipboard;
   /** A soft delete that fails asks to force delete. */
   onDelete: (name: string) => void;
+  /** Delete is counting this branch's own commits (#1067): Delete is off until it is done. */
+  counting?: boolean;
 }): ContextMenuItem[] {
   const actions = branchActions({ blockers, remoteCount, upstream }, branch);
   const items: ContextMenuItem[] = [
@@ -173,7 +178,13 @@ export function localBranchMenuItems({
   });
   items.push(...showAllBranchesItems(graphFilter));
   items.push({ label: "Copy branch name", onSelect: () => onCopy(branch.name, "branch name"), group: "view" });
-  items.push({ ...menuItem(actions.delete, () => onDelete(branch.name)), destructive: true, group: "delete" });
+  const deleteItem = menuItem(actions.delete, () => onDelete(branch.name));
+  items.push({
+    ...deleteItem,
+    ...(counting && !deleteItem.disabled ? { disabled: true, title: COUNTING_REASON } : {}),
+    destructive: true,
+    group: "delete",
+  });
   return items;
 }
 

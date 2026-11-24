@@ -1,6 +1,6 @@
 mod common;
 
-use common::{commit_all, init_repo, write_file};
+use common::{commit_all, commit_at, init_repo, write_file};
 
 #[test]
 fn list_branches_reports_the_current_branch() {
@@ -304,6 +304,229 @@ fn commits_only_on_branch_counts_an_annotated_tag_as_keeping_them() {
     assert_eq!(
         git_core::branch::commits_only_on_branch(&repo, "feature").unwrap(),
         0
+    );
+}
+
+/// `count` commits in a line on top of `parent` (none: a root), one second apart from `start`.
+fn line_of_commits(
+    repo: &git2::Repository,
+    parent: Option<git2::Oid>,
+    count: usize,
+    start: i64,
+) -> Vec<git2::Oid> {
+    let mut ids = Vec::new();
+    let mut parent = parent;
+    for n in 0..count {
+        let parents: Vec<git2::Oid> = parent.into_iter().collect();
+        let id = commit_at(repo, &parents, &format!("commit {n}"), start + n as i64);
+        ids.push(id);
+        parent = Some(id);
+    }
+    ids
+}
+
+/// #1067: a long main line with a tag on every commit, a feature branch forked early, and tags
+/// on and beyond the feature's own commits. The count stays exact however many refs there are.
+#[test]
+fn commits_only_on_branch_is_exact_with_a_tag_on_every_commit() {
+    let (_dir, repo) = init_repo();
+    let main = line_of_commits(&repo, None, 400, 1_000);
+    repo.reference("refs/heads/main", main[399], true, "test")
+        .unwrap();
+    repo.set_head("refs/heads/main").unwrap();
+    for (n, id) in main.iter().enumerate() {
+        let commit = repo.find_commit(*id).unwrap();
+        repo.tag_lightweight(&format!("m{n}"), commit.as_object(), false)
+            .unwrap();
+    }
+    // Forked at main's 50th commit; newer than all of main.
+    let feature = line_of_commits(&repo, Some(main[49]), 6, 5_000);
+    repo.reference("refs/heads/feature", feature[5], true, "test")
+        .unwrap();
+    assert_eq!(
+        git_core::branch::commits_only_on_branch(&repo, "feature").unwrap(),
+        6
+    );
+
+    // A tag on the feature's second commit keeps it and the first.
+    let second = repo.find_commit(feature[1]).unwrap();
+    repo.tag_lightweight("f2", second.as_object(), false)
+        .unwrap();
+    assert_eq!(
+        git_core::branch::commits_only_on_branch(&repo, "feature").unwrap(),
+        4
+    );
+
+    // A tag on a commit on no branch, made on top of the feature's fourth commit, keeps the
+    // first four.
+    let side = commit_at(&repo, &[feature[3]], "side", 9_000);
+    let side = repo.find_commit(side).unwrap();
+    repo.tag_lightweight("side", side.as_object(), false)
+        .unwrap();
+    assert_eq!(
+        git_core::branch::commits_only_on_branch(&repo, "feature").unwrap(),
+        2
+    );
+}
+
+/// #1067: hundreds of branches and remote-tracking branches, some of them on the feature's
+/// commits; a symbolic `origin/HEAD` and a tag of a tree keep nothing of their own.
+#[test]
+fn commits_only_on_branch_is_exact_with_many_branches() {
+    let (_dir, repo) = init_repo();
+    let main = line_of_commits(&repo, None, 300, 1_000);
+    repo.reference("refs/heads/main", main[299], true, "test")
+        .unwrap();
+    repo.set_head("refs/heads/main").unwrap();
+    for (n, id) in main.iter().enumerate() {
+        repo.reference(&format!("refs/heads/b{n}"), *id, true, "test")
+            .unwrap();
+        repo.reference(&format!("refs/remotes/origin/r{n}"), *id, true, "test")
+            .unwrap();
+    }
+    let feature = line_of_commits(&repo, Some(main[10]), 8, 5_000);
+    repo.reference("refs/heads/feature", feature[7], true, "test")
+        .unwrap();
+    repo.reference_symbolic(
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/r299",
+        true,
+        "test",
+    )
+    .unwrap();
+    let tree = repo.find_commit(feature[7]).unwrap().tree().unwrap();
+    repo.tag_lightweight("a-tree", tree.as_object(), false)
+        .unwrap();
+    assert_eq!(
+        git_core::branch::commits_only_on_branch(&repo, "feature").unwrap(),
+        8
+    );
+
+    // origin/feature has the first five.
+    repo.reference("refs/remotes/origin/feature", feature[4], true, "test")
+        .unwrap();
+    assert_eq!(
+        git_core::branch::commits_only_on_branch(&repo, "feature").unwrap(),
+        3
+    );
+}
+
+/// #1067: a branch that reaches the feature's commits through a commit dated before them (a
+/// skewed clock) still keeps them, as `git rev-list --count` sees it.
+#[test]
+fn commits_only_on_branch_follows_a_commit_dated_before_its_parent() {
+    let (_dir, repo) = init_repo();
+    let base = commit_at(&repo, &[], "base", 1_000);
+    let first = commit_at(&repo, &[base], "first", 2_000);
+    let second = commit_at(&repo, &[first], "second", 3_000);
+    // `other`'s tip is a child of `first`, dated before it.
+    let skewed = commit_at(&repo, &[first], "skewed", 1_500);
+    repo.reference("refs/heads/main", base, true, "test")
+        .unwrap();
+    repo.set_head("refs/heads/main").unwrap();
+    repo.reference("refs/heads/feature", second, true, "test")
+        .unwrap();
+    repo.reference("refs/heads/other", skewed, true, "test")
+        .unwrap();
+
+    assert_eq!(
+        git_core::branch::commits_only_on_branch(&repo, "feature").unwrap(),
+        1
+    );
+}
+
+/// #1067: merges on both sides. `feature` merged `main` in; `main` has a merge of its own.
+#[test]
+fn commits_only_on_branch_counts_through_merges() {
+    let (_dir, repo) = init_repo();
+    let base = commit_at(&repo, &[], "base", 1_000);
+    let side = commit_at(&repo, &[base], "side", 1_100);
+    let main_tip = commit_at(&repo, &[base, side], "merge on main", 1_200);
+    let f1 = commit_at(&repo, &[base], "f1", 1_050);
+    let f2 = commit_at(&repo, &[f1, main_tip], "merge main into feature", 1_300);
+    let f3 = commit_at(&repo, &[f2], "f3", 1_400);
+    repo.reference("refs/heads/main", main_tip, true, "test")
+        .unwrap();
+    repo.set_head("refs/heads/main").unwrap();
+    repo.reference("refs/heads/feature", f3, true, "test")
+        .unwrap();
+
+    // f1, the merge and f3.
+    assert_eq!(
+        git_core::branch::commits_only_on_branch(&repo, "feature").unwrap(),
+        3
+    );
+}
+
+/// #1067: a branch whose commits are all dated before every commit of the other branches. The
+/// walk takes the newest commits first, so it meets only hidden ones for a while and must not stop
+/// before it reaches the branch's own.
+#[test]
+fn commits_only_on_branch_counts_a_branch_dated_before_the_others() {
+    let (_dir, repo) = init_repo();
+    let root = commit_at(&repo, &[], "root", 1);
+    let main = line_of_commits(&repo, Some(root), 50, 1_000);
+    let feature = line_of_commits(&repo, Some(root), 10, 100);
+    repo.reference("refs/heads/main", main[49], true, "test")
+        .unwrap();
+    repo.set_head("refs/heads/main").unwrap();
+    repo.reference("refs/heads/feature", feature[9], true, "test")
+        .unwrap();
+
+    assert_eq!(
+        git_core::branch::commits_only_on_branch(&repo, "feature").unwrap(),
+        10
+    );
+}
+
+/// #1067: a commit the branch reaches along two paths (a merge of two of its own lines) counts
+/// once, and stays counted.
+#[test]
+fn commits_only_on_branch_counts_a_commit_reached_twice_once() {
+    let (_dir, repo) = init_repo();
+    let base = commit_at(&repo, &[], "base", 1_000);
+    let fork = commit_at(&repo, &[base], "fork", 1_100);
+    let left = commit_at(&repo, &[fork], "left", 1_200);
+    let right = commit_at(&repo, &[fork], "right", 1_300);
+    let merge = commit_at(&repo, &[left, right], "merge", 1_400);
+    repo.reference("refs/heads/main", base, true, "test")
+        .unwrap();
+    repo.set_head("refs/heads/main").unwrap();
+    repo.reference("refs/heads/feature", merge, true, "test")
+        .unwrap();
+
+    assert_eq!(
+        git_core::branch::commits_only_on_branch(&repo, "feature").unwrap(),
+        4
+    );
+}
+
+/// #1067: the walk stops a few commits past where only hidden ones are left, as git's does,
+/// instead of walking the other branches' whole history. Seen through the object store: a commit
+/// far below the fork point can be missing.
+#[test]
+fn commits_only_on_branch_stops_soon_after_only_hidden_commits_are_left() {
+    let (dir, repo) = init_repo();
+    let main = line_of_commits(&repo, None, 200, 1_000);
+    let feature = line_of_commits(&repo, Some(main[150]), 2, 5_000);
+    repo.reference("refs/heads/main", main[199], true, "test")
+        .unwrap();
+    repo.set_head("refs/heads/main").unwrap();
+    repo.reference("refs/heads/feature", feature[1], true, "test")
+        .unwrap();
+    let old = main[10].to_string();
+    let loose = repo.path().join("objects").join(&old[..2]).join(&old[2..]);
+    let mut permissions = std::fs::metadata(&loose).unwrap().permissions();
+    #[allow(clippy::permissions_set_readonly_false)]
+    permissions.set_readonly(false);
+    std::fs::set_permissions(&loose, permissions).unwrap();
+    std::fs::remove_file(&loose).unwrap();
+    // A fresh handle: the first one has the commit in its object cache.
+    let repo = git2::Repository::open(dir.path()).unwrap();
+
+    assert_eq!(
+        git_core::branch::commits_only_on_branch(&repo, "feature").unwrap(),
+        2
     );
 }
 

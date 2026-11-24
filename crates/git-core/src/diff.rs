@@ -21,6 +21,20 @@ pub enum DiffError {
     InvalidPath(String),
     #[error("{0}")]
     Io(#[from] std::io::Error),
+    /// A side of the file is over `DiffOptions::max_file_bytes` (#1066): nothing was diffed.
+    /// `size` is the larger side's.
+    #[error("{}", too_large_message(*size, *limit))]
+    TooLarge { size: u64, limit: u64 },
+}
+
+/// "This file is 25.3 MB, over the 20 MB diff limit, so its diff isn't loaded."
+fn too_large_message(size: u64, limit: u64) -> String {
+    const MB: f64 = 1024.0 * 1024.0;
+    format!(
+        "This file is {:.1} MB, over the {} MB diff limit, so its diff isn't loaded.",
+        size as f64 / MB,
+        limit / (1024 * 1024)
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -47,6 +61,11 @@ pub struct DiffHunk {
 }
 
 pub const MAX_CONTEXT_LINES: u32 = 20;
+
+/// The size the app diffs files up to unless asked to load one anyway (#1066): with either side
+/// over it, the diff is `DiffError::TooLarge`, judged from the object header or the file's size,
+/// so nothing of the file is read.
+pub const DIFF_SIZE_LIMIT: u64 = 20 * 1024 * 1024;
 
 /// `context_lines` value that shows the whole file: every line of a changed file, in one hunk
 /// ("Show whole file", #444). Any other value is clamped to `MAX_CONTEXT_LINES`.
@@ -87,6 +106,9 @@ pub struct DiffOptions {
     pub ignore_whitespace: bool,
     pub context_lines: u32,
     pub algorithm: DiffAlgorithm,
+    /// Files over this many bytes on either side aren't diffed (`DiffError::TooLarge`, #1066);
+    /// `None`: libgit2's own rule only (a file over 512 MiB diffs as binary).
+    pub max_file_bytes: Option<u64>,
 }
 
 impl Default for DiffOptions {
@@ -95,6 +117,7 @@ impl Default for DiffOptions {
             ignore_whitespace: false,
             context_lines: 3,
             algorithm: DiffAlgorithm::Default,
+            max_file_bytes: None,
         }
     }
 }
@@ -116,6 +139,7 @@ impl HunkOptions {
             ignore_whitespace: false,
             context_lines: self.context_lines,
             algorithm: self.algorithm,
+            max_file_bytes: None,
         }
     }
 }
@@ -141,6 +165,11 @@ fn apply_display_options(git_opts: &mut git2::DiffOptions, opts: &DiffOptions) {
         .context_lines(effective_context_lines(opts.context_lines))
         .patience(opts.algorithm == DiffAlgorithm::Patience)
         .minimal(opts.algorithm == DiffAlgorithm::Minimal);
+    // libgit2 then treats a bigger file as binary without loading it: a blob's size comes from
+    // its object header, a work tree file's from its stat. `hunks_from_diff` tells it apart.
+    if let Some(limit) = opts.max_file_bytes {
+        git_opts.max_size(i64::try_from(limit).unwrap_or(i64::MAX));
+    }
 }
 
 /// Literal pathspec for `path` (and `old_path`, for a rename) plus the display options.
@@ -239,7 +268,7 @@ pub fn working_diff(
         repo.diff_index_to_workdir(None, Some(&mut git_opts))?
     };
 
-    hunks_from_diff(&diff, &[path])
+    hunks_from_diff(&diff, &[path], opts.max_file_bytes)
 }
 
 /// The staged diff of a rename from `old_path` to `new_path` (HEAD → index), with rename
@@ -254,7 +283,7 @@ pub fn staged_rename_diff(
     let mut git_opts = literal_path_options(new_path, Some(old_path), opts);
     let mut diff = repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut git_opts))?;
     detect_renames(&mut diff)?;
-    hunks_from_diff(&diff, &[old_path, new_path])
+    hunks_from_diff(&diff, &[old_path, new_path], opts.max_file_bytes)
 }
 
 /// Diff for one path between `commit_id` and its first parent (or an empty tree, for a
@@ -269,7 +298,7 @@ pub fn commit_diff(
     let (old_tree, new_tree) = commit_and_parent_trees(repo, commit_id)?;
     let mut git_opts = literal_path_options(path, None, opts);
     let diff = repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut git_opts))?;
-    hunks_from_diff(&diff, &[path])
+    hunks_from_diff(&diff, &[path], opts.max_file_bytes)
 }
 
 /// Diff of a file that `commit_id` renamed from `old_path` to `new_path`, against the first
@@ -287,7 +316,7 @@ pub fn commit_rename_diff(
     let mut diff =
         repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut git_opts))?;
     detect_renames(&mut diff)?;
-    hunks_from_diff(&diff, &[old_path, new_path])
+    hunks_from_diff(&diff, &[old_path, new_path], opts.max_file_bytes)
 }
 
 /// Paths changed by `commit_id` (vs. its first parent, same rule as `commit_diff`) — used to
@@ -342,7 +371,7 @@ pub fn range_diff(
         detect_renames(&mut diff)?;
     }
     let wanted: Vec<&str> = std::iter::once(path).chain(old_path).collect();
-    hunks_from_diff(&diff, &wanted)
+    hunks_from_diff(&diff, &wanted, opts.max_file_bytes)
 }
 
 /// The working tree compares like the Uncommitted view: staged, unstaged and untracked files.
@@ -394,7 +423,7 @@ pub fn compare_working_tree(
     if old_path.is_some() {
         detect_renames(&mut diff)?;
     }
-    hunks_from_diff(&diff, &wanted)
+    hunks_from_diff(&diff, &wanted, opts.max_file_bytes)
 }
 
 /// `merge-base(HEAD, ref)..ref`: what `ref_name` (a full `refs/heads/…`, `refs/remotes/…` or
@@ -464,17 +493,27 @@ pub(crate) fn delta_is_one_of(delta: &git2::DiffDelta<'_>, wanted: &[&str]) -> b
     })
 }
 
-/// The hunks of the deltas whose old or new path is one of `wanted`.
+/// The hunks of the deltas whose old or new path is one of `wanted`. With `limit` (the
+/// `max_size` the diff was made with), such a delta with a side over it is `TooLarge`: libgit2
+/// marked it binary by its size and loaded neither side.
 pub(crate) fn hunks_from_diff(
     diff: &git2::Diff,
     wanted: &[&str],
+    limit: Option<u64>,
 ) -> Result<Vec<DiffHunk>, DiffError> {
     let hunks: RefCell<Vec<DiffHunk>> = RefCell::new(Vec::new());
     let keep = std::cell::Cell::new(false);
+    let too_large = std::cell::Cell::new(None);
 
     diff.foreach(
         &mut |delta, _progress| {
             keep.set(delta_is_one_of(&delta, wanted));
+            if let Some(limit) = limit.filter(|_| keep.get() && delta.flags().is_binary()) {
+                let size = delta.old_file().size().max(delta.new_file().size());
+                if size > limit {
+                    too_large.set(Some(DiffError::TooLarge { size, limit }));
+                }
+            }
             true
         },
         None,
@@ -507,7 +546,10 @@ pub(crate) fn hunks_from_diff(
         }),
     )?;
 
-    Ok(hunks.into_inner())
+    match too_large.into_inner() {
+        Some(error) => Err(error),
+        None => Ok(hunks.into_inner()),
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

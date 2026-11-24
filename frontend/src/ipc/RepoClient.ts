@@ -31,10 +31,19 @@ export interface DiffLine {
 export type DiffAlgorithm = "Default" | "Patience" | "Minimal";
 export const DIFF_ALGORITHM_VALUES: readonly DiffAlgorithm[] = ["Default", "Patience", "Minimal"];
 
-export interface DiffOptions {
+/** The view settings every diff request carries; the saved `DiffSettings` hold them too. */
+export interface DiffViewOptions {
   ignoreWhitespace: boolean;
   contextLines: number;
   algorithm: DiffAlgorithm;
+}
+
+export interface DiffOptions extends DiffViewOptions {
+  /**
+   * "Load diff anyway" (#1066): diff the file whatever its size. Absent, a file over the
+   * backend's limit rejects with kind `DiffTooLarge`.
+   */
+  noSizeLimit?: boolean;
 }
 
 /**
@@ -51,7 +60,7 @@ export interface HunkOptions {
 export type WordWrap = "Auto" | "On" | "Off";
 export const WORD_WRAP_VALUES: readonly WordWrap[] = ["Auto", "On", "Off"];
 
-export interface DiffSettings extends DiffOptions {
+export interface DiffSettings extends DiffViewOptions {
   syntaxHighlight: boolean;
   wordWrap: WordWrap;
   /** Faint markers for spaces, tabs and carriage returns in diff lines (#616); display only. */
@@ -426,6 +435,8 @@ export type UndoOutcome =
   | { kind: "RepositoryChanged"; label: string }
   /** A branch to move, delete or check out is held by a worktree (#291); `message` says how. */
   | { kind: "BranchHeld"; label: string; message: string }
+  /** A file the entry didn't store for its size (over 50 MB) changed since (#1065); `message` names it. */
+  | { kind: "FileNotSaved"; label: string; message: string }
   | { kind: "OperationInProgress" };
 /**
  * A single cherry-pick/revert. `HookFailed`: its `prepare-commit-msg` failed (#183); nothing was
@@ -567,7 +578,9 @@ export type ErrorKind =
   | "PermissionDenied"
   | "LocalChanges"
   | "MissingIdentity"
-  | "RestLeft";
+  | "RestLeft"
+  /** A file's diff over the backend's size limit (#1066); `noSizeLimit` loads it anyway. */
+  | "DiffTooLarge";
 
 /** A rejected request as the backend sends it (`repo_service::wire::ErrorDto`). */
 export interface RepoErrorPayload {
@@ -615,6 +628,7 @@ const ERROR_KINDS: ReadonlySet<string> = new Set<ErrorKind>([
   "LocalChanges",
   "MissingIdentity",
   "RestLeft",
+  "DiffTooLarge",
 ]);
 
 /**
@@ -1736,7 +1750,7 @@ export interface RepoClient {
   setUpdateSettings(settings: UpdateSettings): Promise<void>;
   /** Labels of the next undo/redo step for this repo; `null` when the stack is empty. */
   getUndoState(repoPath: string): Promise<UndoState>;
-  /** Refusals (`Nothing`, `RepositoryChanged`, `BranchHeld`, `OperationInProgress`) resolve; only real failures reject. */
+  /** Refusals (`Nothing`, `RepositoryChanged`, `BranchHeld`, `FileNotSaved`, `OperationInProgress`) resolve; only real failures reject. */
   undo(repoPath: string): Promise<UndoOutcome>;
   redo(repoPath: string): Promise<UndoOutcome>;
   /** `mainline` (1-based parent) is required for a merge commit and refused for any other. */

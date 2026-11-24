@@ -91,6 +91,7 @@ impl Fx {
             ignore_whitespace: false,
             context_lines: 3,
             algorithm: git_core::diff::DiffAlgorithm::Default,
+            max_file_bytes: None,
         };
         working_diff(&self.repo, "d/f.txt", false, &opts).unwrap()[0]
             .lines

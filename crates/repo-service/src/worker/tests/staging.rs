@@ -312,3 +312,52 @@ fn an_unreadable_file_answers_permission_denied() {
     let error = handle.stage_file("../outside.txt".into()).unwrap_err();
     assert_eq!(error.kind, ErrorKind::Other, "{}", error.message);
 }
+
+/// #1066: a diff over the size limit answers `DiffTooLarge`; loaded anyway (no limit) its hunks
+/// show, and staging one (which re-diffs with the hunk's own options, never limited) works.
+#[test]
+fn a_diff_over_the_size_limit_is_diff_too_large_and_stages_once_loaded_anyway() {
+    let (dir, repo) = init_repo();
+    let big = "line\n".repeat(2000);
+    write_file(dir.path(), "big.txt", &big);
+    commit_all(&repo, "initial commit");
+    write_file(dir.path(), "big.txt", &format!("changed\n{big}"));
+
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let limited = git_core::diff::DiffOptions {
+        max_file_bytes: Some(1000),
+        ..git_core::diff::DiffOptions::default()
+    };
+    let refused = handle
+        .get_working_diff("big.txt".into(), false, limited, None)
+        .unwrap_err();
+    assert_eq!(refused.kind, crate::wire::ErrorKind::DiffTooLarge);
+
+    let hunks = handle
+        .get_working_diff(
+            "big.txt".into(),
+            false,
+            git_core::diff::DiffOptions::default(),
+            None,
+        )
+        .unwrap();
+    assert_eq!(hunks.len(), 1);
+    handle
+        .stage_hunk(
+            "big.txt".into(),
+            hunks[0].old_start,
+            hunks[0].new_start,
+            HUNK,
+        )
+        .unwrap();
+    let staged = handle
+        .get_working_diff(
+            "big.txt".into(),
+            true,
+            git_core::diff::DiffOptions::default(),
+            None,
+        )
+        .unwrap();
+    assert_eq!(staged.len(), 1);
+}

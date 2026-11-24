@@ -5,8 +5,12 @@ use git_core::stash::{StashApplyOutcome, StashEntry, StashFiles, StashOptions};
 
 use super::{Command, ReadHandle, WorkerHandle};
 
-pub(super) fn list(repo: &mut git2::Repository, reply: Sender<Result<Vec<StashEntry>, ErrorDto>>) {
-    let result = git_core::stash::list_stashes(repo).map_err(ErrorDto::from_error);
+pub(super) fn list(
+    repo: &mut git2::Repository,
+    cache: &mut git_core::stash::StashCountCache,
+    reply: Sender<Result<Vec<StashEntry>, ErrorDto>>,
+) {
+    let result = git_core::stash::list_stashes_cached(repo, cache).map_err(ErrorDto::from_error);
     let _ = reply.send(result);
 }
 

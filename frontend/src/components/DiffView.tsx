@@ -151,6 +151,21 @@ const lineCount = new Intl.NumberFormat("en-US");
  * A diff of a generated file, or longer than `LARGE_DIFF_LINES`, starts collapsed behind "Load
  * diff (N lines)"; a loaded one renders `DIFF_WINDOW_LINES` at a time (#686, `lib/largeDiff.ts`).
  */
+/**
+ * In place of a diff the backend refused for its size (#1066): its message, and "Load diff
+ * anyway" (`useDiffSizeLimit`).
+ */
+export function DiffTooLarge({ message, onLoadAnyway }: { message: string; onLoadAnyway: () => void }) {
+  return (
+    <div className={styles.collapsed}>
+      <p className={styles.placeholder}>{message}</p>
+      <button type="button" onClick={onLoadAnyway}>
+        Load diff anyway
+      </button>
+    </div>
+  );
+}
+
 /** A button in a hunk's header (`DiffView`'s `hunkActions`). */
 export interface HunkHeaderAction {
   label: string;

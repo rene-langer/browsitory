@@ -264,7 +264,7 @@ pub(super) fn table() -> Vec<((&'static str, Command), &'static str)> {
                 new_start: 1,
                 hunk: HUNK
             }),
-            "undo(Full, Discard hunk in a.txt) lock busy=Discard hold",
+            "undo(FullUncapped, Discard hunk in a.txt) lock busy=Discard hold",
         ),
         (
             cmd!(StageLines {
@@ -297,15 +297,15 @@ pub(super) fn table() -> Vec<((&'static str, Command), &'static str)> {
                 line_indices: vec![],
                 expected_lines: vec![]
             }),
-            "undo(Full, Discard lines in a.txt) lock busy=Discard hold",
+            "undo(FullUncapped, Discard lines in a.txt) lock busy=Discard hold",
         ),
         (
             cmd!(DiscardFile { path: s("a.txt") }),
-            "undo(Full, Discard changes to a.txt) lock busy=Discard hold",
+            "undo(FullUncapped, Discard changes to a.txt) lock busy=Discard hold",
         ),
         (
             cmd!(DiscardAllUnstaged { paths: vec![] }),
-            "undo(Full, Discard all unstaged changes) lock busy=Discard hold",
+            "undo(FullUncapped, Discard all unstaged changes) lock busy=Discard hold",
         ),
         (
             cmd!(ApplyCommitChange {
@@ -318,7 +318,7 @@ pub(super) fn table() -> Vec<((&'static str, Command), &'static str)> {
                     stage: false,
                 }
             }),
-            "undo(Full, Revert a.txt from 707e824) lock busy=Discard hold",
+            "undo(FullUncapped, Revert a.txt from 707e824) lock busy=Discard hold",
         ),
         (
             cmd!(ApplyCommitChange {
@@ -335,7 +335,7 @@ pub(super) fn table() -> Vec<((&'static str, Command), &'static str)> {
                     stage: false,
                 }
             }),
-            "undo(Full, Apply hunk in a.txt from 707e824) lock busy=Discard hold",
+            "undo(FullUncapped, Apply hunk in a.txt from 707e824) lock busy=Discard hold",
         ),
         (
             cmd!(GetPatch {
@@ -350,7 +350,7 @@ pub(super) fn table() -> Vec<((&'static str, Command), &'static str)> {
                 operation_id: op(),
                 events: channel().0
             }),
-            "undo(Full, Apply patch) lock busy=Discard hold",
+            "undo(FullUncapped, Apply patch) lock busy=Discard hold",
         ),
         (
             cmd!(ApplyPatch {
@@ -359,7 +359,7 @@ pub(super) fn table() -> Vec<((&'static str, Command), &'static str)> {
                 operation_id: op(),
                 events: channel().0
             }),
-            "undo(Full, Apply and stage patch) lock busy=Discard hold",
+            "undo(FullUncapped, Apply and stage patch) lock busy=Discard hold",
         ),
         (
             cmd!(ApplyPatch {
@@ -368,7 +368,7 @@ pub(super) fn table() -> Vec<((&'static str, Command), &'static str)> {
                 operation_id: op(),
                 events: channel().0
             }),
-            "undo(Full, Apply patch as commits) lock busy=Discard hold gate",
+            "undo(FullUncapped, Apply patch as commits) lock busy=Discard hold gate",
         ),
         (cmd!(PreviewPatch { content: vec![] }), "read"),
         (
@@ -718,7 +718,7 @@ pub(super) fn table() -> Vec<((&'static str, Command), &'static str)> {
                 commit_id: s(ONTO),
                 path: s("a.txt")
             }),
-            "undo(Full, Restore a.txt from 707e824) lock busy=Discard hold",
+            "undo(FullUncapped, Restore a.txt from 707e824) lock busy=Discard hold",
         ),
         (cmd!(CommitsSince { onto: s(ONTO) }), "read"),
         (
@@ -850,7 +850,7 @@ pub(super) fn table() -> Vec<((&'static str, Command), &'static str)> {
                 commit_id: s(ONTO),
                 mode: ResetMode::Hard
             }),
-            "undo(Full, Reset to 707e824 (hard)) lock busy=Discard hold gate",
+            "undo(FullUncapped, Reset to 707e824 (hard)) lock busy=Discard hold gate",
         ),
         (
             cmd!(ResetToCommit {

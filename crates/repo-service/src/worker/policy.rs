@@ -13,7 +13,7 @@ use std::sync::mpsc::Sender;
 
 use git_core::patch::PatchApply;
 use git_core::reset::ResetMode;
-use git_core::undo::SnapshotScope::{self, Full, RefsAndIndex};
+use git_core::undo::SnapshotScope::{self, Full, FullUncapped, RefsAndIndex};
 
 use super::undo::{
     amend_label, count_label, fit, fold_staged_label, merge_label, quoted, reset_label,
@@ -316,43 +316,45 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
             P::recorded(several("Ignore ", patterns, "patterns"), Full)
         }
 
-        // Discards: recorded, and refused rather than run unrecorded.
+        // Discards: recorded, and refused rather than run unrecorded. They and the other
+        // `busy=Discard` commands snapshot every file whatever its size (`FullUncapped`, #1065):
+        // the snapshot is the only way back to what they overwrite.
         Command::DiscardHunk { path, .. } => {
-            P::recorded(with_path("Discard hunk in ", path, ""), Full).refused_when_busy(Discard)
+            P::recorded(with_path("Discard hunk in ", path, ""), FullUncapped).refused_when_busy(Discard)
         }
         Command::DiscardLines { path, .. } => {
-            P::recorded(with_path("Discard lines in ", path, ""), Full).refused_when_busy(Discard)
+            P::recorded(with_path("Discard lines in ", path, ""), FullUncapped).refused_when_busy(Discard)
         }
         Command::DiscardFile { path, .. } => {
-            P::recorded(with_path("Discard changes to ", path, ""), Full).refused_when_busy(Discard)
+            P::recorded(with_path("Discard changes to ", path, ""), FullUncapped).refused_when_busy(Discard)
         }
         Command::DiscardAllUnstaged { .. } => {
-            P::recorded("Discard all unstaged changes".to_string(), Full).refused_when_busy(Discard)
+            P::recorded("Discard all unstaged changes".to_string(), FullUncapped).refused_when_busy(Discard)
         }
         // Overwrites the work tree file, so it is a discard too (#446).
         Command::RestoreFileVersion {
             commit_id, path, ..
         } => P::recorded(
             with_path("Restore ", path, &format!(" from {}", short(commit_id))),
-            Full,
+            FullUncapped,
         )
         .refused_when_busy(Discard),
 
         // A commit's file or hunk, or a patch file, applied to the working tree (#448): recorded,
         // and like a discard refused rather than run unrecorded (it may merge into local edits).
         Command::ApplyCommitChange { change, .. } => {
-            P::recorded(commit_change_label(change), Full).refused_when_busy(Discard)
+            P::recorded(commit_change_label(change), FullUncapped).refused_when_busy(Discard)
         }
         // As commits (#658) it moves HEAD, so like a commit it can't run under a stored rebase or
         // sequence.
         Command::ApplyPatch { how, .. } => match how {
             PatchApply::WorkTree => {
-                P::recorded("Apply patch".to_string(), Full).refused_when_busy(Discard)
+                P::recorded("Apply patch".to_string(), FullUncapped).refused_when_busy(Discard)
             }
             PatchApply::Stage => {
-                P::recorded("Apply and stage patch".to_string(), Full).refused_when_busy(Discard)
+                P::recorded("Apply and stage patch".to_string(), FullUncapped).refused_when_busy(Discard)
             }
-            PatchApply::Commits => P::recorded("Apply patch as commits".to_string(), Full)
+            PatchApply::Commits => P::recorded("Apply patch as commits".to_string(), FullUncapped)
                 .refused_when_busy(Discard)
                 .gated(Refused),
         },
@@ -417,11 +419,13 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         Command::ResetToCommit {
             commit_id, mode, ..
         } => {
-            let policy = P::recorded(reset_label(commit_id, *mode), Full).gated(Refused);
+            let label = reset_label(commit_id, *mode);
             match mode {
-                ResetMode::Hard => policy.refused_when_busy(Discard),
+                ResetMode::Hard => P::recorded(label, FullUncapped)
+                    .gated(Refused)
+                    .refused_when_busy(Discard),
                 // A reset that keeps the work tree runs unrecorded instead.
-                ResetMode::Soft | ResetMode::Mixed => policy,
+                ResetMode::Soft | ResetMode::Mixed => P::recorded(label, Full).gated(Refused),
             }
         }
         Command::RestoreReflogEntry {

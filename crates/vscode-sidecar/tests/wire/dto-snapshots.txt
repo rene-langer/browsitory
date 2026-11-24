@@ -222,6 +222,7 @@ UndoOutcome/Done {"kind":"Done","label":"Commit"}
 UndoOutcome/Nothing {"kind":"Nothing"}
 UndoOutcome/RepositoryChanged {"kind":"RepositoryChanged","label":"Commit"}
 UndoOutcome/BranchHeld {"kind":"BranchHeld","label":"Switch","message":"main is checked out in another worktree"}
+UndoOutcome/FileNotSaved {"kind":"FileNotSaved","label":"Switch to main","message":"dump.sql is larger than 50 MB, so its contents weren't saved for undo, and it has changed since."}
 UndoOutcome/OperationInProgress {"kind":"OperationInProgress"}
 PullOutcome/UpToDate {"kind":"UpToDate"}
 PullOutcome/FastForwarded {"kind":"FastForwarded","upstreamRef":"refs/remotes/origin/main"}
@@ -279,3 +280,4 @@ RepoErrorPayload/PermissionDenied {"kind":"PermissionDenied","message":"failed t
 RepoErrorPayload/LocalChanges {"kind":"LocalChanges","message":"Your local changes would be overwritten by switching to feature. Commit or stash them first."}
 RepoErrorPayload/MissingIdentity {"kind":"MissingIdentity","message":"Set your name and email for git before committing."}
 RepoErrorPayload/RestLeft {"kind":"RestLeft","message":"c.txt has changes that aren't staged. Commit or discard them, then continue."}
+RepoErrorPayload/DiffTooLarge {"kind":"DiffTooLarge","message":"This file is 25.3 MB, over the 20 MB diff limit, so its diff isn't loaded."}

@@ -245,6 +245,12 @@ pub enum UndoOutcome {
         label: String,
         message: String,
     },
+    /// A file the entry didn't store for its size changed since (#1065): `message` names it.
+    /// Nothing was restored; the entry stays on its stack.
+    FileNotSaved {
+        label: String,
+        message: String,
+    },
     OperationInProgress,
 }
 
@@ -579,6 +585,12 @@ impl UndoRecorder {
                 return Ok(UndoOutcome::BranchHeld {
                     label,
                     message: held.to_string(),
+                })
+            }
+            Err(error @ UndoError::NotSaved(_)) => {
+                return Ok(UndoOutcome::FileNotSaved {
+                    label,
+                    message: error.to_string(),
                 })
             }
             Err(UndoError::OperationInProgress) => return Ok(UndoOutcome::OperationInProgress),
@@ -1014,7 +1026,10 @@ mod tests {
                 path: "a.txt".into(),
                 reply: tx
             }),
-            Some(("Discard changes to a.txt".into(), SnapshotScope::Full))
+            Some((
+                "Discard changes to a.txt".into(),
+                SnapshotScope::FullUncapped
+            ))
         );
         let (tx, _rx) = channel();
         assert_eq!(
@@ -1023,7 +1038,10 @@ mod tests {
                 mode: git_core::reset::ResetMode::Hard,
                 reply: tx
             }),
-            Some(("Reset to 1a2b3c4 (hard)".into(), SnapshotScope::Full))
+            Some((
+                "Reset to 1a2b3c4 (hard)".into(),
+                SnapshotScope::FullUncapped
+            ))
         );
     }
 

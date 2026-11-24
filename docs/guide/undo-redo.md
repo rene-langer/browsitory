@@ -42,6 +42,16 @@ another worktree ("Can't undo Commit: branch 'topic' is checked out in another w
 the Undo stack, so you can try again once that worktree lets go of the branch. A missing
 worktree folder gets the same `git worktree prune` hint as Reflog restore. The reflog stays available for all of these cases.
 
+**Files over 50 MB.** To keep switching, pulling, merging and the like quick next to a big
+file that isn't ignored (a database dump, a disk image, a dataset), Undo doesn't save a copy of
+a changed or untracked file over 50 MB for those operations; it only notes the file's size and
+time. They never change such a file, so Undo works as usual and leaves it as it is. If the
+file is no longer as Undo noted it and Undo would have to bring back its old contents, it
+refuses and changes nothing: "Can't undo Switch to main: dump.sql is larger than 50 MB, so its
+contents weren't saved for undo, and it has changed since." Discards, **Reset hard**, restoring
+a file, and applying a patch or a commit's change still save every file they replace, however
+big, so Undo brings it back; for a big file they take longer.
+
 Undo and Redo write each restored file next to the old one and swap it in only when it is
 complete. If writing fails (for example a full disk), that file stays as it was. Files restored
 before the failure keep their restored content. Fix the problem and run Undo or Redo again: it

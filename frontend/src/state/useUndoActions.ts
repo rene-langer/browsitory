@@ -17,6 +17,7 @@ function refusalMessage(verb: "undo" | "redo", outcome: UndoOutcome): string | n
     case "RepositoryChanged":
       return `Can't ${verb} ${outcome.label}: the repository changed since. Use the reflog to recover.`;
     case "BranchHeld":
+    case "FileNotSaved":
       return `Can't ${verb} ${outcome.label}: ${outcome.message}${outcome.message.endsWith(".") ? "" : "."}`;
     case "OperationInProgress":
       return "Finish or abort the merge or rebase first.";

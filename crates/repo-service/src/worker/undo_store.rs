@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use git2::{ObjectType, Oid, Repository, Signature};
-use git_core::undo::{HeadState, RepoSnapshot};
+use git_core::undo::{HeadState, RepoSnapshot, SkippedFile};
 use serde::{Deserialize, Serialize};
 
 pub(super) const UNDO_LIMIT: usize = 50;
@@ -51,6 +51,44 @@ struct StoredSnapshot {
     refs: BTreeMap<String, String>,
     index_tree: String,
     worktree_tree: Option<String>,
+    /// The files the snapshot didn't store for their size (#1065); absent when there are none,
+    /// so such a file reads as before. A build that predates it ignores it: such a file is then
+    /// simply not in either tree, and stays as it is.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    skipped: BTreeMap<String, StoredSkipped>,
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredSkipped {
+    size: u64,
+    mtime_secs: i64,
+    mtime_nanos: u32,
+    ino: u64,
+    mode: u32,
+}
+
+impl From<&SkippedFile> for StoredSkipped {
+    fn from(file: &SkippedFile) -> Self {
+        Self {
+            size: file.size,
+            mtime_secs: file.mtime.0,
+            mtime_nanos: file.mtime.1,
+            ino: file.ino,
+            mode: file.mode,
+        }
+    }
+}
+
+impl From<StoredSkipped> for SkippedFile {
+    fn from(stored: StoredSkipped) -> Self {
+        Self {
+            size: stored.size,
+            mtime: (stored.mtime_secs, stored.mtime_nanos),
+            ino: stored.ino,
+            mode: stored.mode,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -88,6 +126,11 @@ impl From<&RepoSnapshot> for StoredSnapshot {
             refs: snapshot.refs.clone(),
             index_tree: snapshot.index_tree.clone(),
             worktree_tree: snapshot.worktree_tree.clone(),
+            skipped: snapshot
+                .skipped
+                .iter()
+                .map(|(path, file)| (path.clone(), file.into()))
+                .collect(),
         }
     }
 }
@@ -102,6 +145,11 @@ impl From<StoredSnapshot> for RepoSnapshot {
             refs: stored.refs,
             index_tree: stored.index_tree,
             worktree_tree: stored.worktree_tree,
+            skipped: stored
+                .skipped
+                .into_iter()
+                .map(|(path, file)| (path, file.into()))
+                .collect(),
         }
     }
 }
@@ -409,6 +457,37 @@ mod tests {
         assert_eq!(reloaded.undo, stacks.undo);
         assert_eq!(reloaded.redo, stacks.redo);
         assert!(repo.find_reference("refs/browsitory/undo/main").is_ok());
+    }
+
+    /// #1065: the files a snapshot identified instead of storing survive a save and reload, and
+    /// a snapshot without any writes no `skipped` key (older builds read the file as before).
+    #[test]
+    fn saves_and_reloads_the_files_a_snapshot_did_not_store() {
+        let (_dir, repo) = repo_with_commit();
+        let (mut store, mut stacks) = UndoStore::open(&repo);
+        let mut with_skipped = entry(&repo, "Switch to main");
+        with_skipped.before.skipped.insert(
+            "dump.sql".into(),
+            git_core::undo::SkippedFile {
+                size: 60 << 20,
+                mtime: (1_700_000_000, 123_456_789),
+                ino: 42,
+                mode: 0o100644,
+            },
+        );
+        stacks.undo.push(with_skipped);
+        stacks.undo.push(entry(&repo, "Stage a.txt"));
+        store.save(&repo, &stacks).unwrap();
+
+        let (_, reloaded) = UndoStore::open(&repo);
+        assert_eq!(reloaded.undo, stacks.undo);
+        let json: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(repo.path().join("browsitory/undo.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(json["undo"][0]["before"].get("skipped").is_some());
+        assert!(json["undo"][0]["after"].get("skipped").is_none());
+        assert!(json["undo"][1]["before"].get("skipped").is_none());
     }
 
     #[test]

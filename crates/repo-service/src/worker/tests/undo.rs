@@ -1,5 +1,118 @@
 use super::*;
 
+/// A sparse file over the undo snapshot limit by `extra` bytes (#1065): no 50 MB written to disk.
+fn over_snapshot_limit(path: &Path, extra: u64) {
+    std::fs::File::create(path)
+        .unwrap()
+        .set_len(git_core::undo::SNAPSHOT_FILE_LIMIT + extra)
+        .unwrap();
+}
+
+fn blob_of_file_stored(repo: &Repository, path: &Path) -> bool {
+    let id = git2::Oid::hash_file(git2::ObjectType::Blob, path).unwrap();
+    repo.odb().unwrap().exists(id)
+}
+
+/// #1065: a switch's snapshots don't store an untracked file over the limit; the switch still
+/// undoes, and the file is left as it is.
+#[test]
+fn a_switch_with_a_big_untracked_file_undoes_without_storing_it() {
+    let (dir, repo) = init_repo();
+    repo.set_head("refs/heads/main").unwrap();
+    write_file(dir.path(), "a.txt", "one\n");
+    commit_all(&repo, "initial");
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("other", &head, false).unwrap();
+    write_file(dir.path(), "a.txt", "two\n");
+    commit_all(&repo, "second");
+    let dump = dir.path().join("dump.sql");
+    over_snapshot_limit(&dump, 1);
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+
+    handle.switch_branch("other".into(), no_events()).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        "one\n"
+    );
+    assert!(!blob_of_file_stored(&repo, &dump));
+
+    assert_eq!(
+        handle.undo().unwrap(),
+        UndoOutcome::Done {
+            label: "Switch to other".into()
+        }
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        "two\n"
+    );
+    assert_eq!(
+        std::fs::metadata(&dump).unwrap().len(),
+        git_core::undo::SNAPSHOT_FILE_LIMIT + 1
+    );
+}
+
+/// #1065: Undo of "Ignore" over a big file that changed since can't bring back what it never
+/// stored: it says so (`FileNotSaved`) and changes nothing.
+#[test]
+fn undo_says_which_big_file_it_did_not_save() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "one\n");
+    commit_all(&repo, "initial");
+    let dump = dir.path().join("dump.sql");
+    over_snapshot_limit(&dump, 1);
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+
+    handle.ignore_path("dump.sql".into()).unwrap();
+    over_snapshot_limit(&dump, 2);
+
+    assert_eq!(
+        handle.undo().unwrap(),
+        UndoOutcome::FileNotSaved {
+            label: "Ignore dump.sql".into(),
+            message: "dump.sql is larger than 50 MB, so its contents weren't saved for undo, \
+                      and it has changed since."
+                .into()
+        }
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join(".gitignore")).unwrap(),
+        "dump.sql\n"
+    );
+    assert_eq!(
+        handle.get_undo_state().unwrap().undo.as_deref(),
+        Some("Ignore dump.sql")
+    );
+}
+
+/// #1065: a discard keeps a full copy of what it discards, however big, so Undo brings it back.
+#[test]
+fn discarding_a_big_file_can_still_be_undone() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "data.bin", "small\n");
+    commit_all(&repo, "initial");
+    let data = dir.path().join("data.bin");
+    over_snapshot_limit(&data, 1);
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+
+    handle.discard_file("data.bin".into()).unwrap();
+    assert_eq!(std::fs::read_to_string(&data).unwrap(), "small\n");
+
+    assert_eq!(
+        handle.undo().unwrap(),
+        UndoOutcome::Done {
+            label: "Discard changes to data.bin".into()
+        }
+    );
+    assert_eq!(
+        std::fs::metadata(&data).unwrap().len(),
+        git_core::undo::SNAPSHOT_FILE_LIMIT + 1
+    );
+}
+
 #[test]
 fn undo_and_redo_a_discard_round_trip_through_the_worker() {
     let (dir, repo) = init_repo();

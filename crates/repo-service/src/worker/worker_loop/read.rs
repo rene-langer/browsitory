@@ -37,6 +37,8 @@ pub(super) struct ReadState<'a> {
     pub(super) ahead_behind: &'a mut git_core::ahead_behind::AheadBehindCache,
     // The co-author suggestions for the current HEAD (#140).
     pub(super) recent_authors: &'a mut git_core::commit::RecentAuthorsCache,
+    // The stash list's file counts, by stash commit (#1070).
+    pub(super) stash_counts: &'a mut git_core::stash::StashCountCache,
 }
 
 /// What a transfer borrows from the worker loop: the repository, and the queue it serves reads
@@ -237,7 +239,7 @@ pub(super) fn dispatch(
         }
         Command::GetRemoteAuthMode { name, reply } => remote::auth_mode(repo, name, reply),
         Command::ListTags { reply } => tag::list(repo, reply),
-        Command::ListStashes { reply } => stash::list(repo, reply),
+        Command::ListStashes { reply } => stash::list(repo, state.stash_counts, reply),
         Command::GetStashFiles { commit_id, reply } => stash::files(repo, commit_id, reply),
         Command::GetMergeDefaults { reply } => merge::defaults(repo, reply),
         Command::GetConflictHunks { path, reply } => merge::conflict_hunks(repo, path, reply),
@@ -315,6 +317,7 @@ mod tests {
         };
         let mut ahead_behind = git_core::ahead_behind::AheadBehindCache::default();
         let mut recent_authors = git_core::commit::RecentAuthorsCache::default();
+        let mut stash_counts = git_core::stash::StashCountCache::default();
         let clean_merge: Option<merge::CleanMerge> = None;
         let search_generation = SearchGeneration::default();
         let mut walk_cache = git_core::graph::WalkCache::default();
@@ -326,6 +329,7 @@ mod tests {
             clean_merge: &clean_merge,
             ahead_behind: &mut ahead_behind,
             recent_authors: &mut recent_authors,
+            stash_counts: &mut stash_counts,
         };
         for ((name, command), _) in table() {
             if matches!(command, Command::PanicNow) {

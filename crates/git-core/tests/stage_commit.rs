@@ -372,6 +372,7 @@ fn stage_hunk_with_wider_context_stages_the_merged_hunk() {
         ignore_whitespace: false,
         context_lines: 5,
         algorithm: git_core::diff::DiffAlgorithm::Default,
+        max_file_bytes: None,
     };
     let hunks = git_core::diff::working_diff(&repo, "f.txt", false, &five).unwrap();
     assert_eq!(hunks.len(), 1);

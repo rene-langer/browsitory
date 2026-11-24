@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
-import { DEFAULT_DIFF_SETTINGS, type DiffHunk, type HeadInfo, type RepoClient, type StatusEntry } from "../ipc/RepoClient";
+import { DEFAULT_DIFF_SETTINGS, RepoError, type DiffHunk, type DiffOptions, type HeadInfo, type RepoClient, type StatusEntry } from "../ipc/RepoClient";
 import { DiffSettingsContext } from "../state/useDiffSettings";
 import { OpenPreferencesContext } from "../state/openPreferences";
 import { WorkspaceActionsContext, type WorkspaceActions } from "../state/useWorkspaceActions";
@@ -254,6 +254,29 @@ describe("working-tree view (#639)", () => {
 
     fireEvent.click(screen.getByRole("option", { name: /a\.txt/ }));
     expect(await within(viewer()).findByText("unstaged a.txt")).toBeInTheDocument();
+  });
+
+  // #1066: the backend refuses a diff over its size limit; the viewer says so and loads it on
+  // request, for that file only.
+  it("shows why a file over the diff size limit isn't loaded, and loads it anyway on request", async () => {
+    const message = "This file is 25.3 MB, over the 20 MB diff limit, so its diff isn't loaded.";
+    const getWorkingDiff = vi.fn(async (repo: string, path: string, staged: boolean, opts: DiffOptions) => {
+      if (path === "a.txt" && opts.noSizeLimit !== true) throw new RepoError("DiffTooLarge", message);
+      return diffNamingFile(repo, path, staged);
+    });
+    render(<Pane client={fakeRepoClient({ getWorkingDiff }, "empty")} status={status} />);
+
+    expect(await within(viewer()).findByText(message)).toBeInTheDocument();
+    expect(within(viewer()).queryByRole("button", { name: "Retry" })).toBeNull();
+    fireEvent.click(within(viewer()).getByRole("button", { name: "Load diff anyway" }));
+
+    expect(await within(viewer()).findByText("unstaged a.txt")).toBeInTheDocument();
+    expect(getWorkingDiff).toHaveBeenLastCalledWith(REPO, "a.txt", false, expect.objectContaining({ noSizeLimit: true }));
+
+    // Another file is asked for with the limit again.
+    fireEvent.click(screen.getByRole("option", { name: /b\.txt/ }));
+    await within(viewer()).findByText("unstaged b.txt");
+    expect(getWorkingDiff).toHaveBeenLastCalledWith(REPO, "b.txt", false, { ignoreWhitespace: false, contextLines: 3, algorithm: "Default" });
   });
 });
 

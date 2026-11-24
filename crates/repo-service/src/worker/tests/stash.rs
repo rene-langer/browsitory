@@ -117,3 +117,51 @@ fn stash_options_pop_and_files_round_trip_through_the_worker() {
         "mine"
     );
 }
+
+/// #1070: a stash never changes, so its file count is worked out once per worker, not on every
+/// refresh. Seen through the object store: once listed, the stash's untracked tree can go
+/// missing and the list still answers with the same counts. (The tree is over libgit2's 4 KiB
+/// object cache limit, so an uncached walk would have to read it again.)
+#[test]
+fn list_stashes_reads_a_stash_s_untracked_tree_only_once() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "initial commit");
+    write_file(dir.path(), "file.txt", "v2");
+    for n in 0..300 {
+        write_file(dir.path(), &format!("untracked-{n:04}.txt"), "new");
+    }
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    handle
+        .save_stash(git_core::stash::StashOptions::default())
+        .unwrap();
+    let first = handle.list_stashes().unwrap();
+    assert_eq!(first[0].file_count, 301);
+
+    let stash = repo
+        .find_commit(git2::Oid::from_str(&first[0].commit_id).unwrap())
+        .unwrap();
+    let untracked_tree = stash.parent(2).unwrap().tree_id().to_string();
+    let loose = repo
+        .path()
+        .join("objects")
+        .join(&untracked_tree[..2])
+        .join(&untracked_tree[2..]);
+    let mut permissions = std::fs::metadata(&loose).unwrap().permissions();
+    #[allow(clippy::permissions_set_readonly_false)]
+    permissions.set_readonly(false);
+    std::fs::set_permissions(&loose, permissions).unwrap();
+    std::fs::remove_file(&loose).unwrap();
+
+    write_file(dir.path(), "file.txt", "v3");
+    handle
+        .save_stash(git_core::stash::StashOptions::default())
+        .unwrap();
+    let again = handle.list_stashes().unwrap();
+    assert_eq!(again.len(), 2);
+    assert_eq!(again[0].file_count, 1);
+    assert_eq!(again[1].commit_id, first[0].commit_id);
+    assert_eq!(again[1].file_count, 301);
+    assert_eq!(again[1].has_staged_changes, first[0].has_staged_changes);
+}

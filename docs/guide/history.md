@@ -207,6 +207,13 @@ lines)** instead. Generated files are lockfiles (such as `Cargo.lock`, `package-
 stage part of it. A loaded diff shows its first 2,000 lines; **Show 2,000 more** and **Show all**
 below it show the rest. `]` and `↓` move past the last shown line and show more on their own.
 
+**Very large files** aren't diffed until you ask: when either version of a file is over 20 MB,
+the diff says how large it is and offers **Load diff anyway**. Nothing of the file is read until
+then, so a database dump or a regenerated data file never holds up the app. A file you load
+anyway stays loaded while you stay on it, also after you stage part of it; another file, or the
+same file in another commit, asks again. A binary file over 20 MB shows the same note, and once
+loaded says it has no text differences.
+
 With a screen reader, each line of a diff is read with what it is and its line number, such as
 "Added line 12", "Removed line 7" or "Unchanged line 3", before its text; the `+`/`−` markers
 and the line-number columns are not read. Where lines can be selected, each hunk's lines are a

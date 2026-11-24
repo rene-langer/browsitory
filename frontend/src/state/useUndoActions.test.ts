@@ -76,6 +76,19 @@ describe("useUndoActions", () => {
     expect(pruned.getState().error).toBe(`Can't redo Commit: ${hint}`);
   });
 
+  it("names a file the undo history didn't save for its size (#1065)", async () => {
+    const message = "dump.sql is larger than 50 MB, so its contents weren't saved for undo, and it has changed since.";
+    const { result, getState } = setup({ kind: "FileNotSaved", label: "Switch to main", message });
+    await act(async () => {
+      await result.current.undo();
+    });
+    expect(getState().error).toBe(`Can't undo Switch to main: ${message}`);
+    await act(async () => {
+      await result.current.redo();
+    });
+    expect(getState().error).toBe(`Can't redo Switch to main: ${message}`);
+  });
+
   it("asks to finish the merge or rebase first", async () => {
     const { result, getState } = setup({ kind: "OperationInProgress" });
     await act(async () => {
