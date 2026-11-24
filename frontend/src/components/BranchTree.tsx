@@ -205,6 +205,10 @@ function BranchTreeContent({
   const onRunUserCommand = onRunUserCommandProp ?? userCommandsApi?.run;
   // The branch Delete asks about, with the commits only it has (`null`: couldn't count them).
   const [deleteConfirm, setDeleteConfirm] = useState<{ name: string; count: number | null } | null>(null);
+  // The branches whose commits Delete is counting (#1067): their Delete is off meanwhile, so a
+  // second click starts no second count and no second delete.
+  const [counting, setCounting] = useState<ReadonlySet<string>>(new Set());
+  const countingRef = useRef(new Set<string>());
   // The branch the Rename branch dialog renames (#1002), `null` while it's closed.
   const [renaming, setRenaming] = useState<string | null>(null);
   // The new name while a rename runs: the list already shows it (optimistically), and the dialog
@@ -416,11 +420,21 @@ function BranchTreeContent({
     // Counted first (#996): a branch whose commits another branch has loses nothing and goes at
     // once; otherwise one confirm says what would be left on no branch. Either way it is deleted
     // with force, since git's own check (merged into HEAD) is what this replaces.
+    if (countingRef.current.has(name)) return;
+    const setCountingTo = (next: Set<string>) => {
+      countingRef.current = next;
+      setCounting(next);
+    };
+    setCountingTo(new Set(countingRef.current).add(name));
     let count: number | null;
     try {
       count = await onCountCommitsOnlyOnBranch(name);
     } catch {
       count = null;
+    } finally {
+      const next = new Set(countingRef.current);
+      next.delete(name);
+      setCountingTo(next);
     }
     if (count === 0) void onDeleteBranch(name, true);
     else setDeleteConfirm({ name, count });
@@ -580,6 +594,7 @@ function BranchTreeContent({
                   graphFilter,
                   onCopy: copyToClipboard,
                   onDelete: (name) => void handleDeleteClick(name),
+                  counting: counting.has(branch.name),
                 }).concat(
                   onRunUserCommand === undefined
                     ? []

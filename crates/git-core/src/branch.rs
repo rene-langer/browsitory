@@ -350,8 +350,8 @@ pub fn rename_branch(repo: &Repository, old_name: &str, new_name: &str) -> Resul
 pub fn commits_only_on_branch(repo: &Repository, name: &str) -> Result<usize, BranchError> {
     let branch = repo.find_branch(name, BranchType::Local)?;
     let own = branch.get().name()?.to_string();
-    let mut walk = repo.revwalk()?;
-    walk.push(branch.get().peel_to_commit()?.id())?;
+    let tip = branch.get().peel_to_commit()?.id();
+    let mut others = std::collections::HashSet::new();
     for reference in repo.references()? {
         let reference = reference?;
         if !(reference.is_branch() || reference.is_remote() || reference.is_tag())
@@ -362,15 +362,10 @@ pub fn commits_only_on_branch(repo: &Repository, name: &str) -> Result<usize, Br
         // A symbolic one (`refs/remotes/origin/HEAD`) peels to its target's commit, an annotated
         // tag to its commit; a tag of a tree or blob has none and keeps nothing.
         if let Ok(commit) = reference.peel_to_commit() {
-            walk.hide(commit.id())?;
+            others.insert(commit.id());
         }
     }
-    let mut count = 0;
-    for oid in walk {
-        oid?;
-        count += 1;
-    }
-    Ok(count)
+    Ok(crate::reach::count_unreachable_from(repo, tip, others)?)
 }
 
 pub fn delete_branch(repo: &Repository, name: &str, force: bool) -> Result<(), BranchError> {

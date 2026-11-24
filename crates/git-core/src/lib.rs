@@ -26,6 +26,7 @@ pub mod patch;
 mod patch_mail;
 pub mod pick;
 pub mod process;
+mod reach;
 pub mod rebase;
 pub mod rebase_file;
 pub mod reflog;
