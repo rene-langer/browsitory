@@ -324,6 +324,39 @@ fn rejects_a_url_with_an_embedded_password() {
     assert!(!dest.exists());
 }
 
+/// A token passed as the user name, and Bitbucket's copy URL: git would write the user name into
+/// `.git/config`, where `list_remotes` then refuses it (#1052).
+#[test]
+fn rejects_an_http_url_with_a_user_name_or_token() {
+    for url in [
+        "https://ghp_0123456789abcdef@github.example.test/o/r.git",
+        "https://alice@bitbucket.example.test/ws/r.git",
+        "HTTPS://alice@example.test/r.git",
+        "http://alice@example.test/r.git",
+    ] {
+        let target = tempfile::TempDir::new().unwrap();
+        let dest = target.path().join("clone");
+
+        let (result, _) = run(&opts(url, dest.clone()));
+
+        assert!(
+            matches!(result, Err(CloneError::CredentialBearingUrl)),
+            "{url}: {result:?}"
+        );
+        assert!(!dest.exists(), "{url}: destination must not be created");
+    }
+}
+
+#[test]
+fn accepts_a_user_name_in_an_ssh_url_at_validation() {
+    for url in [
+        "ssh://alice@example.test/repo.git",
+        "alice@example.test:org/repo.git",
+    ] {
+        assert!(git_core::clone::validate_clone_url(url).is_ok(), "{url}");
+    }
+}
+
 #[test]
 fn accepts_scp_style_and_ipv6_ssh_urls_at_validation() {
     for url in [
