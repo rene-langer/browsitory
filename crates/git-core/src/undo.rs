@@ -41,7 +41,12 @@ pub struct RepoSnapshot {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SnapshotScope {
     RefsAndIndex,
+    /// Refs, index and work tree; a work-tree file over `SNAPSHOT_FILE_LIMIT` is not stored, only
+    /// identified (`RepoSnapshot::skipped`, #1065).
     Full,
+    /// `Full` with every file stored whatever its size: for the commands that destroy work-tree
+    /// content with no other way back (discards, a hard reset, #1065).
+    FullUncapped,
 }
 
 #[derive(Debug, Error)]
@@ -87,7 +92,9 @@ pub fn capture(repo: &Repository, scope: SnapshotScope) -> Result<RepoSnapshot, 
     let index_tree = index.write_tree()?.to_string();
     let worktree_tree = match scope {
         SnapshotScope::RefsAndIndex => None,
-        SnapshotScope::Full => Some(build_worktree_tree(repo)?.to_string()),
+        SnapshotScope::Full | SnapshotScope::FullUncapped => {
+            Some(build_worktree_tree(repo)?.to_string())
+        }
     };
     Ok(RepoSnapshot {
         head: head_state(repo)?,

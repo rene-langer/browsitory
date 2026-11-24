@@ -1014,7 +1014,10 @@ mod tests {
                 path: "a.txt".into(),
                 reply: tx
             }),
-            Some(("Discard changes to a.txt".into(), SnapshotScope::Full))
+            Some((
+                "Discard changes to a.txt".into(),
+                SnapshotScope::FullUncapped
+            ))
         );
         let (tx, _rx) = channel();
         assert_eq!(
@@ -1023,7 +1026,10 @@ mod tests {
                 mode: git_core::reset::ResetMode::Hard,
                 reply: tx
             }),
-            Some(("Reset to 1a2b3c4 (hard)".into(), SnapshotScope::Full))
+            Some((
+                "Reset to 1a2b3c4 (hard)".into(),
+                SnapshotScope::FullUncapped
+            ))
         );
     }
 
