@@ -203,7 +203,12 @@ terminalRebase: TerminalRebase | null,
  * The branch HEAD names while it has no commit yet (a new repository, #983); absent
  * otherwise.
  */
-unbornBranch?: string, };
+unbornBranch?: string, 
+/**
+ * The external filter drivers the repository's attributes name, which Browsitory can't
+ * run (#1087); absent when there are none.
+ */
+externalFilters?: Array<string>, };
 
 export type HistoryEditKind = "Reword" | "Squash" | "Fixup" | "MoveUp" | "MoveDown" | "Drop" | "Edit" | "Split";
 
@@ -414,7 +419,12 @@ oldPath: string | null, staged: boolean, kind: StatusKind,
 /**
  * Only on an untracked folder listed as one entry (#845): `true`.
  */
-untrackedFolder?: boolean, };
+untrackedFolder?: boolean, 
+/**
+ * The external filter driver Browsitory can't run, on an unstaged file under it whose
+ * change it can't compare (#1087); absent otherwise.
+ */
+externalFilter?: string, };
 
 export type StatusKind = "New" | "Modified" | "Deleted" | "Renamed" | "TypeChange" | "Conflicted";
 

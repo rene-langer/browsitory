@@ -107,6 +107,9 @@ pub struct HeadInfo {
     /// The branch HEAD names while it has no commit yet (a new repository, #983): its first
     /// commit creates it. `None` once HEAD points at a commit, and for a detached HEAD.
     pub unborn_branch: Option<String>,
+    /// The configured external filter drivers (git-crypt, Git LFS) that the repository's
+    /// attribute files name, which Browsitory can't run (#1087); sorted, each once.
+    pub external_filters: Vec<String>,
 }
 
 /// Which command a terminal rebase folder belongs to.
@@ -788,6 +791,7 @@ pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
                 terminal_sequence: crate::pick::terminal_sequence(repo),
                 terminal_rebase: terminal_rebase(repo),
                 unborn_branch: unborn_branch(repo),
+                external_filters: Vec::new(),
             });
         }
         Err(error) => return Err(error.into()),
@@ -810,6 +814,7 @@ pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
         terminal_sequence: crate::pick::terminal_sequence(repo),
         terminal_rebase: terminal_rebase(repo),
         unborn_branch: None,
+        external_filters: Vec::new(),
     })
 }
 

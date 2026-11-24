@@ -28,6 +28,10 @@ pub struct StatusEntry {
     /// An untracked folder with more than [`UNTRACKED_FOLDER_THRESHOLD`] files, listed as one
     /// entry (`path` ends in `/`) instead of file by file (#845); see [`untracked_folder_files`].
     pub untracked_folder: bool,
+    /// The external filter driver (git-crypt, Git LFS) whose files Browsitory can't compare or
+    /// stage (#1087): on an unstaged entry that reads the work-tree file (not a deletion, not a
+    /// symbolic link) whose `filter` attribute names a configured driver.
+    pub external_filter: Option<String>,
 }
 
 /// An untracked folder with more files than this is listed as one entry (#845).
@@ -77,6 +81,7 @@ fn new_file(path: String) -> StatusEntry {
         staged: false,
         kind: StatusKind::New,
         untracked_folder: false,
+        external_filter: None,
     }
 }
 
@@ -137,6 +142,7 @@ pub(crate) fn entries(
                 staged: false,
                 kind: StatusKind::Conflicted,
                 untracked_folder: false,
+                external_filter: None,
             });
             continue;
         }
@@ -154,6 +160,7 @@ pub(crate) fn entries(
                 staged: true,
                 kind,
                 untracked_folder: false,
+                external_filter: None,
             });
         }
         if let Some(kind) = unstaged_kind(flags) {
@@ -165,6 +172,7 @@ pub(crate) fn entries(
                 staged: false,
                 kind,
                 untracked_folder: false,
+                external_filter: None,
             });
         }
     }

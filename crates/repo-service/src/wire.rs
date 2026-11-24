@@ -97,6 +97,11 @@ pub struct StatusEntryDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(any(test, feature = "ts"), ts(optional))]
     pub untracked_folder: Option<bool>,
+    /// The external filter driver Browsitory can't run, on an unstaged file under it whose
+    /// change it can't compare (#1087); absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(any(test, feature = "ts"), ts(optional))]
+    pub external_filter: Option<String>,
 }
 
 impl From<git_core::status::StatusEntry> for StatusEntryDto {
@@ -107,6 +112,7 @@ impl From<git_core::status::StatusEntry> for StatusEntryDto {
             staged: entry.staged,
             kind: entry.kind,
             untracked_folder: entry.untracked_folder.then_some(true),
+            external_filter: entry.external_filter,
         }
     }
 }
@@ -1083,6 +1089,11 @@ pub struct HeadInfoDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(any(test, feature = "ts"), ts(optional))]
     pub unborn_branch: Option<String>,
+    /// The external filter drivers the repository's attributes name, which Browsitory can't
+    /// run (#1087); absent when there are none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(any(test, feature = "ts"), ts(as = "Option<Vec<String>>", optional))]
+    pub external_filters: Vec<String>,
 }
 
 /// `{ "kind": "Rebase" | "Am", "branch", "onto", "currentStep", "totalSteps" }`: `branch` and
@@ -1193,6 +1204,7 @@ impl From<git_core::repo::HeadInfo> for HeadInfoDto {
             terminal_sequence: info.terminal_sequence.map(TerminalSequenceDto::from),
             terminal_rebase: info.terminal_rebase.map(TerminalRebaseDto::from),
             unborn_branch: info.unborn_branch,
+            external_filters: info.external_filters,
         }
     }
 }

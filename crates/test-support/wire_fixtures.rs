@@ -275,6 +275,7 @@ pub fn status_entries() -> Cases<git_core::status::StatusEntry> {
                     staged: false,
                     kind,
                     untracked_folder: false,
+                    external_filter: None,
                 },
             )
         })
@@ -287,6 +288,7 @@ pub fn status_entries() -> Cases<git_core::status::StatusEntry> {
             staged: true,
             kind: StatusKind::Renamed,
             untracked_folder: false,
+            external_filter: None,
         },
     ));
     cases.push(case(
@@ -297,6 +299,19 @@ pub fn status_entries() -> Cases<git_core::status::StatusEntry> {
             staged: false,
             kind: StatusKind::New,
             untracked_folder: true,
+            external_filter: None,
+        },
+    ));
+    // A file under a filter driver Browsitory can't run (#1087).
+    cases.push(case(
+        "external-filter",
+        git_core::status::StatusEntry {
+            path: "secret.env".to_string(),
+            old_path: None,
+            staged: false,
+            kind: StatusKind::Modified,
+            untracked_folder: false,
+            external_filter: some("crypt"),
         },
     ));
     cases
@@ -1699,6 +1714,7 @@ fn empty_head() -> git_core::repo::HeadInfo {
         terminal_sequence: None,
         terminal_rebase: None,
         unborn_branch: None,
+        external_filters: Vec::new(),
     }
 }
 
@@ -1725,6 +1741,7 @@ pub fn head_infos() -> Cases<git_core::repo::HeadInfo> {
                 terminal_sequence: Some(terminal_sequence(SequenceKind::CherryPick)),
                 terminal_rebase: Some(terminal_rebase(TerminalRebaseKind::Rebase)),
                 unborn_branch: None,
+                external_filters: Vec::new(),
             },
         ),
         // A new repository (#983): HEAD names a branch with no commit yet.
@@ -1732,6 +1749,14 @@ pub fn head_infos() -> Cases<git_core::repo::HeadInfo> {
             "unborn",
             git_core::repo::HeadInfo {
                 unborn_branch: some("main"),
+                ..empty_head()
+            },
+        ),
+        // Filter drivers Browsitory can't run (#1087).
+        case(
+            "external-filters",
+            git_core::repo::HeadInfo {
+                external_filters: strings(&["crypt", "lfs"]),
                 ..empty_head()
             },
         ),
@@ -1864,6 +1889,7 @@ pub fn statuses_with_stamps() -> Cases<git_core::change_stamp::StatusWithStamp> 
                 staged: false,
                 kind: git_core::status::StatusKind::Modified,
                 untracked_folder: false,
+                external_filter: None,
             }],
             stamp: git_core::change_stamp::ChangeStamp {
                 refs: "0123456789abcdef".to_string(),
