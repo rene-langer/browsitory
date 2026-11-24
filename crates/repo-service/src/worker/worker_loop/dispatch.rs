@@ -27,6 +27,7 @@ where
             clean_merge: &self.clean_merge,
             ahead_behind: &mut self.ahead_behind,
             recent_authors: &mut self.recent_authors,
+            stash_counts: &mut self.stash_counts,
         };
         let Some(command) = read::dispatch(&mut self.repo, &mut state, command) else {
             return;

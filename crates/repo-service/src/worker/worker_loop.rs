@@ -47,6 +47,8 @@ pub(super) struct WorkerLoop<S: CredentialStore, A: ForgeApi> {
     ahead_behind: git_core::ahead_behind::AheadBehindCache,
     // The commit box's co-author suggestions for the current HEAD (#140).
     recent_authors: git_core::commit::RecentAuthorsCache,
+    // The stash list's file counts, worked out once per stash (#1070).
+    stash_counts: git_core::stash::StashCountCache,
     // Undo bookkeeping is shared with other processes on this repository (#172).
     state_lock: state_lock::StateLock,
     logged_busy: bool,
@@ -160,6 +162,7 @@ where
             clean_merge: None,
             ahead_behind: git_core::ahead_behind::AheadBehindCache::default(),
             recent_authors: git_core::commit::RecentAuthorsCache::default(),
+            stash_counts: git_core::stash::StashCountCache::default(),
             state_lock,
             logged_busy: false,
             logged_unavailable: false,
@@ -211,6 +214,7 @@ where
                 clean_merge: &self.clean_merge,
                 ahead_behind: &mut self.ahead_behind,
                 recent_authors: &mut self.recent_authors,
+                stash_counts: &mut self.stash_counts,
             },
         };
         (host, &self.credential_service, &self.background_memory)

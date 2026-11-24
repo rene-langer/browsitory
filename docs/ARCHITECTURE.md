@@ -295,7 +295,11 @@ command (`refresh({ full: true })`), a failed refresh and a missing stamp read e
 history reads do run, the worker keeps each branch's ahead/behind count by its pair of tips
 (`git_core::ahead_behind::AheadBehindCache`, #112): only a branch or upstream that moved is
 counted again, the upstream reads after the branch list count nothing, the branch list drops the
-pairs it no longer lists, and a changed shallow or graft file forgets every count. Refreshes
+pairs it no longer lists, and a changed shallow or graft file forgets every count. The stash
+list, which every refresh reads, keeps each stash's file count and "has staged changes" by its
+commit id (`git_core::stash::StashCountCache`, #1070): a stash commit never changes, so its
+trees (an untracked folder saved with it included) are walked once per worker, and the list
+drops the counts of stashes it no longer lists. Refreshes
 are coalesced per tab (#222): one runs and at most one waits; a call while one runs shares the
 waiting one, which starts after the running one ends, so it still sees the caller's change.
 `useAppState.refresh()` reads the stamp together with the status, from one scan of the work tree
