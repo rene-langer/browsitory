@@ -14,6 +14,8 @@ end of a row pins the repository: pinned repositories come first, in the order y
 stay there however many others you open, and don't count against the ten. Click the pin again
 to unpin it; it then goes back on top of the recent ones. The **×** takes a repository off the
 list, pinned or not (the folder stays where it is); opening the repository again puts it back.
+A repository that leaves the list also loses its recent searches, recent commit messages,
+recent branches and **Fetch automatically** / **Prune** choices (see [Privacy](privacy.md)).
 A repository whose folder is gone (moved, deleted, or on a drive that isn't connected) is marked
 **Folder not found** and doesn't open. **Locate…** in place of the pin lets you pick the folder's
 new place, which replaces the entry (pinned again if it was) and opens; **×** removes it. If such
