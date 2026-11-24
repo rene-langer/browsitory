@@ -33,6 +33,7 @@ fn hunk(repo: &Repository, id: &str, path: &str, index: usize, context_lines: u3
         ignore_whitespace: false,
         context_lines,
         algorithm: git_core::diff::DiffAlgorithm::Default,
+        max_file_bytes: None,
     };
     let hunks = commit_diff(repo, id, path, &opts).unwrap();
     CommitHunk {

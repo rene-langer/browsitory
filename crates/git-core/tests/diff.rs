@@ -194,11 +194,13 @@ fn context_lines_option_merges_or_splits_hunks() {
         ignore_whitespace: false,
         context_lines: 3,
         algorithm: git_core::diff::DiffAlgorithm::Default,
+        max_file_bytes: None,
     };
     let five = DiffOptions {
         ignore_whitespace: false,
         context_lines: 5,
         algorithm: git_core::diff::DiffAlgorithm::Default,
+        max_file_bytes: None,
     };
     assert_eq!(
         git_core::diff::working_diff(&repo, "f.txt", false, &three)
@@ -241,6 +243,7 @@ fn context_lines_option_is_clamped_to_twenty() {
         ignore_whitespace: false,
         context_lines: 1000,
         algorithm: git_core::diff::DiffAlgorithm::Default,
+        max_file_bytes: None,
     };
     let hunk = &git_core::diff::working_diff(&repo, "f.txt", false, &huge).unwrap()[0];
     // 20 context lines on each side + the removed line.
@@ -271,6 +274,7 @@ fn whole_file_context_shows_every_line_in_one_hunk() {
         ignore_whitespace: false,
         context_lines: git_core::diff::WHOLE_FILE_CONTEXT_LINES,
         algorithm: git_core::diff::DiffAlgorithm::Default,
+        max_file_bytes: None,
     };
     let hunks = git_core::diff::working_diff(&repo, "f.txt", false, &whole).unwrap();
     assert_eq!(hunks.len(), 1);
@@ -301,6 +305,7 @@ fn whole_file_context_applies_to_commit_diffs() {
         ignore_whitespace: false,
         context_lines: git_core::diff::WHOLE_FILE_CONTEXT_LINES,
         algorithm: git_core::diff::DiffAlgorithm::Default,
+        max_file_bytes: None,
     };
     let hunks = git_core::diff::commit_diff(&repo, &head, "f.txt", &whole).unwrap();
     assert_eq!(hunks.len(), 1);
@@ -320,6 +325,7 @@ fn ignore_whitespace_hides_whitespace_only_changes() {
         ignore_whitespace: true,
         context_lines: 3,
         algorithm: git_core::diff::DiffAlgorithm::Default,
+        max_file_bytes: None,
     };
     assert_eq!(
         git_core::diff::working_diff(&repo, "f.txt", false, &raw)
@@ -347,6 +353,7 @@ fn commit_diff_honours_ignore_whitespace() {
         ignore_whitespace: true,
         context_lines: 3,
         algorithm: git_core::diff::DiffAlgorithm::Default,
+        max_file_bytes: None,
     };
     assert!(
         git_core::diff::commit_diff(&repo, &head, "f.txt", &ignoring)

@@ -17,6 +17,7 @@ fn shown(
         ignore_whitespace: false,
         context_lines: ctx,
         algorithm: git_core::diff::DiffAlgorithm::Default,
+        max_file_bytes: None,
     };
     working_diff(repo, path, staged, &opts)
         .unwrap()
@@ -221,6 +222,7 @@ fn stage_lines_with_zero_context_matches_the_displayed_hunk() {
         ignore_whitespace: false,
         context_lines: 0,
         algorithm: git_core::diff::DiffAlgorithm::Default,
+        max_file_bytes: None,
     };
     let hunks = working_diff(&repo, "f.txt", false, &zero).unwrap();
     // With zero context: hunk 0 = "-b","+B"; hunk 1 = "+d".
@@ -267,6 +269,7 @@ fn line_actions_with_whole_file_context_touch_only_the_selection() {
         ignore_whitespace: false,
         context_lines: whole,
         algorithm: git_core::diff::DiffAlgorithm::Default,
+        max_file_bytes: None,
     };
     let hunks = working_diff(&repo, "f.txt", false, &opts).unwrap();
     assert_eq!(hunks.len(), 1);
@@ -385,6 +388,7 @@ fn stages_a_removed_line_of_a_zero_context_hunk() {
         ignore_whitespace: false,
         context_lines: 0,
         algorithm: git_core::diff::DiffAlgorithm::Default,
+        max_file_bytes: None,
     };
     let hunks = working_diff(&repo, "f.txt", false, &zero).unwrap();
     stage_lines(
@@ -406,6 +410,7 @@ fn discards_an_added_line_of_a_zero_context_hunk() {
         ignore_whitespace: false,
         context_lines: 0,
         algorithm: git_core::diff::DiffAlgorithm::Default,
+        max_file_bytes: None,
     };
     let hunks = working_diff(&repo, "f.txt", false, &zero).unwrap();
     discard_lines(
@@ -434,6 +439,7 @@ fn unstages_a_line_from_the_middle_with_zero_context() {
         ignore_whitespace: false,
         context_lines: 0,
         algorithm: git_core::diff::DiffAlgorithm::Default,
+        max_file_bytes: None,
     };
     let hunks = working_diff(&repo, "f.txt", true, &zero).unwrap();
     assert_eq!(hunks.len(), 2);
@@ -564,6 +570,7 @@ const ZERO: DiffOptions = DiffOptions {
     ignore_whitespace: false,
     context_lines: 0,
     algorithm: git_core::diff::DiffAlgorithm::Default,
+    max_file_bytes: None,
 };
 
 #[test]

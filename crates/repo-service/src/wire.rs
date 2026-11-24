@@ -3100,6 +3100,11 @@ pub struct DiffOptionsDto {
     pub ignore_whitespace: bool,
     pub context_lines: u32,
     pub algorithm: DiffAlgorithmDto,
+    /// "Load diff anyway" (#1066): diff the file whatever its size. Absent is `false`: a file
+    /// over `git_core::diff::DIFF_SIZE_LIMIT` is then the `DiffTooLarge` error.
+    #[serde(default)]
+    #[cfg_attr(any(test, feature = "ts"), ts(optional))]
+    pub no_size_limit: Option<bool>,
 }
 
 impl From<DiffOptionsDto> for git_core::diff::DiffOptions {
@@ -3108,6 +3113,7 @@ impl From<DiffOptionsDto> for git_core::diff::DiffOptions {
             ignore_whitespace: dto.ignore_whitespace,
             context_lines: dto.context_lines,
             algorithm: dto.algorithm.into(),
+            max_file_bytes: None,
         }
     }
 }

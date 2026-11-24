@@ -35,6 +35,11 @@ export interface DiffOptions {
   ignoreWhitespace: boolean;
   contextLines: number;
   algorithm: DiffAlgorithm;
+  /**
+   * "Load diff anyway" (#1066): diff the file whatever its size. Absent, a file over the
+   * backend's limit rejects with kind `DiffTooLarge`.
+   */
+  noSizeLimit?: boolean;
 }
 
 /**

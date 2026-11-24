@@ -21,6 +21,20 @@ pub enum DiffError {
     InvalidPath(String),
     #[error("{0}")]
     Io(#[from] std::io::Error),
+    /// A side of the file is over `DiffOptions::max_file_bytes` (#1066): nothing was diffed.
+    /// `size` is the larger side's.
+    #[error("{}", too_large_message(*size, *limit))]
+    TooLarge { size: u64, limit: u64 },
+}
+
+/// "This file is 25.3 MB, over the 20 MB diff limit, so its diff isn't loaded."
+fn too_large_message(size: u64, limit: u64) -> String {
+    const MB: f64 = 1024.0 * 1024.0;
+    format!(
+        "This file is {:.1} MB, over the {} MB diff limit, so its diff isn't loaded.",
+        size as f64 / MB,
+        limit / (1024 * 1024)
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -47,6 +61,11 @@ pub struct DiffHunk {
 }
 
 pub const MAX_CONTEXT_LINES: u32 = 20;
+
+/// The size the app diffs files up to unless asked to load one anyway (#1066): with either side
+/// over it, the diff is `DiffError::TooLarge`, judged from the object header or the file's size,
+/// so nothing of the file is read.
+pub const DIFF_SIZE_LIMIT: u64 = 20 * 1024 * 1024;
 
 /// `context_lines` value that shows the whole file: every line of a changed file, in one hunk
 /// ("Show whole file", #444). Any other value is clamped to `MAX_CONTEXT_LINES`.
@@ -87,6 +106,9 @@ pub struct DiffOptions {
     pub ignore_whitespace: bool,
     pub context_lines: u32,
     pub algorithm: DiffAlgorithm,
+    /// Files over this many bytes on either side aren't diffed (`DiffError::TooLarge`, #1066);
+    /// `None`: libgit2's own rule only (a file over 512 MiB diffs as binary).
+    pub max_file_bytes: Option<u64>,
 }
 
 impl Default for DiffOptions {
@@ -95,6 +117,7 @@ impl Default for DiffOptions {
             ignore_whitespace: false,
             context_lines: 3,
             algorithm: DiffAlgorithm::Default,
+            max_file_bytes: None,
         }
     }
 }
@@ -116,6 +139,7 @@ impl HunkOptions {
             ignore_whitespace: false,
             context_lines: self.context_lines,
             algorithm: self.algorithm,
+            max_file_bytes: None,
         }
     }
 }

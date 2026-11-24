@@ -79,7 +79,12 @@ export type DiffLine = { origin: DiffLineOrigin, content: string, };
 
 export type DiffLineOrigin = "Add" | "Remove" | "Context";
 
-export type DiffOptions = { ignoreWhitespace: boolean, contextLines: number, algorithm: DiffAlgorithm, };
+export type DiffOptions = { ignoreWhitespace: boolean, contextLines: number, algorithm: DiffAlgorithm, 
+/**
+ * "Load diff anyway" (#1066): diff the file whatever its size. Absent is `false`: a file
+ * over `git_core::diff::DIFF_SIZE_LIMIT` is then the `DiffTooLarge` error.
+ */
+noSizeLimit?: boolean, };
 
 export type DiffSettings = { ignoreWhitespace: boolean, contextLines: number, syntaxHighlight: boolean, wordWrap: WordWrap, algorithm: DiffAlgorithm, showWhitespace: boolean, expandUntracked: boolean, };
 

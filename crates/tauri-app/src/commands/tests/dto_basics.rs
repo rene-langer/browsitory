@@ -107,6 +107,7 @@ fn diff_options_dto_parses_camel_case() {
             ignore_whitespace: true,
             context_lines: 5,
             algorithm: git_core::diff::DiffAlgorithm::Patience,
+            max_file_bytes: Some(git_core::diff::DIFF_SIZE_LIMIT),
         }
     );
 }
