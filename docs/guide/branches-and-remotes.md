@@ -24,7 +24,8 @@ The menus offer:
   branch name**. Delete goes at once when every commit of the branch is on another branch
   (local or remote-tracking) or a tag too; otherwise it asks first, saying how many commits would
   be on no branch ("feature has 1 commit on no other branch. Delete it anyway?", **Delete
-  branch**). **Undo** brings it back;
+  branch**). While it counts those commits, that branch's **Delete** is unavailable. **Undo**
+  brings it back;
 - a remote branch: **Switch to** (to a local branch tracking it), **Set as upstream for current
   branch**, **Rebase current branch onto ⟨remote⟩/⟨branch⟩…**, **Isolate branch** (as for a
   local branch), **Show all branches** (as for a local branch), **Copy branch name** (as
