@@ -121,6 +121,8 @@ impl RepoWatcher {
             folders: HashSet::new(),
             work_folders: 0,
             max_folders,
+            #[cfg(test)]
+            walks: 0,
         };
         state.watch_initial()?;
         let alive = Arc::new(AtomicBool::new(true));
@@ -167,6 +169,9 @@ struct State {
     /// How many of `folders` are in the work tree (the git folder's don't count).
     work_folders: usize,
     max_folders: usize,
+    /// How many times `sync` walked the whole tree.
+    #[cfg(test)]
+    walks: usize,
 }
 
 /// Whether watches cover only the folder itself, not its subfolders (inotify).
@@ -206,6 +211,10 @@ impl State {
     /// Adds a watch for every folder that should have one and doesn't (Linux): the whole work
     /// tree and git folders at the start, and again when the ignore rules change.
     fn sync(&mut self) -> Result<(), SyncError> {
+        #[cfg(test)]
+        {
+            self.walks += 1;
+        }
         let roots: Vec<PathBuf> = self
             .layout
             .workdir

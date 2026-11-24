@@ -421,3 +421,62 @@ fn the_reasons_name_the_folder_limit() {
     );
     assert_eq!(SyncError::Watch("full".into()).to_string(), "full");
 }
+
+/// A watcher's state whose notify watcher reports to nowhere: the test feeds `run` its own
+/// events.
+#[cfg(target_os = "linux")]
+fn state_fed_by_the_test(path: &Path) -> super::State {
+    let repo = git_core::repo::open(path).unwrap();
+    let layout = super::paths::Layout::of(&repo);
+    let watcher = notify::recommended_watcher(|_: notify::Result<notify::Event>| {}).unwrap();
+    let mut state = super::State {
+        repo,
+        layout,
+        watcher: Arc::new(std::sync::Mutex::new(Some(watcher))),
+        folders: std::collections::HashSet::new(),
+        work_folders: 0,
+        max_folders: MAX_FOLDERS,
+        walks: 0,
+    };
+    assert!(state.watch_initial().is_ok());
+    state
+}
+
+/// One editor save of a `.gitignore` brings several events, and a branch switch one per changed
+/// `.gitignore`: the tree is walked again once for the whole debounced batch, not once per event
+/// (#1068), and still before the batch's change is reported.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_burst_of_ignore_rule_changes_walks_the_tree_once() {
+    use notify::event::{DataChange, EventKind, ModifyKind};
+
+    let (dir, _repo) = repo_with_commit();
+    let root = dir.path().canonicalize().unwrap();
+    std::fs::create_dir_all(root.join("build/x")).unwrap();
+    let mut state = state_fed_by_the_test(&root);
+    let walks_at_start = state.walks;
+    assert!(!state.folders.contains(&root.join("build/x")));
+    std::fs::write(root.join(".gitignore"), "*.log\n").unwrap();
+
+    let (events_tx, events_rx) = mpsc::channel();
+    for _ in 0..50 {
+        let event = notify::Event::new(EventKind::Modify(ModifyKind::Data(DataChange::Content)))
+            .add_path(root.join(".gitignore"));
+        events_tx.send(Ok(event)).unwrap();
+    }
+    // Ends `run` once the batch is reported: dropping the sender is what a dropped watcher does.
+    let (reported_tx, reported_rx) = mpsc::channel();
+    let feeder = std::thread::spawn(move || {
+        let reported: Vec<WatchEvent> = reported_rx.recv_timeout(TIMEOUT).into_iter().collect();
+        drop(events_tx);
+        reported
+    });
+    let stopped = state.run(events_rx, &move |event| {
+        let _ = reported_tx.send(event);
+    });
+
+    assert!(!stopped);
+    assert_eq!(feeder.join().unwrap(), vec![WatchEvent::Changed]);
+    assert_eq!(state.walks - walks_at_start, 1);
+    assert!(state.folders.contains(&root.join("build/x")));
+}
