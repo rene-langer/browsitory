@@ -70,15 +70,17 @@ pub struct StatusWithStamp {
     pub stamp: ChangeStamp,
 }
 
-/// [`crate::status::status`] and [`change_stamp`] in one read, which scans the work tree once
-/// and refreshes the index's stat data on the way (#841).
+/// [`crate::status::status_refreshing_index`] and [`change_stamp`] in one read, which scans the
+/// work tree once and refreshes the index's stat data on the way (#841).
 pub fn status_with_stamp(repo: &git2::Repository) -> Result<StatusWithStamp, git2::Error> {
     let refs = refs_stamp(repo)?;
     let (statuses, index) = crate::index_refresh::scan(repo)?;
     let expansion = crate::untracked::expand(repo, &statuses);
     let workdir = repo.workdir().unwrap_or(Path::new(""));
+    let mut status = crate::status::entries(&statuses, &expansion);
+    crate::external_filter::annotate(repo, &mut status);
     Ok(StatusWithStamp {
-        status: crate::status::entries(&statuses, &expansion),
+        status,
         stamp: ChangeStamp {
             refs,
             work_tree: hash_work_tree(Some(&index), Some((&statuses, &expansion, workdir))),

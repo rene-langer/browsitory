@@ -791,7 +791,7 @@ pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
                 terminal_sequence: crate::pick::terminal_sequence(repo),
                 terminal_rebase: terminal_rebase(repo),
                 unborn_branch: unborn_branch(repo),
-                external_filters: Vec::new(),
+                external_filters: crate::external_filter::named_drivers(repo),
             });
         }
         Err(error) => return Err(error.into()),
@@ -814,7 +814,7 @@ pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
         terminal_sequence: crate::pick::terminal_sequence(repo),
         terminal_rebase: terminal_rebase(repo),
         unborn_branch: None,
-        external_filters: Vec::new(),
+        external_filters: crate::external_filter::named_drivers(repo),
     })
 }
 

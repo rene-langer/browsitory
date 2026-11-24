@@ -70,7 +70,9 @@ pub fn untracked_folder_files(
     else {
         unreachable!("a walk without a limit lists every file")
     };
-    Ok(files.into_iter().map(new_file).collect())
+    let mut entries = files.into_iter().map(new_file).collect();
+    crate::external_filter::annotate(repo, &mut entries);
+    Ok(entries)
 }
 
 /// An unstaged new file (or nested repository) entry.
@@ -106,7 +108,8 @@ pub(crate) fn status_options() -> git2::StatusOptions {
 }
 
 /// The status of `repo`, read only: the index's stat data stays as it is (the internal reads of
-/// write commands use it). The app's own status reads use [`status_refreshing_index`].
+/// write commands use it), and files under an external filter driver are neither marked nor
+/// left out. The app's own status reads use [`status_refreshing_index`].
 pub fn status(repo: &git2::Repository) -> Result<Vec<StatusEntry>, StatusError> {
     let statuses = repo.statuses(Some(&mut status_options()))?;
     let expansion = crate::untracked::expand(repo, &statuses);
@@ -185,11 +188,15 @@ pub(crate) fn entries(
     entries
 }
 
-/// [`status`], with the index's stat data refreshed on the way (#841); see `index_refresh`.
+/// [`status`], with the index's stat data refreshed on the way (#841; see `index_refresh`) and
+/// files under an external filter driver marked or, when only the filter explains the
+/// difference, left out (#1087; see `external_filter::annotate`). What the app lists.
 pub fn status_refreshing_index(repo: &git2::Repository) -> Result<Vec<StatusEntry>, StatusError> {
     let (statuses, _) = crate::index_refresh::scan(repo)?;
     let expansion = crate::untracked::expand(repo, &statuses);
-    Ok(entries(&statuses, &expansion))
+    let mut entries = entries(&statuses, &expansion);
+    crate::external_filter::annotate(repo, &mut entries);
+    Ok(entries)
 }
 
 /// The delta's new path (falling back to `fallback`) and its old path when it differs.
