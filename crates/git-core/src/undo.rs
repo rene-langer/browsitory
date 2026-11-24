@@ -39,10 +39,20 @@ pub struct RepoSnapshot {
     /// Work-tree files over the size limit, by path (#1065): left out of `worktree_tree` (not
     /// stored), only identified by their stat data.
     pub skipped: BTreeMap<String, SkippedFile>,
+    /// Blob listing the untracked files a snapshot with more than `SNAPSHOT_UNTRACKED_LIMIT` of
+    /// them left out of `worktree_tree` (#1090), each identified like a [`SkippedFile`]; read
+    /// with [`unsaved_untracked`]. One blob, not a map, so a folder of tens of thousands of
+    /// files costs each snapshot an object id in memory and in `undo.json`, and identical lists
+    /// share one object.
+    pub unsaved_untracked: Option<String>,
 }
 
 /// The largest work-tree file a `SnapshotScope::Full` snapshot stores (#1065).
 pub const SNAPSHOT_FILE_LIMIT: u64 = 50 * 1024 * 1024;
+
+/// The most untracked files a `SnapshotScope::Full` snapshot stores (#1090): with more, it stores
+/// none of them, only identifies them (`RepoSnapshot::unsaved_untracked`).
+pub const SNAPSHOT_UNTRACKED_LIMIT: usize = 10_000;
 
 /// A work-tree file a snapshot did not store for its size (#1065): what `restore` compares the
 /// file on disk with to tell whether it is still the one the snapshot saw.
@@ -79,6 +89,13 @@ pub enum UndoError {
         limit = SNAPSHOT_FILE_LIMIT / (1024 * 1024)
     )]
     NotSaved(String),
+    /// Like `NotSaved`, for an untracked file the snapshot did not store because there were too
+    /// many (#1090).
+    #[error(
+        "{0} is one of more than {limit} untracked files, so its contents weren't saved for undo, and it has changed since.",
+        limit = grouped(SNAPSHOT_UNTRACKED_LIMIT)
+    )]
+    NotSavedUntracked(String),
     /// A branch to move, delete or check out is held by another worktree: checked out, being
     /// rebased or bisected, or used by a paused cherry-pick or revert there (#291, #293).
     #[error(transparent)]
@@ -127,6 +144,37 @@ pub fn capture_limited(repo: &Repository, limit: u64) -> Result<RepoSnapshot, Un
     capture_with(repo, Some(Some(limit)))
 }
 
+/// [`capture`] with `SnapshotScope::Full` and an untracked-file limit other than
+/// `SNAPSHOT_UNTRACKED_LIMIT`: a test seam, so tests need no 10,000 files.
+#[doc(hidden)]
+pub fn capture_counted(
+    repo: &Repository,
+    _untracked_limit: usize,
+) -> Result<RepoSnapshot, UndoError> {
+    capture_with(repo, Some(Some(SNAPSHOT_FILE_LIMIT)))
+}
+
+/// The untracked files `snapshot` identified instead of storing (#1090), by path.
+pub fn unsaved_untracked(
+    _repo: &Repository,
+    _snapshot: &RepoSnapshot,
+) -> Result<BTreeMap<String, SkippedFile>, UndoError> {
+    Ok(BTreeMap::new())
+}
+
+/// `n` with a comma between each group of three digits.
+fn grouped(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, digit) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
+}
+
 /// `worktree`: `None` for refs and index only, else the work tree too, with its per-file limit.
 fn capture_with(
     repo: &Repository,
@@ -151,6 +199,7 @@ fn capture_with(
         index_tree,
         worktree_tree,
         skipped,
+        unsaved_untracked: None,
     })
 }
 

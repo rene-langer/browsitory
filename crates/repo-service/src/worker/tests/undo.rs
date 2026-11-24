@@ -87,6 +87,88 @@ fn undo_says_which_big_file_it_did_not_save() {
     );
 }
 
+/// More untracked files than an undo snapshot stores (#1090), in `many/`.
+fn over_untracked_limit(dir: &Path) {
+    std::fs::create_dir(dir.join("many")).unwrap();
+    for i in 0..=git_core::undo::SNAPSHOT_UNTRACKED_LIMIT {
+        write_file(dir, &format!("many/{i}.txt"), &format!("small file {i}\n"));
+    }
+}
+
+fn blob_stored(repo: &Repository, contents: &[u8]) -> bool {
+    let id = git2::Oid::hash_object(git2::ObjectType::Blob, contents).unwrap();
+    repo.odb().unwrap().exists(id)
+}
+
+/// #1090: a switch next to a folder of more untracked files than the limit stores none of them
+/// in its snapshots; it still undoes, and leaves them as they are.
+#[test]
+fn a_switch_next_to_many_untracked_files_undoes_without_storing_them() {
+    let (dir, repo) = init_repo();
+    repo.set_head("refs/heads/main").unwrap();
+    write_file(dir.path(), "a.txt", "one\n");
+    commit_all(&repo, "initial");
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("other", &head, false).unwrap();
+    write_file(dir.path(), "a.txt", "two\n");
+    commit_all(&repo, "second");
+    over_untracked_limit(dir.path());
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+
+    handle.switch_branch("other".into(), no_events()).unwrap();
+    assert!(!blob_stored(&repo, b"small file 0\n"));
+    assert!(!blob_stored(&repo, b"small file 10000\n"));
+
+    assert_eq!(
+        handle.undo().unwrap(),
+        UndoOutcome::Done {
+            label: "Switch to other".into()
+        }
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        "two\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("many/7.txt")).unwrap(),
+        "small file 7\n"
+    );
+}
+
+/// #1090: Undo of "Ignore" over an unsaved untracked file that changed since says so and
+/// changes nothing.
+#[test]
+fn undo_says_which_untracked_file_it_did_not_save() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "one\n");
+    commit_all(&repo, "initial");
+    over_untracked_limit(dir.path());
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+
+    handle.ignore_path("many/".into()).unwrap();
+    write_file(dir.path(), "many/5.txt", "edited since then\n");
+
+    assert_eq!(
+        handle.undo().unwrap(),
+        UndoOutcome::FileNotSaved {
+            label: "Ignore many/".into(),
+            message: "many/5.txt is one of more than 10,000 untracked files, so its contents \
+                      weren't saved for undo, and it has changed since."
+                .into()
+        }
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join(".gitignore")).unwrap(),
+        "many/\n"
+    );
+    assert_eq!(
+        handle.get_undo_state().unwrap().undo.as_deref(),
+        Some("Ignore many/")
+    );
+}
+
 /// #1065: a discard keeps a full copy of what it discards, however big, so Undo brings it back.
 #[test]
 fn discarding_a_big_file_can_still_be_undone() {

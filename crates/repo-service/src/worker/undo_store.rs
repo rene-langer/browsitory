@@ -149,6 +149,7 @@ impl From<StoredSnapshot> for RepoSnapshot {
             refs: stored.refs,
             index_tree: stored.index_tree,
             worktree_tree: stored.worktree_tree,
+            unsaved_untracked: None,
             skipped: stored
                 .skipped
                 .into_iter()
@@ -801,6 +802,46 @@ mod tests {
             "worktree tree pruned"
         );
         assert!(reopened.find_blob(blob).is_ok(), "untracked blob pruned");
+    }
+
+    /// #1090: the list of a snapshot's unsaved untracked files survives a save and reload, is
+    /// absent from `undo.json` when there is none, and is pinned by the anchor across gc.
+    #[test]
+    fn saves_reloads_and_pins_the_unsaved_untracked_list() {
+        if Process::new("git").arg("--version").output().is_err() {
+            eprintln!("git CLI not found; skipping gc test");
+            return;
+        }
+        let (dir, repo) = repo_with_commit();
+        let list = repo.blob(b"a list only this snapshot has").unwrap();
+        let mut with_list = entry(&repo, "Switch to main");
+        with_list.before.unsaved_untracked = Some(list.to_string());
+        let (mut store, mut stacks) = UndoStore::open(&repo);
+        stacks.undo.push(with_list);
+        store.save(&repo, &stacks).unwrap();
+
+        let (_, reloaded) = UndoStore::open(&repo);
+        assert_eq!(reloaded.undo, stacks.undo);
+        let json = undo_json(&repo);
+        assert_eq!(json["version"], 2);
+        assert_eq!(
+            json["undo"][0]["before"]["unsavedUntracked"],
+            list.to_string()
+        );
+        assert!(json["undo"][0]["after"].get("unsavedUntracked").is_none());
+
+        for args in [
+            &["reflog", "expire", "--all", "--expire=now"][..],
+            &["gc", "--prune=now", "--quiet"][..],
+        ] {
+            assert!(test_support::git_command(dir.path())
+                .args(args)
+                .status()
+                .unwrap()
+                .success());
+        }
+        let reopened = Repository::open(dir.path()).unwrap();
+        assert!(reopened.find_blob(list).is_ok(), "unsaved list pruned");
     }
 
     fn pending(repo: &Repository, label: &str) -> PendingEntry {
