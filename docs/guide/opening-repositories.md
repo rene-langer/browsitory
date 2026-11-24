@@ -53,7 +53,9 @@ folder and offers to open the result. The rest of this section is about the desk
 - **HTTPS credentials** — for private repositories with an HTTPS (`https://`) URL, enter a
   username and access token. The token is saved to your system keychain, and the remote set to
   use it, **only after the clone succeeds**. SSH URLs use your SSH agent. Don't put the token in
-  the URL — Browsitory refuses URLs that contain a password.
+  the URL — Browsitory refuses URLs that contain a password. A user name in an `https://` URL
+  (`https://alice@bitbucket.org/…`, as Bitbucket copies it) moves to the **Username** field when
+  you click **Clone**, so it never lands in the repository's Git config.
   If the keychain write fails, the clone still succeeds and a toast says "Cloned *name*, but the
   token couldn't be saved." — enter the token again later from the remote's **Manage
   credentials** action (right-click the remote in the Branches sidebar).
