@@ -1,6 +1,7 @@
 import type { StatusEntry } from "../ipc/RepoClient";
 
-const isUntracked = (entry: StatusEntry) => !entry.staged && entry.kind === "New";
+/** An unstaged new file: git status lists it as untracked. */
+export const isUntracked = (entry: StatusEntry) => !entry.staged && entry.kind === "New";
 
 /** A status letter and the kind it stands for, as a row shows them (#639); untracked is "?", as in `git status --short` (#1027). */
 export function statusLetter(entry: StatusEntry): { letter: string; kind: string } {

@@ -8,10 +8,9 @@ export type { HistoryEditKind };
  * the plan is every commit `commitsSince(onto)` lists, picked, with one entry changed. It runs
  * through `startRebase`, so conflicts pause it like any rebase and it is one Undo step, named after
  * the edit (`startRebase`'s `edit`, #473).
+ *
+ * What a one-click edit needs on top of its kind: Reword's new message, Squash's combined one.
  */
-export const HISTORY_EDIT_KINDS: readonly HistoryEditKind[] = ["Reword", "Squash", "Fixup", "MoveUp", "MoveDown", "Drop", "Edit", "Split"];
-
-/** What a one-click edit needs on top of its kind: Reword's new message, Squash's combined one. */
 export type HistoryEdit =
   | { kind: "Reword"; message: string }
   | { kind: "Squash"; combinedMessage: string }

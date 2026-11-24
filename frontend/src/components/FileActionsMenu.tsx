@@ -1,4 +1,5 @@
 import type { StatusEntry } from "../ipc/RepoClient";
+import { isUntracked } from "../lib/statusLetter";
 import type { ContextMenuItem } from "./primitives/ContextMenu";
 
 export type FileAction =
@@ -24,8 +25,6 @@ export type FileAction =
   | { kind: "saveFilePatch" }
   // The history of the file's folder (#1023): in the read-only file menu, not a header button.
   | { kind: "folderHistory" };
-
-export const isUntracked = (entry: StatusEntry) => !entry.staged && entry.kind === "New";
 
 export function ignorePatterns(path: string): Array<{ label: string; pattern: string }> {
   const out = [{ label: "Ignore file", pattern: `/${path}` }];

@@ -23,7 +23,7 @@ export function stageModifiedPaths(status: StatusEntry[]): string[] {
 
 /**
  * The paths "Delete untracked…" deletes (#622): the untracked entries in the Changes group
- * (`isUntracked` in `FileActionsMenu`), never tracked changes, conflicts or ignored files. Status
+ * (`isUntracked` in `statusLetter`), never tracked changes, conflicts or ignored files. Status
  * lists the files inside untracked folders one by one; a folder entry (a nested repository) is
  * refused by `discard_all_unstaged` and named in its error, as the per-file "Delete file" does.
  */

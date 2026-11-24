@@ -10,11 +10,10 @@ import { BlameView } from "./BlameView";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import styles from "./DiffPane.module.css";
 import { DiffView } from "./DiffView";
-import { isUntracked } from "./FileActionsMenu";
 import { FolderHistoryButton } from "./FolderHistoryButton";
 import { ImageDiff, ImageTextToggle } from "./ImageDiff";
 import { InlineError } from "./primitives/InlineError";
-import { statusLetter } from "../lib/statusLetter";
+import { isUntracked, statusLetter } from "../lib/statusLetter";
 import { useMarkResolved } from "./useMarkResolved";
 
 type HunkCallback = (path: string, oldStart: number, newStart: number, hunk: HunkOptions) => void;

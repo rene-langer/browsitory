@@ -6,10 +6,9 @@ import { useRegisterDiffView } from "../state/useCurrentDiff";
 import { Toolbar } from "./primitives/Toolbar";
 import { useDiffViewOptions } from "../state/useDiffViewOptions";
 import { wordDiff, type Segment } from "../lib/wordDiff";
-import { useHunkTokens } from "../lib/highlight";
+import { logHighlightError, useHunkTokens } from "../lib/highlight";
 import { languageForPath } from "../lib/languageForPath";
 import { wrapLines } from "../lib/wordWrap";
-import { logFailure } from "../lib/logger";
 import { DiffLineContent } from "./DiffLineContent";
 import { DIFF_WINDOW_LINES, collapseReason, diffLineCount, windowHunks } from "../lib/largeDiff";
 import { hunkRange } from "../lib/hunkRange";
@@ -66,11 +65,6 @@ function computeWordSegments(hunks: DiffHunk[] | null): Map<DiffLine, Segment[]>
     }
   }
   return segments;
-}
-
-// Highlight failures are never user-facing: log and fall back to plain text.
-function logHighlightError(error: unknown): void {
-  logFailure("Syntax highlighting failed", error);
 }
 
 type SplitRow =
