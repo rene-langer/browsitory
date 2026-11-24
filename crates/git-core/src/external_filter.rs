@@ -76,7 +76,10 @@ impl Drivers {
         }
         // A bare repository has no work tree to filter into or from.
         let lookup = match repo.workdir() {
-            Some(workdir) if !drivers.is_empty() => Some(Repository::open(workdir)?),
+            // The git folder when the work tree has no `.git` of its own (`core.worktree`).
+            Some(workdir) if !drivers.is_empty() => {
+                Some(Repository::open(workdir).or_else(|_| Repository::open(repo.path()))?)
+            }
             _ => None,
         };
         Ok(Self {
