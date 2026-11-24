@@ -1,17 +1,18 @@
 .list {
-  display: grid;
-  gap: var(--space-1);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-/* One line per tag: checkbox, icon, name (takes the rest, truncated), kind, "…". */
-.list li {
+/* One line per tag: checkbox, icon, name (takes the rest, truncated), kind, "…". The space
+   between rows is inside them (#1069), as in the Stashes section: the windowed list
+   (useVirtualRows) counts rows of one measured height, which a grid gap isn't part of. */
+.list > li {
   display: flex;
   align-items: center;
   gap: var(--space-1);
   min-width: 0;
+  padding-block: calc(var(--space-1) * 1.5);
 }
 
 .select {
