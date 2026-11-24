@@ -240,6 +240,15 @@ pub trait TransferReporter {
     fn connected(&mut self) -> bool {
         true
     }
+
+    /// Told once a fetch or push that connected is about to write what other commands see (#1064):
+    /// a fetch has downloaded and is about to update remote-tracking refs, tags and
+    /// `FETCH_HEAD`; a push is about to send, run `pre-push` and update tracking refs. `false`
+    /// stops the transfer there, as `Cancelled`. A caller waiting on another thread uses it to
+    /// give up on a stalled transfer only while giving up is still safe.
+    fn writing(&mut self) -> bool {
+        true
+    }
 }
 
 pub trait CredentialProvider {

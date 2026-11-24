@@ -31,6 +31,10 @@ use crate::credentials::{CredentialService, CredentialStore, RemoteCredentialPro
 /// How often the worker looks at a connecting helper.
 const POLL: Duration = Duration::from_millis(25);
 
+/// How long a transfer that connected may leave the user's cancel unanswered before the worker
+/// gives up on it as stalled (#1064).
+const STALLED_CANCEL_GRACE: Duration = Duration::from_secs(2);
+
 /// What the worker lends a transfer: its repository, and the queued reads it serves while it
 /// waits (see the module docs).
 pub(super) trait TransferHost {
@@ -123,6 +127,8 @@ where
     if spawned.is_err() {
         return Err(helper_lost());
     }
+    // When the worker first saw the user's cancel.
+    let mut cancelled_at = None;
     loop {
         // After a read, look at the helper without waiting: more reads may be queued.
         let message = if host.serve_read() {
@@ -149,7 +155,10 @@ where
             Some(HelperMessage::Done(result)) => return result,
             None => {}
         }
-        if let Some(error) = give_up(&phase, &user_cancel, wait.connect_limit) {
+        if cancelled_at.is_none() && user_cancel() {
+            cancelled_at = Some(Instant::now());
+        }
+        if let Some(error) = give_up(&phase, cancelled_at, wait.connect_limit) {
             return Err(error);
         }
     }
@@ -160,14 +169,14 @@ where
 /// the helper's `connected` takes, so the helper can't go on to transfer after this.
 fn give_up(
     phase: &SharedPhase,
-    user_cancel: &dyn Fn() -> bool,
+    cancelled_at: Option<Instant>,
     connect_limit: Option<Duration>,
 ) -> Option<RemoteError> {
     let mut current = phase.lock();
     let Phase::Connecting(since) = *current else {
         return None;
     };
-    let error = if user_cancel() {
+    let error = if cancelled_at.is_some() {
         RemoteError::Cancelled
     } else if connect_limit.is_some_and(|limit| since.elapsed() >= limit) {
         RemoteError::Unreachable(git2::Error::from_str("connecting took too long"))
@@ -191,6 +200,7 @@ fn helper_lost() -> RemoteError {
 enum Phase {
     Connecting(Instant),
     Transferring,
+    Writing,
     Abandoned,
 }
 
@@ -209,6 +219,11 @@ impl SharedPhase {
             return false;
         }
         *phase = Phase::Transferring;
+        true
+    }
+
+    /// The transfer is about to write.
+    fn writing(&self) -> bool {
         true
     }
 }
@@ -287,10 +302,10 @@ mod tests {
     #[test]
     fn the_worker_gives_up_on_a_connecting_transfer_when_the_user_cancels() {
         let connecting = phase(Phase::Connecting(Instant::now()));
-        assert!(give_up(&connecting, &|| false, None).is_none());
+        assert!(give_up(&connecting, None, None).is_none());
         assert!(matches!(*connecting.lock(), Phase::Connecting(_)));
         assert!(matches!(
-            give_up(&connecting, &|| true, None),
+            give_up(&connecting, Some(Instant::now()), None),
             Some(RemoteError::Cancelled)
         ));
         assert_eq!(*connecting.lock(), Phase::Abandoned);
@@ -300,10 +315,10 @@ mod tests {
     fn the_worker_gives_up_on_a_transfer_connecting_past_its_limit() {
         let started = Instant::now() - Duration::from_secs(10);
         let connecting = phase(Phase::Connecting(started));
-        assert!(give_up(&connecting, &|| false, Some(Duration::from_secs(60))).is_none());
-        assert!(give_up(&connecting, &|| false, None).is_none());
+        assert!(give_up(&connecting, None, Some(Duration::from_secs(60))).is_none());
+        assert!(give_up(&connecting, None, None).is_none());
         assert!(matches!(
-            give_up(&connecting, &|| false, Some(Duration::from_secs(5))),
+            give_up(&connecting, None, Some(Duration::from_secs(5))),
             Some(RemoteError::Unreachable(_))
         ));
         assert_eq!(*connecting.lock(), Phase::Abandoned);
@@ -312,8 +327,62 @@ mod tests {
     #[test]
     fn the_worker_never_gives_up_on_a_transfer_that_connected() {
         let transferring = phase(Phase::Transferring);
-        assert!(give_up(&transferring, &|| true, Some(Duration::ZERO)).is_none());
+        assert!(give_up(&transferring, Some(Instant::now()), Some(Duration::ZERO)).is_none());
         assert_eq!(*transferring.lock(), Phase::Transferring);
+    }
+
+    #[test]
+    fn a_transfer_writes_only_if_the_worker_has_not_given_up() {
+        let transferring = phase(Phase::Transferring);
+        assert!(transferring.writing());
+        assert_eq!(*transferring.lock(), Phase::Writing);
+        let abandoned = phase(Phase::Abandoned);
+        assert!(!abandoned.writing());
+        assert_eq!(*abandoned.lock(), Phase::Abandoned);
+    }
+
+    #[test]
+    fn a_helpers_reporter_writes_only_if_not_abandoned() {
+        let (messages, _rx) = mpsc::channel::<HelperMessage<()>>();
+        let mut transferring = HelperReporter {
+            messages: messages.clone(),
+            phase: phase(Phase::Transferring),
+        };
+        assert!(transferring.writing());
+        assert_eq!(*transferring.phase.lock(), Phase::Writing);
+        let mut abandoned = HelperReporter {
+            messages,
+            phase: phase(Phase::Abandoned),
+        };
+        assert!(!abandoned.writing());
+    }
+
+    /// #1064: a transfer that connected answers a cancel at its next progress callback; one that
+    /// left it unanswered for the grace period is stalled, and the worker gives up on it.
+    #[test]
+    fn the_worker_gives_up_on_a_stalled_transfer_once_a_cancel_went_unanswered() {
+        let transferring = phase(Phase::Transferring);
+        assert!(give_up(&transferring, None, Some(Duration::ZERO)).is_none());
+        assert!(give_up(&transferring, Some(Instant::now()), None).is_none());
+        assert_eq!(*transferring.lock(), Phase::Transferring);
+        let unanswered = Instant::now()
+            .checked_sub(STALLED_CANCEL_GRACE)
+            .expect("an instant before now");
+        assert!(matches!(
+            give_up(&transferring, Some(unanswered), None),
+            Some(RemoteError::Cancelled)
+        ));
+        assert_eq!(*transferring.lock(), Phase::Abandoned);
+    }
+
+    #[test]
+    fn the_worker_never_gives_up_on_a_transfer_that_writes() {
+        let writing = phase(Phase::Writing);
+        let long_ago = Instant::now()
+            .checked_sub(STALLED_CANCEL_GRACE * 10)
+            .expect("an instant before now");
+        assert!(give_up(&writing, Some(long_ago), Some(Duration::ZERO)).is_none());
+        assert_eq!(*writing.lock(), Phase::Writing);
     }
 
     /// A host whose "reads" are numbers on a channel; serving one acknowledges it.
