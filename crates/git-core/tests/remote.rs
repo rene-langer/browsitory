@@ -7,8 +7,9 @@ use git_core::remote::{
     pull_after_fetch, push_branch, push_current_branch, push_tags, push_target, remote_upstreams,
     remove_remote, remove_remote_and_clear_upstreams, rename_remote, resolve_push_target,
     set_branch_upstream, set_current_upstream, set_remote_auth_profile, update_remote_urls,
-    CredentialProvider, FetchAllOutcome, PullOutcome, PushTarget, RemoteAuthMode, RemoteError,
-    TransferErrorKind, TransferOperation, TransferPhase, TransferProgress, TransferReporter,
+    url_without_user_info, CredentialProvider, FetchAllOutcome, PullOutcome, PushTarget,
+    RemoteAuthMode, RemoteError, TransferErrorKind, TransferOperation, TransferPhase,
+    TransferProgress, TransferReporter,
 };
 
 #[derive(Default)]
@@ -1146,6 +1147,42 @@ fn editing_a_remote_replaces_a_url_with_hidden_user_info_by_a_new_one() {
         stored_urls(&repo, "origin"),
         ("https://bitbucket.example.test/ws/r.git".to_string(), None)
     );
+}
+
+/// The URL a saved HTTPS token is keyed by (#1081): only an http(s) URL loses its user info;
+/// anything else, an ssh user name included, stays as it is.
+#[test]
+fn url_without_user_info_drops_only_the_user_info_of_http_urls() {
+    for (url, expected) in [
+        (
+            "https://alice@example.test/ws/r.git",
+            "https://example.test/ws/r.git",
+        ),
+        (
+            "https://alice:s3cret@example.test:8443/ws/r.git",
+            "https://example.test:8443/ws/r.git",
+        ),
+        (
+            "http://ghp_0123abcd@example.test/o/r.git",
+            "http://example.test/o/r.git",
+        ),
+        (
+            "https://***@example.test/ws/r.git",
+            "https://example.test/ws/r.git",
+        ),
+        (
+            "https://example.test/ws/r.git",
+            "https://example.test/ws/r.git",
+        ),
+        (
+            "ssh://alice@example.test/ws/r.git",
+            "ssh://alice@example.test/ws/r.git",
+        ),
+        ("git@example.test:ws/r.git", "git@example.test:ws/r.git"),
+        ("/tmp/local/repo.git", "/tmp/local/repo.git"),
+    ] {
+        assert_eq!(url_without_user_info(url), expected, "{url}");
+    }
 }
 
 #[test]
