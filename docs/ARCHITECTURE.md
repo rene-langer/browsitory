@@ -303,7 +303,8 @@ On Linux, inotify needs a watch per folder and a user's watches are shared with 
 (VS Code's own watcher included), so the watcher walks the tree itself and adds one watch per
 folder git doesn't ignore, plus the git folders that hold the files above (`.git`, `refs/**`,
 `logs`, `logs/refs`, `worktrees/*`, ...), never `objects/`. New folders get watches as they appear,
-moved or deleted ones lose them, and a changed `.gitignore` or `info/exclude` walks the tree again.
+moved or deleted ones lose them, and a changed `.gitignore` or `info/exclude` walks the tree again,
+once per debounced batch however many such events it holds (#1068), before the batch's `Changed`.
 More than 20 000 work tree folders (`MAX_FOLDERS`) is not watched. macOS (FSEvents) and Windows
 (ReadDirectoryChangesW) use one recursive watch per root. When a watcher can't start (`watchRepo`
 answers `false`) or stops (the watch limit was reached: `Stopped`), the reason goes to stderr (the

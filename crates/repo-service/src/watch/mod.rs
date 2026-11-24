@@ -160,6 +160,15 @@ impl Drop for RepoWatcher {
 /// Why the event loop ends early.
 struct Stop;
 
+/// What one event means for the batch it is part of.
+struct Handled {
+    /// It may change the change stamp.
+    relevant: bool,
+    /// The watched folders must be worked out again (Linux): the ignore rules changed, or
+    /// events were lost.
+    resync: bool,
+}
+
 struct State {
     repo: git2::Repository,
     layout: Layout,
@@ -323,36 +332,45 @@ impl State {
             let Ok(first) = events.recv() else {
                 return false;
             };
-            let relevant = match self.handle(first) {
-                Ok(relevant) => relevant,
-                Err(Stop) => return true,
+            let Ok(Handled {
+                relevant,
+                mut resync,
+            }) = self.handle(first)
+            else {
+                return true;
             };
-            if !relevant {
-                continue;
-            }
-            let started = Instant::now();
-            loop {
-                let left = MAX_DELAY.saturating_sub(started.elapsed());
-                if left.is_zero() {
-                    break;
-                }
-                match events.recv_timeout(DEBOUNCE.min(left)) {
-                    Ok(event) => {
-                        if self.handle(event).is_err() {
-                            return true;
-                        }
+            if relevant {
+                let started = Instant::now();
+                loop {
+                    let left = MAX_DELAY.saturating_sub(started.elapsed());
+                    if left.is_zero() {
+                        break;
                     }
-                    Err(mpsc::RecvTimeoutError::Timeout) => break,
-                    Err(mpsc::RecvTimeoutError::Disconnected) => return false,
+                    match events.recv_timeout(DEBOUNCE.min(left)) {
+                        Ok(event) => match self.handle(event) {
+                            Ok(handled) => resync |= handled.resync,
+                            Err(Stop) => return true,
+                        },
+                        Err(mpsc::RecvTimeoutError::Timeout) => break,
+                        Err(mpsc::RecvTimeoutError::Disconnected) => return false,
+                    }
                 }
             }
-            on_event(WatchEvent::Changed);
+            // One walk for the whole batch (#1068): saving a `.gitignore` brings several events,
+            // and a branch switch one per `.gitignore` it changes. Before `Changed`, so the
+            // folders the new rules no longer ignore are watched by the time the frontend checks.
+            if resync && self.resync().is_err() {
+                return true;
+            }
+            if relevant {
+                on_event(WatchEvent::Changed);
+            }
         }
     }
 
-    /// Follows one event: keeps the watches up to date (Linux) and says whether it may change
-    /// the stamp.
-    fn handle(&mut self, event: notify::Result<notify::Event>) -> Result<bool, Stop> {
+    /// Follows one event: keeps the watches of folders that appeared or went away up to date
+    /// (Linux), and says whether it may change the stamp and whether the ignore rules changed.
+    fn handle(&mut self, event: notify::Result<notify::Event>) -> Result<Handled, Stop> {
         let event = match event {
             Ok(event) => event,
             Err(error) if is_limit(&error) => {
@@ -360,15 +378,25 @@ impl State {
                 return Err(Stop);
             }
             // Something went wrong on the operating system's side: check, to be safe.
-            Err(_) => return Ok(true),
+            Err(_) => {
+                return Ok(Handled {
+                    relevant: true,
+                    resync: false,
+                })
+            }
         };
         if event.need_rescan() {
             // Events were lost (the queue overflowed): new folders may lack their watches.
-            self.resync()?;
-            return Ok(true);
+            return Ok(Handled {
+                relevant: true,
+                resync: true,
+            });
         }
         if is_read(&event.kind) {
-            return Ok(false);
+            return Ok(Handled {
+                relevant: false,
+                resync: false,
+            });
         }
         let mut relevant = false;
         let mut rules_changed = false;
@@ -391,10 +419,10 @@ impl State {
                 Place::Outside => {}
             }
         }
-        if rules_changed && PER_FOLDER {
-            self.resync()?;
-        }
-        Ok(relevant)
+        Ok(Handled {
+            relevant,
+            resync: rules_changed,
+        })
     }
 
     fn resync(&mut self) -> Result<(), Stop> {
