@@ -765,7 +765,7 @@ mod tests {
             &std::fs::read(repo.path().join("browsitory/undo.json")).unwrap(),
         )
         .unwrap();
-        assert_eq!(json["version"], 1);
+        assert_eq!(json["version"], 2);
         assert_eq!(json["pending"]["label"], "Merge feature");
         assert_eq!(json["pending"]["operation"], "merge abc def");
     }
@@ -807,7 +807,7 @@ mod tests {
         store.save(&repo, &stacks).unwrap();
         let bytes = std::fs::read(repo.path().join("browsitory/undo.json")).unwrap();
         let old: OldStoredFile = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(old.version, 1);
+        assert_eq!(old.version, 2);
         assert_eq!(old.undo.len(), 1);
     }
 
