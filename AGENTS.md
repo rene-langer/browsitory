@@ -118,8 +118,11 @@ below). The hook diffs against
 `origin/main` if your clone has it, else `main`; it never fetches, so `git fetch` now and then
 keeps it accurate. Bypass once with `SKIP_CHANGELOG_CHECK=1 git push`. A diff that touches only dependency manifests/lockfiles
 (`Cargo.toml`, `Cargo.lock`, `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`,
-`rust-toolchain.toml`) needs no entry; that includes `extension/package.json`, so a change to
-its `contributes` block (commands, keybindings, menus) needs a fragment added by hand. CI's `changelog` job runs the same check (the
+`rust-toolchain.toml`) needs no entry. A `package.json` under `extension/` or `e2e/` counts as
+one only while just its dependency fields change (`dependencies`, `devDependencies`,
+`optionalDependencies`, `peerDependencies`, `packageManager`, `pnpm`); a change to any other
+field, such as the extension's `contributes` block or `engines`, needs an entry (#1094).
+`frontend/package.json` lies outside the watched `frontend/src/` and stays exempt. CI's `changelog` job runs the same check (the
 `skip-changelog` PR label bypasses it).
 
 All worktrees of a clone share one hooks folder, so the link always points into the main
