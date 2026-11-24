@@ -33,6 +33,32 @@ class NeedsChangelogTests(unittest.TestCase):
             check_changelog.needs_changelog(["e2e/specs/pull-requests.spec.ts"])
         )
 
+    def test_watched_extension_file_without_changelog(self):
+        # The extension host ships in every VSIX (#1057).
+        self.assertTrue(
+            check_changelog.needs_changelog(["extension/src/sidecarBridge.ts"])
+        )
+
+    def test_watched_extension_script_without_changelog(self):
+        self.assertTrue(
+            check_changelog.needs_changelog(["extension/scripts/package-vsix.mjs"])
+        )
+
+    def test_watched_extension_e2e_file_without_changelog(self):
+        # Like e2e/, the extension's E2E tests need an entry too (#1057).
+        self.assertTrue(
+            check_changelog.needs_changelog(
+                ["extension/e2e/src/specs/first-flow.spec.ts"]
+            )
+        )
+
+    def test_extension_file_with_fragment(self):
+        self.assertFalse(
+            check_changelog.needs_changelog(
+                ["extension/src/sidecarBridge.ts", "changelog.d/1057-extension.md"]
+            )
+        )
+
     def test_watched_file_with_changelog_update(self):
         self.assertFalse(
             check_changelog.needs_changelog(
@@ -65,6 +91,8 @@ class NeedsChangelogTests(unittest.TestCase):
                     "e2e/pnpm-lock.yaml",
                     "frontend/package.json",
                     "frontend/pnpm-lock.yaml",
+                    "extension/package.json",
+                    "extension/pnpm-lock.yaml",
                     "extension/e2e/pnpm-workspace.yaml",
                 ]
             )
