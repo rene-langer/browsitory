@@ -55,7 +55,10 @@ folder and offers to open the result. The rest of this section is about the desk
   use it, **only after the clone succeeds**. SSH URLs use your SSH agent. Don't put the token in
   the URL — Browsitory refuses URLs that contain a password. A user name in an `https://` URL
   (`https://alice@bitbucket.org/…`, as Bitbucket copies it) moves to the **Username** field when
-  you click **Clone**, so it never lands in the repository's Git config.
+  you click **Clone**, so it never lands in the repository's Git config. A user name that looks
+  like an access token (`ghp_…`, `github_pat_…`, `glpat-…`, `ATBB…`, or a long random string) is
+  taken out of the URL but not shown: the clone doesn't start, and the dialog asks for your
+  username and the token in the **Token** field.
   If the keychain write fails, the clone still succeeds and a toast says "Cloned *name*, but the
   token couldn't be saved." — enter the token again later from the remote's **Manage
   credentials** action (right-click the remote in the Branches sidebar).
