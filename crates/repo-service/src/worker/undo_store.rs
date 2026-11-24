@@ -60,6 +60,10 @@ struct StoredSnapshot {
     /// Builds that predate it never read it: they ignore a version 2 file (#1093).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     skipped: BTreeMap<String, StoredSkipped>,
+    /// The blob listing the untracked files the snapshot didn't store for their number (#1090);
+    /// absent when there are none. Pinned by the anchor like the trees.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    unsaved_untracked: Option<String>,
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -130,6 +134,7 @@ impl From<&RepoSnapshot> for StoredSnapshot {
             refs: snapshot.refs.clone(),
             index_tree: snapshot.index_tree.clone(),
             worktree_tree: snapshot.worktree_tree.clone(),
+            unsaved_untracked: snapshot.unsaved_untracked.clone(),
             skipped: snapshot
                 .skipped
                 .iter()
@@ -149,7 +154,7 @@ impl From<StoredSnapshot> for RepoSnapshot {
             refs: stored.refs,
             index_tree: stored.index_tree,
             worktree_tree: stored.worktree_tree,
-            unsaved_untracked: None,
+            unsaved_untracked: stored.unsaved_untracked,
             skipped: stored
                 .skipped
                 .into_iter()
@@ -316,6 +321,9 @@ impl UndoStore {
             )?;
             if let Some(tree) = &snapshot.worktree_tree {
                 builder.insert(format!("{name}-worktree"), Oid::from_str(tree)?, 0o040000)?;
+            }
+            if let Some(list) = &snapshot.unsaved_untracked {
+                builder.insert(format!("{name}-untracked"), Oid::from_str(list)?, 0o100644)?;
             }
             if let HeadState::Detached(oid) = &snapshot.head {
                 referenced.insert(Oid::from_str(oid)?);
