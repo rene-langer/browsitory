@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { RemoteInfo, TagInfo } from "../ipc/RepoClient";
 import { TagPanel } from "./TagPanel";
 import { describedByText } from "../test/describedBy";
+import { layoutInPane, ROW } from "../test/virtualLayout";
 
 const tag: TagInfo = {
   name: "v1.0.0",
@@ -425,6 +426,102 @@ describe("TagPanel", () => {
     expect(push).toHaveAccessibleDescription("A transfer is in progress.");
     fireEvent.click(push);
     expect(p.onPush).not.toHaveBeenCalled();
+  });
+});
+
+// #1069: only the rows in view render, as in the Stashes and Reflog sections (#775).
+describe("TagPanel — windowed rows", () => {
+  const many: TagInfo[] = Array.from({ length: 1000 }, (_, n) => ({ ...tag, name: `v${n}` }));
+
+  function renderInPane(overrides: Partial<Props> = {}) {
+    localStorage.removeItem("sidebar-tags");
+    const layout = layoutInPane();
+    const all = props({ tags: many, ...overrides });
+    const utils = render(<TagPanel {...all} />, { container: layout.pane });
+    fireEvent.click(screen.getByRole("button", { name: "Tags" }));
+    const rows = () => [...screen.getByRole("list", { name: "Tags" }).querySelectorAll<HTMLElement>(":scope > li")];
+    return { ...utils, ...layout, rows, props: all };
+  }
+
+  it("renders the rows in view plus a margin, and pads for the rest", () => {
+    const { rows, restore } = renderInPane();
+    try {
+      const rendered = rows();
+      // Rows 0–9 are in view, 20 more below them.
+      expect(rendered).toHaveLength(30);
+      expect(within(rendered[0]).getByText("v0")).toBeInTheDocument();
+      expect(rendered[1]).toHaveAttribute("data-row-index", "1");
+      const list = rendered[0].parentElement!;
+      expect(list.style.paddingTop).toBe("0px");
+      expect(list.style.paddingBottom).toBe(`${(1000 - 30) * ROW}px`);
+    } finally {
+      restore();
+    }
+  });
+
+  it("renders the rows of the scrolled-to part", () => {
+    const { rows, scrollTo, restore } = renderInPane();
+    try {
+      scrollTo(ROW * 500);
+      const rendered = rows();
+      expect(rendered[0]).toHaveAttribute("data-row-index", "480");
+      expect(within(rendered[0]).getByText("v480")).toBeInTheDocument();
+      expect(rendered.at(-1)).toHaveAttribute("data-row-index", "529");
+      expect(rendered[0].parentElement!.style.paddingTop).toBe(`${480 * ROW}px`);
+    } finally {
+      restore();
+    }
+  });
+
+  it("windows the tags the filter shows, counted among those", () => {
+    const { rows, restore } = renderInPane();
+    try {
+      // v9, v90–v99, v900–v999: 111 tags.
+      fireEvent.change(screen.getByRole("searchbox", { name: "Filter tags" }), { target: { value: "v9" } });
+      const rendered = rows();
+      expect(rendered).toHaveLength(30);
+      expect(within(rendered[0]).getByText("v9")).toBeInTheDocument();
+      expect(rendered[1]).toHaveAttribute("data-row-index", "1");
+      expect(rendered[0].parentElement!.style.paddingBottom).toBe(`${(111 - 30) * ROW}px`);
+    } finally {
+      restore();
+    }
+  });
+
+  it("selects every tag with Select all, rendered or not, and keeps rows far down ticked", () => {
+    const { scrollTo, restore, props: p } = renderInPane();
+    try {
+      const selectAll = screen.getByRole("checkbox", { name: "Select all" });
+      fireEvent.click(selectAll);
+      expect(screen.getByRole("group", { name: "Selected tags" })).toHaveTextContent("1000 selected");
+      scrollTo(ROW * 500);
+      expect(screen.getByRole("checkbox", { name: "Select v510" })).toBeChecked();
+
+      fireEvent.click(screen.getByRole("checkbox", { name: "Select v510" }));
+      expect(screen.getByRole("group", { name: "Selected tags" })).toHaveTextContent("999 selected");
+      expect(selectAll).toHaveProperty("indeterminate", true);
+      fireEvent.click(screen.getByRole("button", { name: "Push to origin" }));
+      expect(p.onPush).toHaveBeenCalledWith(
+        "origin",
+        many.map((each) => each.name).filter((name) => name !== "v510"),
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it("keeps the selection in the order ticked, and prunes tags a refresh removed", () => {
+    const { rerender, restore, props: p } = renderInPane();
+    try {
+      for (const name of ["v3", "v1", "v2"]) fireEvent.click(screen.getByRole("checkbox", { name: `Select ${name}` }));
+      rerender(<TagPanel {...p} tags={many.filter((each) => each.name !== "v1")} />);
+
+      expect(screen.getByRole("group", { name: "Selected tags" })).toHaveTextContent("2 selected");
+      fireEvent.click(screen.getByRole("button", { name: "Push to origin" }));
+      expect(p.onPush).toHaveBeenCalledWith("origin", ["v3", "v2"]);
+    } finally {
+      restore();
+    }
   });
 });
 
