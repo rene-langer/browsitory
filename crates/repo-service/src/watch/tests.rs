@@ -480,3 +480,42 @@ fn a_burst_of_ignore_rule_changes_walks_the_tree_once() {
     assert_eq!(state.walks - walks_at_start, 1);
     assert!(state.folders.contains(&root.join("build/x")));
 }
+
+/// A batch that starts with an ordinary change and changes the ignore rules later still walks
+/// the tree before it is reported.
+#[cfg(target_os = "linux")]
+#[test]
+fn an_ignore_rule_change_late_in_a_batch_walks_the_tree() {
+    use notify::event::{DataChange, EventKind, ModifyKind};
+
+    let (dir, _repo) = repo_with_commit();
+    let root = dir.path().canonicalize().unwrap();
+    std::fs::create_dir_all(root.join("build/x")).unwrap();
+    let mut state = state_fed_by_the_test(&root);
+    let walks_at_start = state.walks;
+    std::fs::write(root.join(".gitignore"), "*.log\n").unwrap();
+
+    let (events_tx, events_rx) = mpsc::channel();
+    for (file, times) in [("a.txt", 1), (".gitignore", 1), ("a.txt", 3)] {
+        for _ in 0..times {
+            let event =
+                notify::Event::new(EventKind::Modify(ModifyKind::Data(DataChange::Content)))
+                    .add_path(root.join(file));
+            events_tx.send(Ok(event)).unwrap();
+        }
+    }
+    let (reported_tx, reported_rx) = mpsc::channel();
+    let feeder = std::thread::spawn(move || {
+        let reported: Vec<WatchEvent> = reported_rx.recv_timeout(TIMEOUT).into_iter().collect();
+        drop(events_tx);
+        reported
+    });
+    let stopped = state.run(events_rx, &move |event| {
+        let _ = reported_tx.send(event);
+    });
+
+    assert!(!stopped);
+    assert_eq!(feeder.join().unwrap(), vec![WatchEvent::Changed]);
+    assert_eq!(state.walks - walks_at_start, 1);
+    assert!(state.folders.contains(&root.join("build/x")));
+}
