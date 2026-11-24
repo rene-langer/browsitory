@@ -69,12 +69,27 @@ in the background at the interval you chose. No other server is involved. The se
 ### Pull requests (only if you set them up)
 
 When you connect a pull request card to GitHub or Bitbucket with a personal access token,
-Browsitory asks the forge's API for the repository's pull requests each time you open the card,
-and creates the ones you ask for. It connects to
-`api.github.com` for GitHub remotes and `api.bitbucket.org` for Bitbucket remotes. The request
-carries your token, the repository's owner and name, and the pull request you create (title,
-description, branches). Until you connect, Browsitory doesn't ask these APIs for pull
-requests (the update download above also goes through `api.github.com`, without a token).
+Browsitory asks the forge's API for the repository's pull requests, and creates the ones you
+ask for. It connects to `api.github.com` for GitHub remotes and `api.bitbucket.org` for
+Bitbucket remotes. The request carries your token, the repository's owner and name, and the
+pull request you create (title, description, branches). Until you connect, Browsitory doesn't
+ask these APIs for pull requests (the update download above also goes through
+`api.github.com`, without a token).
+
+The connection is per forge, not per repository: once you connect GitHub (or Bitbucket) in one
+repository, Browsitory uses the same account and token for every repository with a remote on
+that forge, including ones you open later. It lists a repository's pull requests without a
+click as soon as the repository opens, whenever the **Pull requests** section and that
+remote's card are expanded, and again each time you expand the section or the card. To stop
+this, collapse the section or choose **Disconnect** in a card's **…** menu.
+
+??? note "Details"
+    The **Pull requests** section starts collapsed. Each remote's card starts expanded. Both
+    remember whether you expanded or collapsed them for every repository, not one at a time: a
+    card's choice applies to all remotes with the same name, such as `origin`. Turning the
+    section off with the gear button at the top of the sidebar also stops the listing; hiding
+    the whole sidebar doesn't. **Disconnect** forgets the token for every repository on that
+    forge.
 
 ### Links you open
 
@@ -95,7 +110,7 @@ None of this leaves your computer, and we can't see it.
 | What | Where |
 |---|---|
 | Settings: recent, pinned and open repositories, workspaces, branch filters, merge choices, diff, commit message, tool, fetch, update and keyboard shortcut preferences, your own commands, the last version whose release notes you saw | `config.toml` in Browsitory's config folder (see below) |
-| Display choices: theme, panel sizes, open and closed sections, recent commands, recent searches, recent commit messages, the per-repository **Fetch automatically** and **Prune** choices, the account name each pull request provider is connected with (not the token) | The app's web storage (`localStorage`) |
+| Display choices: theme, panel sizes, which sidebar sections are shown and which are open, recent commands, the **Preferences** group you saw last, and view choices (**Split view**, **Show whole file**, the merge editor's layout, a flat or tree file list, **Show lines changed**, search results in the graph or as a list, whether a new branch is checked out). Per repository: recent searches, recent commit messages, the last 5 branches you switched to, and the **Fetch automatically** and **Prune** choices. The account name each pull request provider is connected with (not the token) | The app's web storage (`localStorage`) |
 | HTTPS tokens for Git remotes and pull request tokens | Your system's credential store: Keychain on macOS, Credential Manager on Windows, the Secret Service (for example GNOME Keyring or KWallet) on Linux, under the names `com.browsitory.git` and `com.browsitory.forge` |
 | Undo and redo history, a paused rebase, cherry-pick or revert | Inside each repository: the folder `.git/browsitory/` (in a linked worktree, `browsitory/` in that worktree's own Git folder, `.git/worktrees/<name>/`) and Git references under `refs/browsitory/`, shared by all worktrees |
 | How you sign in to each remote: HTTPS token or SSH agent, and the HTTPS user name (not the token) | The repository's Git config (`.git/config`), under `browsitory.remote.<remote name>` |
@@ -106,8 +121,10 @@ The log file holds errors, warnings and a few notes, for example the folders the
 when its identifier changed. A message can contain a file path, a branch name or a remote's
 address. Browsitory writes no other log files.
 
-The web storage holds the path of each repository it remembers something for, and the text of
-your recent searches and commit messages.
+The web storage holds the path of each repository it remembers something for, the text of
+your recent searches and commit messages, and the names of the branches you switched to
+recently (branch names can carry ticket numbers or customer names). It keeps them after a
+repository leaves **Recent repositories**, until you delete the web storage (see below).
 
 The operation log can hold what your hooks print, file and branch names, commit messages and
 remote addresses. It removes the user name and password from every URL and the value of every
