@@ -1001,9 +1001,13 @@ fn credential_bearing_urls_are_rejected_and_never_returned() {
         "https://example.com/repo.git"
     );
 
+    // A URL written outside the app is listed with its user information hidden (#1081).
     repo.remote_set_pushurl("origin", Some(credential_url))
         .unwrap();
-    assert!(list_remotes(&repo).is_err());
+    assert_eq!(
+        list_remotes(&repo).unwrap()[0].push_url.as_deref(),
+        Some("https://***@example.com/repo.git")
+    );
 }
 
 #[test]
