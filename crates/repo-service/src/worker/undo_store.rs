@@ -490,6 +490,63 @@ mod tests {
         assert!(json["undo"][1]["before"].get("skipped").is_none());
     }
 
+    fn with_a_skipped_file(repo: &Repository) -> UndoEntry {
+        let mut entry = entry(repo, "Switch to main");
+        entry.before.skipped.insert(
+            "dump.sql".into(),
+            git_core::undo::SkippedFile {
+                size: 60 << 20,
+                mtime: (1_700_000_000, 0),
+                ino: 7,
+                mode: 0o100644,
+            },
+        );
+        entry
+    }
+
+    fn undo_json(repo: &Repository) -> serde_json::Value {
+        serde_json::from_slice(&std::fs::read(repo.path().join("browsitory/undo.json")).unwrap())
+            .unwrap()
+    }
+
+    /// #1093: builds before the skipped files (#1065) read only version 1 and ignore any other,
+    /// so they never act on snapshots whose skipped files they would not know about.
+    #[test]
+    fn a_file_with_skipped_files_is_not_version_1() {
+        let (_dir, repo) = repo_with_commit();
+        let (mut store, mut stacks) = UndoStore::open(&repo);
+        stacks.undo.push(with_a_skipped_file(&repo));
+        store.save(&repo, &stacks).unwrap();
+
+        assert_eq!(undo_json(&repo)["version"], 2);
+        let (_, reloaded) = UndoStore::open(&repo);
+        assert_eq!(reloaded.undo, stacks.undo);
+    }
+
+    /// #1093: the history an older build (or a build with #1088 alone) wrote stays usable, and
+    /// the next save writes it as version 2.
+    #[test]
+    fn a_version_1_file_still_loads_and_is_saved_as_version_2() {
+        let (_dir, repo) = repo_with_commit();
+        let (mut store, mut stacks) = UndoStore::open(&repo);
+        stacks.undo.push(with_a_skipped_file(&repo));
+        stacks.undo.push(entry(&repo, "Stage a.txt"));
+        store.save(&repo, &stacks).unwrap();
+        let mut json = undo_json(&repo);
+        json["version"] = 1.into();
+        std::fs::write(
+            repo.path().join("browsitory/undo.json"),
+            serde_json::to_vec(&json).unwrap(),
+        )
+        .unwrap();
+
+        let (mut store, reloaded) = UndoStore::open(&repo);
+        assert!(!store.is_blocked());
+        assert_eq!(reloaded.undo, stacks.undo);
+        store.save(&repo, &reloaded).unwrap();
+        assert_eq!(undo_json(&repo)["version"], 2);
+    }
+
     #[test]
     fn a_corrupt_file_starts_empty() {
         let (_dir, repo) = repo_with_commit();
