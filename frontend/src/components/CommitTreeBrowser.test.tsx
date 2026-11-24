@@ -129,11 +129,11 @@ describe("CommitTreeBrowser", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /data\.bin/ }));
-    expect(await screen.findByText(/Binary file \(3 bytes\), not shown/)).toBeInTheDocument();
+    expect(await screen.findByText(/Binary file \(3 B\), not shown/)).toBeInTheDocument();
 
     client.getFileAtCommit.mockResolvedValueOnce({ kind: "TooLarge", size: 5 * 1024 * 1024 });
     fireEvent.click(screen.getByRole("button", { name: /README\.txt/ }));
-    expect(await screen.findByText(/too large to show here \(5 MB\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/too large to show here \(5\.0 MB\)/)).toBeInTheDocument();
   });
 
   it("restores a version after confirming, and not while the repository is busy", async () => {
