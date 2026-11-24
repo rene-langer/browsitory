@@ -113,6 +113,30 @@ fn diff_options_dto_parses_camel_case() {
 }
 
 #[test]
+fn diff_options_dto_no_size_limit_lifts_the_diff_size_limit() {
+    // "Load diff anyway" (#1066).
+    let parse = |json: serde_json::Value| {
+        git_core::diff::DiffOptions::from(serde_json::from_value::<DiffOptionsDto>(json).unwrap())
+    };
+    let base =
+        serde_json::json!({"ignoreWhitespace": false, "contextLines": 3, "algorithm": "Default"});
+    let mut anyway = base.clone();
+    anyway["noSizeLimit"] = serde_json::json!(true);
+    let mut limited = base.clone();
+    limited["noSizeLimit"] = serde_json::json!(false);
+
+    assert_eq!(parse(anyway).max_file_bytes, None);
+    assert_eq!(
+        parse(limited).max_file_bytes,
+        Some(git_core::diff::DIFF_SIZE_LIMIT)
+    );
+    assert_eq!(
+        parse(base).max_file_bytes,
+        Some(git_core::diff::DIFF_SIZE_LIMIT)
+    );
+}
+
+#[test]
 fn status_entry_dto_always_serializes_old_path() {
     use git_core::status::{StatusEntry, StatusKind};
     let plain = StatusEntryDto::from(StatusEntry {

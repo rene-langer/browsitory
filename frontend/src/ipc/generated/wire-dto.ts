@@ -92,7 +92,7 @@ export type DiffSource = { "kind": "Unstaged" } | { "kind": "Staged", oldPath: s
 
 export type EditRest = "Commit" | "Discard";
 
-export type ErrorKind = "Other" | "WorkerStopped" | "CredentialStoreFailure" | "DirtyWorktree" | "PullFailed" | "Cancelled" | "AddDeleteConflict" | "InvalidSearchQuery" | "PermissionDenied" | "LocalChanges" | "MissingIdentity" | "RestLeft";
+export type ErrorKind = "Other" | "WorkerStopped" | "CredentialStoreFailure" | "DirtyWorktree" | "PullFailed" | "Cancelled" | "AddDeleteConflict" | "InvalidSearchQuery" | "PermissionDenied" | "LocalChanges" | "MissingIdentity" | "RestLeft" | "DiffTooLarge";
 
 export type ExternalToolSettings = { editor: string | null, terminal: string | null, };
 

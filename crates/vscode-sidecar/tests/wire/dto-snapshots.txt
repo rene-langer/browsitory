@@ -279,3 +279,4 @@ RepoErrorPayload/PermissionDenied {"kind":"PermissionDenied","message":"failed t
 RepoErrorPayload/LocalChanges {"kind":"LocalChanges","message":"Your local changes would be overwritten by switching to feature. Commit or stash them first."}
 RepoErrorPayload/MissingIdentity {"kind":"MissingIdentity","message":"Set your name and email for git before committing."}
 RepoErrorPayload/RestLeft {"kind":"RestLeft","message":"c.txt has changes that aren't staged. Commit or discard them, then continue."}
+RepoErrorPayload/DiffTooLarge {"kind":"DiffTooLarge","message":"This file is 25.3 MB, over the 20 MB diff limit, so its diff isn't loaded."}

@@ -572,7 +572,9 @@ export type ErrorKind =
   | "PermissionDenied"
   | "LocalChanges"
   | "MissingIdentity"
-  | "RestLeft";
+  | "RestLeft"
+  /** A file's diff over the backend's size limit (#1066); `noSizeLimit` loads it anyway. */
+  | "DiffTooLarge";
 
 /** A rejected request as the backend sends it (`repo_service::wire::ErrorDto`). */
 export interface RepoErrorPayload {
@@ -620,6 +622,7 @@ const ERROR_KINDS: ReadonlySet<string> = new Set<ErrorKind>([
   "LocalChanges",
   "MissingIdentity",
   "RestLeft",
+  "DiffTooLarge",
 ]);
 
 /**

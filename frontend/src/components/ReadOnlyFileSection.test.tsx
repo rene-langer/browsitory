@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_DIFF_SETTINGS, WHOLE_FILE_CONTEXT_LINES, type DiffSource } from "../ipc/RepoClient";
+import { DEFAULT_DIFF_SETTINGS, RepoError, WHOLE_FILE_CONTEXT_LINES, type DiffOptions, type DiffSource } from "../ipc/RepoClient";
 import { DiffSettingsContext } from "../state/useDiffSettings";
 import type { ExternalToolsApi } from "../state/useExternalTools";
 import { ReadOnlyFileSection } from "./ReadOnlyFileSection";
@@ -373,5 +373,28 @@ describe("ReadOnlyFileSection", () => {
     fireEvent.click(actions, { detail: 1 });
     fireEvent.keyDown(screen.getByRole("menuitem", { name: "Open in editor" }), { key: "Escape" });
     expect(actions).toHaveFocus();
+  });
+
+  // #1066: the backend refuses a diff over its size limit; the section says so and loads it on
+  // request. Another file (or diff source) asks with the limit again.
+  it("shows why a file over the diff size limit isn't loaded, and loads it anyway on request", async () => {
+    const message = "This file is 25.3 MB, over the 20 MB diff limit, so its diff isn't loaded.";
+    const hunk = { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ origin: "Add" as const, content: "loaded\n" }] };
+    const fetchDiff = vi.fn(async (opts: DiffOptions) => {
+      if (opts.noSizeLimit !== true) throw new RepoError("DiffTooLarge", message);
+      return [hunk];
+    });
+    const { props, rerender } = renderSection({ fetchDiff });
+
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Load diff anyway" }));
+
+    expect(await screen.findByText("loaded")).toBeInTheDocument();
+    expect(fetchDiff).toHaveBeenLastCalledWith({ ignoreWhitespace: false, contextLines: 3, algorithm: "Default", noSizeLimit: true });
+
+    rerender(<ReadOnlyFileSection {...props} diffKey="k2" />);
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(fetchDiff).toHaveBeenLastCalledWith({ ignoreWhitespace: false, contextLines: 3, algorithm: "Default" });
   });
 });

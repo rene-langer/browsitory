@@ -956,3 +956,209 @@ fn commit_stats_batch_answers_in_order_and_stops_at_the_request_budget() {
     assert_eq!(first_only.len(), 1);
     assert_eq!(first_only[0].commit_id, ids[0]);
 }
+
+// #1066: a file over `max_file_bytes` on either side isn't diffed: `TooLarge`, with the larger
+// side's size and the limit. Under or at the limit, and without one, it diffs as before.
+
+fn limited(limit: u64) -> DiffOptions {
+    DiffOptions {
+        max_file_bytes: Some(limit),
+        ..DiffOptions::default()
+    }
+}
+
+fn too_large(size: u64, limit: u64) -> git_core::diff::DiffError {
+    git_core::diff::DiffError::TooLarge { size, limit }
+}
+
+fn assert_too_large(
+    result: Result<Vec<git_core::diff::DiffHunk>, git_core::diff::DiffError>,
+    size: u64,
+    limit: u64,
+) {
+    match result {
+        Err(git_core::diff::DiffError::TooLarge {
+            size: got_size,
+            limit: got_limit,
+        }) => assert_eq!((got_size, got_limit), (size, limit)),
+        Ok(hunks) => panic!(
+            "expected {:?}, got {} hunks",
+            too_large(size, limit),
+            hunks.len()
+        ),
+        Err(other) => panic!("expected {:?}, got {other:?}", too_large(size, limit)),
+    }
+}
+
+/// `n` bytes of text: "a\n" repeated.
+fn text(n: usize) -> String {
+    "a\n".repeat(n / 2)
+}
+
+#[test]
+fn working_diff_refuses_a_modified_file_over_the_size_limit() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "f.txt", &text(2000));
+    commit_all(&repo, "initial");
+    write_file(dir.path(), "f.txt", &text(3000));
+
+    assert_too_large(
+        git_core::diff::working_diff(&repo, "f.txt", false, &limited(2500)),
+        3000,
+        2500,
+    );
+    // The old side alone is over it too.
+    assert_too_large(
+        git_core::diff::working_diff(&repo, "f.txt", false, &limited(1000)),
+        3000,
+        1000,
+    );
+    assert!(
+        !git_core::diff::working_diff(&repo, "f.txt", false, &limited(3000))
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        !git_core::diff::working_diff(&repo, "f.txt", false, &DiffOptions::default())
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn working_diff_refuses_a_file_that_shrank_from_over_the_size_limit() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "f.txt", &text(4000));
+    commit_all(&repo, "initial");
+    write_file(dir.path(), "f.txt", &text(100));
+
+    assert_too_large(
+        git_core::diff::working_diff(&repo, "f.txt", false, &limited(2000)),
+        4000,
+        2000,
+    );
+}
+
+#[test]
+fn working_diff_refuses_an_untracked_file_over_the_size_limit() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "seed.txt", "seed\n");
+    commit_all(&repo, "initial");
+    write_file(dir.path(), "new.txt", &text(3000));
+
+    assert_too_large(
+        git_core::diff::working_diff(&repo, "new.txt", false, &limited(2000)),
+        3000,
+        2000,
+    );
+    assert!(
+        !git_core::diff::working_diff(&repo, "new.txt", false, &limited(3000))
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn staged_diffs_refuse_a_file_over_the_size_limit() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "f.txt", &text(1000));
+    commit_all(&repo, "initial");
+    write_file(dir.path(), "f.txt", &text(3000));
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("f.txt")).unwrap();
+    index.write().unwrap();
+
+    assert_too_large(
+        git_core::diff::working_diff(&repo, "f.txt", true, &limited(2000)),
+        3000,
+        2000,
+    );
+    assert_too_large(
+        git_core::diff::staged_rename_diff(&repo, "f.txt", "f.txt", &limited(2000)),
+        3000,
+        2000,
+    );
+}
+
+#[test]
+fn commit_and_range_diffs_refuse_a_file_over_the_size_limit() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "f.txt", &text(1000));
+    commit_all(&repo, "initial");
+    let first = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+    write_file(dir.path(), "f.txt", &text(3000));
+    commit_all(&repo, "grow");
+    let second = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+
+    assert_too_large(
+        git_core::diff::commit_diff(&repo, &second, "f.txt", &limited(2000)),
+        3000,
+        2000,
+    );
+    assert_too_large(
+        git_core::diff::commit_rename_diff(&repo, &second, "f.txt", "f.txt", &limited(2000)),
+        3000,
+        2000,
+    );
+    assert_too_large(
+        git_core::diff::range_diff(&repo, &first, &second, "f.txt", None, &limited(2000)),
+        3000,
+        2000,
+    );
+    assert_too_large(
+        git_core::diff::compare_working_tree(&repo, &first, "f.txt", None, &limited(2000)),
+        3000,
+        2000,
+    );
+    assert!(
+        !git_core::diff::commit_diff(&repo, &second, "f.txt", &limited(3000))
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn the_size_limit_only_concerns_the_file_asked_for() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "big.txt", &text(1000));
+    write_file(dir.path(), "small.txt", "one\n");
+    commit_all(&repo, "initial");
+    write_file(dir.path(), "big.txt", &text(5000));
+    write_file(dir.path(), "small.txt", "two\n");
+    commit_all(&repo, "both");
+    let head = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+
+    assert!(
+        !git_core::diff::commit_diff(&repo, &head, "small.txt", &limited(2000))
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_too_large_diff_says_how_large_and_what_the_limit_is() {
+    let size = 25 * 1024 * 1024 + 300 * 1024;
+    assert_eq!(
+        too_large(size, git_core::diff::DIFF_SIZE_LIMIT).to_string(),
+        "This file is 25.3 MB, over the 20 MB diff limit, so its diff isn't loaded."
+    );
+    assert_eq!(git_core::diff::DIFF_SIZE_LIMIT, 20 * 1024 * 1024);
+}

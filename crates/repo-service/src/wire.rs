@@ -3807,6 +3807,9 @@ pub enum ErrorKind {
     /// Continue at an edit stop refused because changes aren't staged (#884); `get_edit_rest`
     /// names them, and Continue with a `rest` choice commits or discards them.
     RestLeft,
+    /// A file's diff over the size limit (#1066); the diff view offers to load it anyway
+    /// (`noSizeLimit`).
+    DiffTooLarge,
 }
 
 impl ErrorKind {

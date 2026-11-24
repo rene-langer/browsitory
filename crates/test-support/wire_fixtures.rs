@@ -186,6 +186,13 @@ pub fn errors() -> Cases<repo_service::wire::ErrorDto> {
                 paths: vec!["c.txt".into()],
             }),
         ),
+        case(
+            "DiffTooLarge",
+            ErrorDto::from_error(git_core::diff::DiffError::TooLarge {
+                size: 25 * 1024 * 1024 + 300 * 1024,
+                limit: git_core::diff::DIFF_SIZE_LIMIT,
+            }),
+        ),
     ];
     assert_every_variant!(
         cases
@@ -205,6 +212,7 @@ pub fn errors() -> Cases<repo_service::wire::ErrorDto> {
         ErrorKind::LocalChanges,
         ErrorKind::MissingIdentity,
         ErrorKind::RestLeft,
+        ErrorKind::DiffTooLarge,
     );
     cases
 }
