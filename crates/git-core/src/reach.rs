@@ -9,9 +9,7 @@ use git2::{Oid, Repository};
 const SLOP: u32 = 5;
 
 struct Node {
-    time: i64,
-    /// Set once the commit is taken from the queue; its parents are then in `nodes` too.
-    parents: Option<Vec<Oid>>,
+    parents: Vec<Oid>,
     hidden: bool,
     queued: bool,
 }
@@ -36,12 +34,12 @@ impl Walk<'_> {
             }
             return Ok(());
         }
-        let time = self.repo.find_commit(id)?.time().seconds();
+        let commit = self.repo.find_commit(id)?;
+        let time = commit.time().seconds();
         self.nodes.insert(
             id,
             Node {
-                time,
-                parents: None,
+                parents: commit.parent_ids().collect(),
                 hidden,
                 queued: true,
             },
@@ -53,8 +51,8 @@ impl Walk<'_> {
         Ok(())
     }
 
-    /// Hides `id` and every ancestor already walked through it (git's
-    /// `mark_parents_uninteresting`); ancestors not walked yet are hidden when taken.
+    /// Hides `id` and every ancestor the walk has met (git's `mark_parents_uninteresting`);
+    /// ancestors not met yet are hidden when added.
     fn hide(&mut self, id: Oid) {
         let mut stack = vec![id];
         while let Some(id) = stack.pop() {
@@ -68,9 +66,7 @@ impl Walk<'_> {
             if node.queued {
                 self.interesting_queued -= 1;
             }
-            if let Some(parents) = &node.parents {
-                stack.extend(parents.iter().copied());
-            }
+            stack.extend(node.parents.iter().copied());
         }
     }
 
@@ -117,8 +113,7 @@ pub(crate) fn count_unreachable_from(
         if !hidden {
             walk.interesting_queued -= 1;
         }
-        let parents: Vec<Oid> = repo.find_commit(id)?.parent_ids().collect();
-        node.parents = Some(parents.clone());
+        let parents = node.parents.clone();
         for parent in parents {
             walk.add(parent, hidden)?;
         }
