@@ -168,6 +168,57 @@ describe("CloneDialog", () => {
     expect(screen.getByLabelText("Username")).toHaveValue("bob");
   });
 
+  it("refuses a token pasted as the URL's user name, takes it out of the URL and never shows it (#1092)", async () => {
+    const token = "ghp_0123456789abcdefABCDEF0123456789abcd";
+    const { client } = fakeClient();
+    render(<CloneDialog client={client} onCloned={vi.fn()} onCancel={vi.fn()} />);
+    fill(`https://${token}@github.com/o/r.git`);
+    fireEvent.click(screen.getByRole("button", { name: "Clone" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The URL's user name looks like an access token, so it was taken out of the URL. Enter your username, and the token in the Token field.",
+    );
+    expect(client.cloneRepo).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Repository URL")).toHaveValue("https://github.com/o/r.git");
+    expect(screen.getByLabelText("Username")).toHaveValue("");
+    expect(screen.getByLabelText("Token")).toHaveValue("");
+    expect(screen.queryByDisplayValue(new RegExp(token))).toBeNull();
+    expect(document.body.textContent).not.toContain(token);
+  });
+
+  it("clones once the username and token are entered after refusing a token in the URL (#1092)", async () => {
+    const { client } = fakeClient();
+    render(<CloneDialog client={client} onCloned={vi.fn()} onCancel={vi.fn()} />);
+    // Split so a secret scanner doesn't take the fake token for a real one.
+    fill(`https://${"glpat-" + "0123456789abcdefABCD"}@gitlab.com/o/r.git`);
+    fireEvent.click(screen.getByRole("button", { name: "Clone" }));
+    await screen.findByRole("alert");
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "alice" } });
+    fireEvent.change(screen.getByLabelText("Token"), { target: { value: "tok" } });
+    fireEvent.click(screen.getByRole("button", { name: "Clone" }));
+    await waitFor(() => expect(client.cloneRepo).toHaveBeenCalledTimes(1));
+    const request = vi.mocked(client.cloneRepo).mock.calls[0][1];
+    expect(request.url).toBe("https://gitlab.com/o/r.git");
+    expect(request.https).toEqual({ username: "alice", token: "tok" });
+  });
+
+  it("drops a token in the URL without asking when a username is typed (#1092)", async () => {
+    const token = "ghp_0123456789abcdefABCDEF0123456789abcd";
+    const { client } = fakeClient();
+    render(<CloneDialog client={client} onCloned={vi.fn()} onCancel={vi.fn()} />);
+    fill(`https://${token}@github.com/o/r.git`);
+    fireEvent.click(screen.getByRole("button", { name: /HTTPS credentials/ }));
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "bob" } });
+    fireEvent.change(screen.getByLabelText("Token"), { target: { value: "tok" } });
+    fireEvent.click(screen.getByRole("button", { name: "Clone" }));
+    await waitFor(() => expect(client.cloneRepo).toHaveBeenCalled());
+    const request = vi.mocked(client.cloneRepo).mock.calls[0][1];
+    expect(request.url).toBe("https://github.com/o/r.git");
+    expect(request.https).toEqual({ username: "bob", token: "tok" });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(document.body.textContent).not.toContain(token);
+  });
+
   it("leaves a URL with a password for the backend to refuse", async () => {
     const { client } = fakeClient();
     render(<CloneDialog client={client} onCloned={vi.fn()} onCancel={vi.fn()} />);
