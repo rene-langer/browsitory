@@ -566,3 +566,75 @@ fn a_symbolic_link_the_filter_names_still_stages() {
     let entry = index.get_path(Path::new("link"), 0).unwrap();
     assert_eq!(entry.mode, 0o120000);
 }
+
+// --- Mutation testing follow-ups ---
+
+#[test]
+fn applying_a_stash_with_its_index_refuses_a_filtered_staged_change() {
+    let (dir, mut repo) = fixture();
+    // Staged `v2`, work tree back to `v1`: only the stash's index tree changes the file.
+    write_file(dir.path(), SECRET, "v2\n");
+    git_core::stage::stage_file(&repo, SECRET).unwrap();
+    write_file(dir.path(), SECRET, "v1\n");
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+    configure_driver(&repo);
+    let before = state(dir.path(), &repo);
+
+    assert_refused(
+        git_core::stash::apply_stash(&mut repo, 0, None, true),
+        SECRET,
+    );
+
+    assert_eq!(state(dir.path(), &repo), before);
+}
+
+#[test]
+fn aborting_a_merge_refuses_before_removing_what_it_added() {
+    let (dir, repo) = fixture();
+    let base = head_commit(&repo);
+    commit_on(
+        &repo,
+        "other",
+        base,
+        &[(SECRET, "other\n"), ("added.txt", "added\n")],
+    );
+    write_file(dir.path(), SECRET, "main\n");
+    commit_all(&repo, "main side");
+    let outcome = git_core::merge::start_merge(&repo, "other", MergeOptions::default()).unwrap();
+    assert!(
+        matches!(outcome, MergeOutcome::Conflicted { .. }),
+        "{outcome:?}"
+    );
+    configure_driver(&repo);
+    let before = state(dir.path(), &repo);
+
+    assert_refused(git_core::merge::abort_merge(&repo), SECRET);
+
+    assert_eq!(state(dir.path(), &repo), before);
+    assert_eq!(
+        std::fs::read(dir.path().join("added.txt")).unwrap(),
+        b"added\n"
+    );
+}
+
+#[test]
+fn a_driver_name_that_is_not_utf8_is_refused_too() {
+    let (dir, repo) = fixture();
+    let mut attributes = b"secret.env filter=crypt\xff\n".to_vec();
+    attributes.extend_from_slice(b"new/** filter=crypt\n");
+    std::fs::write(dir.path().join(".gitattributes"), attributes).unwrap();
+    let config_path = repo.path().join("config");
+    let mut config = std::fs::read(&config_path).unwrap();
+    config.extend_from_slice(b"[filter \"crypt\xff\"]\n\tclean = false\n");
+    std::fs::write(&config_path, config).unwrap();
+    write_file(dir.path(), SECRET, "plaintext\n");
+    let before = state(dir.path(), &repo);
+
+    let error = git_core::stage::stage_file(&repo, SECRET).unwrap_err();
+
+    assert!(
+        error.to_string().contains(&format!("'{SECRET}'")),
+        "{error}"
+    );
+    assert_eq!(state(dir.path(), &repo), before);
+}
