@@ -1,19 +1,25 @@
 //! Fetches, pulls and pushes run so that a remote that doesn't answer never holds the worker
-//! past a cancel (#462 for the background fetch, #547 for the transfers the user starts).
+//! past a cancel (#462 for the background fetch, #547 for the transfers the user starts, #1064
+//! for a transfer that stalls after connecting).
 //!
 //! A transfer blocked connecting (an unreachable host, a VPN that is down, a server that accepts
-//! and never answers) calls none of libgit2's progress callbacks, so the cancel side channel
-//! (`CancelRegistry`) can't reach it. The transfer therefore runs on a helper thread with its own
-//! `Repository`, and the worker waits for it, polling: while the helper is still connecting, the
-//! worker gives up on it when the user cancels (or, for a background fetch, when it has been
-//! connecting too long) and goes on. The helper is abandoned, not stopped: it stays blocked until
-//! the operating system gives up on the connection, but it writes nothing, because a fetch or push
-//! only downloads, sends, runs `pre-push` and updates references after
-//! `TransferReporter::connected`, which answers `false` once the worker gave up. Once connected,
-//! the transfer reports progress and the worker waits for it as before; a cancel then reaches it
-//! through the callbacks.
+//! and never answers) calls none of libgit2's progress callbacks, and neither does one whose
+//! connection went silent after connecting (Wi-Fi changed, the laptop slept), so the cancel side
+//! channel (`CancelRegistry`) can't reach either. The transfer therefore runs on a helper thread
+//! with its own `Repository`, and the worker waits for it, polling. While the helper is still
+//! connecting, the worker gives up on it when the user cancels (or, for a background fetch, when
+//! it has been connecting too long); once connected, when the user's cancel goes unanswered for
+//! `STALLED_CANCEL_GRACE` (a transfer that still receives answers it at its next callback). The
+//! helper is abandoned, not stopped: it stays blocked until its socket fails (libgit2's server
+//! timeout, `git_core::repo::SERVER_TIMEOUT`, or the operating system), but it writes nothing
+//! that other commands see, because a fetch or push only downloads, sends, runs `pre-push` and
+//! updates references after `TransferReporter::connected`, and only writes after
+//! `TransferReporter::writing`, both of which answer `false` once the worker gave up. A fetch
+//! may have renamed a downloaded pack into place by then, which no reference names. Once a
+//! transfer writes (a fetch updating references, any push past connecting), the worker waits for
+//! it whatever happens; a cancel then reaches it through the callbacks, if at all.
 //!
-//! The worker waits for the helper whatever happens, so the helper's writes never overlap
+//! The worker waits for the helper unless it gave up on it, so the helper's writes never overlap
 //! another command's. While it waits, its own `Repository` is idle, so it serves the read lane's
 //! commands on it (`TransferHost::serve_read`, #734): they only read, and the helper's writes (a
 //! new pack renamed into place, then remote-tracking refs) never leave a ref naming a missing
@@ -50,8 +56,8 @@ pub(super) struct Wait<'a> {
     /// Where the transfer's progress goes, stamped with `op`'s ID.
     pub(super) events: &'a Sender<TransferEvent>,
     /// How long it may take to connect before the worker gives up on it, as
-    /// `RemoteError::Unreachable`. `None` (the transfers the user starts) waits for libgit2's own
-    /// timeouts, which are process-wide and left alone.
+    /// `RemoteError::Unreachable`. `None` (the transfers the user starts) waits for the operating
+    /// system to give up on the connection (libgit2's connect timeout is left alone).
     pub(super) connect_limit: Option<Duration>,
     /// `false` for a background fetch: HTTPS tokens are read without making the OS credential
     /// store prompt (see `CredentialSession`).
@@ -64,7 +70,9 @@ pub(super) struct Wait<'a> {
 /// on, and the cancel to poll.
 ///
 /// A cancel while the transfer is still connecting is `RemoteError::Cancelled` at once, a connect
-/// that outlasts `connect_limit` `RemoteError::Unreachable`; the abandoned helper writes nothing.
+/// that outlasts `connect_limit` `RemoteError::Unreachable`, and a cancel a connected transfer
+/// leaves unanswered for `STALLED_CANCEL_GRACE` `RemoteError::Cancelled`; the abandoned helper
+/// writes nothing.
 pub(super) fn run<S, T, F>(
     host: &mut dyn TransferHost,
     credentials: &Arc<CredentialService<S>>,
@@ -164,24 +172,28 @@ where
     }
 }
 
-/// Whether the worker gives up on a helper now: only while it is still connecting, when the
-/// user cancelled or the connect limit ran out. The phase becomes `Abandoned` under the same lock
-/// the helper's `connected` takes, so the helper can't go on to transfer after this.
+/// Whether the worker gives up on a helper now, given when it first saw the user's cancel:
+/// while it is still connecting, on that cancel or once the connect limit ran out; once it
+/// connected, when the cancel went unanswered for `STALLED_CANCEL_GRACE`; never once it writes.
+/// The phase becomes `Abandoned` under the same lock the helper's `connected` and `writing`
+/// take, so the helper can't go on to transfer or write after this.
 fn give_up(
     phase: &SharedPhase,
     cancelled_at: Option<Instant>,
     connect_limit: Option<Duration>,
 ) -> Option<RemoteError> {
     let mut current = phase.lock();
-    let Phase::Connecting(since) = *current else {
-        return None;
-    };
-    let error = if cancelled_at.is_some() {
-        RemoteError::Cancelled
-    } else if connect_limit.is_some_and(|limit| since.elapsed() >= limit) {
-        RemoteError::Unreachable(git2::Error::from_str("connecting took too long"))
-    } else {
-        return None;
+    let error = match *current {
+        Phase::Connecting(_) if cancelled_at.is_some() => RemoteError::Cancelled,
+        Phase::Connecting(since) if connect_limit.is_some_and(|limit| since.elapsed() >= limit) => {
+            RemoteError::Unreachable(git2::Error::from_str("connecting took too long"))
+        }
+        Phase::Transferring
+            if cancelled_at.is_some_and(|at| at.elapsed() >= STALLED_CANCEL_GRACE) =>
+        {
+            RemoteError::Cancelled
+        }
+        _ => return None,
     };
     *current = Phase::Abandoned;
     Some(error)
@@ -194,8 +206,9 @@ fn helper_lost() -> RemoteError {
 }
 
 /// Where a helper's transfer is, as the worker and the helper agree on it under one lock: the
-/// worker can only give up on a transfer that is still `Connecting`, and a transfer only goes on
-/// from `Connecting` to `Transferring` while the worker hasn't given up.
+/// worker can only give up on a transfer that is `Connecting` or `Transferring`, and a transfer
+/// only goes on from `Connecting` to `Transferring` and from there to `Writing` while the worker
+/// hasn't given up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Phase {
     Connecting(Instant),
@@ -222,8 +235,13 @@ impl SharedPhase {
         true
     }
 
-    /// The transfer is about to write.
+    /// The transfer is about to write: it goes on unless the worker gave up on it.
     fn writing(&self) -> bool {
+        let mut phase = self.lock();
+        if *phase == Phase::Abandoned {
+            return false;
+        }
+        *phase = Phase::Writing;
         true
     }
 }
@@ -254,6 +272,10 @@ impl<T> TransferReporter for HelperReporter<T> {
 
     fn connected(&mut self) -> bool {
         self.phase.connected()
+    }
+
+    fn writing(&mut self) -> bool {
+        self.phase.writing()
     }
 }
 

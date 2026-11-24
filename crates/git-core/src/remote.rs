@@ -1,8 +1,9 @@
 use std::cell::{Cell, RefCell};
 
 use git2::{
-    build::CheckoutBuilder, BranchType, Cred, CredentialType, Direction, ErrorClass, ErrorCode,
-    FetchOptions, FetchPrune, PushOptions, RemoteCallbacks, Repository, StatusOptions, Tag,
+    build::CheckoutBuilder, AutotagOption, BranchType, Cred, CredentialType, Direction, ErrorClass,
+    ErrorCode, FetchOptions, PushOptions, RemoteCallbacks, RemoteUpdateFlags, Repository,
+    StatusOptions, Tag,
 };
 use thiserror::Error;
 use url::Url;
@@ -289,12 +290,12 @@ pub struct FetchAllOutcome {
     pub failed: Vec<(String, TransferErrorKind)>,
 }
 
-/// `None` leaves pruning to git config (`remote.<name>.prune`, then `fetch.prune`).
-fn fetch_prune(prune: Option<bool>) -> FetchPrune {
-    match prune {
-        None => FetchPrune::Unspecified,
-        Some(true) => FetchPrune::On,
-        Some(false) => FetchPrune::Off,
+/// Whether a fetch of `remote_name` prunes when the caller leaves it to git config:
+/// `remote.<name>.prune`, else `fetch.prune`, else no.
+fn effective_prune(config: &git2::Config, remote_name: &str) -> Result<bool, git2::Error> {
+    match config_bool(config, &format!("remote.{remote_name}.prune"))? {
+        Some(prune) => Ok(prune),
+        None => Ok(config_bool(config, "fetch.prune")?.unwrap_or(false)),
     }
 }
 
@@ -800,7 +801,7 @@ fn fetch_with(
     let credentials = RefCell::new(credentials);
     let reporter = RefCell::new(reporter);
 
-    // Connect first, on its own: `fetch` below reuses this connection (libgit2's
+    // Connect first, on its own: `download` below reuses this connection (libgit2's
     // `connect_or_reset_options`), so the fetch is the same, but the caller learns when the
     // remote answered (`TransferReporter::connected`), and a network-level connect failure is
     // told apart from a failure later in the transfer (#462).
@@ -851,6 +852,22 @@ fn fetch_with(
         });
         true
     });
+    let mut options = FetchOptions::new();
+    options.remote_callbacks(callbacks);
+
+    // libgit2's `git_remote_fetch`, step by step, so the caller is asked between downloading
+    // and writing (#1064): `download` writes only a new pack, which no ref names yet.
+    let remote = connection.remote();
+    remote
+        .download(&[] as &[&str], Some(&mut options))
+        .map_err(|error| cancellation_or(cancel, error))?;
+    drop(options);
+    let _ = remote.disconnect();
+    if !reporter.borrow_mut().writing() || cancel() {
+        return Err(RemoteError::Cancelled);
+    }
+
+    let mut callbacks = RemoteCallbacks::new();
     callbacks.update_tips(|_reference, _old, _new| {
         if cancel() {
             return false;
@@ -866,17 +883,24 @@ fn fetch_with(
         });
         true
     });
-
-    let mut options = FetchOptions::new();
-    options.remote_callbacks(callbacks);
-    options.prune(fetch_prune(prune));
-    match connection
-        .remote()
-        .fetch(&[] as &[&str], Some(&mut options), None)
-    {
-        Ok(()) => Ok(()),
-        Err(error) => Err(cancellation_or(cancel, error)),
+    remote
+        .update_tips(
+            Some(&mut callbacks),
+            RemoteUpdateFlags::UPDATE_FETCHHEAD,
+            AutotagOption::Unspecified,
+            Some(&format!("fetch {remote_name}")),
+        )
+        .map_err(|error| cancellation_or(cancel, error))?;
+    let prune = match prune {
+        Some(prune) => prune,
+        None => effective_prune(&repo.config()?, remote_name)?,
+    };
+    if prune {
+        remote
+            .prune(Some(callbacks))
+            .map_err(|error| cancellation_or(cancel, error))?;
     }
+    Ok(())
 }
 
 /// Classifies a failed transfer: libgit2 reports a callback-initiated abort as an ordinary
@@ -1436,10 +1460,7 @@ pub fn list_remotes(repo: &Repository) -> Result<Vec<RemoteInfo>, RemoteError> {
             name: name.to_string(),
             fetch_url: fetch_url.to_string(),
             push_url: push_url.map(str::to_string),
-            prune: match config_bool(&config, &format!("remote.{name}.prune"))? {
-                Some(prune) => prune,
-                None => config_bool(&config, "fetch.prune")?.unwrap_or(false),
-            },
+            prune: effective_prune(&config, name)?,
         });
     }
     Ok(remotes)
@@ -1730,6 +1751,11 @@ fn push_refs(
         .connect_auth(Direction::Push, Some(connect_callbacks), None)
         .map_err(|error| connect_error(cancel, error, is_local_url(&push_url)))?;
     if !reporter.borrow_mut().connected() || cancel() {
+        return Err(RemoteError::Cancelled);
+    }
+    // `push` below sends, runs `pre-push` and writes tracking refs in one call, and may land on
+    // the remote however it ends, so the caller must not give up on it from here on (#1064).
+    if !reporter.borrow_mut().writing() {
         return Err(RemoteError::Cancelled);
     }
 
