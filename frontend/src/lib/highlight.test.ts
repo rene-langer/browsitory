@@ -5,12 +5,15 @@ import { GLSL_GRAMMAR } from "./grammars/glsl";
 import {
   highlightLines,
   loadedLanguages,
+  logHighlightError,
   setHighlightTransport,
   useHunkTokens,
   withoutExcludedGrammars,
   type Token,
 } from "./highlight";
 import type { HighlightTransport } from "./highlightWorkerProtocol";
+import { installGlobalErrorLogging } from "./logger";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 describe("highlightLines", () => {
   it("tokenizes per line with css-variable colors", async () => {
@@ -183,5 +186,18 @@ describe("highlightLines with a transport", () => {
     unmount();
 
     expect(requests.map((r) => r.signal?.aborted)).toEqual([true, true]);
+  });
+});
+
+describe("logHighlightError (#1060)", () => {
+  it("logs a highlighting failure through RepoClient.logFrontendError", () => {
+    const client = fakeRepoClient({ logFrontendError: vi.fn(async () => {}) });
+    const dispose = installGlobalErrorLogging(client);
+    const error = new Error("grammar failed to load");
+
+    logHighlightError(error);
+
+    expect(client.logFrontendError).toHaveBeenCalledWith("Syntax highlighting failed", error);
+    dispose();
   });
 });
