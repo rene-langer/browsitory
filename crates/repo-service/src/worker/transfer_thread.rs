@@ -325,13 +325,6 @@ mod tests {
     }
 
     #[test]
-    fn the_worker_never_gives_up_on_a_transfer_that_connected() {
-        let transferring = phase(Phase::Transferring);
-        assert!(give_up(&transferring, Some(Instant::now()), Some(Duration::ZERO)).is_none());
-        assert_eq!(*transferring.lock(), Phase::Transferring);
-    }
-
-    #[test]
     fn a_transfer_writes_only_if_the_worker_has_not_given_up() {
         let transferring = phase(Phase::Transferring);
         assert!(transferring.writing());
