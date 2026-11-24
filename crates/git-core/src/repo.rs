@@ -20,10 +20,23 @@ pub enum RepoError {
 /// Turns off libgit2's strict hash verification: by default it hashes every object it reads
 /// again and compares it with its id, up to two thirds of a history walk's time. git checks
 /// hashes in `git fsck` and when it receives objects, not on ordinary reads. Objects the app
-/// writes are still hashed to make their ids. See `docs/ARCHITECTURE.md`.
+/// writes are still hashed to make their ids.
+///
+/// Sets libgit2's server timeout to `SERVER_TIMEOUT` (#1064): a fetch, pull, push or clone whose
+/// connection goes silent after connecting fails instead of waiting forever. libgit2's WinHTTP
+/// transport (HTTP(S) on Windows) ignores it. See `docs/ARCHITECTURE.md`.
 pub fn configure_libgit2() {
     git2::opts::strict_hash_verification(false);
+    let timeout = i32::try_from(SERVER_TIMEOUT.as_millis()).unwrap_or(i32::MAX);
+    // SAFETY: called once at startup, before any other thread uses libgit2. It fails only for a
+    // negative timeout.
+    let _ = unsafe { git2::opts::set_server_timeout_in_milliseconds(timeout) };
 }
+
+/// How long a socket read or write on a remote's connection may get nothing before the transfer
+/// fails. Git servers send a keep-alive every 5 s by default while they prepare a pack or run
+/// hooks, so a working transfer never goes this long without a byte.
+pub const SERVER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
 pub fn open(path: &Path) -> Result<git2::Repository, RepoError> {
     Ok(git2::Repository::discover(path)?)

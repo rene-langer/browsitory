@@ -42,6 +42,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Once, OnceLock};
 
+mod stalled_server;
+pub use stalled_server::{StalledServer, STALLED_BRANCH_TIP};
+
 #[doc(hidden)]
 pub use ctor as __ctor;
 #[doc(hidden)]

@@ -164,6 +164,18 @@ to one repository or lane). Tests run with libgit2's default unless they call th
 (`crates/git-core/tests/hash_verification.rs`, and the sidecar's
 `the_sidecar_reads_objects_without_rehashing_them`, which pins that the binary calls it).
 
+It also sets libgit2's server timeout to `SERVER_TIMEOUT` (120 s,
+`git2::opts::set_server_timeout_in_milliseconds`, #1064): a socket read or write on a remote's
+connection that gets nothing for that long fails, so a fetch, pull, push or clone whose network
+went away without a reset (Wi-Fi changed, a VPN dropped, the laptop slept) ends instead of
+waiting forever. Git servers send a keep-alive every 5 s by default while they prepare a pack
+or run hooks, so a working transfer never goes that long without a byte. libgit2's socket
+stream (HTTP(S) on Linux and macOS under OpenSSL/SecureTransport, `git://`) and libssh2's
+session timeout honour it; libgit2's WinHTTP transport (HTTP(S) on Windows) sets WinHTTP's
+timeouts to infinite and ignores it. The connect timeout stays the operating system's (#547).
+`crates/git-core/tests/server_timeout.rs` pins the value and that a stalled fetch fails once
+the timeout passes.
+
 ### Blame and the history walks
 
 File history, line history and blame share one walk (`git_core::history`, #838/#839): each
@@ -796,8 +808,8 @@ before a write sent earlier but not answered yet (nothing orders unanswered comm
 overlaps the worker's own writes (one thread), and only overlaps a helper's network phase: a new
 pack renamed into place, then remote-tracking refs, never the index, work tree, HEAD or
 configuration. A pull's merge and `post-merge` hook, commit hooks and signing run on the worker,
-so reads still wait for them. A long read delays the wait's next poll (progress, and a Cancel
-while still connecting) by its own run time.
+so reads still wait for them. A long read delays the wait's next poll (progress, and giving up on
+a connecting or stalled transfer) by its own run time.
 
 **Stopping at exit (#965).** When the desktop app's last window closes or it quits (also before
 an update's restart), the process would end every worker thread wherever it is; one cut off in a
@@ -2569,20 +2581,35 @@ User-defined commands (epic #897) are programs the user adds to menus and the pa
   touching the store. A remote failing with
   `MissingCredential`, `CredentialStoreFailure` or `SshAgentFailure` is named once per session
   in a toast. Like every fetch it records no undo entry.
-- **No transfer holds the worker past a cancel while it connects (#462, #547).** A fetch or
-  push blocked connecting calls no libgit2 callback, so the `CancelRegistry` side channel can't
-  reach it, and libgit2's connect/read timeouts (`git2::opts`) are process-wide, so they are
-  left alone. Fetch, Fetch all, the background fetch, Pull's fetch and every push-shaped command
+- **No transfer holds the worker past a cancel while it connects or stalls (#462, #547,
+  #1064).** A fetch or push blocked connecting, or whose connection went silent after
+  connecting, calls no libgit2 callback, so the `CancelRegistry` side channel can't reach it.
+  libgit2's connect timeout is process-wide and left alone; its server (read/write) timeout is
+  set once at startup (see "Process-wide libgit2 settings"). Fetch, Fetch all, the background
+  fetch, Pull's fetch and every push-shaped command
   (push, Push to…, force push, Push tags, delete remote branch/tag) therefore run their git-core
   call on a helper thread with its own `Repository` and credential provider while the worker
   polls it (`worker/transfer_thread.rs`). git-core connects first (`connect_auth`; the fetch or
   push then reuses the connection) and asks `TransferReporter::connected` before downloading,
-  sending, running `pre-push` or writing anything. While the helper is still connecting, the
+  sending, running `pre-push` or writing anything, then `TransferReporter::writing` before it
+  writes what other commands see: a fetch after `download` (it runs libgit2's
+  `git_remote_fetch` step by step: `download`, `disconnect`, then `update_tips` with the same
+  reflog message and `FETCH_HEAD`, and `prune` per `remote.<name>.prune`/`fetch.prune`), a push
+  right after connecting (its one `Remote::push` call sends, runs `pre-push` and writes
+  tracking refs). The phase (`Connecting` → `Transferring` → `Writing`, or `Abandoned`) changes
+  under one lock. While the helper is still connecting, the
   worker gives up on it on a cancel (the transfer ends `Cancelled` at once) or, for the
-  background fetch only, after `BACKGROUND_CONNECT_LIMIT` (30 s): under one lock it marks the
-  transfer abandoned, so `connected` answers `false` and the helper, when the OS finally lets
-  it go, writes nothing. Once connected the worker waits as for any transfer; the callbacks see
-  a cancel. Otherwise the worker always waits for the helper, so a helper's writes never overlap
+  background fetch only, after `BACKGROUND_CONNECT_LIMIT` (30 s). Once it connected, the worker
+  gives up on it when the user's cancel goes unanswered for `STALLED_CANCEL_GRACE` (2 s): a
+  transfer still receiving answers it at its next callback and ends by itself, so only a
+  stalled one is abandoned, and a background fetch the user's action cancels leaves no helper
+  behind while data flows. Giving up marks the transfer abandoned, so `connected` and
+  `writing` answer `false` and the helper, when its socket fails (the server timeout or the
+  OS), writes nothing; a fetch may have renamed a downloaded pack into place, which no ref
+  names. Once a transfer writes the worker waits for it: a push is never given up on after it
+  connected (#185's rule: it may land however it ends), so a push that stalls holds the worker
+  until the server timeout, and over WinHTTP until the OS gives up. Otherwise the worker always
+  waits for the helper, so a helper's writes never overlap
   another command; Pull's fast-forward and `post-merge` run on the worker after it. Helpers
   report progress through the worker (stamped with the operation's ID), never through the
   caller's event channel, so an abandoned one keeps no listener open. Manual Fetch all and the

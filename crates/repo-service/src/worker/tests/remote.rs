@@ -1,4 +1,5 @@
 use super::*;
+use test_support::StalledServer;
 
 #[test]
 fn remote_and_current_upstream_round_trip_through_the_worker() {
@@ -1162,8 +1163,16 @@ fn cancel_while_connecting(
 /// A local repository with one commit on its current branch, `origin` (fetched) as its upstream
 /// and a `silent` remote that accepts and never answers. Returns the branch name too.
 pub(super) fn repo_with_a_silent_remote() -> (TempDir, TempDir, TempDir, SilentServer, String) {
-    let (source_dir, remote_dir, local_dir) = local_and_bare_remote();
     let server = SilentServer::start();
+    let (source_dir, remote_dir, local_dir, branch) =
+        repo_with_an_upstream_and("silent", &server.url);
+    (source_dir, remote_dir, local_dir, server, branch)
+}
+
+/// A local repository with one commit on its current branch, `origin` (fetched) as its upstream,
+/// and a remote `name` at `url`. Returns the branch name too.
+fn repo_with_an_upstream_and(name: &str, url: &str) -> (TempDir, TempDir, TempDir, String) {
+    let (source_dir, remote_dir, local_dir) = local_and_bare_remote();
     let local = Repository::open(local_dir.path()).expect("open local");
     local
         .find_remote("origin")
@@ -1198,10 +1207,8 @@ pub(super) fn repo_with_a_silent_remote() -> (TempDir, TempDir, TempDir, SilentS
             )
             .expect("upstream branch");
     }
-    local
-        .remote("silent", &server.url)
-        .expect("add silent remote");
-    (source_dir, remote_dir, local_dir, server, branch)
+    local.remote(name, url).expect("add remote");
+    (source_dir, remote_dir, local_dir, branch)
 }
 
 fn silent_refs(local_dir: &TempDir) -> usize {
@@ -1339,4 +1346,168 @@ fn a_cancel_stops_a_push_that_is_still_connecting() {
             .expect("upstream remote"),
         "origin"
     );
+}
+
+/// #1064: a transfer that connected and then stalled (its server went silent) holds the worker
+/// only until Cancel: waits until it stalled, checks the worker keeps waiting meanwhile, cancels
+/// `operation_id`, and checks that a write sent then (staging `new.txt`, which waits for any
+/// transfer) answers within a few seconds. Returns every event of the operation.
+fn cancel_while_stalled(
+    handle: &super::super::WorkerHandle,
+    server: &StalledServer,
+    operation_id: &str,
+    event_rx: &mpsc::Receiver<TransferEvent>,
+) -> Vec<TransferEvent> {
+    server
+        .stalled
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the transfer connects and then waits for the server");
+    thread::sleep(Duration::from_millis(300));
+    let mut events: Vec<_> = event_rx.try_iter().collect();
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, TransferEvent::Completed { .. })),
+        "{events:?}"
+    );
+
+    let started = std::time::Instant::now();
+    handle.cancel_transfer(operation_id);
+    let (staged_tx, staged) = mpsc::channel();
+    {
+        let handle = handle.clone();
+        thread::spawn(move || {
+            let _ = staged_tx.send(handle.stage_file("new.txt".into()));
+        });
+    }
+    staged
+        .recv_timeout(Duration::from_secs(15))
+        .unwrap_or_else(|_| {
+            panic!(
+                "the worker still waited {:?} after Cancel for a transfer that stalled",
+                started.elapsed()
+            )
+        })
+        .expect("stage");
+    loop {
+        let event = event_rx
+            .recv_timeout(Duration::from_secs(15))
+            .expect("the operation completes");
+        let done = matches!(event, TransferEvent::Completed { .. });
+        events.push(event);
+        if done {
+            break;
+        }
+    }
+    assert_eq!(handle.cancelled.len(), 0);
+    events
+}
+
+/// `repo_with_an_upstream_and` with a `stalled` remote that answers the connect and then never
+/// again, and an untracked `new.txt`.
+fn repo_with_a_stalled_remote() -> (TempDir, TempDir, TempDir, StalledServer, String) {
+    let server = StalledServer::start();
+    let (source_dir, remote_dir, local_dir, branch) =
+        repo_with_an_upstream_and("stalled", &server.url);
+    std::fs::write(local_dir.path().join("new.txt"), "new\n").expect("write file");
+    (source_dir, remote_dir, local_dir, server, branch)
+}
+
+/// What a fetch from the stalled remote would write: its tracking refs and `FETCH_HEAD`.
+fn stalled_writes(local_dir: &TempDir) -> (usize, bool) {
+    let local = Repository::open(local_dir.path()).expect("reopen local");
+    let refs = local
+        .references_glob("refs/remotes/stalled/*")
+        .expect("references")
+        .count();
+    let fetch_head = std::fs::read_to_string(local.path().join("FETCH_HEAD"))
+        .is_ok_and(|contents| contents.contains(test_support::STALLED_BRANCH_TIP));
+    (refs, fetch_head)
+}
+
+#[test]
+fn a_cancel_stops_a_fetch_that_stalled_after_connecting() {
+    let (_source_dir, _remote_dir, local_dir, server, _branch) = repo_with_a_stalled_remote();
+    let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+    let handle = worker.handle();
+    let (event_tx, event_rx) = mpsc::channel();
+
+    let operation_id = handle
+        .fetch_remote("stalled".into(), None, event_tx)
+        .expect("start fetch");
+    let events = cancel_while_stalled(&handle, &server, &operation_id, &event_rx);
+
+    assert_eq!(
+        completed(&events),
+        (TransferOperation::Fetch, Some(TransferErrorKind::Cancelled))
+    );
+    assert_eq!(stalled_writes(&local_dir), (0, false));
+}
+
+#[test]
+fn a_cancel_stops_a_fetch_all_whose_remote_stalled_after_connecting() {
+    let (_source_dir, _remote_dir, local_dir, server, _branch) = repo_with_a_stalled_remote();
+    let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+    let handle = worker.handle();
+    let (event_tx, event_rx) = mpsc::channel();
+
+    let operation_id = handle
+        .fetch_all_remotes(None, event_tx)
+        .expect("start fetch all");
+    let events = cancel_while_stalled(&handle, &server, &operation_id, &event_rx);
+
+    assert_eq!(
+        completed(&events),
+        (
+            TransferOperation::FetchAll,
+            Some(TransferErrorKind::Cancelled)
+        )
+    );
+    assert!(remote_failures(&events).is_empty(), "{events:?}");
+    assert_eq!(stalled_writes(&local_dir), (0, false));
+}
+
+#[test]
+fn a_cancel_stops_a_pull_whose_fetch_stalled_after_connecting() {
+    let (_source_dir, _remote_dir, local_dir, server, branch) = repo_with_a_stalled_remote();
+    Repository::open(local_dir.path())
+        .expect("open local")
+        .config()
+        .expect("config")
+        .set_str(&format!("branch.{branch}.remote"), "stalled")
+        .expect("upstream on the stalled remote");
+    let head_before = Repository::open(local_dir.path())
+        .expect("open local")
+        .head()
+        .expect("head")
+        .target();
+    let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+    let handle = worker.handle();
+    let (event_tx, event_rx) = mpsc::channel();
+
+    let pulling = {
+        let handle = handle.clone();
+        thread::spawn(move || handle.pull_current_upstream(event_tx))
+    };
+    let operation_id = match event_rx
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the pull starts")
+    {
+        TransferEvent::Started { operation_id, .. } => operation_id,
+        other => panic!("expected Started first, got {other:?}"),
+    };
+    let events = cancel_while_stalled(&handle, &server, &operation_id, &event_rx);
+
+    assert_eq!(
+        completed(&events),
+        (TransferOperation::Pull, Some(TransferErrorKind::Cancelled))
+    );
+    let error = pulling
+        .join()
+        .expect("pull thread")
+        .expect_err("a cancelled pull fails");
+    assert_eq!(error.kind, crate::wire::ErrorKind::Cancelled);
+    assert_eq!(stalled_writes(&local_dir), (0, false));
+    let local = Repository::open(local_dir.path()).expect("reopen local");
+    assert_eq!(local.head().expect("head").target(), head_before);
 }

@@ -2776,6 +2776,237 @@ fn a_push_that_the_reporter_stops_once_connected_sends_and_writes_nothing() {
         .is_ok_and(|merge| merge == "refs/heads/main"));
 }
 
+/// A reporter answering `connected` and `writing` as told, recording the order it was asked in.
+struct Gate {
+    connected: bool,
+    writing: bool,
+    calls: Vec<&'static str>,
+}
+
+impl Gate {
+    fn new(writing: bool) -> Self {
+        Self {
+            connected: true,
+            writing,
+            calls: Vec::new(),
+        }
+    }
+}
+
+impl TransferReporter for Gate {
+    fn report(&mut self, _event: TransferProgress) {}
+
+    fn connected(&mut self) -> bool {
+        self.calls.push("connected");
+        self.connected
+    }
+
+    fn writing(&mut self) -> bool {
+        self.calls.push("writing");
+        self.writing
+    }
+}
+
+fn fetch_head(fixture: &RemoteFixture) -> Option<Vec<u8>> {
+    std::fs::read(fixture.local.path().join("FETCH_HEAD")).ok()
+}
+
+/// #1064: the caller learns when a fetch that downloaded is about to write, so it can give up on
+/// a stalled one before it writes.
+#[test]
+fn a_fetch_asks_the_reporter_before_writing_and_fetches() {
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit_without_fetch("only on the remote");
+    let mut gate = Gate::new(true);
+
+    fetch_remote(
+        &fixture.local,
+        "origin",
+        None,
+        "fetch-1".to_string(),
+        &mut NoCredentials,
+        &mut gate,
+        &|| false,
+    )
+    .unwrap();
+
+    assert_eq!(gate.calls, ["connected", "writing"]);
+    assert_eq!(
+        fixture
+            .local
+            .find_reference("refs/remotes/origin/main")
+            .unwrap()
+            .target(),
+        Some(fixture.remote_tip())
+    );
+}
+
+/// #1064: a fetch the caller gave up on after it downloaded writes no ref and no `FETCH_HEAD`.
+#[test]
+fn a_fetch_that_the_reporter_stops_before_writing_writes_nothing() {
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit_without_fetch("only on the remote");
+    let tracking_before = fixture
+        .local
+        .find_reference("refs/remotes/origin/main")
+        .unwrap()
+        .target();
+    let fetch_head_before = fetch_head(&fixture);
+    let mut gate = Gate::new(false);
+
+    let result = fetch_remote(
+        &fixture.local,
+        "origin",
+        None,
+        "fetch-1".to_string(),
+        &mut NoCredentials,
+        &mut gate,
+        &|| false,
+    );
+
+    assert!(matches!(result, Err(RemoteError::Cancelled)), "{result:?}");
+    assert_eq!(gate.calls, ["connected", "writing"]);
+    assert_eq!(
+        fixture
+            .local
+            .find_reference("refs/remotes/origin/main")
+            .unwrap()
+            .target(),
+        tracking_before
+    );
+    assert_eq!(fetch_head(&fixture), fetch_head_before);
+}
+
+/// #1064: a push asks before it sends anything, so a caller never gives up on one that may land.
+#[test]
+fn a_push_asks_the_reporter_before_writing() {
+    let fixture = local_and_bare_remote();
+    fixture.local_commit("local work");
+    let mut gate = Gate::new(true);
+
+    push_current_branch(
+        &fixture.local,
+        "origin",
+        false,
+        &mut NoCredentials,
+        &mut gate,
+        &|| false,
+    )
+    .unwrap();
+
+    assert_eq!(gate.calls, ["connected", "writing"]);
+    assert_eq!(
+        fixture.bare_tip("main"),
+        fixture.local.head().unwrap().target()
+    );
+}
+
+#[test]
+fn a_push_that_the_reporter_stops_before_writing_sends_and_writes_nothing() {
+    let fixture = local_and_bare_remote();
+    fixture.local_commit("local work");
+    let before = fixture.bare_tip("main");
+    let mut gate = Gate::new(false);
+
+    let result = push_branch(
+        &fixture.local,
+        "origin",
+        "main",
+        "published",
+        true,
+        false,
+        &mut NoCredentials,
+        &mut gate,
+        &|| false,
+    );
+
+    assert!(matches!(result, Err(RemoteError::Cancelled)), "{result:?}");
+    assert_eq!(gate.calls, ["connected", "writing"]);
+    assert_eq!(fixture.bare_tip("main"), before);
+    assert_eq!(fixture.bare_tip("published"), None);
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/origin/published")
+        .is_err());
+    assert!(fixture
+        .local
+        .config()
+        .unwrap()
+        .get_string("branch.main.merge")
+        .is_ok_and(|merge| merge == "refs/heads/main"));
+}
+
+/// What a fetch writes besides remote-tracking branches: tags on fetched commits and
+/// `FETCH_HEAD`, as `git fetch` does.
+#[test]
+fn a_fetch_follows_tags_and_writes_fetch_head() {
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit_without_fetch("tagged on the remote");
+    let tagged = fixture.remote_tip();
+    let signature = git2::Signature::now("Test User", "test@example.com").unwrap();
+    let object = fixture.source.find_object(tagged, None).unwrap();
+    fixture
+        .source
+        .tag("v9", &object, &signature, "release", false)
+        .unwrap();
+    fixture
+        .source
+        .find_remote("origin")
+        .unwrap()
+        .push(&["refs/tags/v9:refs/tags/v9"], None)
+        .unwrap();
+    std::fs::remove_file(fixture.local.path().join("FETCH_HEAD")).ok();
+
+    fetch_remote(
+        &fixture.local,
+        "origin",
+        None,
+        "fetch-1".to_string(),
+        &mut NoCredentials,
+        &mut VecReporter::default(),
+        &|| false,
+    )
+    .unwrap();
+
+    let tag = fixture
+        .local
+        .find_reference("refs/tags/v9")
+        .unwrap()
+        .peel_to_commit()
+        .unwrap();
+    assert_eq!(tag.id(), tagged);
+    let fetch_head = String::from_utf8(fetch_head(&fixture).expect("FETCH_HEAD")).unwrap();
+    assert!(
+        fetch_head.starts_with(&format!("{tagged}\t\tbranch 'main' of ")),
+        "{fetch_head}"
+    );
+}
+
+#[test]
+fn fetch_with_unspecified_prune_follows_the_remotes_prune_config_first() {
+    let fixture = local_and_bare_remote();
+    stale_tracking_ref(&fixture, "gone");
+    let mut config = fixture.local.config().unwrap();
+    config.set_bool("fetch.prune", false).unwrap();
+    config.set_bool("remote.origin.prune", true).unwrap();
+
+    fetch_remote(
+        &fixture.local,
+        "origin",
+        None,
+        "f-1".into(),
+        &mut NoCredentials,
+        &mut VecReporter::default(),
+        &|| false,
+    )
+    .unwrap();
+
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/origin/gone")
+        .is_err());
+}
+
 #[test]
 fn a_push_whose_connection_is_refused_is_unreachable() {
     let fixture = local_and_bare_remote();
