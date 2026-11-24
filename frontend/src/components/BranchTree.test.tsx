@@ -134,6 +134,34 @@ describe("BranchTree — local branches", () => {
     expect(screen.queryByRole("dialog", { name: "Delete feat/foo" })).not.toBeInTheDocument();
   });
 
+  // #1067: counting can take a while in a repository with many refs. A second Delete meanwhile
+  // would start a second count and a second delete that fails with "branch not found".
+  it("disables Delete on a branch while its commits are being counted, and counts once (#1067)", async () => {
+    let finishCount: (count: number) => void = () => {};
+    const onCountCommitsOnlyOnBranch = vi.fn(
+      () =>
+        new Promise<number>((resolve) => {
+          finishCount = resolve;
+        }),
+    );
+    const { props } = renderTree({ onCountCommitsOnlyOnBranch });
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
+    const again = screen.getByRole("menuitem", { name: "Delete" });
+    expect(again).toBeDisabled();
+    expect(again).toHaveAttribute("title", "Counting the commits only this branch has…");
+    fireEvent.click(again);
+    expect(onCountCommitsOnlyOnBranch).toHaveBeenCalledOnce();
+
+    await act(async () => finishCount(0));
+    await waitFor(() => expect(props.onDeleteBranch).toHaveBeenCalledWith("feat/foo", true));
+    expect(props.onDeleteBranch).toHaveBeenCalledOnce();
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeEnabled();
+  });
+
   it("Rename… opens the Rename branch dialog; Rename calls onRenameBranch (#1002)", async () => {
     const { props } = renderTree();
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
