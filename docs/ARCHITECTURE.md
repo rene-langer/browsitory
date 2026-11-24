@@ -2206,6 +2206,40 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   the image preview, staging, which libgit2 does by path) read the file through either name. A
   hardlink is indistinguishable from a regular file by path; it needs the user (or a local
   process) to have created it on the same filesystem.
+- External filter drivers (#1063, `external_filter`): libgit2 runs only its built-in filters
+  (CRLF/eol, `ident`), so a path whose `filter` attribute names a driver git would run
+  (git-crypt, Git LFS) is refused with `ExternalFilter { path, driver }` by every operation
+  that would pass it through a filter, before it writes anything: git-crypt's plaintext would
+  be committed, LFS pointers written over the real files. A driver counts when its
+  `filter.<name>.clean`, `.smudge` or `.process` is non-empty (the last value, all config
+  levels, so a global `git lfs install` too) or `.required` is true (git fails without a
+  command; an unreadable boolean counts as true). The attribute comes from the work tree's
+  `.gitattributes`, then the index's (`FILE_THEN_INDEX`); a link is never filtered, and a
+  `filter=<name>` without driver config is ignored, as git ignores it. Without any driver
+  configured (one config read) nothing else is looked up. Where:
+  - checkouts: `hardlink::install`'s notify callback (so every checkout listed under
+    "Hardlinks") looks up each file libgit2 plans to write and stops the checkout at the first
+    filtered one, before anything is written. libgit2 then returns a positive code, which git2
+    reports as `Ok`, so `install` returns a `FilterGuard` and each call site checks it right
+    after the libgit2 call, before it moves HEAD or writes anything else. The attribute lookup
+    uses a repository handle of its own (`stash_apply` borrows the caller's mutably).
+  - libgit2's compound operations go on after a refused checkout (`git_merge` writes the index
+    and `MERGE_HEAD`, `git_cherrypick` its state files, `git_stash_apply` runs its next
+    checkout and writes the index), so their files are checked before they start:
+    `refuse_merged` (the merged index against HEAD's tree: merge, squash, cherry-pick, revert,
+    rebase step) and `refuse_filtered_stash` (the stash's work-tree and index trees against
+    its base, its untracked files). Their guards stay as a backstop.
+  - checked by path first: Stage (a file, not a link; an untracked folder's files), hunk and
+    line staging and discarding, Mark resolved, taking a side, resolving an add/delete
+    conflict, saving a hunk resolution, Stash (the changed paths, or the chosen ones; also
+    covers `stash_save2`'s reset, which takes no callbacks), an abort's reset of the touched
+    paths, and patch apply and preview (the patch's added or changed files).
+  Not refused: status and diffs (a git-crypt file can show as modified: raw bytes against the
+  encrypted blob), side files and the VSCode content provider (see "External tools"), a fresh
+  clone and a new worktree (nothing of the user's to overwrite; files the driver would smudge
+  stay as stored, as with git without the driver installed), Undo's snapshot (raw bytes,
+  internal), unstaging. A checkout that itself brings in the `.gitattributes` adding a filter
+  isn't refused for the files that become covered (new files, nothing overwritten).
 - Folder/link pairs in the index (#157): `stage_file` of `d/f` below a symlinked `d` removes
   `d/f`'s stage-0 entry (stages its deletion; git sees no file there) and reads nothing through
   the link; conflict entries there are still refused (`BeyondSymlink`), as are hunk and line
