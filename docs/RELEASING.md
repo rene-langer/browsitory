@@ -17,7 +17,9 @@ Every installer carries `THIRD_PARTY_NOTICES.md` (a Tauri resource), and
 needs no extra step for it (see `docs/LICENSE_COMPLIANCE.md`). The `verify` job runs first on
 the tagged commit: `cargo test --workspace`, the frontend test suite,
 `scripts/generate-third-party-notices.py --check`, so a stale notices file stops the release,
-and `scripts/fold-changelog.py --check`, so unfolded changelog fragments stop it too.
+and `scripts/fold-changelog.py --check`, so unfolded changelog fragments stop it too. Its
+`cargo test` restores the Rust cache `ci.yml`'s `rust` job saved on main (#1061) and never saves
+one.
 
 ### Linux build image (glibc floor)
 
