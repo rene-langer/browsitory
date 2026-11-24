@@ -110,16 +110,36 @@ pub enum UndoError {
 }
 
 pub fn capture(repo: &Repository, scope: SnapshotScope) -> Result<RepoSnapshot, UndoError> {
+    match scope {
+        SnapshotScope::RefsAndIndex => capture_with(repo, None),
+        SnapshotScope::Full => capture_with(repo, Some(Some(SNAPSHOT_FILE_LIMIT))),
+        SnapshotScope::FullUncapped => capture_with(repo, Some(None)),
+    }
+}
+
+/// [`capture`] with `SnapshotScope::Full` and a per-file `limit` other than
+/// `SNAPSHOT_FILE_LIMIT`: a test seam, so tests need no 50 MB files.
+#[doc(hidden)]
+pub fn capture_limited(repo: &Repository, limit: u64) -> Result<RepoSnapshot, UndoError> {
+    capture_with(repo, Some(Some(limit)))
+}
+
+/// `worktree`: `None` for refs and index only, else the work tree too, with its per-file limit.
+fn capture_with(
+    repo: &Repository,
+    worktree: Option<Option<u64>>,
+) -> Result<RepoSnapshot, UndoError> {
     let mut index = repo.index()?;
     index.read(false)?;
     if index.has_conflicts() {
         return Err(UndoError::ConflictedIndex);
     }
     let index_tree = index.write_tree()?.to_string();
-    let worktree_tree = match scope {
-        SnapshotScope::RefsAndIndex => None,
-        SnapshotScope::Full | SnapshotScope::FullUncapped => {
-            Some(build_worktree_tree(repo)?.to_string())
+    let (worktree_tree, skipped) = match worktree {
+        None => (None, BTreeMap::new()),
+        Some(limit) => {
+            let (tree, skipped) = build_worktree_tree(repo, limit)?;
+            (Some(tree.to_string()), skipped)
         }
     };
     Ok(RepoSnapshot {
@@ -127,16 +147,8 @@ pub fn capture(repo: &Repository, scope: SnapshotScope) -> Result<RepoSnapshot, 
         refs: local_refs(repo)?,
         index_tree,
         worktree_tree,
-        skipped: BTreeMap::new(),
+        skipped,
     })
-}
-
-/// [`capture`] with `SnapshotScope::Full` and a per-file `limit` other than
-/// `SNAPSHOT_FILE_LIMIT`: a test seam, so tests need no 50 MB files.
-#[doc(hidden)]
-pub fn capture_limited(repo: &Repository, limit: u64) -> Result<RepoSnapshot, UndoError> {
-    let _ = limit;
-    capture(repo, SnapshotScope::Full)
 }
 
 fn head_state(repo: &Repository) -> Result<HeadState, UndoError> {
@@ -178,10 +190,18 @@ pub(crate) fn worktree_config(repo: &Repository) -> Result<WorktreeConfig, UndoE
     })
 }
 
-fn build_worktree_tree(repo: &Repository) -> Result<Oid, UndoError> {
+/// The work tree as a tree, and the files over `limit` it leaves out (#1065). Each stored file
+/// streams from its opened handle into the object database (raw bytes, no filters), so a big
+/// one is never held in memory; one over `limit` is not read at all.
+fn build_worktree_tree(
+    repo: &Repository,
+    limit: Option<u64>,
+) -> Result<(Oid, BTreeMap<String, SkippedFile>), UndoError> {
+    use crate::worktree_guard::Opened;
     let workdir = repo.workdir().ok_or(UndoError::Bare)?;
     let config = worktree_config(repo)?;
     let mut overlay = Index::new()?;
+    let mut skipped = BTreeMap::new();
     if let Ok(head) = repo.head() {
         overlay.read_tree(&head.peel_to_tree()?)?;
     }
@@ -201,17 +221,65 @@ fn build_worktree_tree(repo: &Repository) -> Result<Oid, UndoError> {
             continue;
         }
         let previous_mode = overlay.get_path(Path::new(&path), 0).map(|e| e.mode);
-        match read_worktree_file(workdir, &path, &config, previous_mode)? {
-            Some((bytes, mode)) => {
-                let id = repo.blob(&bytes)?;
-                overlay.add(&index_entry(&path, id, mode))?;
+        match crate::worktree_guard::open_leaf_beneath(workdir, &path)? {
+            Some(Opened::Link { target, .. }) => {
+                let id = repo.blob(&target)?;
+                overlay.add(&index_entry(&path, id, MODE_LINK))?;
+            }
+            Some(Opened::File {
+                mut file,
+                executable,
+                stat,
+            }) => {
+                let mode = file_mode(&config, executable, previous_mode);
+                if limit.is_some_and(|limit| stat.size > limit) {
+                    skipped.insert(path.clone(), SkippedFile::of(&stat, mode));
+                    let _ = overlay.remove_path(Path::new(&path));
+                    continue;
+                }
+                let mut writer = repo.blob_writer(None)?;
+                io::copy(&mut file, &mut writer)?;
+                overlay.add(&index_entry(&path, writer.commit()?, mode))?;
             }
             None => {
                 let _ = overlay.remove_path(Path::new(&path));
             }
         }
     }
-    Ok(overlay.write_tree_to(repo)?)
+    Ok((overlay.write_tree_to(repo)?, skipped))
+}
+
+impl SkippedFile {
+    fn of(stat: &crate::worktree_guard::FileStat, mode: u32) -> Self {
+        SkippedFile {
+            size: stat.size,
+            mtime: stat.mtime,
+            ino: stat.ino,
+            mode,
+        }
+    }
+}
+
+/// The work-tree file `rel` as a [`SkippedFile`] would identify it, `None` when it is missing or
+/// not a regular file; its mode as [`file_mode`] gives it with `previous_mode`. Nothing is read.
+fn identify_worktree_file(
+    workdir: &Path,
+    rel: &str,
+    config: &WorktreeConfig,
+    previous_mode: Option<u32>,
+) -> io::Result<Option<SkippedFile>> {
+    use crate::worktree_guard::Opened;
+    Ok(
+        match crate::worktree_guard::open_leaf_beneath(workdir, rel)? {
+            Some(Opened::File {
+                executable, stat, ..
+            }) => Some(SkippedFile::of(
+                &stat,
+                file_mode(config, executable, previous_mode),
+            )),
+            _ => None,
+        },
+    )
 }
 
 /// Raw bytes (no clean filters) and git mode of the worktree path `rel`; `None` when absent, a
@@ -311,7 +379,7 @@ pub fn restore(
         .collect();
     let index_differs = expected.index_tree != target.index_tree;
     let worktree = match (&expected.worktree_tree, &target.worktree_tree) {
-        (Some(from), Some(to)) if from != to => {
+        (Some(from), Some(to)) if from != to || expected.skipped != target.skipped => {
             Some(WorktreeChange::new(repo, expected, target, from, to)?)
         }
         _ => None,
@@ -464,6 +532,13 @@ struct WorktreeChange {
     /// Target files equal to their index entry once the index is written: checked out from the
     /// index (so smudge filters and `core.autocrlf` apply) rather than written as raw bytes.
     from_index: BTreeSet<String>,
+    /// Files the target didn't store for their size (#1065), unless the expected side skipped
+    /// them alike (the command didn't touch them): they must already be as the target saw them,
+    /// else `NotSaved`. Never written.
+    keep: Vec<(String, SkippedFile)>,
+    /// Files only the expected side didn't store for their size (in `paths`): checked by their
+    /// stat data, not their contents, then written or removed like any other path.
+    from_skipped: BTreeMap<String, SkippedFile>,
 }
 
 impl WorktreeChange {
@@ -481,14 +556,27 @@ impl WorktreeChange {
             .collect();
         let from = flatten_tree(repo, from)?;
         let to = flatten_tree(repo, to)?;
-        let paths: Vec<String> = from
+        let mut paths: BTreeSet<String> = from
             .keys()
             .chain(to.keys())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
             .filter(|path| from.get(*path) != to.get(*path))
             .cloned()
             .collect();
+        let mut keep = Vec::new();
+        for (path, file) in &target.skipped {
+            if expected.skipped.get(path) != Some(file) {
+                keep.push((path.clone(), *file));
+            }
+            paths.remove(path);
+        }
+        let from_skipped: BTreeMap<String, SkippedFile> = expected
+            .skipped
+            .iter()
+            .filter(|(path, _)| !target.skipped.contains_key(*path))
+            .map(|(path, file)| (path.clone(), *file))
+            .collect();
+        paths.extend(from_skipped.keys().cloned());
+        let paths: Vec<String> = paths.into_iter().collect();
         // Ignore files stay raw writes: apply needs them on disk before the index is written.
         // When the index isn't rewritten, the entry checked out is the current one, which may
         // have been restaged since; only matching entries qualify.
@@ -535,6 +623,8 @@ impl WorktreeChange {
             paths,
             tracked,
             from_index,
+            keep,
+            from_skipped,
         })
     }
 
@@ -543,10 +633,25 @@ impl WorktreeChange {
         let config = worktree_config(repo)?;
         let mut index = repo.index()?;
         index.read(false)?;
+        for (path, file) in &self.keep {
+            if identify_worktree_file(workdir, path, &config, Some(file.mode))? != Some(*file) {
+                return Err(UndoError::NotSaved(path.clone()));
+            }
+        }
         for path in &self.paths {
+            let full = workdir.join(path);
+            if let Some(file) = self.from_skipped.get(path) {
+                // Its contents were never stored: as the snapshot saw it, judged by its stat
+                // data, without reading it.
+                if identify_worktree_file(workdir, path, &config, Some(file.mode))? != Some(*file)
+                    && !self.already_restored(workdir, path, &config)?
+                {
+                    return Err(UndoError::RepositoryChanged);
+                }
+                continue;
+            }
             let expected = self.from.get(path).copied();
             let previous_mode = expected.map(|(_, mode)| mode);
-            let full = workdir.join(path);
             let disk = read_worktree_file(workdir, path, &config, previous_mode)?;
             let current = disk
                 .as_ref()

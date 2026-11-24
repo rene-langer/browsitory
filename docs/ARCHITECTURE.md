@@ -930,6 +930,21 @@ certificate.
   modified/deleted/untracked file overlaid, raw bytes, no filters). Undo restores `before` over
   `after`, redo the reverse, touching only components that differ and only after verifying each
   still equals the expected side (strict: any drift refuses).
+- **Size limit** (#1065): a `Full` snapshot stores no file over `SNAPSHOT_FILE_LIMIT` (50 MiB);
+  it leaves the file out of the worktree tree and notes its stat data (size, mtime, inode, git
+  mode) in `RepoSnapshot::skipped`, persisted in `undo.json` as an optional `skipped` map. Stored
+  files stream from the handle `worktree_guard::open_leaf_beneath` opened into a `blob_writer`,
+  so none is held in memory; a skipped one is not read at all. `restore` treats a file skipped
+  alike on both sides as unchanged (never checked or written, like any unchanged file); one
+  only the target skipped must already match its noted stat data, else `UndoError::NotSaved`
+  (`UndoOutcome::FileNotSaved`, nothing written); one only the expected side skipped is checked
+  by its stat data instead of its contents, then written or removed as usual. The commands that
+  destroy work-tree content with no other way back (policy `busy=Discard`: discards, restoring
+  a file version, applying a commit's change or a patch, a hard reset) snapshot with
+  `FullUncapped`, which stores every file. Every other work-tree command leaves dirty and
+  untracked files as they are (git refuses to overwrite them), so for those a skipped file only
+  ever needs to stay put. A build that predates `skipped` ignores it: such a file is in neither
+  tree, so that build leaves it alone too.
 - **Recording** (`repo-service::worker::undo`): the worker snapshots before/after each
   recordable command; failed/no-op commands record nothing; operations that stop on conflicts
   stay pending until completed (one entry) or aborted (none).
@@ -1030,9 +1045,11 @@ certificate.
   worktree), an anchor commit visible in `git log --all`, plus
   `refs/browsitory/undo-keep/main/<n>` / `refs/browsitory/undo-keep/wt/<name>/<n>` refs for
   non-commit objects such as tag objects.
-- **Known cost**: commands that touch the working tree hash every dirty/untracked file into the
-  object database, so very large untracked files make those commands slower and grow `.git`
-  until gc after the entry ages out.
+- **Known cost**: commands that touch the working tree hash every dirty/untracked file up to
+  the size limit into the object database (before and after the command), so many or large
+  untracked files make those commands slower and grow `.git` until gc after the entry ages out.
+  Discards and a hard reset store files over the limit too. An untracked folder of many small
+  files still costs a read of each (no count limit).
 
 ## Commit signing
 

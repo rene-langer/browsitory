@@ -587,6 +587,12 @@ impl UndoRecorder {
                     message: held.to_string(),
                 })
             }
+            Err(error @ UndoError::NotSaved(_)) => {
+                return Ok(UndoOutcome::FileNotSaved {
+                    label,
+                    message: error.to_string(),
+                })
+            }
             Err(UndoError::OperationInProgress) => return Ok(UndoOutcome::OperationInProgress),
             Err(error) => return Err(ErrorDto::from_error(error)),
         }

@@ -1746,7 +1746,7 @@ export interface RepoClient {
   setUpdateSettings(settings: UpdateSettings): Promise<void>;
   /** Labels of the next undo/redo step for this repo; `null` when the stack is empty. */
   getUndoState(repoPath: string): Promise<UndoState>;
-  /** Refusals (`Nothing`, `RepositoryChanged`, `BranchHeld`, `OperationInProgress`) resolve; only real failures reject. */
+  /** Refusals (`Nothing`, `RepositoryChanged`, `BranchHeld`, `FileNotSaved`, `OperationInProgress`) resolve; only real failures reject. */
   undo(repoPath: string): Promise<UndoOutcome>;
   redo(repoPath: string): Promise<UndoOutcome>;
   /** `mainline` (1-based parent) is required for a merge commit and refused for any other. */

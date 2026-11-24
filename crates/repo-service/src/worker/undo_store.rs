@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use git2::{ObjectType, Oid, Repository, Signature};
-use git_core::undo::{HeadState, RepoSnapshot};
+use git_core::undo::{HeadState, RepoSnapshot, SkippedFile};
 use serde::{Deserialize, Serialize};
 
 pub(super) const UNDO_LIMIT: usize = 50;
@@ -51,6 +51,44 @@ struct StoredSnapshot {
     refs: BTreeMap<String, String>,
     index_tree: String,
     worktree_tree: Option<String>,
+    /// The files the snapshot didn't store for their size (#1065); absent when there are none,
+    /// so such a file reads as before. A build that predates it ignores it: such a file is then
+    /// simply not in either tree, and stays as it is.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    skipped: BTreeMap<String, StoredSkipped>,
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredSkipped {
+    size: u64,
+    mtime_secs: i64,
+    mtime_nanos: u32,
+    ino: u64,
+    mode: u32,
+}
+
+impl From<&SkippedFile> for StoredSkipped {
+    fn from(file: &SkippedFile) -> Self {
+        Self {
+            size: file.size,
+            mtime_secs: file.mtime.0,
+            mtime_nanos: file.mtime.1,
+            ino: file.ino,
+            mode: file.mode,
+        }
+    }
+}
+
+impl From<StoredSkipped> for SkippedFile {
+    fn from(stored: StoredSkipped) -> Self {
+        Self {
+            size: stored.size,
+            mtime: (stored.mtime_secs, stored.mtime_nanos),
+            ino: stored.ino,
+            mode: stored.mode,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -88,6 +126,11 @@ impl From<&RepoSnapshot> for StoredSnapshot {
             refs: snapshot.refs.clone(),
             index_tree: snapshot.index_tree.clone(),
             worktree_tree: snapshot.worktree_tree.clone(),
+            skipped: snapshot
+                .skipped
+                .iter()
+                .map(|(path, file)| (path.clone(), file.into()))
+                .collect(),
         }
     }
 }
@@ -102,7 +145,11 @@ impl From<StoredSnapshot> for RepoSnapshot {
             refs: stored.refs,
             index_tree: stored.index_tree,
             worktree_tree: stored.worktree_tree,
-            skipped: BTreeMap::new(),
+            skipped: stored
+                .skipped
+                .into_iter()
+                .map(|(path, file)| (path, file.into()))
+                .collect(),
         }
     }
 }
