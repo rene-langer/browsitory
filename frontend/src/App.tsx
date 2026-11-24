@@ -16,6 +16,7 @@ import { requestWorkspace } from "./lib/workspaceRequests";
 import { InlineError } from "./components/primitives/InlineError";
 import { OpenErrorBanner } from "./components/OpenErrorBanner";
 import { describeOpenFailure, type OpenFailure } from "./lib/openFailure";
+import { forgetRepoWebStorage } from "./lib/repoWebStorage";
 import { ConfirmDialog } from "./components/primitives/ConfirmDialog";
 import { CloneDialog } from "./components/CloneDialog";
 import { Overlay } from "./components/primitives/Overlay";
@@ -598,7 +599,10 @@ function AppContent({
                 onOpen={(path) => void openRepoTab(path)}
                 onRemoveRecent={(path) =>
                   client.removeRecentRepo(path).then(
-                    () => setOpenError(null),
+                    () => {
+                      forgetRepoWebStorage(path);
+                      setOpenError(null);
+                    },
                     (error: unknown) =>
                       setOpenError({ kind: "failed", path: "", message: error instanceof Error ? error.message : String(error) }),
                   )

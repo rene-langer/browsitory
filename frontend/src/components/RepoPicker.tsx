@@ -4,6 +4,7 @@ import type { RepoClient, Workspace } from "../ipc/RepoClient";
 import { shortcutLabel } from "../lib/keybindings";
 import { useKeymap } from "../lib/keymap";
 import { repoNameOf } from "../lib/repoName";
+import { forgetRepoWebStorage, forgetRepoWebStorageExcept } from "../lib/repoWebStorage";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
@@ -80,10 +81,21 @@ export function RepoPicker({
     [client],
   );
 
+  // A repository that dropped off the recent list (past its 10, #1096) loses its web storage,
+  // unless it is open in a tab.
+  const openPathsRef = useRef(openPaths);
+  useEffect(() => {
+    openPathsRef.current = openPaths;
+  }, [openPaths]);
+  const showRecent = useCallback((paths: string[]) => {
+    setRecentRepos(paths);
+    forgetRepoWebStorageExcept([...paths, ...(openPathsRef.current ?? [])]);
+  }, []);
+
   useEffect(() => {
     client
       .listRecentRepos()
-      .then(setRecentRepos)
+      .then(showRecent)
       .catch((err: unknown) => setError(String(err)))
       .finally(() => setLoaded(true));
     void loadPinned();
@@ -92,11 +104,14 @@ export function RepoPicker({
       (paths) => setMissingRepos(new Set(paths)),
       () => {},
     );
-  }, [client, loadPinned]);
+  }, [client, loadPinned, showRecent]);
 
   const removeRecentRepo = (path: string) => {
     client.removeRecentRepo(path).then(
-      () => setRecentRepos((prev) => prev.filter((recent) => recent !== path)),
+      () => {
+        forgetRepoWebStorage(path);
+        setRecentRepos((prev) => prev.filter((recent) => recent !== path));
+      },
       (err: unknown) => setError(String(err)),
     );
   };
@@ -105,7 +120,7 @@ export function RepoPicker({
   // again rather than reordered here.
   const setPinned = (path: string, pinned: boolean) => {
     (pinned ? client.pinRecentRepo(path) : client.unpinRecentRepo(path))
-      .then(() => Promise.all([client.listRecentRepos().then(setRecentRepos), loadPinned()]))
+      .then(() => Promise.all([client.listRecentRepos().then(showRecent), loadPinned()]))
       .catch((err: unknown) => setError(String(err)));
   };
 
@@ -117,6 +132,7 @@ export function RepoPicker({
       .then(async (picked) => {
         if (picked === null) return;
         await client.removeRecentRepo(path);
+        forgetRepoWebStorage(path);
         if (pinnedRepos.has(path)) await client.pinRecentRepo(picked);
         setRecentRepos((prev) => prev.filter((recent) => recent !== path));
         onOpenRepo(picked);

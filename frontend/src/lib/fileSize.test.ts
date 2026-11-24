@@ -1,16 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { formatBytes, formatSize } from "./fileSize";
+import { formatBytes } from "./fileSize";
 
-describe("formatSize", () => {
-  it("formats bytes, KB and MB", () => {
-    expect(formatSize(1)).toBe("1 byte");
-    expect(formatSize(512)).toBe("512 bytes");
-    expect(formatSize(1536)).toBe("1.5 KB");
-    expect(formatSize(2 * 1024 * 1024)).toBe("2 MB");
-  });
-});
-
-// The image diff and the transfer progress share this one (#1060).
+// Every size the app shows uses this one format (#1060).
 describe("formatBytes", () => {
   it("uses base 1024 with one decimal above bytes", () => {
     expect(formatBytes(0)).toBe("0 B");

@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RepoClient } from "../ipc/RepoClient";
 import { RepoPicker } from "./RepoPicker";
 import { fakeRepoClient } from "../test/fakeRepoClient";
+import { NOTHING, SOMETHING, rememberRepo, remembered } from "../test/rememberRepo";
 
 function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
   return fakeRepoClient(overrides, "empty");
@@ -273,6 +274,106 @@ describe("RepoPicker recent repositories (#690)", () => {
     render(<RepoPicker client={fakeClient()} onOpenRepo={vi.fn()} {...workspaceProps()} />);
     await screen.findByText("No recent repositories");
     expect(screen.queryByRole("searchbox")).toBeNull();
+  });
+});
+
+describe("RepoPicker web storage of repositories that leave the recent list (#1096)", () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
+
+  it("forgets a repository's web storage when it is removed from the recent list", async () => {
+    rememberRepo("/repo/a");
+    rememberRepo("/repo/b");
+    const client = fakeClient({ listRecentRepos: async () => ["/repo/a", "/repo/b"] });
+    render(<RepoPicker client={client} onOpenRepo={vi.fn()} {...workspaceProps()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Remove a from recent repositories" }));
+
+    await waitFor(() => expect(remembered("/repo/a")).toEqual(NOTHING));
+    expect(remembered("/repo/b")).toEqual(SOMETHING);
+  });
+
+  it("keeps a repository's web storage when removing it fails", async () => {
+    rememberRepo("/repo/a");
+    const client = fakeClient({
+      listRecentRepos: async () => ["/repo/a"],
+      removeRecentRepo: async () => {
+        throw new Error("config read-only");
+      },
+    });
+    render(<RepoPicker client={client} onOpenRepo={vi.fn()} {...workspaceProps()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Remove a from recent repositories" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("config read-only");
+    expect(remembered("/repo/a")).toEqual(SOMETHING);
+  });
+
+  it("forgets the web storage of the old place when Locate… replaces an entry", async () => {
+    rememberRepo("/repo/gone");
+    const onOpenRepo = vi.fn();
+    const client = fakeClient({
+      listRecentRepos: async () => ["/repo/gone"],
+      listMissingRecentRepos: async () => ["/repo/gone"],
+      pickRepoFolder: async () => "/moved/gone",
+    });
+    render(<RepoPicker client={client} onOpenRepo={onOpenRepo} {...workspaceProps()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Locate gone…" }));
+
+    await waitFor(() => expect(onOpenRepo).toHaveBeenCalledWith("/moved/gone"));
+    expect(remembered("/repo/gone")).toEqual(NOTHING);
+  });
+
+  it("forgets the web storage of repositories that dropped off the recent list, except open ones", async () => {
+    rememberRepo("/repo/a");
+    rememberRepo("/repo/dropped");
+    rememberRepo("/repo/open");
+    localStorage.setItem("sidebar-width", "300");
+    const client = fakeClient({ listRecentRepos: async () => ["/repo/a"] });
+    render(
+      <RepoPicker client={client} onOpenRepo={vi.fn()} {...workspaceProps()} openPaths={new Set(["/repo/open"])} />,
+    );
+
+    await waitFor(() => expect(remembered("/repo/dropped")).toEqual(NOTHING));
+    expect(remembered("/repo/a")).toEqual(SOMETHING);
+    expect(remembered("/repo/open")).toEqual(SOMETHING);
+    expect(localStorage.getItem("sidebar-width")).toBe("300");
+  });
+
+  it("forgets the web storage of a repository that drops off when another is unpinned", async () => {
+    rememberRepo("/repo/a");
+    rememberRepo("/repo/p");
+    // The recent list is full: unpinning p puts it on top and pushes a off the end.
+    let recent = ["/repo/p", "/repo/a"];
+    let pinned = ["/repo/p"];
+    const client = fakeClient({
+      listRecentRepos: async () => recent,
+      listPinnedRepos: async () => pinned,
+      unpinRecentRepo: async () => {
+        recent = ["/repo/p"];
+        pinned = [];
+      },
+    });
+    render(<RepoPicker client={client} onOpenRepo={vi.fn()} {...workspaceProps()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Unpin p" }));
+
+    await waitFor(() => expect(remembered("/repo/a")).toEqual(NOTHING));
+    expect(remembered("/repo/p")).toEqual(SOMETHING);
+  });
+
+  it("keeps all web storage when the recent list can't be read", async () => {
+    rememberRepo("/repo/a");
+    const client = fakeClient({
+      listRecentRepos: async () => {
+        throw new Error("config unreadable");
+      },
+    });
+    render(<RepoPicker client={client} onOpenRepo={vi.fn()} {...workspaceProps()} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("config unreadable");
+    expect(remembered("/repo/a")).toEqual(SOMETHING);
   });
 });
 

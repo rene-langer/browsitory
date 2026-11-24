@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { RepoError, type HeadInfo, type RepoClient, type TransferProgress } from "./ipc/RepoClient";
 import { EMPTY_RESULTS, fakeRepoClient, graphPage } from "./test/fakeRepoClient";
+import { NOTHING, SOMETHING, rememberRepo, remembered } from "./test/rememberRepo";
 
 // Errors, banners and toasts (#973, #984, #996, #998, #1000). Whole-App renders, like
 // App.test.tsx (#217's slow-machine budget).
@@ -436,6 +437,46 @@ describe("opening a recent repository whose folder is gone (#998)", () => {
     fireEvent.click(within(banner).getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(removeRecentRepo).toHaveBeenCalledWith("/gone"));
     await waitFor(() => expect(banners()).toEqual([]));
+  });
+
+  describe("its web storage (#1096)", () => {
+    beforeEach(() => localStorage.clear());
+    afterEach(() => localStorage.clear());
+
+    it("is forgotten once it is removed, and another recent repository's is kept", async () => {
+      rememberRepo("/gone");
+      rememberRepo("/other");
+      const openRepo = vi.fn(async () => {
+        throw new RepoError(
+          "Other",
+          "failed to open repository: failed to resolve path '/gone': No such file or directory; class=Os (2); code=NotFound (-3)",
+        );
+      });
+      render(
+        <App
+          client={startPageClient("/gone", {
+            openRepo,
+            listRecentRepos: async () => ["/gone", "/other"],
+            listMissingRecentRepos: async () => ["/gone"],
+            scanReposInRoot: async () => {
+              throw new Error("No such file or directory");
+            },
+          })}
+        />,
+      );
+      fireEvent.click(await screen.findByRole("button", { name: "Open repository…" }));
+      const banner = await waitFor(() => {
+        const [found] = banners();
+        expect(found).toHaveTextContent("Remove it from recent repositories?");
+        return found!;
+      });
+      expect(remembered("/gone")).toEqual(SOMETHING);
+
+      fireEvent.click(within(banner).getByRole("button", { name: "Remove" }));
+
+      await waitFor(() => expect(remembered("/gone")).toEqual(NOTHING));
+      expect(remembered("/other")).toEqual(SOMETHING);
+    });
   });
 });
 
