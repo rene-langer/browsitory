@@ -31,10 +31,14 @@ export interface DiffLine {
 export type DiffAlgorithm = "Default" | "Patience" | "Minimal";
 export const DIFF_ALGORITHM_VALUES: readonly DiffAlgorithm[] = ["Default", "Patience", "Minimal"];
 
-export interface DiffOptions {
+/** The view settings every diff request carries; the saved `DiffSettings` hold them too. */
+export interface DiffViewOptions {
   ignoreWhitespace: boolean;
   contextLines: number;
   algorithm: DiffAlgorithm;
+}
+
+export interface DiffOptions extends DiffViewOptions {
   /**
    * "Load diff anyway" (#1066): diff the file whatever its size. Absent, a file over the
    * backend's limit rejects with kind `DiffTooLarge`.
@@ -56,7 +60,7 @@ export interface HunkOptions {
 export type WordWrap = "Auto" | "On" | "Off";
 export const WORD_WRAP_VALUES: readonly WordWrap[] = ["Auto", "On", "Off"];
 
-export interface DiffSettings extends DiffOptions {
+export interface DiffSettings extends DiffViewOptions {
   syntaxHighlight: boolean;
   wordWrap: WordWrap;
   /** Faint markers for spaces, tabs and carriage returns in diff lines (#616); display only. */
