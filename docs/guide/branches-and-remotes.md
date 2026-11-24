@@ -168,8 +168,14 @@ again."; **Details** shows the cause in the operation log.
     still connecting (a server that doesn't answer, a VPN that is down), Cancel stops it at once
     and you can go on working: nothing has been fetched or sent, and the repository is
     unchanged. Once data is flowing, a fetch stops at its next progress step; a pull cancelled
-    during its fetch doesn't merge. A push can be cancelled until it starts sending; after that
+    during its fetch doesn't merge. A fetch or pull that stopped receiving (the Wi-Fi changed,
+    the VPN dropped, the laptop slept) stops within about two seconds of Cancel, without
+    updating any remote branch. A push can be cancelled until it starts sending; after that
     it finishes and reports how it went, because the remote may already have taken it.
+
+    A fetch, pull, push or clone that receives nothing for two minutes fails on its own, even
+    without Cancel. On Windows this doesn't apply to HTTPS remotes: there, Cancel stops a
+    stalled fetch or pull, and a stalled push waits until Windows gives up on the connection.
 
 ## Fetching automatically
 
