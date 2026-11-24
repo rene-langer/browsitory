@@ -206,13 +206,6 @@ subscriptions, `logFrontendError`). What a transport does around a call (logging
 the desktop's wait for its event listeners before a command that emits transfer or hook events)
 lives in its call function, not in a per-method override. A new operation is one line in
 `createRepoClient.ts`.
-The desktop webview's capability (`crates/tauri-app/capabilities/default.json`) grants only the
-plugin permissions the frontend calls from JavaScript: `core:default`, `updater:default`,
-`process:allow-restart` and `log:default` (#1053). Folder pickers, save dialogs, opening a URL
-or a file and revealing a path are Tauri commands that call the dialog and opener plugins from
-Rust, which needs no permission; granting `dialog:default` or `opener:default` would let any
-script in the webview open URLs and reveal paths around `open_external_url`'s checks.
-`crates/tauri-app/tests/capabilities.rs` pins the list.
 `frontend/src/ipc/transportStatus.ts` is a transport-neutral lifecycle seam that lets `App`
 reuse its global `InlineError` path without importing VSCode APIs. Tauri registers no lifecycle
 status listener and retains its existing updater/error behavior.
@@ -221,6 +214,14 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
 `no-restricted-imports` override banning `@tauri-apps/*` imports from
 `frontend/src/components/**` and `frontend/src/state/**`, so a violation fails `pnpm lint`
 (and CI).
+
+The desktop webview's capability (`crates/tauri-app/capabilities/default.json`) grants only the
+plugin permissions the frontend calls from JavaScript: `core:default`, `updater:default`,
+`process:allow-restart` and `log:default` (#1053). Folder pickers, save dialogs, opening a URL
+or a file and revealing a path are Tauri commands that call the dialog and opener plugins from
+Rust, which needs no permission; granting `dialog:default` or `opener:default` would let any
+script in the webview open URLs and reveal paths around `open_external_url`'s checks.
+`crates/tauri-app/tests/capabilities.rs` pins the list.
 
 ## Frontend state
 
@@ -2656,7 +2657,10 @@ Nothing secret is kept (`oplog::redact`): every target, parameter, message, prog
 output loses the user information of each URL (`https://***@host/...`) and the value of each
 `Authorization:` header line, and commands that carry a token (saving an HTTPS credential or a
 forge token) log no token at all. Each entry keeps at most `MAX_RUNS` (32) program runs and the
-last `MAX_RUN_OUTPUT` (16 KiB) of each run's output.
+last `MAX_RUN_OUTPUT` (16 KiB) of each run's output. The frontend applies the same rule
+(`frontend/src/lib/redact.ts`, #1056) to every error either transport's `logFrontendError`
+writes (the desktop log file, VSCode's output channel) and to what an error banner's Copy
+details copies.
 
 `WorkerHandle::operation_log` reads a page straight from the journal, never through the worker's
 queue, so an open log panel shows a long push while it runs. Both transports expose it as
