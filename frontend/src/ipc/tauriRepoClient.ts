@@ -15,6 +15,7 @@ import type {
   TransferProgress,
 } from "./RepoClient";
 import { createRepoClient } from "./createRepoClient";
+import { redactedLogText } from "../lib/redact";
 
 let transferListenersReady: Promise<void> = Promise.resolve();
 let hookListenersReady: Promise<void> = Promise.resolve();
@@ -23,9 +24,10 @@ let hookListenersReady: Promise<void> = Promise.resolve();
 // the Rust backend (see crates/tauri-app/src/main.rs's log plugin setup), so a bug report
 // doesn't need console access to a running dev session to diagnose. Backs both this module's
 // own `call` below and the `RepoClient.logFrontendError` method exposed to
-// `frontend/src/lib/logger.ts`'s global `error`/`unhandledrejection` handlers.
+// `frontend/src/lib/logger.ts`'s global `error`/`unhandledrejection` handlers. A libgit2 error
+// can name a remote's URL with a token in it (#1056): nothing reaches the file unredacted.
 function logFrontendError(context: string, error: unknown): Promise<void> {
-  return logError(`${context}: ${String(error)}`);
+  return logError(`${context}: ${redactedLogText(error)}`);
 }
 
 // Every backend command failure surfaces to the UI as a rejected `invoke` promise, so this
@@ -41,9 +43,8 @@ function loggedInvoke<T>(command: string, args?: Record<string, unknown>): Promi
 
 function loggedRawInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   return invoke<T>(command, args).catch((error: unknown) => {
-    // A command's error payload is a plain object (`{ kind, message }`): log it as JSON.
-    const logged = typeof error === "object" && error !== null && !(error instanceof Error) ? JSON.stringify(error) : error;
-    void logFrontendError(`IPC ${command} failed`, logged);
+    // A command's error payload is a plain object (`{ kind, message }`): logged as JSON.
+    void logFrontendError(`IPC ${command} failed`, error);
     throw error;
   });
 }

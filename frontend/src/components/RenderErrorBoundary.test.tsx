@@ -194,6 +194,21 @@ describe("renderErrorDetails (#846)", () => {
     );
   });
 
+  it("leaves out the credentials a URL carries (#1056)", () => {
+    const error = Object.assign(new Error("fetch https://ghp_secret@example.test/o/r.git"), {
+      stack: "Error: fetch https://ghp_secret@example.test/o/r.git\n    at Thrower (view.tsx:1:1)",
+    });
+    expect(renderErrorDetails({ error, componentStack: "" }, "1.2.3")).toBe(
+      [
+        "Browsitory 1.2.3",
+        "Error: fetch https://***@example.test/o/r.git",
+        "",
+        "Error: fetch https://***@example.test/o/r.git",
+        "    at Thrower (view.tsx:1:1)",
+      ].join("\n"),
+    );
+  });
+
   it("copes with a thrown value that isn't an Error, and an unknown version", () => {
     expect(renderErrorDetails({ error: "plain text", componentStack: "" }, null)).toBe(
       ["Browsitory (version unknown)", "plain text"].join("\n"),

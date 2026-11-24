@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { CloneOutcome, RepoClient } from "../ipc/RepoClient";
 import { CloneError } from "../ipc/RepoClient";
-import { deriveRepoName, joinPath } from "../lib/cloneNames";
+import { deriveRepoName, joinPath, splitHttpsUserName } from "../lib/cloneNames";
 import { FormDialog } from "./primitives/FormDialog";
 import { InlineError } from "./primitives/InlineError";
 import { DialogActions } from "./primitives/DialogActions";
@@ -96,9 +96,20 @@ export function CloneDialog({
     setProgress(null);
     setError(null);
     const trimmedBranch = branch.trim();
-    const https = showHttps && username.trim() !== "" && token !== "" ? { username: username.trim(), token } : null;
+    // The backend refuses a user name in an https URL (#1052): it moves to the Username field.
+    const split = splitHttpsUserName(url);
+    let user = username.trim();
+    if (split !== null) {
+      setUrl(split.url);
+      if (user === "") {
+        user = split.username;
+        setUsername(user);
+      }
+      setHttpsOpen(true);
+    }
+    const https = showHttps && user !== "" && token !== "" ? { username: user, token } : null;
     client
-      .cloneRepo(id, { url: url.trim(), dest, branch: trimmedBranch === "" ? null : trimmedBranch, recurseSubmodules, https })
+      .cloneRepo(id, { url: split?.url ?? url.trim(), dest, branch: trimmedBranch === "" ? null : trimmedBranch, recurseSubmodules, https })
       .then((outcome) => onCloned(outcome, name.trim()))
       .catch((raw: unknown) => {
         const failure = raw instanceof CloneError ? raw : new CloneError("TransferFailed", String(raw));

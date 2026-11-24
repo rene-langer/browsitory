@@ -1418,8 +1418,8 @@ pub fn list_remotes(repo: &Repository) -> Result<Vec<RemoteInfo>, RemoteError> {
         let remote = repo.find_remote(name)?;
         let fetch_url = remote.url()?;
         let push_url = remote.pushurl()?;
-        if contains_embedded_credentials(fetch_url)
-            || push_url.is_some_and(contains_embedded_credentials)
+        if url_contains_embedded_credentials(fetch_url)
+            || push_url.is_some_and(url_contains_embedded_credentials)
         {
             return Err(RemoteError::CredentialBearingUrl);
         }
@@ -1957,18 +1957,20 @@ fn worktree_is_clean(repo: &Repository) -> Result<bool, RemoteError> {
 }
 
 fn validate_urls(fetch_url: &str, push_url: Option<&str>) -> Result<(), RemoteError> {
-    if contains_embedded_credentials(fetch_url)
-        || push_url.is_some_and(contains_embedded_credentials)
+    if url_contains_embedded_credentials(fetch_url)
+        || push_url.is_some_and(url_contains_embedded_credentials)
     {
         return Err(RemoteError::CredentialBearingUrl);
     }
     Ok(())
 }
 
-fn contains_embedded_credentials(url: &str) -> bool {
-    let Ok(parsed) = Url::parse(url) else {
-        return false;
-    };
+fn url_contains_embedded_credentials(url: &str) -> bool {
+    Url::parse(url).is_ok_and(|parsed| contains_embedded_credentials(&parsed))
+}
+
+/// An http(s) URL with any user information: a user name alone is often a token.
+pub(crate) fn contains_embedded_credentials(parsed: &Url) -> bool {
     if !matches!(parsed.scheme(), "http" | "https") {
         return false;
     }

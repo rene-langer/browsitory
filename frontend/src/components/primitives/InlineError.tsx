@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { copyText } from "../../lib/clipboard";
 import { withoutLibgit2Codes } from "../../lib/errorMessages";
+import { redactCredentials } from "../../lib/redact";
 import styles from "./InlineError.module.css";
 
 /** A button in the banner's row, before Details and dismiss (#984). */
@@ -123,7 +124,10 @@ function errorDetails(
   return lines.join("\n");
 }
 
-/** Copies `text`, saying so on the button for a moment (the banner may sit outside a workspace). */
+/**
+ * Copies `text` without credentials (#1056: it goes into bug reports), saying so on the button
+ * for a moment (the banner may sit outside a workspace).
+ */
 export function CopyDetailsButton({ text, className = styles.action }: { text: string; className?: string }) {
   const [outcome, setOutcome] = useState<"copied" | "failed" | null>(null);
   useEffect(() => {
@@ -136,7 +140,7 @@ export function CopyDetailsButton({ text, className = styles.action }: { text: s
       type="button"
       className={className}
       onClick={() => {
-        copyText(text).then(
+        copyText(redactCredentials(text)).then(
           () => setOutcome("copied"),
           () => setOutcome("failed"),
         );

@@ -100,6 +100,25 @@ describe("tauriRepoClient failure logging", () => {
     expect(logError).toHaveBeenCalledWith('IPC get_status failed: {"kind":"WorkerStopped","message":"worker thread stopped"}');
   });
 
+  // #1056: a libgit2 error can name a credential-bearing URL (a remote added outside the app).
+  it("redacts credentials from a failed invoke before logging it, and still rejects with them", async () => {
+    const message = "failed to fetch 'https://ghp_secret@example.test/o/r.git'\nAuthorization: Bearer tok123";
+    vi.mocked(invoke).mockRejectedValue({ kind: "Other", message });
+
+    const error: unknown = await tauriRepoClient.getStatus(TEST_REPO_PATH).catch((caught: unknown) => caught);
+
+    expect(String(error)).toBe(message);
+    expect(logError).toHaveBeenCalledWith(
+      `IPC get_status failed: {"kind":"Other","message":"failed to fetch 'https://***@example.test/o/r.git'\\nAuthorization: ***"}`,
+    );
+  });
+
+  it("redacts credentials from logFrontendError calls", async () => {
+    await tauriRepoClient.logFrontendError("Uncaught error", new Error("push to https://alice:pw@example.test/r failed"));
+
+    expect(logError).toHaveBeenCalledWith("Uncaught error: Error: push to https://***@example.test/r failed");
+  });
+
   it("reads a bare string rejection, and a kind it doesn't know, as Other", async () => {
     vi.mocked(invoke).mockRejectedValueOnce("invalid args `repoPath` for command `get_status`");
     const bare: unknown = await tauriRepoClient.getStatus(TEST_REPO_PATH).catch((caught: unknown) => caught);

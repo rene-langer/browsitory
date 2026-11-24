@@ -123,6 +123,60 @@ describe("CloneDialog", () => {
     expect(vi.mocked(client.cloneRepo).mock.calls[0][1].https).toEqual({ username: "alice", token: "tok" });
   });
 
+  it("moves a user name out of an https URL into the Username field (#1052)", async () => {
+    const { client } = fakeClient();
+    render(<CloneDialog client={client} onCloned={vi.fn()} onCancel={vi.fn()} />);
+    fill("https://alice@bitbucket.org/ws/r.git");
+    fireEvent.click(screen.getByRole("button", { name: "Clone" }));
+    await waitFor(() => expect(client.cloneRepo).toHaveBeenCalled());
+    expect(vi.mocked(client.cloneRepo).mock.calls[0][1]).toEqual({
+      url: "https://bitbucket.org/ws/r.git",
+      dest: "/home/me/src/r",
+      branch: null,
+      recurseSubmodules: true,
+      https: null,
+    });
+    expect(screen.getByLabelText("Repository URL")).toHaveValue("https://bitbucket.org/ws/r.git");
+    expect(screen.getByLabelText("Username")).toHaveValue("alice");
+  });
+
+  it("sends the user name moved out of the URL with the token entered (#1052)", async () => {
+    const { client } = fakeClient();
+    render(<CloneDialog client={client} onCloned={vi.fn()} onCancel={vi.fn()} />);
+    fill("https://alice@bitbucket.org/ws/r.git");
+    fireEvent.click(screen.getByRole("button", { name: /HTTPS credentials/ }));
+    fireEvent.change(screen.getByLabelText("Token"), { target: { value: "tok" } });
+    fireEvent.click(screen.getByRole("button", { name: "Clone" }));
+    await waitFor(() => expect(client.cloneRepo).toHaveBeenCalled());
+    const request = vi.mocked(client.cloneRepo).mock.calls[0][1];
+    expect(request.url).toBe("https://bitbucket.org/ws/r.git");
+    expect(request.https).toEqual({ username: "alice", token: "tok" });
+  });
+
+  it("keeps a typed user name over the one in the URL, and still drops that one (#1052)", async () => {
+    const { client } = fakeClient();
+    render(<CloneDialog client={client} onCloned={vi.fn()} onCancel={vi.fn()} />);
+    fill("https://alice@bitbucket.org/ws/r.git");
+    fireEvent.click(screen.getByRole("button", { name: /HTTPS credentials/ }));
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "bob" } });
+    fireEvent.change(screen.getByLabelText("Token"), { target: { value: "tok" } });
+    fireEvent.click(screen.getByRole("button", { name: "Clone" }));
+    await waitFor(() => expect(client.cloneRepo).toHaveBeenCalled());
+    const request = vi.mocked(client.cloneRepo).mock.calls[0][1];
+    expect(request.url).toBe("https://bitbucket.org/ws/r.git");
+    expect(request.https).toEqual({ username: "bob", token: "tok" });
+    expect(screen.getByLabelText("Username")).toHaveValue("bob");
+  });
+
+  it("leaves a URL with a password for the backend to refuse", async () => {
+    const { client } = fakeClient();
+    render(<CloneDialog client={client} onCloned={vi.fn()} onCancel={vi.fn()} />);
+    fill("https://alice:secret@bitbucket.org/ws/r.git");
+    fireEvent.click(screen.getByRole("button", { name: "Clone" }));
+    await waitFor(() => expect(client.cloneRepo).toHaveBeenCalled());
+    expect(vi.mocked(client.cloneRepo).mock.calls[0][1].url).toBe("https://alice:secret@bitbucket.org/ws/r.git");
+  });
+
   it("shows progress for its own operation only and cancels it", async () => {
     let finish: (o: CloneOutcome) => void = () => {};
     const { client, emit } = fakeClient({

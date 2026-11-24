@@ -119,7 +119,8 @@ None of this leaves your computer, and we can't see it.
 
 The log file holds errors, warnings and a few notes, for example the folders the app moved
 when its identifier changed. A message can contain a file path, a branch name or a remote's
-address. Browsitory writes no other log files.
+address, without the user name and password of any URL or the value of any `Authorization`
+header. Browsitory writes no other log files.
 
 The web storage holds the path of each repository it remembers something for, the text of
 your recent searches and commit messages, and the names of the branches you switched to

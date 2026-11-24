@@ -2,6 +2,7 @@ import type { HookProgress, HostRequest, OpenRepoEntry, OperationLogChange, Repo
 import { createRepoClient } from "./createRepoClient";
 import { RepoError, toRepoError } from "./RepoClient";
 import { __resetHostVisibilityForTests, publishHostVisibility } from "./hostVisibility";
+import { redactCredentials } from "../lib/redact";
 import {
   __resetTransportStatusForTests,
   publishTransportStatus,
@@ -282,6 +283,7 @@ export const vscodeRepoClient: RepoClient = {
   readPatchFile: () => Promise.reject(new Error("Not supported in the VSCode extension")),
   // Handled natively by the extension host (see `sidecarBridge.ts`'s `NATIVE_METHODS`), which
   // writes into the "Browsitory" output channel rather than forwarding to the sidecar process.
+  // Redacted first, like the desktop log file (#1056).
   logFrontendError: (context: string, error: unknown) =>
-    call<void>("log_frontend_error", { context, message: String(error) }),
+    call<void>("log_frontend_error", { context, message: redactCredentials(String(error)) }),
 };

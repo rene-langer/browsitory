@@ -11,8 +11,8 @@ use thiserror::Error;
 use url::Url;
 
 use crate::remote::{
-    CredentialProvider, RemoteError, TransferErrorKind, TransferOperation, TransferPhase,
-    TransferProgress, TransferReporter,
+    contains_embedded_credentials, CredentialProvider, RemoteError, TransferErrorKind,
+    TransferOperation, TransferPhase, TransferProgress, TransferReporter,
 };
 use crate::submodule::{init_submodule, list_submodules, update_submodule};
 use crate::worktree_guard::{find_case_collision, CasePolicy, GuardSource};
@@ -69,7 +69,8 @@ pub enum CloneError {
 /// User-typed clone URLs may point at a local repository, so unlike submodule URLs `file://`
 /// and plain paths are allowed. Refused: empty input, remote-helper syntax
 /// (`<transport>::<address>`, recognised as a `::` with no `/` before it so `ssh://[::1]/r`
-/// still passes), and URLs carrying a password.
+/// still passes), URLs carrying a password, and http(s) URLs carrying a user name: git would
+/// write it, often a token, into `.git/config`, where `list_remotes` refuses it (#1052).
 pub fn validate_clone_url(url: &str) -> Result<(), CloneError> {
     let url = url.trim();
     if url.is_empty() {
@@ -81,7 +82,7 @@ pub fn validate_clone_url(url: &str) -> Result<(), CloneError> {
         }
     }
     if let Ok(parsed) = Url::parse(url) {
-        if parsed.password().is_some() {
+        if parsed.password().is_some() || contains_embedded_credentials(&parsed) {
             return Err(CloneError::CredentialBearingUrl);
         }
     }

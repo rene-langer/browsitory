@@ -3,6 +3,8 @@
  * what the fallback's "Copy details" copies.
  */
 
+import { redactCredentials } from "./redact";
+
 /** An exception thrown while rendering, and where in the component tree it happened. */
 export interface CaughtRenderError {
   error: unknown;
@@ -20,7 +22,11 @@ export function renderErrorReport(caught: CaughtRenderError): string {
   return lines.join("\n");
 }
 
-/** What "Copy details" copies: the app version (when known), then {@link renderErrorReport}. */
+/**
+ * What "Copy details" copies: the app version (when known), then {@link renderErrorReport},
+ * without credentials (#1056). The log gets the report through `logFrontendError`, which redacts.
+ */
 export function renderErrorDetails(caught: CaughtRenderError, version: string | null): string {
-  return `${version === null ? "Browsitory (version unknown)" : `Browsitory ${version}`}\n${renderErrorReport(caught)}`;
+  const report = redactCredentials(renderErrorReport(caught));
+  return `${version === null ? "Browsitory (version unknown)" : `Browsitory ${version}`}\n${report}`;
 }
