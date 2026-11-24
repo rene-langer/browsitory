@@ -2330,6 +2330,19 @@ work to a `HighlightTransport` (`highlightWorkerProtocol.ts`):
   SVG, `<object>` or `<iframe>`, so SVG script never runs. The VSCode webview CSP allows
   `img-src data:` for this and nothing else.
 
+## Diff size limit
+
+- A file's text diff (#1066) is built only while both sides are at most
+  `git_core::diff::DIFF_SIZE_LIMIT` (20 MiB). `DiffOptions::max_file_bytes` sets libgit2's
+  `max_size`, so a bigger side is marked binary by its size (a blob's from its object header, a
+  work tree file's from its stat) without being loaded or hashed; `hunks_from_diff` then answers
+  `DiffError::TooLarge { size, limit }` for a wanted path, and the wire `ErrorKind::DiffTooLarge`.
+  The limit is the `DiffOptions` DTO's default; its optional `noSizeLimit` ("Load diff anyway",
+  `useDiffSizeLimit` in the two diff hosts) lifts it for one file, leaving libgit2's own 512 MiB
+  binary rule. Hunk and line actions re-diff with `HunkOptions`, which carry no limit, so a file
+  loaded anyway stages, discards, reverts and applies as before. The frontend's own collapsing of
+  long diffs (#686, `lib/largeDiff.ts`) still applies to what does load.
+
 ## External tools
 
 - Each host launches tools its own way. The desktop app spawns programs from Rust

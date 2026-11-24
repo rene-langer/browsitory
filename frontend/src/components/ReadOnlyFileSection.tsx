@@ -6,11 +6,12 @@ import type { SelectedRow } from "../state/useAppState";
 import type { ExternalToolsApi } from "../state/useExternalTools";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
 import { useWholeFile } from "../state/useWholeFile";
+import { useDiffSizeLimit } from "../state/useDiffSizeLimit";
 import { LineHistoryButton } from "./LineHistoryButton";
 import { BlameView } from "./BlameView";
 import { CollapseToggle } from "./CollapseToggle";
 import styles from "./DiffPane.module.css";
-import { DiffView, type HunkHeaderAction } from "./DiffView";
+import { DiffTooLarge, DiffView, type HunkHeaderAction } from "./DiffView";
 import { ImageDiff, ImageTextToggle } from "./ImageDiff";
 import { imageMimeType, isSvgPath } from "../lib/imageTypes";
 import { folderOf } from "../lib/folderHistory";
@@ -148,10 +149,12 @@ export function ReadOnlyFileSection({
 
   const { settings } = useDiffSettingsContext();
   const wholeFile = useWholeFile(settings.contextLines);
+  const sizeLimit = useDiffSizeLimit(`${diffKey}\0${oldPath ?? ""}\0${path}`);
   const diffOptions: DiffOptions = {
     ignoreWhitespace: settings.ignoreWhitespace,
     contextLines: wholeFile.contextLines,
     algorithm: settings.algorithm,
+    ...sizeLimit.options,
   };
   const hunkActions =
     patch === undefined
@@ -181,12 +184,13 @@ export function ReadOnlyFileSection({
           setHunks(next);
           setFetchedOptions(requested);
           setError(null);
+          sizeLimit.loaded();
         }
       })
       .catch((err: unknown) => {
-        if (!ignore) {
-          setError(describeError(err));
-        }
+        if (ignore) return;
+        if (sizeLimit.refused(err)) setError(null);
+        else setError(describeError(err));
       });
     return () => {
       ignore = true;
@@ -197,7 +201,7 @@ export function ReadOnlyFileSection({
     if (mode !== "diff" || collapsed || showImage) return;
     return loadDiff();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [diffKey, path, oldPath, mode, collapsed, showImage, settings.ignoreWhitespace, wholeFile.contextLines, settings.algorithm]);
+  }, [diffKey, path, oldPath, mode, collapsed, showImage, settings.ignoreWhitespace, wholeFile.contextLines, settings.algorithm, sizeLimit.options]);
 
   const loadBlame = () => {
     let ignore = false;
@@ -336,6 +340,8 @@ export function ReadOnlyFileSection({
               onDismiss={() => setError(null)}
               onRetry={loadDiff}
             />
+          ) : sizeLimit.tooLarge !== null ? (
+            <DiffTooLarge message={sizeLimit.tooLarge} onLoadAnyway={sizeLimit.loadAnyway} />
           ) : (
             <>
               {isImage && <ImageTextToggle asText onToggle={() => setImageAsText(false)} />}

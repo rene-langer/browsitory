@@ -3113,7 +3113,8 @@ impl From<DiffOptionsDto> for git_core::diff::DiffOptions {
             ignore_whitespace: dto.ignore_whitespace,
             context_lines: dto.context_lines,
             algorithm: dto.algorithm.into(),
-            max_file_bytes: None,
+            max_file_bytes: (!dto.no_size_limit.unwrap_or(false))
+                .then_some(git_core::diff::DIFF_SIZE_LIMIT),
         }
     }
 }
@@ -3844,6 +3845,10 @@ impl ErrorKind {
             Some(Self::MissingIdentity)
         } else if let Some(RebaseError::RestLeft { .. }) = error.downcast_ref::<RebaseError>() {
             Some(Self::RestLeft)
+        } else if let Some(git_core::diff::DiffError::TooLarge { .. }) =
+            error.downcast_ref::<git_core::diff::DiffError>()
+        {
+            Some(Self::DiffTooLarge)
         } else if let Some(error) = error.downcast_ref::<RemoteError>() {
             match error {
                 RemoteError::DirtyWorktree => Some(Self::DirtyWorktree),

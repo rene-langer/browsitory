@@ -5,11 +5,12 @@ import { imageMimeType, isSvgPath } from "../lib/imageTypes";
 import { OpenPreferencesContext } from "../state/openPreferences";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
 import { useWholeFile } from "../state/useWholeFile";
+import { useDiffSizeLimit } from "../state/useDiffSizeLimit";
 import { useWorkspaceActions } from "../state/useWorkspaceActions";
 import { BlameView } from "./BlameView";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import styles from "./DiffPane.module.css";
-import { DiffView } from "./DiffView";
+import { DiffTooLarge, DiffView } from "./DiffView";
 import { FolderHistoryButton } from "./FolderHistoryButton";
 import { ImageDiff, ImageTextToggle } from "./ImageDiff";
 import { InlineError } from "./primitives/InlineError";
@@ -104,10 +105,12 @@ export function UncommittedFileViewer({
   const openPreferences = useContext(OpenPreferencesContext);
   // "Show whole file" fetches with whole-file context; hunk and line actions then pass it too.
   const wholeFile = useWholeFile(settings.contextLines);
+  const sizeLimit = useDiffSizeLimit(`${entry.staged ? "staged" : "unstaged"}\0${renamedFrom ?? ""}\0${entry.path}`);
   const diffOptions: DiffOptions = {
     ignoreWhitespace: settings.ignoreWhitespace,
     contextLines: wholeFile.contextLines,
     algorithm: settings.algorithm,
+    ...sizeLimit.options,
   };
 
   // Pulled out of the effect (returning its own cleanup) so the failure banner's Retry button can
@@ -125,10 +128,13 @@ export function UncommittedFileViewer({
           setHunks(next);
           setFetchedOptions(requested);
           setError(null);
+          sizeLimit.loaded();
         }
       })
       .catch((err: unknown) => {
-        if (!ignore) setError(describeError(err));
+        if (ignore) return;
+        if (sizeLimit.refused(err)) setError(null);
+        else setError(describeError(err));
       });
     return () => {
       ignore = true;
@@ -139,7 +145,7 @@ export function UncommittedFileViewer({
     if (mode !== "diff" || isConflicted || showImage || contentsHidden) return;
     return loadDiff();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repoPath, client, entry.path, entry.staged, renamedFrom, isConflicted, showImage, mode, diffVersion, contentsHidden, settings.ignoreWhitespace, wholeFile.contextLines, settings.algorithm]);
+  }, [repoPath, client, entry.path, entry.staged, renamedFrom, isConflicted, showImage, mode, diffVersion, contentsHidden, settings.ignoreWhitespace, wholeFile.contextLines, settings.algorithm, sizeLimit.options]);
 
   // A hunk that empties the file starts at line 0, which no editor accepts.
   const firstLine = hunks?.[0]?.newStart ?? 0;
@@ -288,6 +294,8 @@ export function UncommittedFileViewer({
           </>
         ) : error !== null ? (
           <InlineError message={error.message} hint={error.hint} onDismiss={() => setError(null)} onRetry={loadDiff} />
+        ) : sizeLimit.tooLarge !== null ? (
+          <DiffTooLarge message={sizeLimit.tooLarge} onLoadAnyway={sizeLimit.loadAnyway} />
         ) : (
           <>
             {isImage && <ImageTextToggle asText onToggle={() => setImageAsText(false)} />}
