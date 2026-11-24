@@ -11,7 +11,12 @@ use git_core::undo::{HeadState, RepoSnapshot, SkippedFile};
 use serde::{Deserialize, Serialize};
 
 pub(super) const UNDO_LIMIT: usize = 50;
-const FORMAT_VERSION: u32 = 1;
+/// Version 2 (#1093) marks snapshots that can leave files unsaved (#1065, #1090): a build that
+/// reads only version 1 ignores the whole file rather than act on snapshots it misreads.
+const FORMAT_VERSION: u32 = 2;
+/// Version 1 is what older builds wrote (and builds with #1088 alone, whose `skipped` files
+/// this build understands), so it still loads.
+const READABLE_VERSIONS: std::ops::RangeInclusive<u32> = 1..=FORMAT_VERSION;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct UndoEntry {
@@ -51,9 +56,8 @@ struct StoredSnapshot {
     refs: BTreeMap<String, String>,
     index_tree: String,
     worktree_tree: Option<String>,
-    /// The files the snapshot didn't store for their size (#1065); absent when there are none,
-    /// so such a file reads as before. A build that predates it ignores it: such a file is then
-    /// simply not in either tree, and stays as it is.
+    /// The files the snapshot didn't store for their size (#1065); absent when there are none.
+    /// Builds that predate it never read it: they ignore a version 2 file (#1093).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     skipped: BTreeMap<String, StoredSkipped>,
 }
@@ -105,7 +109,7 @@ struct StoredPending {
     operation: String,
 }
 
-/// Version 1 throughout: `pending` is optional, and builds that predate it ignore it (no
+/// `pending` is optional (added within version 1): builds that predate it ignore it (no
 /// `deny_unknown_fields`) and drop it on their next save, which only loses the pending entry.
 #[derive(Serialize, Deserialize)]
 struct StoredFile {
@@ -263,7 +267,7 @@ impl UndoStore {
             return UndoStacks::default();
         };
         match serde_json::from_slice::<StoredFile>(&bytes) {
-            Ok(file) if file.version == FORMAT_VERSION => UndoStacks {
+            Ok(file) if READABLE_VERSIONS.contains(&file.version) => UndoStacks {
                 undo: from_stored(file.undo),
                 redo: from_stored(file.redo),
                 pending: file.pending.map(|pending| PendingEntry {
