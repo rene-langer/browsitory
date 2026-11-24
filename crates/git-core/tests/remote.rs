@@ -1010,6 +1010,144 @@ fn credential_bearing_urls_are_rejected_and_never_returned() {
     );
 }
 
+/// A remote whose URL a clone outside the app left with a user name or token (#1081).
+fn user_info_repo() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = common::init_repo();
+    repo.remote("origin", "https://alice@bitbucket.example.test/ws/r.git")
+        .unwrap();
+    repo.remote_set_pushurl(
+        "origin",
+        Some("https://bob:s3cret@push.example.test/ws/r.git"),
+    )
+    .unwrap();
+    repo.remote("other", "https://example.test/other.git")
+        .unwrap();
+    repo.remote("token", "http://ghp_0123abcd@example.test:8080/o/r.git")
+        .unwrap();
+    (dir, repo)
+}
+
+fn stored_urls(repo: &git2::Repository, name: &str) -> (String, Option<String>) {
+    let remote = repo.find_remote(name).unwrap();
+    (
+        remote.url().unwrap().to_string(),
+        remote.pushurl().unwrap().map(str::to_string),
+    )
+}
+
+#[test]
+fn remotes_with_user_info_are_listed_with_it_hidden_and_the_others_as_they_are() {
+    let (_dir, repo) = user_info_repo();
+
+    let remotes = list_remotes(&repo).unwrap();
+
+    let urls: Vec<_> = remotes
+        .iter()
+        .map(|remote| {
+            (
+                remote.name.as_str(),
+                remote.fetch_url.as_str(),
+                remote.push_url.as_deref(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        urls,
+        [
+            (
+                "origin",
+                "https://***@bitbucket.example.test/ws/r.git",
+                Some("https://***@push.example.test/ws/r.git"),
+            ),
+            ("other", "https://example.test/other.git", None),
+            ("token", "http://***@example.test:8080/o/r.git", None),
+        ]
+    );
+    let listed = format!("{remotes:?}");
+    for secret in ["alice", "bob", "s3cret", "ghp_0123abcd"] {
+        assert!(!listed.contains(secret), "{secret} listed: {listed}");
+    }
+}
+
+#[test]
+fn editing_a_remote_keeps_a_url_with_hidden_user_info_sent_back_as_listed() {
+    let (_dir, repo) = user_info_repo();
+    let listed = list_remotes(&repo).unwrap().remove(0);
+    let stored = stored_urls(&repo, "origin");
+
+    update_remote_urls(
+        &repo,
+        "origin",
+        &listed.fetch_url,
+        listed.push_url.as_deref(),
+    )
+    .unwrap();
+    assert_eq!(stored_urls(&repo, "origin"), stored);
+
+    update_remote_urls(
+        &repo,
+        "origin",
+        &listed.fetch_url,
+        Some("https://example.test/new-push.git"),
+    )
+    .unwrap();
+    assert_eq!(
+        stored_urls(&repo, "origin"),
+        (
+            stored.0.clone(),
+            Some("https://example.test/new-push.git".to_string())
+        )
+    );
+}
+
+#[test]
+fn editing_a_remote_refuses_hidden_user_info_that_is_not_the_remotes_own() {
+    let (_dir, repo) = user_info_repo();
+    let stored = stored_urls(&repo, "origin");
+
+    for (fetch_url, push_url) in [
+        // The hidden form of another host, and the push URL's hidden form as the fetch URL.
+        ("https://***@other.example.test/ws/r.git", None),
+        ("https://***@push.example.test/ws/r.git", None),
+        // The fetch URL's hidden form as the push URL.
+        (
+            "https://***@bitbucket.example.test/ws/r.git",
+            Some("https://***@bitbucket.example.test/ws/r.git"),
+        ),
+    ] {
+        let result = update_remote_urls(&repo, "origin", fetch_url, push_url);
+        assert!(
+            matches!(result, Err(RemoteError::CredentialBearingUrl)),
+            "{fetch_url} {push_url:?}: {result:?}"
+        );
+        assert_eq!(stored_urls(&repo, "origin"), stored);
+    }
+    let result = update_remote_urls(&repo, "other", "https://***@example.test/other.git", None);
+    assert!(matches!(result, Err(RemoteError::CredentialBearingUrl)));
+    assert_eq!(
+        stored_urls(&repo, "other"),
+        ("https://example.test/other.git".to_string(), None)
+    );
+}
+
+#[test]
+fn editing_a_remote_replaces_a_url_with_hidden_user_info_by_a_new_one() {
+    let (_dir, repo) = user_info_repo();
+
+    update_remote_urls(
+        &repo,
+        "origin",
+        "https://bitbucket.example.test/ws/r.git",
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(
+        stored_urls(&repo, "origin"),
+        ("https://bitbucket.example.test/ws/r.git".to_string(), None)
+    );
+}
+
 #[test]
 fn normal_ssh_urls_are_accepted() {
     let (_dir, repo) = common::init_repo();

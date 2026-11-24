@@ -680,6 +680,32 @@ mod tests {
         assert_eq!(key.account, "https://git.example.test:8443/rene");
     }
 
+    /// libgit2 asks with the remote's URL, user information included; a remote cloned outside
+    /// the app can have a user name in it (#1081). The saved token is still found.
+    #[test]
+    fn https_provider_finds_the_saved_token_for_a_url_with_user_info() {
+        let store = MemoryCredentialStore::default();
+        let service = CredentialService::new(store);
+        service
+            .save_https("https://git.example.test/owner/repo.git", "rene", "token-1")
+            .unwrap();
+        let mut provider = RemoteCredentialProvider::new(&service, https_profile());
+
+        for url in [
+            "https://alice@git.example.test/owner/repo.git",
+            "https://alice:wrong@git.example.test/owner/repo.git",
+        ] {
+            let credential = provider
+                .credential(
+                    url,
+                    Some("alice"),
+                    git2::CredentialType::USER_PASS_PLAINTEXT,
+                )
+                .unwrap_or_else(|error| panic!("{url}: {}", error.message()));
+            assert!(credential.has_username());
+        }
+    }
+
     #[test]
     fn https_provider_returns_a_plaintext_credential_only_when_the_store_has_a_token() {
         // Removing the lookup or passing a token through any configuration must fail this test.
