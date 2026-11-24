@@ -14,6 +14,7 @@ import type { UserCommand } from "../ipc/RepoClient";
 import { NO_SELECTION, userCommandMenuItems, type RunUserCommand } from "../lib/userCommands";
 import { useUserCommandsContext } from "../state/userCommandsContext";
 import { DeleteTagMessage } from "./DeleteTagMessage";
+import { useVirtualRows } from "./useVirtualRows";
 
 // `returnFocusTo`: the row's "…" for a pointer (WebKit focuses neither the row nor the button);
 // `undefined` for a key, so `ContextMenu` returns focus to what had it (as StashPanel).
@@ -28,7 +29,7 @@ type TagMenu = { name: string; x: number; y: number; returnFocusTo?: HTMLElement
  * palette's "Push all tags to <remote>". Tags are created from the graph
  * (a commit's "Create tag…"), the palette or the header's "+" ("Create tag at HEAD…", #649).
  * Clicking a row (or Enter / Space on it) selects the tag's commit in the graph, like the
- * palette's "Go to tag…" (#441).
+ * palette's "Go to tag…" (#441). Only the rows in view render (#1069), as in the Stashes section.
  */
 export function TagPanel({
   tags,
@@ -82,12 +83,15 @@ export function TagPanel({
   const userCommands = userCommandsProp ?? userCommandsApi?.commands ?? [];
   const onRunUserCommand = onRunUserCommandProp ?? userCommandsApi?.run;
   const [remoteName, setRemoteName] = useState(remotes[0]?.name ?? "");
-  const [selected, setSelected] = useState<string[]>([]);
+  // A set, in the order ticked: with thousands of tags, "Select all" and each row's checkbox
+  // look names up in it (#1069).
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
   const [filter, setFilter] = useState("");
   const [previousRemotes, setPreviousRemotes] = useState(remotes);
   const [previousTags, setPreviousTags] = useState(tags);
   const [deleteConfirmation, setDeleteConfirmation] = useState<string | null>(null);
   const [menu, setMenu] = useState<TagMenu | null>(null);
+  const [listElement, setListElement] = useState<HTMLUListElement | null>(null);
   const copyToClipboard = useCopyToClipboard();
 
   if (previousRemotes !== remotes) {
@@ -99,7 +103,8 @@ export function TagPanel({
 
   if (previousTags !== tags) {
     setPreviousTags(tags);
-    setSelected(selected.filter((name) => tags.some((tag) => tag.name === name)));
+    const names = new Set(tags.map((tag) => tag.name));
+    setSelected(new Set([...selected].filter((name) => names.has(name))));
   }
 
   // The menu acts on the tag it was opened for; a refresh that removed it closes the menu.
@@ -107,9 +112,11 @@ export function TagPanel({
   if (menu !== null && menuTag === undefined) setMenu(null);
 
   const toggleTag = (tagName: string) => {
-    setSelected((current) => current.includes(tagName)
-      ? current.filter((item) => item !== tagName)
-      : [...current, tagName]);
+    setSelected((current) => {
+      const next = new Set(current);
+      if (!next.delete(tagName)) next.add(tagName);
+      return next;
+    });
   };
 
   // The row (a focus stop) and its "…" get the Menu key and Shift+F10 from `ListRow`, which
@@ -124,16 +131,19 @@ export function TagPanel({
   const needle = filter.trim().toLowerCase();
   const shown = needle === "" ? tags : tags.filter((tag) => tag.name.toLowerCase().includes(needle));
   const disabledTitle = pushDisabled ? (operationDisabledReason ?? undefined) : undefined;
-  const shownSelected = shown.filter((tag) => selected.includes(tag.name)).length;
+  const shownSelected = shown.filter((tag) => selected.has(tag.name)).length;
   const allShownSelected = shown.length > 0 && shownSelected === shown.length;
   const toggleAllShown = () => {
-    const names = shown.map((tag) => tag.name);
-    setSelected((current) =>
-      allShownSelected
-        ? current.filter((name) => !names.includes(name))
-        : [...current, ...names.filter((name) => !current.includes(name))],
-    );
+    setSelected((current) => {
+      const next = new Set(current);
+      for (const tag of shown) {
+        if (allShownSelected) next.delete(tag.name);
+        else next.add(tag.name);
+      }
+      return next;
+    });
   };
+  const virtual = useVirtualRows(listElement, shown.length);
   const pushReason = pushDisabled
     ? (operationDisabledReason ?? "Another operation is in progress.")
     : remoteName === ""
@@ -193,10 +203,16 @@ export function TagPanel({
                 />
                 {needle === "" ? "Select all" : "Select all shown"}
               </label>
-              <ul className={styles.list} aria-label="Tags">
-                {shown.map((tag) => (
+              <ul
+                ref={setListElement}
+                className={styles.list}
+                aria-label="Tags"
+                style={virtual.windowed ? { paddingTop: virtual.padTop, paddingBottom: virtual.padBottom } : undefined}
+              >
+                {shown.slice(virtual.start, virtual.end).map((tag, offset) => (
                   <ListRow
                     key={tag.name}
+                    rowIndex={virtual.start + offset}
                     onClick={() => onGoToTag(tag)}
                     onOpenMenu={(anchor, trigger) =>
                       setMenu({
@@ -209,7 +225,7 @@ export function TagPanel({
                     <input
                       type="checkbox"
                       className={styles.select}
-                      checked={selected.includes(tag.name)}
+                      checked={selected.has(tag.name)}
                       onChange={() => toggleTag(tag.name)}
                       // Ticking the box selects the tag for pushing, not its commit.
                       onClick={(event) => event.stopPropagation()}
@@ -248,9 +264,9 @@ export function TagPanel({
               </ul>
             </>
           )}
-          {selected.length > 0 && (
+          {selected.size > 0 && (
             <div className={styles.selectionBar} role="group" aria-label="Selected tags">
-              <span className={styles.selectionCount}>{selected.length} selected</span>
+              <span className={styles.selectionCount}>{selected.size} selected</span>
               {remotes.length > 1 && (
                 <select
                   aria-label="Remote"
@@ -262,11 +278,11 @@ export function TagPanel({
               )}
               <ReasonButton
                 reason={pushReason}
-                onClick={() => void onPush(remoteName, selected)}
+                onClick={() => void onPush(remoteName, [...selected])}
               >
                 {remotes.length > 1 || remoteName === "" ? "Push" : `Push to ${remoteName}`}
               </ReasonButton>
-              <button type="button" onClick={() => setSelected([])}>
+              <button type="button" onClick={() => setSelected(new Set())}>
                 Clear selection
               </button>
             </div>
