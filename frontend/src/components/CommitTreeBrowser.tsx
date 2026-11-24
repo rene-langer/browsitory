@@ -4,7 +4,7 @@ import type { FileContent, RepoClient, TreeEntry, TreeListing } from "../ipc/Rep
 import { describeError, type DescribedError } from "../lib/errorMessages";
 import { HIGHLIGHT_LINE_LIMIT, highlightLines, logHighlightError, type Token } from "../lib/highlight";
 import { isAbortError } from "../lib/highlightWorkerProtocol";
-import { formatSize } from "../lib/fileSize";
+import { formatBytes } from "../lib/fileSize";
 import { languageForPath } from "../lib/languageForPath";
 import type { SelectedRow } from "../state/useAppState";
 import type { ExternalToolsApi } from "../state/useExternalTools";
@@ -179,7 +179,7 @@ export function CommitTreeBrowser({
         >
           <Icon size={14} aria-hidden="true" />
           <span className={styles.name}>{showPath ? entry.path : entry.name}</span>
-          {entry.size !== null && <span className={styles.size}>{formatSize(entry.size)}</span>}
+          {entry.size !== null && <span className={styles.size}>{formatBytes(entry.size)}</span>}
         </button>
       </li>
     );
@@ -428,9 +428,9 @@ export function CommitFileView({
       </div>
     );
   } else if (content.kind === "Binary") {
-    body = <p className={styles.note}>Binary file ({formatSize(content.size)}), not shown. Use Save as… to open it elsewhere.</p>;
+    body = <p className={styles.note}>Binary file ({formatBytes(content.size)}), not shown. Use Save as… to open it elsewhere.</p>;
   } else {
-    body = <p className={styles.note}>This file is too large to show here ({formatSize(content.size)}). Use Save as… to open it elsewhere.</p>;
+    body = <p className={styles.note}>This file is too large to show here ({formatBytes(content.size)}). Use Save as… to open it elsewhere.</p>;
   }
 
   return (
