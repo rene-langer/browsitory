@@ -1654,10 +1654,10 @@ pub fn list_stashes(repo: &mut Repository) -> Result<Vec<StashEntry>, StashError
 /// What [`list_stashes_cached`] keeps between calls (#1070): each listed stash's file count and
 /// whether it has staged changes, by its commit id. A stash commit never changes, so neither do
 /// they; the worker keeps one per repository, so a refresh doesn't walk a stash's untracked tree
-/// (possibly a big folder) again.
+/// (possibly a big folder) again. The id names the commit's trees too, so the counts hold in any
+/// repository that has that commit.
 #[derive(Default)]
 pub struct StashCountCache {
-    repository: Option<std::path::PathBuf>,
     counts: HashMap<git2::Oid, (usize, bool)>,
 }
 
@@ -1667,10 +1667,6 @@ pub fn list_stashes_cached(
     repo: &mut Repository,
     cache: &mut StashCountCache,
 ) -> Result<Vec<StashEntry>, StashError> {
-    if cache.repository.as_deref() != Some(repo.commondir()) {
-        cache.repository = Some(repo.commondir().to_path_buf());
-        cache.counts.clear();
-    }
     let mut entries = Vec::new();
     // `stash_foreach` requires `&mut self` despite being read-only — a libgit2 API constraint,
     // not a design choice (see the design spec's "&mut Repository wrinkle" note).
