@@ -7,7 +7,8 @@ card, titled with the provider, the repository and the remote ("GitHub: acme/wid
 Bitbucket…**). The dialog asks for your account name and a personal access token; Bitbucket needs
 a repository or workspace access token, not an app password. If saving the token fails, the
 dialog says why. The token goes to your system's credential store, and the account name is
-remembered, so every card for that provider is connected from then on.
+remembered, so every card for that provider is connected from then on, in every repository
+you open (see [Privacy](privacy.md#pull-requests-only-if-you-set-them-up) for what that sends).
 
 **Pull requests.** A connected card lists the repository's pull requests by itself each time you
 open it: the number and title, then the source and target branches, the author and the state.

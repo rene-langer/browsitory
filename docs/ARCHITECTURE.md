@@ -194,9 +194,12 @@ the same limit until the page is full or `complete`, and stops when it closes.
 `frontend/src/ipc/RepoClient.ts` defines the interface every UI component depends on — see that
 file directly for the current method list rather than a copy here, which would just go stale.
 
-`frontend/src/ipc/tauriRepoClient.ts` implements it over `@tauri-apps/api`'s `invoke()`. This
-is the *only* file allowed to import `@tauri-apps/api` — every other frontend file receives a
-`RepoClient` as a prop/context value, so it can't accidentally couple to Tauri.
+`frontend/src/ipc/tauriRepoClient.ts` implements it over `@tauri-apps/api`'s `invoke()`. Only
+files under `frontend/src/ipc/` may import `@tauri-apps/*`: `tauriRepoClient.ts`, and
+`updater.ts`, which wraps `@tauri-apps/plugin-updater` and `@tauri-apps/plugin-process` for the
+desktop app's update banner. Every other frontend file receives a `RepoClient` as a
+prop/context value (or calls an `ipc/` module such as `updater.ts`), so it can't accidentally
+couple to Tauri.
 `frontend/src/ipc/vscodeRepoClient.ts` implements the same interface over webview `postMessage`.
 Both build most of it from `createRepoClient(call)` in `frontend/src/ipc/createRepoClient.ts`
 (#504), which holds every method the transports send alike (backend name and params) once; a
@@ -211,9 +214,8 @@ reuse its global `InlineError` path without importing VSCode APIs. Tauri registe
 status listener and retains its existing updater/error behavior.
 
 The rule is enforced mechanically, not just by review: `frontend/eslint.config.js` has a
-`no-restricted-imports` override banning `@tauri-apps/*` imports from
-`frontend/src/components/**` and `frontend/src/state/**`, so a violation fails `pnpm lint`
-(and CI).
+`no-restricted-imports` override banning `@tauri-apps/*` and `vscode` imports from all of
+`frontend/src/**` except `frontend/src/ipc/**`, so a violation fails `pnpm lint` (and CI).
 
 ## Frontend state
 
@@ -403,10 +405,10 @@ menu's choice runs back through the session: the pick, the parent picker or a se
   `Result<&str, Error>` — never `Option`, not even nested. Handle with `let Ok(x) = ... else {
   continue };` in a loop, or `.ok().unwrap_or_default()` otherwise (no `.flatten()` — there's no
   `Option` layer to flatten; it won't compile). See `crates/git-core/src/status.rs`,
-  `crates/git-core/src/log.rs`.
+  `crates/git-core/src/graph.rs`.
 - `Commit::summary()` is the one in this family that's actually `Result<Option<&str>, Error>` —
   `Ok(None)` means no summary, not an error. This is the one that wants
-  `.ok().flatten().unwrap_or_default()`. See `crates/git-core/src/log.rs`.
+  `.ok().flatten().unwrap_or_default()`. See `crates/git-core/src/graph.rs`.
 - Both shapes coexist in this crate — check the actual signature rather than assuming from a
   similar-sounding accessor; a plain-`Result` accessor rejects `.flatten()` and fails to compile
   with an unhelpful error at the call site.

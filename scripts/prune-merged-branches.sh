@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Lists, or with --delete removes, local branches that are already merged into main.
 #
-# Pull requests are squash-merged, so a merged branch's commits never appear in main's history
-# and `git branch --merged` / `git fetch --prune` miss them. A branch counts as merged when
-# either
+# Pull requests are usually squash-merged, so a merged branch's commits never appear in main's
+# history and `git branch --merged` / `git fetch --prune` miss them. A branch counts as merged
+# when either
 #   - GitHub has a merged pull request whose head was exactly this branch tip, or
 #   - the branch tip is already part of origin/main.
 # A branch with commits after its merged pull request is kept. So are main, the branch you are
