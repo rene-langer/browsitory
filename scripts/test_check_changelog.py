@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Tests for check-changelog.py's pure changelog-required predicate."""
 
+import contextlib
 import importlib.util
+import io
+import json
 import os
 import pathlib
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -14,6 +18,13 @@ spec = importlib.util.spec_from_file_location("check_changelog", MODULE_PATH)
 check_changelog = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 spec.loader.exec_module(check_changelog)
+
+MANIFESTS = (
+    "extension/package.json",
+    "extension/e2e/package.json",
+    "e2e/package.json",
+    "frontend/package.json",
+)
 
 
 class NeedsChangelogTests(unittest.TestCase):
@@ -114,6 +125,90 @@ class NeedsChangelogTests(unittest.TestCase):
         )
         self.assertTrue(
             check_changelog.needs_changelog(["e2e/specs/package.json.spec.ts"])
+        )
+
+
+class PackageJsonFieldTests(unittest.TestCase):
+    """changed_beyond_dependencies compares two package.json texts (#1094)."""
+
+    OLD = (
+        '{"name": "browsitory", "version": "0.1.0",'
+        ' "engines": {"vscode": "^1.134.0"},'
+        ' "contributes": {"commands": [{"command": "browsitory.open"}]},'
+        ' "scripts": {"compile": "tsc"},'
+        ' "dependencies": {"a": "^1.0.0"},'
+        ' "devDependencies": {"b": "^2.0.0"},'
+        ' "optionalDependencies": {"c": "^3.0.0"},'
+        ' "peerDependencies": {"d": "^4.0.0"},'
+        ' "packageManager": "pnpm@12.23.0",'
+        ' "pnpm": {"overrides": {"e": "1.0.0"}}}'
+    )
+
+    def changed(self, **fields):
+        new = json.loads(self.OLD)
+        new.update(fields)
+        return check_changelog.changed_beyond_dependencies(
+            self.OLD, json.dumps(new)
+        )
+
+    def test_unchanged(self):
+        self.assertFalse(
+            check_changelog.changed_beyond_dependencies(self.OLD, self.OLD)
+        )
+
+    def test_dependency_field_bumps_are_exempt(self):
+        self.assertFalse(self.changed(dependencies={"a": "^1.1.0"}))
+        self.assertFalse(self.changed(devDependencies={"b": "^2.0.1", "f": "1"}))
+        self.assertFalse(self.changed(optionalDependencies={"c": "^3.1.0"}))
+        self.assertFalse(self.changed(peerDependencies={"d": "^4.1.0"}))
+        self.assertFalse(self.changed(packageManager="pnpm@12.24.0"))
+        self.assertFalse(self.changed(pnpm={"overrides": {"e": "1.0.1"}}))
+
+    def test_reformatting_alone_is_exempt(self):
+        reformatted = json.dumps(json.loads(self.OLD), indent=4, sort_keys=True)
+        self.assertFalse(
+            check_changelog.changed_beyond_dependencies(self.OLD, reformatted)
+        )
+
+    def test_contributes_change_counts(self):
+        self.assertTrue(
+            self.changed(contributes={"commands": [{"command": "browsitory.log"}]})
+        )
+
+    def test_other_field_changes_count(self):
+        self.assertTrue(self.changed(scripts={"compile": "tsc -b"}))
+        self.assertTrue(self.changed(engines={"vscode": "^1.140.0"}))
+        self.assertTrue(self.changed(displayName="Browsitory"))
+
+    def test_removed_field_counts(self):
+        new = json.loads(self.OLD)
+        del new["contributes"]
+        self.assertTrue(
+            check_changelog.changed_beyond_dependencies(self.OLD, json.dumps(new))
+        )
+
+    def test_added_or_deleted_file_counts(self):
+        self.assertTrue(check_changelog.changed_beyond_dependencies(None, self.OLD))
+        self.assertTrue(check_changelog.changed_beyond_dependencies(self.OLD, None))
+
+    def test_invalid_json_counts(self):
+        self.assertTrue(check_changelog.changed_beyond_dependencies(self.OLD, "{"))
+        self.assertTrue(check_changelog.changed_beyond_dependencies("[1]", "[2]"))
+
+    def test_manifest_changed_beyond_dependencies_needs_changelog(self):
+        self.assertTrue(
+            check_changelog.needs_changelog(
+                ["extension/package.json", "extension/pnpm-lock.yaml"],
+                manifests_beyond_dependencies={"extension/package.json"},
+            )
+        )
+
+    def test_manifest_changed_beyond_dependencies_with_fragment(self):
+        self.assertFalse(
+            check_changelog.needs_changelog(
+                ["extension/package.json", "changelog.d/1094-contributes.md"],
+                manifests_beyond_dependencies={"extension/package.json"},
+            )
         )
 
 
@@ -269,6 +364,121 @@ class RepoTests(unittest.TestCase):
         self.assertEqual(files, ["changelog.d/240-café.md"])
         self.assertEqual(
             check_changelog.fragment_files(files), ["changelog.d/240-café.md"]
+        )
+
+    def write_json(self, path, data):
+        target = self.root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(data, indent=2) + "\n")
+
+    def commit_manifests(self):
+        """Commit MANIFESTS on main, then branch off to topic."""
+        self.manifest = {
+            "name": "browsitory",
+            "contributes": {"commands": [{"command": "browsitory.open"}]},
+            "scripts": {"compile": "tsc"},
+            "devDependencies": {"typescript": "~6.0.2"},
+            "packageManager": "pnpm@12.23.0",
+        }
+        for path in MANIFESTS:
+            self.write_json(path, self.manifest)
+        self.commit("manifests")
+        self.git("checkout", "-q", "-b", "topic")
+
+    def run_main(self):
+        stderr = io.StringIO()
+        argv = ["check-changelog.py", "--base", "main"]
+        with (
+            mock.patch.object(sys, "argv", argv),
+            mock.patch.dict(os.environ, {"SKIP_CHANGELOG_CHECK": ""}),
+            contextlib.redirect_stderr(stderr),
+        ):
+            return check_changelog.main(), stderr.getvalue()
+
+    def test_contributes_change_needs_an_entry(self):
+        self.commit_manifests()
+        self.write_json(
+            "extension/package.json",
+            {**self.manifest, "contributes": {"commands": []}},
+        )
+        self.commit("drop a command")
+        code, stderr = self.run_main()
+        self.assertEqual(code, 1)
+        self.assertIn("no changelog entry", stderr)
+        files = check_changelog.changed_files("main")
+        self.assertEqual(
+            check_changelog.manifests_changed_beyond_dependencies("main", files),
+            {"extension/package.json"},
+        )
+
+    def test_contributes_change_with_fragment_passes(self):
+        self.commit_manifests()
+        self.write_json(
+            "extension/package.json",
+            {**self.manifest, "contributes": {"commands": []}},
+        )
+        (self.root / "changelog.d").mkdir()
+        (self.root / "changelog.d" / "1094-x.md").write_text("### X\n\n- x\n")
+        self.commit("drop a command, with a fragment")
+        self.assertEqual(self.run_main(), (0, ""))
+
+    def test_dependency_only_changes_pass(self):
+        self.commit_manifests()
+        for path in MANIFESTS:
+            self.write_json(
+                path,
+                {
+                    **self.manifest,
+                    "devDependencies": {"typescript": "~6.0.3", "x": "^1.0.0"},
+                    "packageManager": "pnpm@12.24.0",
+                },
+            )
+        self.commit("bump dependencies")
+        self.assertEqual(self.run_main(), (0, ""))
+        files = check_changelog.changed_files("main")
+        self.assertEqual(
+            check_changelog.manifests_changed_beyond_dependencies("main", files),
+            set(),
+        )
+
+    def test_scripts_change_in_a_watched_manifest_needs_an_entry(self):
+        self.commit_manifests()
+        self.write_json("e2e/package.json", {**self.manifest, "scripts": {}})
+        self.commit("change e2e scripts")
+        self.assertEqual(self.run_main()[0], 1)
+
+    def test_frontend_manifest_is_not_watched(self):
+        # frontend/package.json is outside the watched frontend/src/ (#1094).
+        self.commit_manifests()
+        self.write_json("frontend/package.json", {**self.manifest, "scripts": {}})
+        self.commit("change frontend scripts")
+        self.assertEqual(self.run_main(), (0, ""))
+
+    def test_every_watched_manifest_is_compared(self):
+        self.commit_manifests()
+        for path in MANIFESTS:
+            self.write_json(path, {**self.manifest, "scripts": {"compile": "tsc -b"}})
+        self.commit("change scripts")
+        files = check_changelog.changed_files("main")
+        self.assertEqual(
+            check_changelog.manifests_changed_beyond_dependencies("main", files),
+            {
+                "extension/package.json",
+                "extension/e2e/package.json",
+                "e2e/package.json",
+            },
+        )
+
+    def test_added_and_deleted_watched_manifests_count(self):
+        self.commit_manifests()
+        (self.root / "e2e" / "package.json").unlink()
+        self.write_json("extension/new/package.json", self.manifest)
+        self.commit("move a project")
+        self.assertEqual(self.run_main()[0], 1)
+        files = check_changelog.changed_files("main")
+        self.assertEqual(
+            check_changelog.manifests_changed_beyond_dependencies("main", files),
+            {"e2e/package.json", "extension/new/package.json"},
         )
 
     def test_default_base_is_main_without_origin(self):
