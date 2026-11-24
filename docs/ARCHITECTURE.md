@@ -206,6 +206,13 @@ subscriptions, `logFrontendError`). What a transport does around a call (logging
 the desktop's wait for its event listeners before a command that emits transfer or hook events)
 lives in its call function, not in a per-method override. A new operation is one line in
 `createRepoClient.ts`.
+The desktop webview's capability (`crates/tauri-app/capabilities/default.json`) grants only the
+plugin permissions the frontend calls from JavaScript: `core:default`, `updater:default`,
+`process:allow-restart` and `log:default` (#1053). Folder pickers, save dialogs, opening a URL
+or a file and revealing a path are Tauri commands that call the dialog and opener plugins from
+Rust, which needs no permission; granting `dialog:default` or `opener:default` would let any
+script in the webview open URLs and reveal paths around `open_external_url`'s checks.
+`crates/tauri-app/tests/capabilities.rs` pins the list.
 `frontend/src/ipc/transportStatus.ts` is a transport-neutral lifecycle seam that lets `App`
 reuse its global `InlineError` path without importing VSCode APIs. Tauri registers no lifecycle
 status listener and retains its existing updater/error behavior.
