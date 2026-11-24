@@ -100,6 +100,9 @@ pub enum PatchError {
     CaseConfig(#[from] crate::CaseConfigUnreadable),
     #[error("{0}")]
     Io(#[from] std::io::Error),
+    /// A file the patch writes uses an external filter driver (#1063); nothing changed.
+    #[error(transparent)]
+    ExternalFilter(#[from] crate::ExternalFilter),
 }
 
 impl From<crate::diff::DiffError> for PatchError {
@@ -1249,6 +1252,7 @@ fn does_not_apply(e: git2::Error) -> PatchError {
 /// differs only in case from a tracked one where case folds.
 fn guard(repo: &git2::Repository, diff: &git2::Diff) -> Result<(), PatchError> {
     let workdir = repo.workdir().ok_or(PatchError::NoWorkdir)?;
+    crate::external_filter::refuse_diff::<PatchError>(repo, diff)?;
     let folds = worktree_guard::try_folds_case(repo)?;
     let index = if folds { Some(repo.index()?) } else { None };
     // The links this patch writes. The checks below look at the working tree as it is before the

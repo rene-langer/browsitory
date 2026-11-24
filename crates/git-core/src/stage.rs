@@ -78,6 +78,9 @@ pub enum StageError {
     /// back.
     #[error("Couldn't restore '{path}': it is now a folder holding '{inner}', which Undo can't bring back. Move it first.")]
     RestoreBlockedByFolder { path: String, inner: String },
+    /// A file to stage or write uses an external filter driver (#1063); nothing changed.
+    #[error(transparent)]
+    ExternalFilter(#[from] crate::ExternalFilter),
 }
 
 impl From<LinePatchError> for StageError {
@@ -130,6 +133,9 @@ pub fn stage_file(repo: &git2::Repository, path: &str) -> Result<(), StageError>
         if meta.file_type().is_symlink() {
             // A link that replaced a tracked folder takes the folder's place, like `git add`.
             index.remove_dir(rel, 0)?;
+        } else {
+            // git doesn't filter a link; a file goes through the clean filters (#1063).
+            crate::external_filter::refuse_paths::<StageError, _>(repo, [rel])?;
         }
         index.add_path(Path::new(path))?;
     } else {
@@ -143,6 +149,21 @@ pub fn stage_file(repo: &git2::Repository, path: &str) -> Result<(), StageError>
 /// ignored files, and not a nested repository in it.
 fn stage_untracked_folder(repo: &git2::Repository, folder: &str) -> Result<(), StageError> {
     let files = untracked_folder_files(repo, folder)?;
+    crate::external_filter::refuse_paths::<StageError, _>(
+        repo,
+        files
+            .iter()
+            .filter(|file| !file.path.ends_with('/'))
+            .filter(|file| {
+                repo.workdir().is_some_and(|workdir| {
+                    workdir
+                        .join(&file.path)
+                        .symlink_metadata()
+                        .is_ok_and(|meta| !meta.file_type().is_symlink())
+                })
+            })
+            .map(|file| Path::new(&file.path)),
+    )?;
     let mut index = repo.index()?;
     for file in files.iter().filter(|file| !file.path.ends_with('/')) {
         index.add_path(Path::new(&file.path))?;
@@ -296,7 +317,7 @@ pub fn discard_file(repo: &git2::Repository, path: &str) -> Result<(), StageErro
         )?;
         let mut checkout = git2::build::CheckoutBuilder::new();
         checkout.force().path(rel).disable_pathspec_match(true);
-        crate::hardlink::on_checkout(repo, &mut checkout);
+        let filters = crate::hardlink::on_checkout(repo, &mut checkout);
         // A file another program holds open: say so, not libgit2's raw error (#268).
         repo.checkout_index(None, Some(&mut checkout))
             .map_err(|error| {
@@ -305,6 +326,7 @@ pub fn discard_file(repo: &git2::Repository, path: &str) -> Result<(), StageErro
                     None => error.into(),
                 }
             })?;
+        filters.check()?;
     } else {
         // Through the held-folder walker, so a folder swapped for a link after the checks above
         // can't redirect the delete outside the repository (#149).
@@ -367,7 +389,7 @@ pub fn restore_file_version(
         .path(rel)
         .disable_pathspec_match(true)
         .update_index(false);
-    crate::hardlink::on_checkout(repo, &mut checkout);
+    let filters = crate::hardlink::on_checkout(repo, &mut checkout);
     repo.checkout_tree(tree.as_object(), Some(&mut checkout))
         .map_err(|error| {
             match crate::worktree_guard::held_open_after_checkout(workdir, &error, [path]) {
@@ -375,6 +397,7 @@ pub fn restore_file_version(
                 None => error.into(),
             }
         })?;
+    filters.check()?;
     Ok(())
 }
 
@@ -915,6 +938,11 @@ fn apply_selection(
         repo.diff_index_to_workdir(None, Some(&mut opts))?
     };
     let hunk = find_hunk(&diff, path, old_start, new_start)?;
+    // Staging writes the work tree's bytes as a blob, a discard the index's to the work tree,
+    // both unfiltered (#1063). Unstaging moves blobs only.
+    if !matches!(target, Target::Unstage) {
+        crate::external_filter::refuse_paths::<StageError, _>(repo, [path])?;
+    }
     if matches!(target, Target::Discard) {
         let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
         refuse_beyond_symlink(workdir, path)?;

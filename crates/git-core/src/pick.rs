@@ -24,6 +24,9 @@ pub enum PickOutcome {
 pub enum PickError {
     #[error("{0}")]
     Git(#[from] git2::Error),
+    /// A file the step writes uses an external filter driver (#1063); nothing changed.
+    #[error(transparent)]
+    ExternalFilter(#[from] crate::ExternalFilter),
     #[error("Finish or abort the current merge/cherry-pick/revert/rebase first.")]
     OperationInProgress,
     #[error("Commit or unstage your staged changes first.")]
@@ -599,6 +602,8 @@ fn step(
         repo,
         &[crate::worktree_guard::Incoming::MergeAsConflict(&merged)],
     )?;
+    // libgit2's pick leaves its state files even when its checkout is refused (#1063).
+    crate::external_filter::refuse_merged::<PickError>(repo, &head.tree()?, &merged)?;
     // libgit2 can miss a file/folder conflict and would commit without one of them (#410): the
     // step stops at git's conflict instead (#416), after the link check, whose refusal is the
     // more specific one for a link.
@@ -643,7 +648,7 @@ fn apply_step(
     let written = crate::partial_checkout::Written::default();
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.safe().allow_conflicts(true);
-    written.record(repo, &mut checkout);
+    let filters = written.record(repo, &mut checkout);
     written.expect_conflicts(repo, merged);
     let applied = match kind {
         Kind::CherryPick => {
@@ -663,6 +668,11 @@ fn apply_step(
             repo.revert(target, Some(&mut options))
         }
     };
+    if let Err(refusal) = filters.check() {
+        // Checked before the step (`refuse_merged`); libgit2 wrote its state files only.
+        let _ = crate::commit::clear_commit_state(repo);
+        return Err(refusal.into());
+    }
     if let Err(error) = applied {
         let restored = crate::partial_checkout::roll_back(repo, &written);
         let _ = crate::commit::clear_commit_state(repo);
@@ -1534,8 +1544,9 @@ fn rewind_to(repo: &Repository, original: &Commit<'_>, reflog: &str) -> Result<(
     )?;
     if pairs.is_empty() {
         let mut checkout = git2::build::CheckoutBuilder::new();
-        crate::hardlink::on_checkout(repo, &mut checkout);
+        let filters = crate::hardlink::on_checkout(repo, &mut checkout);
         repo.checkout_tree(original.as_object(), Some(&mut checkout))?;
+        filters.check()?;
     } else {
         rewind_around_case_pairs(repo, &tree, &pairs)?;
     }
@@ -1575,12 +1586,13 @@ fn rewind_around_case_pairs(
     // No paths would mean the whole tree.
     if !others.is_empty() {
         let mut checkout = git2::build::CheckoutBuilder::new();
-        crate::hardlink::on_checkout(repo, &mut checkout);
+        let filters = crate::hardlink::on_checkout(repo, &mut checkout);
         checkout.disable_pathspec_match(true);
         for path in others {
             checkout.path(path);
         }
         repo.checkout_tree(tree.as_object(), Some(&mut checkout))?;
+        filters.check()?;
     }
     crate::worktree_guard::restore_case_pairs::<MergeError>(repo, tree, pairs)?;
     set_case_pair_entries(repo, tree, pairs)

@@ -96,8 +96,15 @@ impl Written {
     /// how they were. Installs the builder's notify and progress callbacks, which also give a
     /// file with other hard links a name of its own before libgit2 writes it (#420, see
     /// `hardlink`).
-    pub(crate) fn record(&self, repo: &Repository, builder: &mut git2::build::CheckoutBuilder<'_>) {
-        crate::hardlink::install(repo, builder, Some(self.clone()));
+    ///
+    /// Returns the guard of `hardlink::install`: a file that uses an external filter driver
+    /// stops the checkout before anything is written (#1063), and the caller checks it.
+    pub(crate) fn record(
+        &self,
+        repo: &Repository,
+        builder: &mut git2::build::CheckoutBuilder<'_>,
+    ) -> crate::external_filter::FilterGuard {
+        crate::hardlink::install(repo, builder, Some(self.clone()))
     }
 
     pub(crate) fn set_workdir(&self, workdir: &Path) {
@@ -462,8 +469,12 @@ fn check_out_paths(
     for path in paths {
         builder.path(path.as_slice());
     }
-    crate::hardlink::on_checkout(repo, &mut builder);
+    let filters = crate::hardlink::on_checkout(repo, &mut builder);
     checkout(&mut builder)?;
+    // Only files a refused checkout wrote are put back, so none uses an external filter.
+    filters
+        .check()
+        .map_err(|refusal| git2::Error::from_str(&refusal.to_string()))?;
     Ok(())
 }
 
@@ -611,7 +622,7 @@ mod tests {
 
         let written = Written::default();
         let mut checkout = git2::build::CheckoutBuilder::new();
-        written.record(&repo, &mut checkout);
+        let _filters = written.record(&repo, &mut checkout);
         let result = repo.checkout_tree(side.as_object(), Some(&mut checkout));
         read_only(0o644);
 

@@ -39,6 +39,9 @@ pub enum BranchError {
     /// Stashing the local changes for [`stash_and_switch`] failed, or putting them back did.
     #[error(transparent)]
     Stash(#[from] crate::stash::StashError),
+    /// A file to write uses an external filter driver (#1063); nothing changed.
+    #[error(transparent)]
+    ExternalFilter(#[from] crate::ExternalFilter),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -177,7 +180,7 @@ pub fn switch_branch(repo: &Repository, name: &str) -> Result<(), BranchError> {
     refuse_case_pair_brought_in(repo, &tree)?;
     // A file with other hard links gets a name of its own before it is written (#420).
     let mut checkout = git2::build::CheckoutBuilder::new();
-    crate::hardlink::on_checkout(repo, &mut checkout);
+    let filters = crate::hardlink::on_checkout(repo, &mut checkout);
     // A file another program holds open: say so, not libgit2's raw error (#303). Local changes
     // in the way are their own error, so the app can offer to stash them (#653).
     repo.checkout_tree(target.as_object(), Some(&mut checkout))
@@ -191,6 +194,7 @@ pub fn switch_branch(repo: &Repository, name: &str) -> Result<(), BranchError> {
                 )(error)
             }
         })?;
+    filters.check()?;
     repo.set_head(&branch_ref)?;
     Ok(())
 }
@@ -321,13 +325,14 @@ pub fn checkout_commit(repo: &Repository, commit_id: &str) -> Result<(), BranchE
     refuse_case_pair_brought_in(repo, &tree)?;
     // A file with other hard links gets a name of its own before it is written (#420).
     let mut checkout = git2::build::CheckoutBuilder::new();
-    crate::hardlink::on_checkout(repo, &mut checkout);
+    let filters = crate::hardlink::on_checkout(repo, &mut checkout);
     // A file another program holds open: say so, not libgit2's raw error (#303).
     repo.checkout_tree(target.as_object(), Some(&mut checkout))
         .map_err(crate::worktree_guard::held_open::<BranchError>(
             repo.workdir(),
             crate::HeldDuring::Switch,
         ))?;
+    filters.check()?;
     repo.set_head_detached(target.id())?;
     Ok(())
 }

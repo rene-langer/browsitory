@@ -54,6 +54,9 @@ pub enum SubmoduleError {
     /// Windows: a checkout stopped at a file another program holds open (#303).
     #[error(transparent)]
     HeldOpen(#[from] crate::HeldOpen),
+    /// A file to check out in the submodule uses an external filter driver (#1063); nothing changed.
+    #[error(transparent)]
+    ExternalFilter(#[from] crate::ExternalFilter),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -199,20 +202,22 @@ fn guarded_update(
             // file, so libgit2's safe checkout would take the missing files for deletions.
             let mut checkout = git2::build::CheckoutBuilder::new();
             checkout.safe().recreate_missing(true);
-            crate::hardlink::on_checkout(&sub, &mut checkout);
+            let filters = crate::hardlink::on_checkout(&sub, &mut checkout);
             sub.checkout_tree(commit.as_object(), Some(&mut checkout))
                 .map_err(held())?;
+            filters.check()?;
             sub.set_head_detached(target)?;
         } else {
             // libgit2's default (safe) checkout, with a file with other hard links given a name
             // of its own before it is written (#420).
             let mut checkout = git2::build::CheckoutBuilder::new();
-            crate::hardlink::on_checkout(&sub, &mut checkout);
+            let filters = crate::hardlink::on_checkout(&sub, &mut checkout);
             let mut options = git2::SubmoduleUpdateOptions::new();
             options.checkout(checkout);
             submodule
                 .update(false, Some(&mut options))
                 .map_err(held())?;
+            filters.check()?;
         }
         return Ok(());
     }
@@ -229,8 +234,9 @@ fn guarded_update(
     // must be recreated explicitly.
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.safe().recreate_missing(true);
-    crate::hardlink::on_checkout(&sub, &mut checkout);
+    let filters = crate::hardlink::on_checkout(&sub, &mut checkout);
     sub.checkout_head(Some(&mut checkout)).map_err(held())?;
+    filters.check()?;
     Ok(())
 }
 

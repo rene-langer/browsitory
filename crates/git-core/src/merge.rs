@@ -6,6 +6,9 @@ use thiserror::Error;
 pub enum MergeError {
     #[error("git operation failed: {0}")]
     Git(#[from] git2::Error),
+    /// A file to stage or write uses an external filter driver (#1063); nothing changed.
+    #[error(transparent)]
+    ExternalFilter(#[from] crate::ExternalFilter),
     #[error("failed to write resolved file: {0}")]
     Io(#[from] std::io::Error),
     #[error("repository has no working directory (bare repository)")]
@@ -170,6 +173,8 @@ fn refuse_unsafe_merge(
         return Ok(None);
     }
     let merged = repo.merge_commits(&ours, theirs, None)?;
+    // libgit2's merge writes the index and its state even when its checkout is refused (#1063).
+    crate::external_filter::refuse_merged::<MergeError>(repo, &our_tree, &merged)?;
     // The link check first: its refusal is the more specific one when the "file" is a link.
     crate::worktree_guard::refuse_linked_folders::<MergeError>(
         repo,
@@ -334,12 +339,13 @@ pub fn start_merge(
         // `branch::switch_branch`'s own ordering for the same reason.
         // A file another program holds open: say so, not libgit2's raw error (#303).
         let mut checkout = git2::build::CheckoutBuilder::new();
-        crate::hardlink::on_checkout(repo, &mut checkout);
+        let filters = crate::hardlink::on_checkout(repo, &mut checkout);
         repo.checkout_tree(their_commit.as_object(), Some(&mut checkout))
             .map_err(crate::worktree_guard::held_open::<MergeError>(
                 repo.workdir(),
                 crate::HeldDuring::FastForward,
             ))?;
+        filters.check()?;
         let mut head_ref = repo.head()?;
         head_ref.set_target(their_commit.id(), "merge: Fast-forward")?;
         return Ok(MergeOutcome::FastForwarded);
@@ -364,10 +370,12 @@ pub fn start_merge(
         return Ok(MergeOutcome::Conflicted { files });
     }
 
-    // libgit2's default strategy for a merge (safe); with our callbacks (#420).
+    // libgit2's default strategy for a merge (safe); with our callbacks (#420). The files it
+    // writes were checked for external filters with the merged index (`refuse_unsafe_merge`).
     let mut checkout = git2::build::CheckoutBuilder::new();
-    crate::hardlink::on_checkout(repo, &mut checkout);
+    let filters = crate::hardlink::on_checkout(repo, &mut checkout);
     repo.merge(&[&their_annotated], None, Some(&mut checkout))?;
+    filters.check()?;
     record_merge_mode(repo, opts.fast_forward)?;
 
     let files = conflicted_files(&repo.index()?)?;
@@ -417,8 +425,9 @@ fn squash_merge(
         Some(merged) => merge_with_file_folder_conflict(repo, merged, None, their_label)?,
         None => {
             let mut checkout = git2::build::CheckoutBuilder::new();
-            crate::hardlink::on_checkout(repo, &mut checkout);
+            let filters = crate::hardlink::on_checkout(repo, &mut checkout);
             repo.merge(&[their_annotated], None, Some(&mut checkout))?;
+            filters.check()?;
             conflicted_files(&repo.index()?)?
         }
     };
@@ -694,6 +703,7 @@ pub fn resolve_conflict(
 
     let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
     ensure_inside_workdir(workdir, path)?;
+    crate::external_filter::refuse_paths::<MergeError, _>(repo, [path])?;
     // Never through a symlink that replaced the file (#114).
     if !write_resolved(workdir, path, resolved_content.as_bytes())? {
         return Err(MergeError::SymlinkedFolder(path.to_string()));
@@ -759,6 +769,8 @@ pub fn resolve_whole_file(
     };
     match chosen {
         Some(_) => {
+            // Checked out, then staged: both directions of the filter.
+            crate::external_filter::refuse_paths::<MergeError, _>(repo, [path])?;
             // The forced checkout would replace a read-only file; refuse it as the other
             // resolutions do, before anything is written (#209).
             if crate::worktree_guard::is_read_only_beneath(workdir, path) {
@@ -776,7 +788,7 @@ pub fn resolve_whole_file(
                 ConflictSide::Ours => checkout.use_ours(true),
                 ConflictSide::Theirs => checkout.use_theirs(true),
             };
-            crate::hardlink::on_checkout(repo, &mut checkout);
+            let filters = crate::hardlink::on_checkout(repo, &mut checkout);
             // A file another program holds open: say so, not libgit2's raw error (#268).
             repo.checkout_index(None, Some(&mut checkout))
                 .map_err(|error| {
@@ -785,6 +797,7 @@ pub fn resolve_whole_file(
                         None => error.into(),
                     }
                 })?;
+            filters.check()?;
             let mut index = repo.index()?;
             index.add_path(Path::new(path))?;
             index.write()?;
@@ -903,6 +916,7 @@ pub fn mark_resolved_with_pauses(
             stat,
         }) => {
             let mode = crate::undo::file_mode(&config, executable, previous_mode);
+            crate::external_filter::refuse_paths::<MergeError, _>(repo, [path])?;
             // Streamed from the opened handle into the object database, checked on the way
             // (#212). Through the clean filters (the path as hint), also for a link kept as a
             // file, as git does.
@@ -1443,6 +1457,18 @@ fn apply_operation_reset(repo: &Repository, reset: OperationReset) -> Result<(),
         .collect();
     let head_tree = repo.head()?.peel_to_commit()?.tree()?;
     let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
+    // HEAD's files are written back unfiltered (#1063): refused before anything is removed.
+    crate::external_filter::refuse_paths::<MergeError, _>(
+        repo,
+        touched
+            .iter()
+            .map(|path| path_from_bytes(path))
+            .filter(|rel| {
+                head_tree
+                    .get_path(rel)
+                    .is_ok_and(|entry| entry.filemode() != 0o120000)
+            }),
+    )?;
     // The forced checkout below writes through a symlink that replaced a touched file or a
     // folder on the way to one (#114): remove such links first, like git.
     crate::worktree_guard::prepare_forced_checkout::<MergeError, _>(
@@ -1479,8 +1505,12 @@ fn apply_operation_reset(repo: &Repository, reset: OperationReset) -> Result<(),
         for path in to_checkout {
             checkout.path(path);
         }
-        written.record(repo, &mut checkout);
-        checked_out = repo.checkout_head(Some(&mut checkout));
+        let filters = written.record(repo, &mut checkout);
+        checked_out = repo.checkout_head(Some(&mut checkout)).and_then(|()| {
+            filters
+                .check()
+                .map_err(|refusal| git2::Error::from_str(&refusal.to_string()))
+        });
     }
     let failed = match (not_removed, checked_out) {
         (None, Ok(())) => None,
@@ -1562,6 +1592,7 @@ pub fn resolve_add_delete_conflict(
 
     match entry {
         Some(entry) => {
+            crate::external_filter::refuse_paths::<MergeError, _>(repo, [path])?;
             let blob = repo.find_blob(entry.id)?;
             if !write_resolved(workdir, path, blob.content())? {
                 return Err(MergeError::SymlinkedFolder(path.to_string()));

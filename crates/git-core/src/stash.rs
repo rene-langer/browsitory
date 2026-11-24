@@ -128,6 +128,9 @@ pub enum StashError {
     /// checkout had written was put back and the stash is kept (#321).
     #[error(transparent)]
     HeldOpen(#[from] crate::HeldOpen),
+    /// A file to stash or write uses an external filter driver (#1063); nothing changed.
+    #[error(transparent)]
+    ExternalFilter(#[from] crate::ExternalFilter),
 }
 
 /// Refuses when `stash@{index}` is not the stash `expected` names: the caller's list is stale
@@ -257,6 +260,8 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
     }
     refuse_staged_repository(repo, &index, &opts.paths)?;
     if !opts.paths.is_empty() {
+        // Stashed raw, then reset to HEAD's blob unfiltered (#1063).
+        crate::external_filter::refuse_paths::<StashError, _>(repo, &opts.paths)?;
         return save_path_limited_stash(repo, opts, message, true);
     }
     // Before `entry_in_the_way`, which on macOS and Windows takes the deleted `Old` of a
@@ -264,6 +269,11 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
     refuse_staged_case_only_rename(repo, &index)?;
     // One status pass and one walk of HEAD's tree for every check below (#243).
     let scan = WorktreeScan::new(repo)?;
+    // Stashed raw, then reset to HEAD's blobs unfiltered (#1063); before either route below.
+    crate::external_filter::refuse_paths::<StashError, _>(
+        repo,
+        scan.changed_paths(opts.include_untracked),
+    )?;
     let head_files = head_files(repo)?;
     // The reset after stashing would delete an untracked file (#186), an ignored file or folder
     // (#208) or a nested repository (#211) in the way of a tracked path. The path-limited stash
@@ -874,12 +884,14 @@ fn revert_paths(
     for path in &checkout_paths {
         checkout.path(*path);
     }
-    crate::hardlink::on_checkout(repo, &mut checkout);
+    let filters = crate::hardlink::on_checkout(repo, &mut checkout);
     if keep_index {
         index.read(true)?;
         repo.checkout_index(Some(index), Some(&mut checkout))?;
+        filters.check()?;
     } else {
         repo.checkout_tree(base_tree.as_object(), Some(&mut checkout))?;
+        filters.check()?;
         restore_head_entries(index, base_tree, &checkout_paths)?;
     }
     Ok(())
@@ -1691,6 +1703,29 @@ pub fn list_stashes(repo: &mut Repository) -> Result<Vec<StashEntry>, StashError
 }
 
 /// The trees of `stash@{index}`: its worktree commit and its index and untracked parents.
+/// Refuses `stash@{index}` when a file its apply writes uses an external filter driver
+/// (#1063): what its work-tree and index trees change over its base, and its untracked files.
+/// libgit2's apply goes on after a refused checkout, so this runs before any route starts.
+fn refuse_filtered_stash(repo: &Repository, index: usize) -> Result<(), StashError> {
+    let Some(id) = repo
+        .reflog("refs/stash")
+        .ok()
+        .and_then(|reflog| reflog.get(index).map(|entry| entry.id_new()))
+    else {
+        return Ok(());
+    };
+    let stash = repo.find_commit(id)?;
+    let base = stash.parent(0)?.tree()?;
+    crate::external_filter::refuse_trees::<StashError>(repo, Some(&base), &stash.tree()?)?;
+    if let Ok(staged) = stash.parent(1) {
+        crate::external_filter::refuse_trees::<StashError>(repo, Some(&base), &staged.tree()?)?;
+    }
+    if let Ok(untracked) = stash.parent(2) {
+        crate::external_filter::refuse_trees::<StashError>(repo, None, &untracked.tree()?)?;
+    }
+    Ok(())
+}
+
 fn stash_trees(repo: &Repository, index: usize) -> Result<Vec<git2::Tree<'_>>, StashError> {
     let Some(id) = repo
         .reflog("refs/stash")
@@ -1726,6 +1761,7 @@ pub fn apply_stash(
     if repo.index()?.has_conflicts() {
         return Err(StashError::UnresolvedConflicts);
     }
+    refuse_filtered_stash(repo, index)?;
     // Safe checkouts create files through a symlinked folder (#114): the stash's worktree,
     // index and untracked trees are what the apply writes.
     {
@@ -1761,10 +1797,13 @@ pub fn apply_stash(
     // tried again (#321): libgit2 checks out from the index, which it writes only at the end.
     let written = crate::partial_checkout::Written::default();
     let mut checkout = git2::build::CheckoutBuilder::new();
-    written.record(repo, &mut checkout);
+    let filters = written.record(repo, &mut checkout);
     options.checkout_options(checkout);
     let applied = repo.stash_apply(index, Some(&mut options));
     let repo: &Repository = repo;
+    // libgit2 goes on after a refused checkout; the files were checked first
+    // (`refuse_filtered_stash`).
+    filters.check()?;
     applied.map_err(|error| {
         let restored = crate::partial_checkout::roll_back(repo, &written);
         match (error.code(), error.class()) {
@@ -2225,7 +2264,7 @@ fn apply_in_order(
         .safe()
         .our_label("Updated upstream")
         .their_label("Stashed changes");
-    written.record(repo, &mut checkout);
+    let filters = written.record(repo, &mut checkout);
     written.expect_conflicts(repo, &modified);
     repo_index.clear()?;
     for entry in modified.iter().chain(untracked_files.iter()) {
@@ -2240,6 +2279,11 @@ fn apply_in_order(
         } else {
             crate::partial_checkout::report(repo, restored, crate::HeldDuring::RolledBack, error)
         });
+    }
+    if let Err(refusal) = filters.check() {
+        // Nothing was written; put the index handle back as it was.
+        repo_index.read(true)?;
+        return Err(refusal.into());
     }
     // The index left behind: the merge with its conflicts when there are any (libgit2 checks
     // that out as the index), else the unstashed index, else the index as it was (HEAD's).
