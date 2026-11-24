@@ -1959,6 +1959,15 @@ pub fn undo_outcomes() -> Cases<repo_service::worker::UndoOutcome> {
                 message: "main is checked out in another worktree".to_string(),
             },
         ),
+        case(
+            "FileNotSaved",
+            UndoOutcome::FileNotSaved {
+                label: "Switch to main".to_string(),
+                message: "dump.sql is larger than 50 MB, so its contents weren't saved for \
+                          undo, and it has changed since."
+                    .to_string(),
+            },
+        ),
         case("OperationInProgress", UndoOutcome::OperationInProgress),
     ];
     assert_every_variant!(
@@ -1967,6 +1976,7 @@ pub fn undo_outcomes() -> Cases<repo_service::worker::UndoOutcome> {
         UndoOutcome::Nothing,
         UndoOutcome::RepositoryChanged { .. },
         UndoOutcome::BranchHeld { .. },
+        UndoOutcome::FileNotSaved { .. },
         UndoOutcome::OperationInProgress,
     );
     cases

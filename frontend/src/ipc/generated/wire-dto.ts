@@ -462,7 +462,7 @@ export type TreeListing = { entries: Array<TreeEntry>, truncated: boolean, };
 
 export type UiSize = "Small" | "Normal" | "Large";
 
-export type UndoOutcome = { "kind": "Done", label: string, } | { "kind": "Nothing" } | { "kind": "RepositoryChanged", label: string, } | { "kind": "BranchHeld", label: string, message: string, } | { "kind": "OperationInProgress" };
+export type UndoOutcome = { "kind": "Done", label: string, } | { "kind": "Nothing" } | { "kind": "RepositoryChanged", label: string, } | { "kind": "BranchHeld", label: string, message: string, } | { "kind": "FileNotSaved", label: string, message: string, } | { "kind": "OperationInProgress" };
 
 export type UndoState = { undo: string | null, redo: string | null, };
 

@@ -1922,6 +1922,7 @@ pub enum UndoOutcomeDto {
     Nothing,
     RepositoryChanged { label: String },
     BranchHeld { label: String, message: String },
+    FileNotSaved { label: String, message: String },
     OperationInProgress,
 }
 
@@ -1933,6 +1934,7 @@ impl From<crate::worker::UndoOutcome> for UndoOutcomeDto {
             UndoOutcome::Nothing => Self::Nothing,
             UndoOutcome::RepositoryChanged { label } => Self::RepositoryChanged { label },
             UndoOutcome::BranchHeld { label, message } => Self::BranchHeld { label, message },
+            UndoOutcome::FileNotSaved { label, message } => Self::FileNotSaved { label, message },
             UndoOutcome::OperationInProgress => Self::OperationInProgress,
         }
     }

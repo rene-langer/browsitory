@@ -431,6 +431,8 @@ export type UndoOutcome =
   | { kind: "RepositoryChanged"; label: string }
   /** A branch to move, delete or check out is held by a worktree (#291); `message` says how. */
   | { kind: "BranchHeld"; label: string; message: string }
+  /** A file the entry didn't store for its size (over 50 MB) changed since (#1065); `message` names it. */
+  | { kind: "FileNotSaved"; label: string; message: string }
   | { kind: "OperationInProgress" };
 /**
  * A single cherry-pick/revert. `HookFailed`: its `prepare-commit-msg` failed (#183); nothing was

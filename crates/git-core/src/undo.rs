@@ -36,6 +36,25 @@ pub struct RepoSnapshot {
     /// HEAD tree with every modified/deleted/untracked (not ignored) file overlaid. `None` for
     /// `SnapshotScope::RefsAndIndex`.
     pub worktree_tree: Option<String>,
+    /// Work-tree files over the size limit, by path (#1065): left out of `worktree_tree` (not
+    /// stored), only identified by their stat data.
+    pub skipped: BTreeMap<String, SkippedFile>,
+}
+
+/// The largest work-tree file a `SnapshotScope::Full` snapshot stores (#1065).
+pub const SNAPSHOT_FILE_LIMIT: u64 = 50 * 1024 * 1024;
+
+/// A work-tree file a snapshot did not store for its size (#1065): what `restore` compares the
+/// file on disk with to tell whether it is still the one the snapshot saw.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SkippedFile {
+    pub size: u64,
+    /// Seconds and nanoseconds since the epoch.
+    pub mtime: (i64, u32),
+    /// 0 where the platform has none (Windows).
+    pub ino: u64,
+    /// Its git mode, as the snapshot would have recorded it.
+    pub mode: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,6 +72,13 @@ pub enum SnapshotScope {
 pub enum UndoError {
     #[error("the repository changed since this operation")]
     RepositoryChanged,
+    /// A file the snapshot to restore did not store for its size (#1065) is no longer as it was
+    /// then, so it can't be brought back; nothing was changed.
+    #[error(
+        "{0} is larger than {limit} MB, so its contents weren't saved for undo, and it has changed since.",
+        limit = SNAPSHOT_FILE_LIMIT / (1024 * 1024)
+    )]
+    NotSaved(String),
     /// A branch to move, delete or check out is held by another worktree: checked out, being
     /// rebased or bisected, or used by a paused cherry-pick or revert there (#291, #293).
     #[error(transparent)]
@@ -101,7 +127,16 @@ pub fn capture(repo: &Repository, scope: SnapshotScope) -> Result<RepoSnapshot, 
         refs: local_refs(repo)?,
         index_tree,
         worktree_tree,
+        skipped: BTreeMap::new(),
     })
+}
+
+/// [`capture`] with `SnapshotScope::Full` and a per-file `limit` other than
+/// `SNAPSHOT_FILE_LIMIT`: a test seam, so tests need no 50 MB files.
+#[doc(hidden)]
+pub fn capture_limited(repo: &Repository, limit: u64) -> Result<RepoSnapshot, UndoError> {
+    let _ = limit;
+    capture(repo, SnapshotScope::Full)
 }
 
 fn head_state(repo: &Repository) -> Result<HeadState, UndoError> {

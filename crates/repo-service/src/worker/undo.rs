@@ -245,6 +245,12 @@ pub enum UndoOutcome {
         label: String,
         message: String,
     },
+    /// A file the entry didn't store for its size changed since (#1065): `message` names it.
+    /// Nothing was restored; the entry stays on its stack.
+    FileNotSaved {
+        label: String,
+        message: String,
+    },
     OperationInProgress,
 }
 

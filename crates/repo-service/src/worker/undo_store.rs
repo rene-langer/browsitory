@@ -102,6 +102,7 @@ impl From<StoredSnapshot> for RepoSnapshot {
             refs: stored.refs,
             index_tree: stored.index_tree,
             worktree_tree: stored.worktree_tree,
+            skipped: BTreeMap::new(),
         }
     }
 }
@@ -409,6 +410,37 @@ mod tests {
         assert_eq!(reloaded.undo, stacks.undo);
         assert_eq!(reloaded.redo, stacks.redo);
         assert!(repo.find_reference("refs/browsitory/undo/main").is_ok());
+    }
+
+    /// #1065: the files a snapshot identified instead of storing survive a save and reload, and
+    /// a snapshot without any writes no `skipped` key (older builds read the file as before).
+    #[test]
+    fn saves_and_reloads_the_files_a_snapshot_did_not_store() {
+        let (_dir, repo) = repo_with_commit();
+        let (mut store, mut stacks) = UndoStore::open(&repo);
+        let mut with_skipped = entry(&repo, "Switch to main");
+        with_skipped.before.skipped.insert(
+            "dump.sql".into(),
+            git_core::undo::SkippedFile {
+                size: 60 << 20,
+                mtime: (1_700_000_000, 123_456_789),
+                ino: 42,
+                mode: 0o100644,
+            },
+        );
+        stacks.undo.push(with_skipped);
+        stacks.undo.push(entry(&repo, "Stage a.txt"));
+        store.save(&repo, &stacks).unwrap();
+
+        let (_, reloaded) = UndoStore::open(&repo);
+        assert_eq!(reloaded.undo, stacks.undo);
+        let json: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(repo.path().join("browsitory/undo.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(json["undo"][0]["before"].get("skipped").is_some());
+        assert!(json["undo"][0]["after"].get("skipped").is_none());
+        assert!(json["undo"][1]["before"].get("skipped").is_none());
     }
 
     #[test]

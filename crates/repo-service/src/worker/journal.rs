@@ -754,7 +754,9 @@ fn seen_ok(value: &dyn Any) -> Seen {
             UndoOutcome::RepositoryChanged { .. } => {
                 return Seen::ended(Failed, "The repository changed since.".into())
             }
-            UndoOutcome::BranchHeld { message, .. } => return Seen::ended(Failed, message.clone()),
+            UndoOutcome::BranchHeld { message, .. } | UndoOutcome::FileNotSaved { message, .. } => {
+                return Seen::ended(Failed, message.clone())
+            }
             UndoOutcome::OperationInProgress => {
                 return Seen::ended(Failed, "An operation is in progress.".into())
             }
