@@ -421,6 +421,8 @@ impl<S: CredentialStore, A: SshAgent> CredentialProvider for RemoteCredentialPro
     ) -> Result<git2::Cred, git2::Error> {
         match &self.profile {
             Some(RemoteAuthMode::HttpsToken { username }) => {
+                // libgit2 asks with the URL as configured, which can hold a user name (#1081).
+                let url = &git_core::remote::url_without_user_info(url);
                 let lookup = if self.without_prompt {
                     self.service
                         .lookup_https_without_prompt(url, Some(username))

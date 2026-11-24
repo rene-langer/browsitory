@@ -66,6 +66,10 @@ automatically** turned on (off by default), Browsitory fetches the open reposito
 in the background at the interval you chose. No other server is involved. The server's owner
 (for example GitHub, GitLab, Bitbucket or your company) handles that data under its own terms.
 
+A remote's `https://` or `http://` address that holds a user name, token or password (written
+by Git or another program, since Browsitory refuses such addresses) is shown with `***` in their
+place. Browsitory sends them only to that remote, as Git does, and never shows or logs them.
+
 ### Pull requests (only if you set them up)
 
 When you connect a pull request card to GitHub or Bitbucket with a personal access token,

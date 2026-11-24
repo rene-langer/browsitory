@@ -70,7 +70,7 @@ pub enum CloneError {
 /// and plain paths are allowed. Refused: empty input, remote-helper syntax
 /// (`<transport>::<address>`, recognised as a `::` with no `/` before it so `ssh://[::1]/r`
 /// still passes), URLs carrying a password, and http(s) URLs carrying a user name: git would
-/// write it, often a token, into `.git/config`, where `list_remotes` refuses it (#1052).
+/// write it, often a token, into `.git/config` in plain text (#1052).
 pub fn validate_clone_url(url: &str) -> Result<(), CloneError> {
     let url = url.trim();
     if url.is_empty() {

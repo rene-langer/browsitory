@@ -2,6 +2,7 @@ import { useState, useId } from "react";
 import { Copy } from "lucide-react";
 import type { RemoteInfo } from "../ipc/RepoClient";
 import { remoteNameProblem } from "../lib/refName";
+import { hidesUserInfo } from "../lib/hiddenUserInfo";
 import { useCopyToClipboard } from "../state/useCopyToClipboard";
 import { describedBy } from "../lib/ariaDescribedBy";
 import { BlockedReason } from "./primitives/BlockedReason";
@@ -33,6 +34,10 @@ export function EditRemoteDialog({
 }) {
   // The visible reason the submit button is disabled is its description (#664).
   const reasonId = useId();
+  const fetchHiddenId = useId();
+  const pushHiddenId = useId();
+  const fetchHidesUserInfo = hidesUserInfo(remote.fetchUrl);
+  const pushHidesUserInfo = remote.pushUrl !== null && hidesUserInfo(remote.pushUrl);
   const [name, setName] = useState(remote.name);
   const [fetchUrl, setFetchUrl] = useState(remote.fetchUrl);
   const [pushUrl, setPushUrl] = useState(remote.pushUrl ?? "");
@@ -77,7 +82,11 @@ export function EditRemoteDialog({
         <div className={ownStyles.urlRow}>
           <label className={styles.label}>
             Fetch URL
-            <input value={fetchUrl} onChange={(event) => setFetchUrl(event.target.value)} />
+            <input
+              value={fetchUrl}
+              aria-describedby={fetchHidesUserInfo ? fetchHiddenId : undefined}
+              onChange={(event) => setFetchUrl(event.target.value)}
+            />
           </label>
           <button
             type="button"
@@ -92,12 +101,14 @@ export function EditRemoteDialog({
             Copy
           </button>
         </div>
+        {fetchHidesUserInfo && <HiddenUserInfoNote id={fetchHiddenId} />}
         <div className={ownStyles.urlRow}>
           <label className={styles.label}>
             Push URL
             <input
               value={pushUrl}
               placeholder="Same as fetch URL"
+              aria-describedby={pushHidesUserInfo ? pushHiddenId : undefined}
               onChange={(event) => setPushUrl(event.target.value)}
             />
           </label>
@@ -116,6 +127,7 @@ export function EditRemoteDialog({
             </button>
           )}
         </div>
+        {pushHidesUserInfo && <HiddenUserInfoNote id={pushHiddenId} />}
         <BlockedReason id={reasonId} reason={blockedReason} />
         <DialogActions>
           <button
@@ -133,5 +145,15 @@ export function EditRemoteDialog({
         </DialogActions>
       </form>
     </FormDialog>
+  );
+}
+
+/** Under a URL whose saved form holds user information, hidden by the backend (#1081). */
+function HiddenUserInfoNote({ id }: { id: string }) {
+  return (
+    <p id={id} className={ownStyles.note}>
+      The saved URL holds a user name or token, hidden as ***. Leave it as it is to keep it; to remove it, enter
+      the URL without it and set the user name in Manage credentials.
+    </p>
   );
 }
