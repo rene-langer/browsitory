@@ -72,13 +72,25 @@ undoing when that would write it. The error names the file and the filter, for e
 Browsitory can't run, so it refused this change. Use git on the command line for it instead."
 Actions that don't touch such a file work as usual.
 
+When the repository uses such a filter, the **Changes** list says so at the top ("This repository
+uses the 'lfs' filter, which Browsitory can't run.") until you dismiss it with ✕. A changed file
+under the filter is marked with the filter's name ("'git-crypt' filter"), its Stage button is
+off, and **Stage all** and **Stage modified** leave it out. Its diff compares the file on disk
+with the version Git stored (the encrypted bytes, the LFS pointer), so the difference may be only
+the filter's; a note above the diff says so.
+
 ??? note "Details"
 
     A filter counts when the Git config (of the repository, or your global one: `git lfs install`
     writes there) sets a command for it (`filter.<name>.clean`, `.smudge` or `.process`) or
     marks it `required`. A `filter=` attribute without such a setting is ignored, as Git ignores
-    it, and a symbolic link is never filtered. The changes list and the diff compare the file as
-    it is on disk with what is stored, so an encrypted file can show as changed although it
-    isn't. A fresh clone or a new worktree writes such files as they are stored (the LFS pointer,
+    it, and a symbolic link is never filtered. Git decides whether such a file changed by running
+    the filter on it; Browsitory can't, so an encrypted file can show as changed although it
+    isn't (after a `touch`, or a checkout by another tool). Git LFS is the exception: the stored
+    pointer names the file's size and SHA-256, so a Git LFS file whose content matches it isn't
+    listed (only for a filter whose command is `git-lfs`, as `git lfs install` sets it up). The
+    notice lists the filters named in the repository's `.gitattributes` files,
+    `.git/info/attributes` and the file `core.attributesFile` names, when the Git config sets them
+    up: a global `git lfs install` alone shows no notice. A fresh clone or a new worktree writes such files as they are stored (the LFS pointer,
     the encrypted bytes), as Git does without the program installed; run `git lfs pull` or
     `git-crypt unlock` there. Side files for external tools show the stored text too.
