@@ -42,6 +42,37 @@ describe("InlineError", () => {
     }
   });
 
+  it("copies details without the credentials a URL or header carries (#1056)", async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    try {
+      render(
+        <InlineError
+          message="Fetch failed: https://ghp_secret@example.test/o/r.git"
+          hint="Check https://alice:pw@example.test/"
+          details="Authorization: Bearer tok123"
+          copyDetails
+          earlier={["Push to http://bob@example.test/r failed"]}
+          onDismiss={() => {}}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Copy details" }));
+      await waitFor(() => expect(writeText).toHaveBeenCalled());
+      expect(writeText).toHaveBeenCalledWith(
+        [
+          "Fetch failed: https://***@example.test/o/r.git",
+          "Check https://***@example.test/",
+          "Authorization: ***",
+          "",
+          "Earlier errors:",
+          "- Push to http://***@example.test/r failed",
+        ].join("\n"),
+      );
+    } finally {
+      Reflect.deleteProperty(navigator, "clipboard");
+    }
+  });
+
   it("says when the clipboard refused the copy", async () => {
     render(<InlineError message="Boom" copyDetails onDismiss={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: "Copy details" }));

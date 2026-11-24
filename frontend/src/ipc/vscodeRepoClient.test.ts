@@ -1428,6 +1428,19 @@ describe("vscodeRepoClient", () => {
     await expect(promise).resolves.toBeNull();
   });
 
+  it("redacts credentials before it sends log_frontend_error (#1056)", async () => {
+    const promise = vscodeRepoClient.logFrontendError("IPC fetch failed", new Error("https://ghp_secret@example.test/o/r.git"));
+
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "log_frontend_error",
+      params: { context: "IPC fetch failed", message: "Error: https://***@example.test/o/r.git" },
+    });
+    respond(1, null);
+    await expect(promise).resolves.toBeNull();
+  });
+
   it("wires listPullRequests and createPullRequest", async () => {
     const listPromise = vscodeRepoClient.listPullRequests("/repo", "origin", "alice");
     expect(postMessage).toHaveBeenCalledWith({
