@@ -4,9 +4,16 @@ import styles from "./GoToNotice.module.css";
 
 /**
  * Above the graph: why a "Go to" target has no row in it, with the one change that would show
- * it (#441). A polite status, not an alert: nothing failed, the graph is filtered.
+ * it (#441). A polite status, not an alert: nothing failed, the graph is filtered. The Changes
+ * pane shows its filter-driver notice (#1087) the same way.
  */
-export function GoToNotice({ notice, onDismiss }: { notice: Notice; onDismiss: () => void }) {
+export function GoToNotice({
+  notice,
+  onDismiss,
+}: {
+  notice: Pick<Notice, "message" | "action"> & Partial<Pick<Notice, "commitId">>;
+  onDismiss: () => void;
+}) {
   return (
     <p role="status" className={styles.notice}>
       <span className={styles.message}>{notice.message}</span>

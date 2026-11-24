@@ -5,19 +5,31 @@ import type { StatusEntry } from "../ipc/RepoClient";
 // whatever happens to be in the working tree. One bulk click would silently resolve every
 // outstanding conflict, so the bulk actions skip them. The per-row Stage control on a conflicted
 // file is left alone: that's a deliberate, one-file-at-a-time action.
+//
+// A file under a filter driver Browsitory can't run (`externalFilter`, #1087) is refused by the
+// backend; the bulk actions leave it out so they stage everything else.
 
-/** The paths "Stage all" stages: every unstaged entry but conflicts, untracked files included. */
+/**
+ * The paths "Stage all" stages: every unstaged entry but conflicts and files under a filter
+ * Browsitory can't run, untracked files included.
+ */
 export function stageAllPaths(status: StatusEntry[]): string[] {
-  return status.filter((entry) => !entry.staged && entry.kind !== "Conflicted").map((entry) => entry.path);
+  return status
+    .filter((entry) => !entry.staged && entry.kind !== "Conflicted" && entry.externalFilter === undefined)
+    .map((entry) => entry.path);
 }
 
 /**
  * The paths "Stage modified" stages (#621): the unstaged changes of tracked files (modified,
- * deleted, type changes, renames), leaving untracked files and conflicts alone.
+ * deleted, type changes, renames), leaving untracked files, conflicts and files under a filter
+ * Browsitory can't run alone.
  */
 export function stageModifiedPaths(status: StatusEntry[]): string[] {
   return status
-    .filter((entry) => !entry.staged && entry.kind !== "Conflicted" && entry.kind !== "New")
+    .filter(
+      (entry) =>
+        !entry.staged && entry.kind !== "Conflicted" && entry.kind !== "New" && entry.externalFilter === undefined,
+    )
     .map((entry) => entry.path);
 }
 

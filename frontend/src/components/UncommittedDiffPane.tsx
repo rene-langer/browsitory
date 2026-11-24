@@ -35,6 +35,8 @@ import { isUntracked } from "../lib/statusLetter";
 import { useFileListLayout, writeFileListLayout } from "../lib/fileListLayoutPreference";
 import { buildFileTree, filesUnder, visibleFiles, type FileTreeNode } from "../lib/fileTree";
 import { ChevronDown, ChevronRight, Minus, Plus } from "lucide-react";
+import { GoToNotice } from "./GoToNotice";
+import { externalFiltersNotice } from "../lib/externalFilters";
 
 // The change lists' keys (#449): arrows/j/k move (on to the other group past either end, #639),
 // Shift extends, Ctrl/Cmd+A selects the group, Escape keeps only the current file, `s` stages or
@@ -173,6 +175,10 @@ export function UncommittedDiffPane({
   // The untracked files whose contents the user asked for while "Expand untracked files" is off
   // (#623), by `entryKey`; kept across refreshes while the pane is open.
   const [revealedUntracked, setRevealedUntracked] = useState<ReadonlySet<string>>(new Set());
+  // The filter drivers whose notice (#1087) was dismissed: it shows again when they change.
+  const [dismissedFilters, setDismissedFilters] = useState<string | null>(null);
+  const externalFilters = headInfo.externalFilters ?? [];
+  const filtersKey = externalFilters.join("\n");
   const { expandUntracked } = useDiffSettingsContext().settings;
   const contentsHidden = (entry: StatusEntry) =>
     !expandUntracked && isUntracked(entry) && !revealedUntracked.has(entryKey(entry));
@@ -972,6 +978,14 @@ export function UncommittedDiffPane({
       <span aria-live="polite" aria-atomic="true" className={styles.srOnly} data-testid="file-selection-announcement">
         {selectionAnnouncement}
       </span>
+      {externalFilters.length > 0 && filtersKey !== dismissedFilters && (
+        <div className={styles.filterNotice}>
+          <GoToNotice
+            notice={{ message: externalFiltersNotice(externalFilters), action: null }}
+            onDismiss={() => setDismissedFilters(filtersKey)}
+          />
+        </div>
+      )}
       {status.length === 0 && statusLoaded && (
         // Nothing to list (#665): say the tree is clean, or how a new repository gets its first
         // commit, instead of an empty pane.
@@ -1134,6 +1148,13 @@ export function UncommittedDiffPane({
       {currentEntry !== undefined && currentEntry.untrackedFolder !== true && (
         <>
           {!conflictOpen && <DiffOptionsToolbar sticky />}
+          {currentEntry.externalFilter !== undefined && (
+            <p className={styles.filterNote}>
+              Browsitory can&apos;t run the &apos;{currentEntry.externalFilter}&apos; filter, so this compares the file
+              on disk with the version git stored: the difference may be only the filter&apos;s. Use git on the
+              command line to stage or discard it.
+            </p>
+          )}
           <UncommittedFileViewer
             key={currentKey}
             repoPath={repoPath}
