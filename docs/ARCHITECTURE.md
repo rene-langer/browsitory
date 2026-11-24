@@ -943,8 +943,31 @@ certificate.
   a file version, applying a commit's change or a patch, a hard reset) snapshot with
   `FullUncapped`, which stores every file. Every other work-tree command leaves dirty and
   untracked files as they are (git refuses to overwrite them), so for those a skipped file only
-  ever needs to stay put. A build that predates `skipped` ignores it: such a file is in neither
-  tree, so that build leaves it alone too.
+  ever needs to stay put.
+- **Untracked count limit** (#1090): a `Full` snapshot with more than `SNAPSHOT_UNTRACKED_LIMIT`
+  (10,000) untracked files stores none of them (an un-ignored build folder would otherwise be
+  read and written as loose objects before and after every Switch or Pull). It notes each
+  one's stat data like a skipped file, without reading it, in one JSON blob
+  (`{"files":{"<path>":[size, mtime s, mtime ns, inode, mode]}}`) whose id is
+  `RepoSnapshot::unsaved_untracked`, pinned by the anchor (`<n>-before-untracked`). One blob,
+  not a map in `undo.json`: 50 entries of tens of thousands of files would make the file and
+  the worker's memory hundreds of MB, while a blob costs an id and identical lists (before and
+  after a command that leaves them alone, the usual case) are one object. `restore` reads
+  these lists only when the two sides' ids differ and merges them with `skipped`, under the
+  same rules; a target-only file that changed is `UndoError::NotSavedUntracked` ("notes.txt is
+  one of more than 10,000 untracked files, so its contents weren't saved for undo, and it has
+  changed since.", `UndoOutcome::FileNotSaved` too). Once over the limit every untracked file
+  is left out, not only those past the 10,000th, so which ones are saved never depends on
+  where a path sorts. A file left out on the expected side that already has the target's
+  contents is not rewritten (`holds_blob`): a command that crosses the limit (a mixed reset
+  untracking files) would otherwise give those files new stat data on undo and redo would
+  refuse. `FullUncapped` has no count limit either: discarding a big untracked folder still
+  saves every file.
+- **Format version** (#1093): `undo.json` is version 2 since the snapshots can leave files
+  out; this build reads versions 1 and 2 and writes 2. Older builds read only version 1 and
+  ignore any other file (and never overwrite it), so after a downgrade they start with an empty
+  history instead of restoring snapshots whose left-out files they don't know about (which
+  could delete such a file).
 - **Recording** (`repo-service::worker::undo`): the worker snapshots before/after each
   recordable command; failed/no-op commands record nothing; operations that stop on conflicts
   stay pending until completed (one entry) or aborted (none).
@@ -961,8 +984,8 @@ certificate.
   `policy::reply_of`, which also names every variant. `worker/policy_tests.rs` pins every
   command's policy in one table.
 - **Pending entry**: the paused operation's label and pre-operation snapshot are stored in
-  `undo.json` as `pending` (optional, still version 1: older builds ignore it and drop it on
-  their next save), pinned by the undo anchor like the stacks. It carries the marker of the
+  `undo.json` as `pending` (optional, added within version 1: older builds ignore it and drop
+  it on their next save), pinned by the undo anchor like the stacks. It carries the marker of the
   operation it belongs to (`worker::gate::OperationProbe::marker`): `rebase <branch ref>
   <original tip> <onto>`, `sequence <kind> <original HEAD> <first commit> <count>`, `merge
   <HEAD> <MERGE_HEAD…> @<mtime>`, `cherry-pick <HEAD> <CHERRY_PICK_HEAD> @<mtime>`, `revert
@@ -1048,8 +1071,9 @@ certificate.
 - **Known cost**: commands that touch the working tree hash every dirty/untracked file up to
   the size limit into the object database (before and after the command), so many or large
   untracked files make those commands slower and grow `.git` until gc after the entry ages out.
-  Discards and a hard reset store files over the limit too. An untracked folder of many small
-  files still costs a read of each (no count limit).
+  Discards and a hard reset store files over the limit too. Over the untracked count limit a
+  snapshot still opens and stats each untracked file (no read) and writes one list blob; the
+  discard-type commands still read every file.
 
 ## Commit signing
 
