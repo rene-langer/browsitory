@@ -22,3 +22,9 @@
   border: none;
   cursor: pointer;
 }
+
+.failed {
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+  border-color: var(--color-danger-text);
+}
