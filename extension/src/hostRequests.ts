@@ -4,6 +4,7 @@ import * as path from "node:path";
  * What the extension host asks the webview to do (#677, #678, #679, #759), sent as a `hostRequest`
  * notification. The frontend's `RepoClient.HostRequest` is the same shape; the extension never
  * imports from `frontend/`, so it is duplicated here (as `toolUris.ts` does with `DiffSource`).
+ * `frontendTypes.contract.test.ts` fails when the two drift (#1059).
  */
 export type HostRequest =
   /** Opens each repository as a tab (or keeps its tab) and shows the first one. */

@@ -85,7 +85,9 @@ bridge kills it only if it is still running after `SIDECAR_EXIT_GRACE_MS` (5 s).
 webview to open repositories, show a file's or lines' history, select a commit (from the Timeline
 view, through `useGoTo` like Go to), or run a global shortcut with an id-less
 `hostRequest` notification (`extension/src/hostRequests.ts`; `RepoClient.subscribeHostRequests`
-on the frontend). It holds them until the webview sends `hostReady`, which `useHostRequests`
+on the frontend). The extension never imports from `frontend/`, so it keeps its own copies of
+`HostRequest` and `DiffSource`; `extension/src/frontendTypes.contract.test.ts` compares them with
+`RepoClient.ts`'s and fails when they drift (#1059). It holds them until the webview sends `hostReady`, which `useHostRequests`
 causes once the restored tabs are open, so a request's tab isn't replaced by the restore. The
 webview also sends `webviewFocus`, which sets the `browsitory.webviewFocused` context key. Both
 are handled in `extension.ts` and never reach the bridge or the sidecar. VSCode hands every key

@@ -1017,7 +1017,8 @@ export type FileConflictChoice = "Ours" | "Theirs" | "Delete";
 
 /**
  * Which two versions of a file a diff tool compares. `Range.toId === null` compares `fromId`
- * with the working tree (the compare view's "with the working tree" mode).
+ * with the working tree (the compare view's "with the working tree" mode). `extension/src/
+ * toolUris.ts` holds the same type, checked by `frontendTypes.contract.test.ts` there (#1059).
  */
 export type DiffSource =
   | { kind: "Unstaged" }
@@ -1309,7 +1310,7 @@ export type FileDropEvent = { kind: "over" } | { kind: "leave" } | { kind: "drop
 
 /**
  * What the VSCode extension host asks the app to do (#677, #678, #679, #759); `extension/src/
- * hostRequests.ts` holds the same type.
+ * hostRequests.ts` holds the same type, checked by `frontendTypes.contract.test.ts` there (#1059).
  */
 export type HostRequest =
   /** Opens each repository as a tab (or keeps its tab) and shows the first one. */
