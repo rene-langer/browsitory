@@ -6,6 +6,47 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-24
+
+0.16.0 is a maintenance release: security fixes in the bundled zlib (RUSTSEC-2026-0544) and
+the `url` and `cookie` crates (RUSTSEC-2026-0592, RUSTSEC-2026-0594). The rest is internal:
+test flakes and test isolation fixes, and CI and hook setup changes.
+
+### Security
+
+- Fixed: updated the bundled zlib (`libz-sys` 1.1.33) to pick up the fix for RUSTSEC-2026-0544,
+  a heap buffer overflow (#1045).
+- Fixed: updated `url` to 2.5.9 for RUSTSEC-2026-0592, a stack overflow in `Url::origin()` on
+  nested `blob:` URLs, and `cookie` to 0.18.3 for RUSTSEC-2026-0594, private cookie nonces that
+  can repeat in processes that fork (#1076).
+
+### Internal
+
+- Changed: CI and the documented headless E2E commands give `xvfb-run` an explicit
+  1280x1024x24 screen, since its default differs by distribution (640x480 on Fedora, too small
+  for the VS Code merge editor spec) (#1046).
+- Fixed: the documented `pre-push` hook setup always links the main checkout's script, so the
+  hook no longer dangles once the linked worktree that ran the setup is removed (#1049).
+
+### Internal: test flakes
+
+- Fixed: the multi-repo E2E test read the second tab's changes marker before the status check
+  for the file it had just written answered, and saw "1 file"; it now waits for "2 files" (#1038).
+- Fixed: the remote-management E2E test clicked "Set upstream…" while Add remote was still
+  running, when the item is disabled and the click does nothing; it now clicks the item once it
+  is enabled, and so does the remote-transfer test (#862).
+- Fixed: the DiffView test of the 2,000-line window stops after one step of 2,000 lines
+  instead of rendering all 4,500, and looks for its buttons in the bar under the diff, so it no
+  longer times out on a busy machine (#853).
+
+### Internal: test isolation
+
+- Fixed: the SSH signing tests failed at random on a machine with an SSH agent in its session:
+  the hermetic test guard now removes `SSH_AUTH_SOCK` and `SSH_AGENT_PID`, as it already hides
+  the developer's gpg agent (#805).
+- Fixed: on Windows, the work-tree guard's test seam reported a link as cleared even when none
+  was left to delete; it now reports only a link it removed, as on Unix (#800).
+
 ## [0.15.0] - 2026-11-15
 
 0.15.0 is the UI/UX review (#978): about fifty issues that make the app read and behave the
