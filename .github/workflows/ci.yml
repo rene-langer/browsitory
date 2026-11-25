@@ -251,6 +251,9 @@ jobs:
       # Release tooling too (release.yml's publish-vsix-release, #398); files only, no network.
       - name: check-updater-manifest.py unit tests
         run: python3 scripts/test_check_updater_manifest.py
+      # Release tooling too (release.yml's verify, #1111); temporary git repositories, `gh` faked.
+      - name: check-release-tag.py unit tests
+        run: python3 scripts/test_check_release_tag.py
       # Build tooling (build-dist and release.yml's build-release, #454); no network.
       - name: prefetch-bundler-tools.py unit tests
         run: python3 scripts/test_prefetch_bundler_tools.py
