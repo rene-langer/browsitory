@@ -113,13 +113,16 @@ pub(crate) fn status_options() -> git2::StatusOptions {
 pub fn status(repo: &git2::Repository) -> Result<Vec<StatusEntry>, StatusError> {
     let statuses = repo.statuses(Some(&mut status_options()))?;
     let expansion = crate::untracked::expand(repo, &statuses);
-    Ok(entries(&statuses, &expansion))
+    Ok(entries(&statuses, &expansion, &repo.index()?))
 }
 
-/// The entries of a scan made with [`status_options`].
+/// The entries of a scan made with [`status_options`] against `index`. A skip-worktree file
+/// that is missing (every file outside a sparse checkout's cone) isn't listed as deleted, as
+/// git doesn't list it (#1146).
 pub(crate) fn entries(
     statuses: &git2::Statuses<'_>,
     expansion: &crate::untracked::Expansion,
+    index: &git2::Index,
 ) -> Vec<StatusEntry> {
     let mut entries = Vec::new();
 
@@ -169,6 +172,11 @@ pub(crate) fn entries(
         if let Some(kind) = unstaged_kind(flags) {
             let delta = entry.index_to_workdir();
             let (new, _) = delta_paths(delta.as_ref(), path);
+            if kind == StatusKind::Deleted
+                && crate::index_marks::marks(index, &new) & crate::index_marks::SKIP_WORKTREE != 0
+            {
+                continue;
+            }
             entries.push(StatusEntry {
                 path: new,
                 old_path: None,
@@ -192,9 +200,9 @@ pub(crate) fn entries(
 /// files under an external filter driver marked or, when only the filter explains the
 /// difference, left out (#1087; see `external_filter::annotate`). What the app lists.
 pub fn status_refreshing_index(repo: &git2::Repository) -> Result<Vec<StatusEntry>, StatusError> {
-    let (statuses, _) = crate::index_refresh::scan(repo)?;
+    let (statuses, index) = crate::index_refresh::scan(repo)?;
     let expansion = crate::untracked::expand(repo, &statuses);
-    let mut entries = entries(&statuses, &expansion);
+    let mut entries = entries(&statuses, &expansion, &index);
     crate::external_filter::annotate(repo, &mut entries);
     Ok(entries)
 }

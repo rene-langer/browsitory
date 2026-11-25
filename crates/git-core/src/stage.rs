@@ -81,6 +81,12 @@ pub enum StageError {
     /// A file to stage or write uses an external filter driver (#1063); nothing changed.
     #[error(transparent)]
     ExternalFilter(#[from] crate::ExternalFilter),
+    /// The path's index entry is skip-worktree (outside the sparse checkout, or marked with
+    /// `git update-index --skip-worktree`): git doesn't stage it either (#1146).
+    #[error(
+        "'{0}' is marked skip-worktree (outside the sparse checkout), so git doesn't stage it."
+    )]
+    SkipWorktree(String),
 }
 
 impl From<LinePatchError> for StageError {
@@ -99,7 +105,7 @@ impl From<LinePatchError> for StageError {
 /// and nothing is read through the link (#157); its siblings and the link itself stay as they
 /// were, and staging the link later still replaces the folder's remaining entries (like `git add
 /// -A`). A conflicted path there is refused ("beyond a symbolic link"). A symlink is staged as a
-/// link even when it dangles.
+/// link even when it dangles. A skip-worktree path is refused, as `git add` refuses it.
 pub fn stage_file(repo: &git2::Repository, path: &str) -> Result<(), StageError> {
     if path.ends_with('/') {
         return stage_untracked_folder(repo, path);
@@ -107,6 +113,11 @@ pub fn stage_file(repo: &git2::Repository, path: &str) -> Result<(), StageError>
     let rel = checked_relative(path)?;
     let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
     let mut index = repo.index()?;
+    // As git, from the index file as it is now: a mark set outside counts.
+    index.read(false)?;
+    if crate::index_marks::is_skip_worktree(&index, rel) {
+        return Err(StageError::SkipWorktree(path.to_string()));
+    }
     if crate::worktree_guard::has_symlinked_ancestor(workdir, path) {
         if has_conflict_entries(&index, path) {
             return Err(StageError::BeyondSymlink(path.to_string()));
