@@ -163,6 +163,32 @@ fn a_discard_between_such_snapshots_undoes_and_redoes() {
     assert_eq!(read(&repo, "u/4.txt").as_deref(), Some("u\n"));
 }
 
+/// `capture_keeping` and `capture_worktree` with real limits store a named file over
+/// `SNAPSHOT_FILE_LIMIT` (sparse: no 50 MB written), and leave out one not named.
+#[test]
+fn the_real_captures_store_a_named_big_file() {
+    let (_dir, repo) = seeded();
+    let workdir = repo.workdir().unwrap().to_path_buf();
+    for name in ["named.bin", "other.bin"] {
+        fs::File::create(workdir.join(name))
+            .unwrap()
+            .set_len(git_core::undo::SNAPSHOT_FILE_LIMIT + 1)
+            .unwrap();
+    }
+    let whole = owned(&["named.bin"]);
+
+    let kept = git_core::undo::capture_keeping(&repo, &whole).unwrap();
+    let worktree = git_core::undo::capture_worktree(&repo, Some(&whole)).unwrap();
+
+    for snapshot in [&kept, &worktree] {
+        assert_eq!(
+            snapshot.skipped.keys().collect::<Vec<_>>(),
+            vec!["other.bin"]
+        );
+        assert!(tree_paths(&repo, snapshot).contains(&"named.bin".to_string()));
+    }
+}
+
 #[test]
 fn a_patch_names_the_paths_of_every_file_it_changes() {
     let patch = b"diff --git a/b.txt b/b.txt\n\
