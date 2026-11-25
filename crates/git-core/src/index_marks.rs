@@ -50,11 +50,11 @@ pub(crate) fn is_skip_worktree(index: &git2::Index, path: &Path) -> bool {
         .is_some_and(|entry| entry.flags_extended & SKIP_WORKTREE != 0)
 }
 
-/// The paths of `index`'s skip-worktree entries (stage 0).
+/// The paths of `index`'s skip-worktree entries.
 pub(crate) fn skip_worktree_paths(index: &git2::Index) -> Vec<Vec<u8>> {
     index
         .iter()
-        .filter(|entry| (entry.flags >> 12) & 0x3 == 0 && entry.flags_extended & SKIP_WORKTREE != 0)
+        .filter(|entry| entry.flags_extended & SKIP_WORKTREE != 0)
         .map(|entry| entry.path)
         .collect()
 }
@@ -67,13 +67,11 @@ pub(crate) fn read_tree_marking(
     tree: &git2::Tree<'_>,
     skip_worktree: &[Vec<u8>],
 ) -> Result<(), git2::Error> {
-    // `GIT_INDEX_ENTRY_EXTENDED`: the entry has extended flags.
-    const EXTENDED: u16 = 0x4000;
     index.read_tree(tree)?;
     for path in skip_worktree {
         let path = crate::worktree_guard::path_from_bytes(path);
+        // libgit2 sets the entry's "extended flags" bit itself when it writes the index.
         if let Some(mut entry) = index.get_path(&path, 0) {
-            entry.flags |= EXTENDED;
             entry.flags_extended |= SKIP_WORKTREE;
             index.add(&entry)?;
         }
