@@ -11,11 +11,13 @@ use git_core::undo::{HeadState, RepoSnapshot, SkippedFile};
 use serde::{Deserialize, Serialize};
 
 pub(super) const UNDO_LIMIT: usize = 50;
-/// Version 2 (#1093) marks snapshots that can leave files unsaved (#1065, #1090): a build that
-/// reads only version 1 ignores the whole file rather than act on snapshots it misreads.
-const FORMAT_VERSION: u32 = 2;
-/// Version 1 is what older builds wrote (and builds with #1088 alone, whose `skipped` files
-/// this build understands), so it still loads.
+/// Version 2 (#1093) marks snapshots that can leave files unsaved (#1065, #1090), version 3
+/// snapshots with intent-to-add paths (#1174), branch settings (#1151) and work-tree entries
+/// without an index tree (#1147): a build that reads only older versions ignores the whole file
+/// rather than act on snapshots it misreads, and never overwrites it.
+const FORMAT_VERSION: u32 = 3;
+/// Versions 1 and 2 are what older builds wrote (and builds with #1088 alone, whose `skipped`
+/// files this build understands), so they still load.
 const READABLE_VERSIONS: std::ops::RangeInclusive<u32> = 1..=FORMAT_VERSION;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,6 +57,9 @@ struct StoredSnapshot {
     head: StoredHead,
     refs: BTreeMap<String, String>,
     index_tree: String,
+    /// The index's intent-to-add paths (#1174); absent when there are none.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    intent_to_add: BTreeSet<String>,
     worktree_tree: Option<String>,
     /// The files the snapshot didn't store for their size (#1065); absent when there are none.
     /// Builds that predate it never read it: they ignore a version 2 file (#1093).
@@ -133,6 +138,7 @@ impl From<&RepoSnapshot> for StoredSnapshot {
             },
             refs: snapshot.refs.clone(),
             index_tree: snapshot.index_tree.clone(),
+            intent_to_add: snapshot.intent_to_add.clone(),
             worktree_tree: snapshot.worktree_tree.clone(),
             unsaved_untracked: snapshot.unsaved_untracked.clone(),
             skipped: snapshot
@@ -153,7 +159,7 @@ impl From<StoredSnapshot> for RepoSnapshot {
             },
             refs: stored.refs,
             index_tree: stored.index_tree,
-            intent_to_add: BTreeSet::new(),
+            intent_to_add: stored.intent_to_add,
             worktree_tree: stored.worktree_tree,
             unsaved_untracked: stored.unsaved_untracked,
             skipped: stored

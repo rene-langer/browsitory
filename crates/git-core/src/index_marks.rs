@@ -68,15 +68,29 @@ pub(crate) fn read_tree_marking(
     skip_worktree: &[Vec<u8>],
 ) -> Result<(), git2::Error> {
     index.read_tree(tree)?;
-    for path in skip_worktree {
+    mark(index, skip_worktree, SKIP_WORKTREE)
+}
+
+/// Sets `flag` on the stage-0 entry of each of `paths` that is in `index`.
+fn mark(index: &mut git2::Index, paths: &[Vec<u8>], flag: u16) -> Result<(), git2::Error> {
+    for path in paths {
         let path = crate::worktree_guard::path_from_bytes(path);
         // libgit2 sets the entry's "extended flags" bit itself when it writes the index.
         if let Some(mut entry) = index.get_path(&path, 0) {
-            entry.flags_extended |= SKIP_WORKTREE;
+            entry.flags_extended |= flag;
             index.add(&entry)?;
         }
     }
     Ok(())
+}
+
+/// The paths of `index`'s intent-to-add entries.
+pub(crate) fn intent_to_add_paths(index: &git2::Index) -> Vec<Vec<u8>> {
+    index
+        .iter()
+        .filter(|entry| entry.flags_extended & INTENT_TO_ADD != 0)
+        .map(|entry| entry.path)
+        .collect()
 }
 
 /// [`read_tree_marking`], then the index written. On any error the index is read back from
@@ -87,7 +101,20 @@ pub(crate) fn reset_index_to_tree(
     tree: &git2::Tree<'_>,
     skip_worktree: &[Vec<u8>],
 ) -> Result<(), git2::Error> {
-    let Err(error) = read_tree_marking(index, tree, skip_worktree).and_then(|()| index.write())
+    reset_index_marking(index, tree, skip_worktree, &[])
+}
+
+/// [`reset_index_to_tree`], with the intent-to-add mark also put on each of `intent_to_add`
+/// that the tree has (Undo, #1174).
+pub(crate) fn reset_index_marking(
+    index: &mut git2::Index,
+    tree: &git2::Tree<'_>,
+    skip_worktree: &[Vec<u8>],
+    intent_to_add: &[Vec<u8>],
+) -> Result<(), git2::Error> {
+    let Err(error) = read_tree_marking(index, tree, skip_worktree)
+        .and_then(|()| mark(index, intent_to_add, INTENT_TO_ADD))
+        .and_then(|()| index.write())
     else {
         return Ok(());
     };

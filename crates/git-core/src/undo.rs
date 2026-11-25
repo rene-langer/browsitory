@@ -7,8 +7,8 @@ use std::io;
 use std::path::Path;
 
 use git2::{
-    ErrorCode, Index, IndexEntry, IndexEntryExtendedFlag, IndexTime, ObjectType, Oid, Repository,
-    Status, StatusOptions, TreeWalkMode, TreeWalkResult,
+    ErrorCode, Index, IndexEntry, IndexTime, ObjectType, Oid, Repository, Status, StatusOptions,
+    TreeWalkMode, TreeWalkResult,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -303,6 +303,7 @@ fn capture_with(repo: &Repository, worktree: Option<Limits>) -> Result<RepoSnaps
         return Err(UndoError::ConflictedIndex);
     }
     let index_tree = index.write_tree()?.to_string();
+    let intent_to_add = intent_to_add(&index);
     let (worktree_tree, skipped, unsaved_untracked) = match worktree {
         None => (None, BTreeMap::new(), None),
         Some(limits) => {
@@ -315,11 +316,19 @@ fn capture_with(repo: &Repository, worktree: Option<Limits>) -> Result<RepoSnaps
         head: head_state(repo)?,
         refs: local_refs(repo)?,
         index_tree,
-        intent_to_add: BTreeSet::new(),
+        intent_to_add,
         worktree_tree,
         skipped,
         unsaved_untracked,
     })
+}
+
+/// The intent-to-add paths of `index` (#1174).
+fn intent_to_add(index: &Index) -> BTreeSet<String> {
+    crate::index_marks::intent_to_add_paths(index)
+        .into_iter()
+        .map(|path| String::from_utf8_lossy(&path).into_owned())
+        .collect()
 }
 
 fn head_state(repo: &Repository) -> Result<HeadState, UndoError> {
@@ -582,7 +591,8 @@ pub fn restore(
         .into_iter()
         .filter(|name| expected.refs.get(*name) != target.refs.get(*name))
         .collect();
-    let index_differs = expected.index_tree != target.index_tree;
+    let index_differs =
+        expected.index_tree != target.index_tree || expected.intent_to_add != target.intent_to_add;
     let worktree = match (&expected.worktree_tree, &target.worktree_tree) {
         (Some(from), Some(to))
             if from != to
@@ -614,15 +624,15 @@ pub fn restore(
         index.read(false)?;
         // Already the target's: a restore that stopped after writing the index (in the checkout
         // from it) is being tried again (#251). The work tree is still checked below.
-        let current = index.write_tree()?.to_string();
-        if index.has_conflicts() || (current != expected.index_tree && current != target.index_tree)
-        {
+        if index.has_conflicts() {
             return Err(UndoError::RepositoryChanged);
         }
-        // Rewriting the index from a tree would silently drop these per-entry flags.
-        let flags =
-            (IndexEntryExtendedFlag::SKIP_WORKTREE | IndexEntryExtendedFlag::INTENT_TO_ADD).bits();
-        if index.iter().any(|entry| entry.flags_extended & flags != 0) {
+        // An intent-to-add entry is an empty file in the tree, so its mark counts too (#1174).
+        let current = (index.write_tree()?.to_string(), intent_to_add(&index));
+        let side = |snapshot: &RepoSnapshot| {
+            current.0 == snapshot.index_tree && current.1 == snapshot.intent_to_add
+        };
+        if !side(expected) && !side(target) {
             return Err(UndoError::RepositoryChanged);
         }
     }
@@ -647,7 +657,15 @@ pub fn restore(
     if index_differs {
         let mut index = repo.index()?;
         let tree = repo.find_tree(Oid::from_str(&target.index_tree)?)?;
-        crate::index_marks::reset_index_to_tree(&mut index, &tree, &[])?;
+        // The skip-worktree marks stay as they are now, as git's reset keeps them (#1145); the
+        // intent-to-add ones are the target's (#1174).
+        let skip_worktree = crate::index_marks::skip_worktree_paths(&index);
+        let intent_to_add: Vec<Vec<u8>> = target
+            .intent_to_add
+            .iter()
+            .map(|path| path.as_bytes().to_vec())
+            .collect();
+        crate::index_marks::reset_index_marking(&mut index, &tree, &skip_worktree, &intent_to_add)?;
     }
     if let Some(change) = &worktree {
         change.checkout_from_index(repo)?;
