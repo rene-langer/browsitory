@@ -1,5 +1,12 @@
 //! Commit signing (OpenPGP via gpg, SSH via ssh-keygen) and signature verification. See
 //! `docs/superpowers/specs/2026-10-19-parity-batch3c-design.md`.
+//!
+//! The signing programs (`gpg.program`, `gpg.openpgp.program`, `gpg.ssh.program`) and
+//! `gpg.ssh.allowedSignersFile` are read from the user's own config levels only (system, XDG,
+//! global), as `tools` reads diff and merge tools (#1121). A repository's own `.git/config`
+//! arrives with the folder (an archive, a shared drive), and the verifier runs as soon as a
+//! signed commit is selected: a program it names never runs, and a signers file it names never
+//! vouches for its own commits.
 
 use std::io::Write;
 use std::process::Command;
@@ -35,6 +42,8 @@ pub enum SignError {
     TimedOut { seconds: u64 },
     #[error("Signing was cancelled.")]
     Cancelled,
+    #[error("{setting} is set to \"{program}\" only in this repository's git config. Browsitory ignores signing programs from a repository's own config, so a repository can't make it run commands. Set it in your global git config instead, for example: git config --global {setting} {program}")]
+    RepositoryProgramIgnored { setting: String, program: String },
     #[error(transparent)]
     Git(#[from] git2::Error),
     #[error("io error: {0}")]
@@ -77,17 +86,34 @@ fn config_string(config: &git2::Config, key: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-/// The program that signs/verifies `format`, honoring the same config precedence as git.
-pub(crate) fn program_for(config: &git2::Config, format: SignatureFormat) -> String {
-    match format {
-        SignatureFormat::OpenPgp => config_string(config, "gpg.openpgp.program")
-            .or_else(|| config_string(config, "gpg.program"))
-            .unwrap_or_else(|| "gpg".to_string()),
-        SignatureFormat::Ssh => {
-            config_string(config, "gpg.ssh.program").unwrap_or_else(|| "ssh-keygen".to_string())
+/// The program that signs/verifies `format`, with git's precedence among the user's own config
+/// levels. A program set only in the repository's config is `RepositoryProgramIgnored`.
+fn program_for(config: &git2::Config, format: SignatureFormat) -> Result<String, SignError> {
+    let (settings, default): (&[&str], &str) = match format {
+        SignatureFormat::OpenPgp => (&["gpg.openpgp.program", "gpg.program"], "gpg"),
+        SignatureFormat::Ssh => (&["gpg.ssh.program"], "ssh-keygen"),
+    };
+    for setting in settings {
+        if let Some((program, _)) = crate::tools::trusted_string(config, setting)? {
+            return Ok(program);
         }
     }
+    for setting in settings {
+        if let Some((program, _)) = crate::tools::untrusted_string(config, setting)? {
+            return Err(SignError::RepositoryProgramIgnored {
+                setting: setting.to_string(),
+                program,
+            });
+        }
+    }
+    Ok(default.to_string())
 }
+
+const ALLOWED_SIGNERS: &str = "gpg.ssh.allowedSignersFile";
+
+const ALLOWED_SIGNERS_IGNORED: &str = "gpg.ssh.allowedSignersFile is set only in this \
+     repository's git config. Browsitory ignores it there, so a repository can't vouch for its \
+     own signers. Set it in your global git config instead.";
 
 /// `Ok(None)` when `commit.gpgSign` is false or unset.
 pub fn signing_config(repo: &Repository) -> Result<Option<SigningConfig>, SignError> {
@@ -106,7 +132,7 @@ pub fn signing_config(repo: &Repository) -> Result<Option<SigningConfig>, SignEr
     }
     Ok(Some(SigningConfig {
         format,
-        program: program_for(&config, format),
+        program: program_for(&config, format)?,
         key,
     }))
 }
@@ -448,7 +474,13 @@ pub fn verify_commit_with(
     } else {
         return Ok(CommitSignature::error(None, "unsupported signature type"));
     };
-    let program = program_for(&config, format);
+    let program = match program_for(&config, format) {
+        Ok(program) => program,
+        Err(error @ SignError::RepositoryProgramIgnored { .. }) => {
+            return Ok(CommitSignature::error(Some(format), error.to_string()))
+        }
+        Err(error) => return Err(error),
+    };
     let mut sig_file = tempfile::NamedTempFile::new()?;
     sig_file.write_all(signature.as_bytes())?;
     sig_file.flush()?;
@@ -456,9 +488,16 @@ pub fn verify_commit_with(
     let result = match format {
         SignatureFormat::OpenPgp => verify_gpg(&program, &sig_path, &data, &opts),
         SignatureFormat::Ssh => {
-            let allowed = config_string(&config, "gpg.ssh.allowedSignersFile")
-                .map(|path| expand_tilde(&path).to_string_lossy().into_owned());
-            verify_ssh(&program, &sig_path, allowed.as_deref(), &data, &opts)
+            let allowed = crate::tools::trusted_string(&config, ALLOWED_SIGNERS)?
+                .map(|(path, _)| expand_tilde(&path).to_string_lossy().into_owned());
+            let ignored = allowed.is_none()
+                && crate::tools::untrusted_string(&config, ALLOWED_SIGNERS)?.is_some();
+            verify_ssh(&program, &sig_path, allowed.as_deref(), &data, &opts).map(|mut result| {
+                if ignored && result.status == SignatureStatus::GoodUntrusted {
+                    result.detail = Some(ALLOWED_SIGNERS_IGNORED.to_string());
+                }
+                result
+            })
         }
     };
     match result {

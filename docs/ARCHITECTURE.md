@@ -1112,6 +1112,20 @@ certificate.
     desktop launch; pinentry (gpg-agent) is a separate process and unaffected. Signers are not
     put in a Windows job object (a job kill on a timeout would also end a `gpg-agent` that gpg
     auto-started).
+- The programs (`gpg.openpgp.program` over `gpg.program`, `gpg.ssh.program`) and
+  `gpg.ssh.allowedSignersFile` come from the user's own config levels only (system, XDG,
+  global; `tools::trusted_string`, the filter diff and merge tools use), for signing and
+  verifying alike (#1121): a repository's `.git/config` arrives with an archive or a shared
+  drive, and the verifier runs as soon as a signed commit is selected. A program set only in
+  the repository's config never runs: `signing_config` fails with
+  `SignError::RepositoryProgramIgnored` (so commit, cherry-pick and rebase refuse before they
+  touch anything), and `verify_commit` returns the `Error` status with that message as
+  `detail`. An allowed signers file set only there is ignored, and a valid SSH signature shows
+  `GoodUntrusted` with a `detail` that says why. `commit.gpgSign`, `gpg.format` and
+  `user.signingKey` still count from every level: they only choose between gpg and ssh-keygen
+  and the user's key. Tests put such settings in a global-level file of the test repository
+  (`tests/common::user_config`; the worker tests' `set_user_config`, which `Worker::spawn`
+  adds under `#[cfg(test)]`).
 - `verify_commit` picks the format from the signature armor, not from config:
   - gpg: `--status-fd` lines map to `SignatureStatus`.
   - ssh: `find-principals` + `verify` against `gpg.ssh.allowedSignersFile`, falling back to
