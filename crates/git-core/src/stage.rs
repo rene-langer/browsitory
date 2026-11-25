@@ -106,7 +106,23 @@ impl From<LinePatchError> for StageError {
 /// were, and staging the link later still replaces the folder's remaining entries (like `git add
 /// -A`). A conflicted path there is refused ("beyond a symbolic link"). A symlink is staged as a
 /// link even when it dangles. A skip-worktree path is refused, as `git add` refuses it.
+///
+/// On any error the index is read back from disk: the change is made in the repository's shared
+/// index object (the worker keeps its `Repository` open), and a later write elsewhere would
+/// otherwise save a stage that failed (#1166).
 pub fn stage_file(repo: &git2::Repository, path: &str) -> Result<(), StageError> {
+    let Err(error) = stage_file_unguarded(repo, path) else {
+        return Ok(());
+    };
+    match repo.index().and_then(|mut index| index.read(true)) {
+        Ok(()) => Err(error),
+        Err(reread) => Err(StageError::Index(git2::Error::from_str(&format!(
+            "{error}; re-reading the index afterwards failed too: {reread}"
+        )))),
+    }
+}
+
+fn stage_file_unguarded(repo: &git2::Repository, path: &str) -> Result<(), StageError> {
     if path.ends_with('/') {
         return stage_untracked_folder(repo, path);
     }
