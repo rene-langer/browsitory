@@ -91,6 +91,12 @@ as a tree** sets it too.
     image previews the old version against the new one, and unstaging it unstages both names. A
     file moved on disk but not staged yet shows as deleted plus new, like `git status`.
 
+    In a sparse checkout (`git sparse-checkout`), the files outside the chosen folders aren't
+    on disk and aren't listed, as with `git status`; the same for a file you marked with `git
+    update-index --skip-worktree` (a local configuration file you keep edited). Such a file
+    can't be staged, as `git add` refuses it. A file added with `git add -N` (intent to add) is
+    listed as untracked until you stage it, and a commit leaves it out, as `git commit` does.
+
 ## The diff viewer
 
 The viewer shows the current file: the first one when you open the view, or the one you click.
