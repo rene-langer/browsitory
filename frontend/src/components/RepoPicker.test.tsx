@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RepoClient } from "../ipc/RepoClient";
 import { RepoPicker } from "./RepoPicker";
@@ -250,13 +250,13 @@ describe("RepoPicker recent repositories (#690)", () => {
     const client = fakeClient({ listRecentRepos: async () => ["/code/widget"] });
     render(<RepoPicker client={client} onOpenRepo={vi.fn()} {...workspaceProps()} />);
     await screen.findByText("/code/widget");
-    expect(screen.getByRole("searchbox", { name: "Filter repositories and workspaces" })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("searchbox", { name: "Filter repositories and workspaces" })).toHaveFocus());
   });
 
   it("starts on Open repository… when there is nothing to filter (#1029)", async () => {
     render(<RepoPicker client={fakeClient()} onOpenRepo={vi.fn()} {...workspaceProps()} />);
     await screen.findByText("No recent repositories");
-    expect(screen.getByRole("button", { name: "Open repository…" })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Open repository…" })).toHaveFocus());
   });
 
   it("leaves focus where it is when something else already has it (#1029)", async () => {
@@ -266,6 +266,8 @@ describe("RepoPicker recent repositories (#690)", () => {
     const client = fakeClient({ listRecentRepos: async () => ["/code/widget"] });
     render(<RepoPicker client={client} onOpenRepo={vi.fn()} {...workspaceProps()} />);
     await screen.findByText("/code/widget");
+    // The list can show before the focus effect has run; flush it, or the check passes early.
+    await act(async () => {});
     expect(outside).toHaveFocus();
     outside.remove();
   });
