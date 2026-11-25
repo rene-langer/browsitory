@@ -31,6 +31,21 @@ updates automatically** in **Preferences → Updates**. This works for every ins
 the Linux `.AppImage`, `.deb` and `.rpm`. A `.deb` or `.rpm` update installs the new package for
 the whole system, so Linux asks for your password when you restart to update.
 
+**`.rpm` signing key.** The `.rpm` is signed, and Fedora 45 and newer refuse an update whose
+signing key isn't imported. Import Browsitory's key once, before installing or updating:
+
+```bash
+sudo rpm --import https://github.com/rene-langer/browsitory/releases/latest/download/browsitory-rpm-signing-key.asc
+```
+
+??? note "Details"
+    Without the key, updating from inside the app fails on Fedora 45 and newer: the notice says
+    "Couldn't install update v…: Failed to install package". Import the key as above, then click
+    **Restart to update** again. Browsitory 0.16.0 and older `.rpm` packages are not signed, so
+    updating to them failed there whatever you imported; to install one of those by hand anyway,
+    use `sudo dnf install --nogpgcheck ./Browsitory-<version>-1.x86_64.rpm`. Updating from them
+    to a signed version works from inside the app once the key is imported.
+
 ## VSCode extension
 
 The extension needs VSCode 1.134 or newer on Linux x64 (with glibc 2.39 or newer, as the app),

@@ -201,6 +201,22 @@ jobs:
         timeout-minutes: 15
         shell: bash
         run: ${{ runner.os == 'Windows' && 'python' || 'python3' }} scripts/prefetch-bundler-tools.py
+      # The .rpm is signed with the OpenPGP key in the RPM_SIGNING_KEY secret (#1077): rpm 6
+      # (Fedora 45) refuses an unsigned package, so the in-app update of an .rpm install would
+      # fail. Fails before the build when the secret or the public key users import is missing.
+      - name: Check the RPM signing key is set up
+        if: matrix.os == 'ubuntu-24.04'
+        env:
+          RPM_SIGNING_KEY: ${{ secrets.RPM_SIGNING_KEY }}
+        run: |
+          if [ -z "$RPM_SIGNING_KEY" ]; then
+            echo "error: the RPM_SIGNING_KEY secret is not set (docs/RELEASING.md, \"RPM signing key\")" >&2
+            exit 1
+          fi
+          if ! grep -q -- '-----BEGIN PGP PUBLIC KEY BLOCK-----' packaging/browsitory-rpm-signing-key.asc; then
+            echo "error: packaging/browsitory-rpm-signing-key.asc is missing or not an ASCII-armored public key" >&2
+            exit 1
+          fi
       # Creates the draft release (the first matrix job to finish creates it, the others find it)
       # and uploads the bundles and latest.json, the manifest every installed app's updater reads.
       # v1 (#363) differs from v0 in ways docs/RELEASING.md's "Updater manifest" describes:
@@ -216,6 +232,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PKEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PKEY_PASSWORD }}
+          # Read by the bundler's .rpm step only (tauri-bundler's linux/rpm.rs): the
+          # ASCII-armored secret key itself, not a path.
+          TAURI_SIGNING_RPM_KEY: ${{ matrix.os == 'ubuntu-24.04' && secrets.RPM_SIGNING_KEY || '' }}
+          TAURI_SIGNING_RPM_KEY_PASSPHRASE: ${{ matrix.os == 'ubuntu-24.04' && secrets.RPM_SIGNING_KEY_PASSPHRASE || '' }}
         with:
           projectPath: crates/tauri-app
           tauriScript: node ../../frontend/node_modules/@tauri-apps/cli/tauri.js
@@ -236,6 +256,33 @@ jobs:
           # the main tauri.conf.json so ci.yml's plain build-dist smoke-test job (which has no
           # signing secrets) doesn't also try to sign an updater manifest on every push to main.
           args: ${{ matrix.args }} --config tauri.release.conf.json
+      # The bundler signs only when TAURI_SIGNING_RPM_KEY is set, and says nothing when it isn't.
+      # tauri-action has already uploaded the .rpm to the draft release by now; a failure here
+      # keeps the release a draft (publish-vsix-release and the marketplace jobs don't run).
+      # Checks that the package carries a header signature that the committed public key
+      # verifies: `rpmkeys -K` alone passes an unsigned package (digests only).
+      - name: Check the .rpm is signed with the published key
+        if: matrix.os == 'ubuntu-24.04'
+        timeout-minutes: 15
+        run: |
+          command -v rpmkeys >/dev/null || scripts/ci-apt-install.sh rpm
+          db="$(mktemp -d)"
+          rpmkeys --dbpath "$db" --import packaging/browsitory-rpm-signing-key.asc
+          shopt -s nullglob
+          packages=(target/release/bundle/rpm/*.rpm)
+          if [ "${#packages[@]}" -ne 1 ]; then
+            echo "error: expected one .rpm in target/release/bundle/rpm, found ${#packages[@]}" >&2
+            exit 1
+          fi
+          pkg="${packages[0]}"
+          sigs="$(rpm --dbpath "$db" -qp --nosignature --nodigest \
+            --qf '%{RSAHEADER:pgpsig}|%{DSAHEADER:pgpsig}' "$pkg")"
+          echo "$pkg: $sigs"
+          if [ "$sigs" = "(none)|(none)" ]; then
+            echo "error: $pkg has no OpenPGP signature: is the RPM_SIGNING_KEY secret set?" >&2
+            exit 1
+          fi
+          rpmkeys --dbpath "$db" -Kv "$pkg"
 
   build-vsix-release:
     needs: verify
@@ -330,12 +377,14 @@ jobs:
     timeout-minutes: 15
     steps:
       # For THIRD_PARTY_NOTICES.md: every installer and .vsix already carries it; the release
-      # page gets a copy too, so the licences can be read without installing anything. And for
+      # page gets a copy too, so the licences can be read without installing anything. The public
+      # key that verifies the .rpm (#1077), so `rpm --import` can take it from the release. And for
       # the manifest check below.
       - uses: actions/checkout@v7
         with:
           sparse-checkout: |
             THIRD_PARTY_NOTICES.md
+            packaging/browsitory-rpm-signing-key.asc
             scripts/check-updater-manifest.py
           sparse-checkout-cone-mode: false
       # All build-release jobs are done, so latest.json is final. Each of them rewrites it, and
@@ -365,6 +414,7 @@ jobs:
           files: |
             release-vsix/*.vsix
             THIRD_PARTY_NOTICES.md
+            packaging/browsitory-rpm-signing-key.asc
 
   # Publishes the four platform packages to the Visual Studio Marketplace, after the desktop
   # build and the draft GitHub Release succeeded. Signs in with Microsoft Entra ID through GitHub
