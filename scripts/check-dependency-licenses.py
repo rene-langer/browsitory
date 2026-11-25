@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Check every npm package's licence against the policy (#273).
 
-For each pnpm project (frontend/, extension/, e2e/, extension/e2e/), the whole installed tree,
-production and dev, comes from `pnpm licenses list --json`. Run `pnpm install
---frozen-lockfile` in each project first.
+For each pnpm project (frontend/, extension/, e2e/, extension/e2e/, extension/publish/), the
+whole installed tree, production and dev, comes from `pnpm licenses list --json`. Run `pnpm
+install --frozen-lockfile` in each project first.
 
 Rules:
 
@@ -65,6 +65,8 @@ PROJECTS = (
     ("extension", True),
     ("e2e", False),
     ("extension/e2e", False),
+    # ovsx for release.yml's Open VSX jobs (#1110); a CI tool, never shipped.
+    ("extension/publish", False),
 )
 # Not a member of extension/'s workspace; AGENTS.md installs it with --ignore-workspace too.
 IGNORE_WORKSPACE = {"extension/e2e"}
@@ -111,6 +113,7 @@ EXCEPTIONS: tuple[LicenseException, ...] = (
     LicenseException("version-range", "4", "Artistic-2.0", "@vscode/vsce > secretlint > istextorbinary > editions (packaging only)"),
     LicenseException("@vscode/vsce-sign", "2", UNKNOWN, VSCE_SIGN_REASON),
     LicenseException("@vscode/vsce-sign-*-*", "2", UNKNOWN, "@vscode/vsce-sign's per-platform binaries; " + VSCE_SIGN_REASON),
+    LicenseException("ovsx", "1", "EPL-2.0", "Open VSX's publishing tool, run only by release.yml (extension/publish/, #1110)"),
 )
 
 # Packages whose declared licence is missing or wrong.
