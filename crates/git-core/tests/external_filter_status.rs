@@ -434,6 +434,16 @@ fn head_info_reads_a_tracked_attributes_file_from_the_index_when_deleted_on_disk
 }
 
 #[test]
+fn head_info_reads_only_attribute_files() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "notes.txt", "secret.env filter=crypt\n");
+    commit_all(&repo, "base");
+    configure_driver(&repo);
+
+    assert!(head_filters(&repo).is_empty());
+}
+
+#[test]
 fn head_info_reads_the_top_level_attributes_file_from_the_index_when_deleted_on_disk() {
     let (dir, repo) = fixture();
     std::fs::remove_file(dir.path().join(".gitattributes")).unwrap();
