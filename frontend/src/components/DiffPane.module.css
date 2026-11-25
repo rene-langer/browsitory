@@ -469,13 +469,10 @@ li.fileRow.current {
   color: var(--color-text);
 }
 
-/* A folder of the tree layout: its header, then its files and folders indented under it. */
+/* A folder's row in the tree layout; its files' and folders' rows follow it, indented (#1157).
+   The windowed list counts rows of one height, so its vertical padding is a file row's. */
 .folder {
   list-style: none;
-}
-
-.folder > ul {
-  padding-left: var(--space-3);
 }
 
 .folderRow {
@@ -483,7 +480,7 @@ li.fileRow.current {
   align-items: center;
   gap: var(--space-1);
   min-width: 0;
-  padding: 0 var(--space-2) 0 var(--space-2);
+  padding: 1px var(--space-2);
   font-size: var(--text-sm);
 }
 

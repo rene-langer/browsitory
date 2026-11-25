@@ -4,7 +4,7 @@ import { UncommittedFileViewer } from "./UncommittedFileViewer";
 import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
 import { NO_HEAD_INFO, type DiscardRequest, type SelectionActionKind } from "./diffPaneShared";
 import { stashBlockReason } from "../lib/operationStatus";
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { useVirtualRows } from "./useVirtualRows";
 import type { GraphCommit, HeadInfo, HunkOptions, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
@@ -33,7 +33,7 @@ import { isMenuKey } from "../lib/menuKeys";
 import { stageAllPaths, stageModifiedPaths, untrackedPaths } from "../lib/stagePaths";
 import { isUntracked } from "../lib/statusLetter";
 import { useFileListLayout, writeFileListLayout } from "../lib/fileListLayoutPreference";
-import { buildFileTree, filesUnder, visibleFiles, type FileTreeNode } from "../lib/fileTree";
+import { buildFileTree, type FileTreeNode } from "../lib/fileTree";
 import { ChevronDown, ChevronRight, Minus, Plus } from "lucide-react";
 import { GoToNotice } from "./GoToNotice";
 import { externalFiltersNotice } from "../lib/externalFilters";
@@ -78,6 +78,58 @@ function useChangeTree(
         : null,
     [status, needle, treeLayout, staged],
   );
+}
+
+type FolderNode = Extract<FileTreeNode<StatusEntry>, { kind: "folder" }>;
+
+/**
+ * A row of the tree layout's list (#1157): a folder's, or a file's with the name it shows. The
+ * tree renders as one list of these, indented by `depth`, so it can be windowed as the flat
+ * list is.
+ */
+type TreeRow =
+  | { kind: "folder"; node: FolderNode; depth: number }
+  | { kind: "file"; entry: StatusEntry; name: string; depth: number };
+
+/**
+ * The rows of `nodes` in list order, leaving out the contents of collapsed folders. An untracked
+ * folder entry's shown files (`shownUnder`) follow it.
+ */
+function treeRows(
+  nodes: FileTreeNode<StatusEntry>[],
+  isCollapsed: (path: string) => boolean,
+  shownUnder: (entry: StatusEntry) => StatusEntry[],
+  depth = 0,
+  rows: TreeRow[] = [],
+): TreeRow[] {
+  for (const node of nodes) {
+    if (node.kind === "folder") {
+      rows.push({ kind: "folder", node, depth });
+      if (!isCollapsed(node.path)) treeRows(node.children, isCollapsed, shownUnder, depth + 1, rows);
+      continue;
+    }
+    const entry = node.value;
+    rows.push({ kind: "file", entry, name: entry.untrackedFolder === true ? `${node.name}/` : node.name, depth });
+    for (const file of shownUnder(entry)) {
+      rows.push({ kind: "file", entry: file, name: file.path.slice(entry.path.length), depth });
+    }
+  }
+  return rows;
+}
+
+/** Every folder's files, collapsed or not, by folder path: worked out once per tree (#1157). */
+function useFolderFiles(tree: FileTreeNode<StatusEntry>[] | null): ReadonlyMap<string, StatusEntry[]> {
+  return useMemo(() => {
+    const byFolder = new Map<string, StatusEntry[]>();
+    const visit = (node: FileTreeNode<StatusEntry>): StatusEntry[] => {
+      if (node.kind === "leaf") return [node.value];
+      const files = node.children.flatMap(visit);
+      byFolder.set(node.path, files);
+      return files;
+    };
+    tree?.forEach(visit);
+    return byFolder;
+  }, [tree]);
 }
 
 function entryKey(entry: { path: string; staged: boolean }): string {
@@ -322,27 +374,37 @@ export function UncommittedDiffPane({
   // Built once per status and filter, not on every render (#845).
   const stagedTree = useChangeTree(status, needle, treeLayout, true);
   const changesTree = useChangeTree(status, needle, treeLayout, false);
-  // The rows on screen in list order (a collapsed folder's files left out): what the keys,
+  const stagedFolderFiles = useFolderFiles(stagedTree);
+  const changesFolderFiles = useFolderFiles(changesTree);
+  // The tree layout's rows, folders included (#1157).
+  const stagedRows = stagedTree === null ? null : treeRows(stagedTree, isCollapsed(true), filesShownUnder);
+  const changesRows = changesTree === null ? null : treeRows(changesTree, isCollapsed(false), filesShownUnder);
+  const filesOf = (rows: TreeRow[]) => rows.flatMap((row) => (row.kind === "file" ? [row.entry] : []));
+  // The files on screen in list order (a collapsed folder's files left out): what the keys,
   // the selection and the viewer's current file go through.
-  const stagedEntries = stagedTree === null ? shownStaged : visibleFiles(stagedTree, isCollapsed(true));
+  const stagedEntries = stagedRows === null ? shownStaged : filesOf(stagedRows);
   const conflictEntries = shownConflicts;
   const unstagedEntries = [
     ...conflictEntries,
-    ...withFolderFiles(changesTree === null ? shownOtherChanges : visibleFiles(changesTree, isCollapsed(false))),
+    ...(changesRows === null ? withFolderFiles(shownOtherChanges) : filesOf(changesRows)),
   ];
+  // Each file's place in its group, for its row id: no linear search per row (#1157).
+  const stagedIndex = new Map(stagedEntries.map((entry, index) => [entry, index]));
+  const unstagedIndex = new Map(unstagedEntries.map((entry, index) => [entry, index]));
+  const indexInGroup = (entry: StatusEntry) => (entry.staged ? stagedIndex : unstagedIndex).get(entry) ?? -1;
   const listRefs = useRef<{ staged: HTMLUListElement | null; unstaged: HTMLUListElement | null }>({
     staged: null,
     unstaged: null,
   });
-  // The flat lists render the rows in view (#845): the Changes group's other changes and the
-  // Staged group, each in the list that holds its rows directly.
+  // The lists render the rows in view (#845, the tree's #1157): the Changes group's other changes
+  // and the Staged group, each in the list that holds its rows directly.
   const [unstagedRowList, setUnstagedRowList] = useState<HTMLUListElement | null>(null);
   const [stagedRowList, setStagedRowList] = useState<HTMLUListElement | null>(null);
   const unstagedWindow = useVirtualRows(
-    treeLayout ? null : unstagedRowList,
-    treeLayout ? 0 : unstagedEntries.length - conflictEntries.length,
+    unstagedRowList,
+    changesRows === null ? unstagedEntries.length - conflictEntries.length : changesRows.length,
   );
-  const stagedWindow = useVirtualRows(treeLayout ? null : stagedRowList, treeLayout ? 0 : stagedEntries.length);
+  const stagedWindow = useVirtualRows(stagedRowList, stagedRows === null ? stagedEntries.length : stagedRows.length);
   const stagedGroupRef = useCallback((el: HTMLUListElement | null) => {
     listRefs.current.staged = el;
     setStagedRowList(el);
@@ -393,7 +455,7 @@ export function UncommittedDiffPane({
   // effect: the fallback becomes the current file and its selection at once, so keys and the
   // palette act on what the viewer shows.
   if (currentEntry !== undefined) {
-    const index = (currentEntry.staged ? stagedEntries : unstagedEntries).indexOf(currentEntry);
+    const index = indexInGroup(currentEntry);
     if (lastPlace?.staged !== currentEntry.staged || lastPlace.index !== index) {
       setLastPlace({ staged: currentEntry.staged, index });
     }
@@ -421,9 +483,13 @@ export function UncommittedDiffPane({
   const scrollToCurrent = useRef<() => void>(() => {});
   useLayoutEffect(() => {
     scrollToCurrent.current = () => {
-      if (currentEntry === undefined || treeLayout) return;
-      if (currentEntry.staged) stagedWindow.scrollToIndex(stagedEntries.indexOf(currentEntry));
-      else unstagedWindow.scrollToIndex(unstagedEntries.indexOf(currentEntry) - conflictEntries.length);
+      if (currentEntry === undefined) return;
+      const rows = currentEntry.staged ? stagedRows : changesRows;
+      const index =
+        rows !== null
+          ? rows.findIndex((row) => row.kind === "file" && row.entry === currentEntry)
+          : indexInGroup(currentEntry) - (currentEntry.staged ? 0 : conflictEntries.length);
+      if (index >= 0) (currentEntry.staged ? stagedWindow : unstagedWindow).scrollToIndex(index);
     };
   });
   useLayoutEffect(() => {
@@ -790,7 +856,7 @@ export function UncommittedDiffPane({
     </div>
   );
 
-  const renderRow = (entry: StatusEntry, index: number, name?: string) => {
+  const renderRow = (entry: StatusEntry, index: number, name?: string, depth?: number) => {
     const key = entryKey(entry);
     const summary = isEntrySelected(entry) ? (entry.staged ? stagedSummary : unstagedSummary) : null;
     return (
@@ -812,6 +878,7 @@ export function UncommittedDiffPane({
           rowRefs.current[key] = el;
         }}
         name={name}
+        depth={depth}
         folderFiles={
           entry.untrackedFolder === true
             ? { shown: entry.path in folderFiles, onToggle: () => showFolderFiles(entry.path, !(entry.path in folderFiles)) }
@@ -822,82 +889,67 @@ export function UncommittedDiffPane({
   };
 
   // A folder of the tree layout (#729): a toggle (Left and Right collapse and expand it too), its
-  // file count and a Stage or Unstage for every file in it. Its rows indent under it.
-  const renderTreeNodes = (nodes: FileTreeNode<StatusEntry>[], staged: boolean): ReactNode[] => {
-    const entries = groupEntries(staged);
-    return nodes.map((node) => {
-      if (node.kind === "leaf") {
-        const entry = node.value;
-        if (entry.untrackedFolder === true) {
-          return [
-            renderRow(entry, entries.indexOf(entry), `${node.name}/`),
-            ...filesShownUnder(entry).map((file) =>
-              renderRow(file, entries.indexOf(file), file.path.slice(entry.path.length)),
-            ),
-          ];
-        }
-        return renderRow(entry, entries.indexOf(entry), node.name);
-      }
-      const collapsed = isCollapsed(staged)(node.path);
-      const files = filesUnder(node);
-      const headingId = `${rowIdPrefix}-${staged ? "staged" : "unstaged"}-folder-${node.path}`;
-      const paths = staged ? files.map((entry) => entry.path) : stageAllPaths(files);
-      return (
-        <li key={`folder:${node.path}`} role="group" aria-labelledby={headingId} className={styles.folder}>
-          <div className={styles.folderRow}>
-            <button
-              id={headingId}
-              type="button"
-              className={styles.folderToggle}
-              aria-expanded={!collapsed}
-              title={node.path}
-              onClick={() => toggleFolder(staged, node.path, !collapsed)}
-              onKeyDown={(event) => {
-                if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-                event.preventDefault();
-                event.stopPropagation();
-                toggleFolder(staged, node.path, event.key === "ArrowLeft");
-              }}
-            >
-              {collapsed ? <ChevronRight size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
-              {node.name}
-            </button>
-            <span className={styles.folderCount} aria-hidden="true">
-              {files.length}
-            </span>
-            <button
-              type="button"
-              className={styles.stageToggle}
-              aria-label={`${staged ? "Unstage" : "Stage"} folder ${node.path}`}
-              title={staged ? "Unstage the folder's files" : "Stage the folder's files (conflicts are left out)"}
-              disabled={paths.length === 0}
-              onClick={(event) => {
-                event.stopPropagation();
-                if (staged) onUnstageAllFiles(paths);
-                else onStageAllFiles(paths);
-              }}
-            >
-              {staged ? <Minus size={14} aria-hidden="true" /> : <Plus size={14} aria-hidden="true" />}
-            </button>
-          </div>
-          {!collapsed && (
-            <ul role="none" className={styles.fileList}>
-              {renderTreeNodes(node.children, staged)}
-            </ul>
-          )}
-        </li>
-      );
-    });
+  // file count and a Stage or Unstage for every file in it. Its rows follow, indented (#1157).
+  const renderFolderRow = (node: FolderNode, depth: number, staged: boolean) => {
+    const collapsed = isCollapsed(staged)(node.path);
+    const files = (staged ? stagedFolderFiles : changesFolderFiles).get(node.path) ?? [];
+    const paths = staged ? files.map((entry) => entry.path) : stageAllPaths(files);
+    return (
+      <li key={`folder:${node.path}`} role="none" className={styles.folder}>
+        <div className={styles.folderRow} style={{ paddingLeft: `calc(var(--space-2) + var(--space-3) * ${depth})` }}>
+          <button
+            type="button"
+            className={styles.folderToggle}
+            aria-expanded={!collapsed}
+            title={node.path}
+            onClick={() => toggleFolder(staged, node.path, !collapsed)}
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+              event.preventDefault();
+              event.stopPropagation();
+              toggleFolder(staged, node.path, event.key === "ArrowLeft");
+            }}
+          >
+            {collapsed ? <ChevronRight size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+            {node.name}
+          </button>
+          <span className={styles.folderCount} aria-hidden="true">
+            {files.length}
+          </span>
+          <button
+            type="button"
+            className={styles.stageToggle}
+            aria-label={`${staged ? "Unstage" : "Stage"} folder ${node.path}`}
+            title={staged ? "Unstage the folder's files" : "Stage the folder's files (conflicts are left out)"}
+            disabled={paths.length === 0}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (staged) onUnstageAllFiles(paths);
+              else onStageAllFiles(paths);
+            }}
+          >
+            {staged ? <Minus size={14} aria-hidden="true" /> : <Plus size={14} aria-hidden="true" />}
+          </button>
+        </div>
+      </li>
+    );
   };
   const renderChanges = (staged: boolean, entries: StatusEntry[], offset: number) => {
-    const tree = staged ? stagedTree : changesTree;
-    if (tree !== null) return renderTreeNodes(tree, staged);
+    const rows = staged ? stagedRows : changesRows;
     const { start, end } = staged ? stagedWindow : unstagedWindow;
+    if (rows !== null) {
+      return rows
+        .slice(start, end)
+        .map((row) =>
+          row.kind === "folder"
+            ? renderFolderRow(row.node, row.depth, staged)
+            : renderRow(row.entry, indexInGroup(row.entry), row.name, row.depth),
+        );
+    }
     return entries.slice(start, end).map((entry, index) => renderRow(entry, offset + start + index));
   };
-  // The padding that stands in for the rows a flat list leaves out (#845).
+  // The padding that stands in for the rows a list leaves out (#845).
   const windowPadding = (staged: boolean) => {
-    if (treeLayout) return undefined;
     const { padTop, padBottom } = staged ? stagedWindow : unstagedWindow;
     return { paddingTop: padTop, paddingBottom: padBottom };
   };
