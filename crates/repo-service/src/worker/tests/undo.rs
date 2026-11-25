@@ -606,6 +606,45 @@ fn a_failed_multi_path_stage_records_nothing() {
     assert_eq!(handle.get_undo_state().unwrap().undo, None);
 }
 
+/// #1104: discarding a file next to more untracked files than the limit stores none of those
+/// files for Undo (only the discarded one), and still undoes.
+#[test]
+fn a_discard_next_to_many_untracked_files_stores_only_its_own_file() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "one\n");
+    commit_all(&repo, "initial");
+    write_file(dir.path(), "a.txt", "precious\n");
+    std::fs::create_dir(dir.path().join("u")).unwrap();
+    for i in 0..=git_core::undo::SNAPSHOT_UNTRACKED_LIMIT {
+        write_file(
+            dir.path(),
+            &format!("u/{i}.txt"),
+            &format!("untracked {i}\n"),
+        );
+    }
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+
+    handle.discard_file("a.txt".into()).unwrap();
+    assert!(!blob_of_file_stored(&repo, &dir.path().join("u/0.txt")));
+    assert!(blob_of_file_stored(&repo, &dir.path().join("a.txt")));
+
+    assert_eq!(
+        handle.undo().unwrap(),
+        UndoOutcome::Done {
+            label: "Discard changes to a.txt".into()
+        }
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        "precious\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("u/7.txt")).unwrap(),
+        "untracked 7\n"
+    );
+}
+
 /// `git status --porcelain` in `dir` (the git CLI is the reference).
 fn porcelain(dir: &Path) -> String {
     let output = test_support::git(dir, &["status", "--porcelain"]);

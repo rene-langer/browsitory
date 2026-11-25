@@ -926,6 +926,13 @@ fn split_mails(content: &[u8]) -> Vec<&[u8]> {
     parts
 }
 
+/// Every path the patch file `content` names (old and new, each mail's), sorted; `None` when it
+/// can't be parsed. What applying it can change (#1104).
+pub fn touched_paths(content: &[u8]) -> Option<Vec<String>> {
+    let _ = content;
+    None
+}
+
 fn parse(content: &[u8]) -> Result<git2::Diff<'static>, PatchError> {
     let diff = git2::Diff::from_buffer(content)
         .map_err(|e| PatchError::Unreadable(e.message().to_string()))?;

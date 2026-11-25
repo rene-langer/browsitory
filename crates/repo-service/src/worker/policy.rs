@@ -124,7 +124,11 @@ impl CommandPolicy {
     /// `Commit`/`AmendCommit`, which end a merge or pick).
     fn recorded(label: String, scope: SnapshotScope) -> Self {
         CommandPolicy {
-            undo: Some(UndoPlan { label, scope }),
+            undo: Some(UndoPlan {
+                label,
+                scope,
+                discard: None,
+            }),
             locks_state: true,
             holds_reply: true,
             ..Self::free()

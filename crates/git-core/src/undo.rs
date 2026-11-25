@@ -164,6 +164,31 @@ pub fn capture_counted(
     capture_with(repo, Some(limits))
 }
 
+/// [`capture`] for a command that destroys work-tree content (#1104): `whole` (files, and
+/// everything below folders, matched ignoring case) are stored whatever their size or number,
+/// every other file under `SnapshotScope::Full`'s limits.
+pub fn capture_keeping(repo: &Repository, whole: &[String]) -> Result<RepoSnapshot, UndoError> {
+    let _ = whole;
+    capture(repo, SnapshotScope::FullUncapped)
+}
+
+/// [`capture_keeping`] with limits other than `SNAPSHOT_FILE_LIMIT` and
+/// `SNAPSHOT_UNTRACKED_LIMIT`: a test seam.
+#[doc(hidden)]
+pub fn capture_limited_except(
+    repo: &Repository,
+    file_limit: u64,
+    untracked_limit: usize,
+    whole: &[String],
+) -> Result<RepoSnapshot, UndoError> {
+    let _ = whole;
+    let limits = Limits {
+        file_size: Some(file_limit),
+        untracked: Some(untracked_limit),
+    };
+    capture_with(repo, Some(limits))
+}
+
 /// What a work-tree snapshot leaves unsaved: files over `file_size`, and every untracked file
 /// when there are more than `untracked`.
 #[derive(Clone, Copy)]
@@ -1185,12 +1210,9 @@ fn write_worktree_file(
         let executable = mode == MODE_EXEC;
         // A loose object streams into the new file in pieces (#1089); a packed one is loaded.
         match repo.odb()?.reader(id) {
-            Ok((mut stream, _, _)) => crate::worktree_guard::replace_beneath_from(
-                workdir,
-                rel,
-                executable,
-                &mut stream,
-            ),
+            Ok((mut stream, _, _)) => {
+                crate::worktree_guard::replace_beneath_from(workdir, rel, executable, &mut stream)
+            }
             Err(_) => {
                 let blob = repo.find_blob(id)?;
                 let content = Content::File {

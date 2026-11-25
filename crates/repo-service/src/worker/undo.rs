@@ -30,6 +30,15 @@ undo history. Try again in a moment, so this change can be undone.";
 pub(super) struct UndoPlan {
     pub label: String,
     pub scope: SnapshotScope,
+    /// Only for the commands that destroy work-tree content (`busy=Discard`).
+    pub discard: Option<DiscardPlan>,
+}
+
+/// What a command that destroys work-tree content can touch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct DiscardPlan {
+    /// The paths its snapshots store whatever their size or number (#1104); `None`: every file.
+    pub whole: Option<Vec<String>>,
 }
 
 /// While another holder keeps the state lock past `LOCK_WAIT`, a command whose policy refuses it
@@ -717,6 +726,7 @@ mod tests {
         let plan = |label: &str| UndoPlan {
             label: label.into(),
             scope: SnapshotScope::Full,
+            discard: None,
         };
         // A merge stops on conflicts...
         recorder.begin(&repo, plan("Merge feature"), None);
@@ -734,6 +744,7 @@ mod tests {
         UndoPlan {
             label: label.into(),
             scope: SnapshotScope::Full,
+            discard: None,
         }
     }
 
@@ -948,6 +959,7 @@ mod tests {
         let plan = |label: &str| UndoPlan {
             label: label.into(),
             scope: SnapshotScope::RefsAndIndex,
+            discard: None,
         };
 
         let mut recorder = UndoRecorder::open(&repo);
