@@ -1614,12 +1614,13 @@ fn set_case_pair_entries(
     }
     let mut index = repo.index()?;
     index.read(true)?;
+    let skip_worktree = crate::index_marks::skip_worktree_paths(&index);
     let kept: Vec<git2::IndexEntry> = index
         .iter()
         .filter(|entry| !pairs.covers(&entry.path))
         .collect();
     let wanted: std::collections::HashSet<(Vec<u8>, u16)> = kept.iter().map(key).collect();
-    index.read_tree(tree)?;
+    crate::index_marks::read_tree_marking(&mut index, tree, &skip_worktree)?;
     let stale: Vec<(Vec<u8>, u16)> = index
         .iter()
         .filter(|entry| !pairs.covers(&entry.path))
