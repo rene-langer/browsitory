@@ -1087,6 +1087,64 @@ fn remote_management_round_trips_through_the_worker() {
     assert_eq!(handle.get_current_upstream().unwrap(), None);
 }
 
+/// A remote whose URL holds a user name (#1081) is listed, and its HTTPS token is saved and
+/// forgotten under the URL without it.
+#[test]
+fn a_remote_with_user_info_is_listed_and_its_token_saved_and_forgotten() {
+    let (dir, repo) = init_repo();
+    repo.remote("origin", "https://alice@git.example.test/ws/r.git")
+        .unwrap();
+    repo.remote("other", "https://example.test/other.git")
+        .unwrap();
+    let store = SharedCredentialStore::default();
+    let worker = Worker::spawn_with(
+        dir.path().to_path_buf(),
+        store.clone(),
+        super::forge::FakeForgeApi::queue(vec![]),
+    )
+    .unwrap();
+    let handle = worker.handle();
+
+    let urls: Vec<_> = handle
+        .list_remotes()
+        .unwrap()
+        .into_iter()
+        .map(|remote| (remote.name, remote.fetch_url))
+        .collect();
+    assert_eq!(
+        urls,
+        [
+            (
+                "origin".to_string(),
+                "https://***@git.example.test/ws/r.git".to_string()
+            ),
+            (
+                "other".to_string(),
+                "https://example.test/other.git".to_string()
+            ),
+        ]
+    );
+
+    handle
+        .set_remote_auth_mode(
+            "origin".into(),
+            git_core::remote::RemoteAuthMode::HttpsToken {
+                username: "rene".into(),
+            },
+        )
+        .unwrap();
+    handle
+        .save_https_credential("origin".into(), "rene".into(), "token".into())
+        .unwrap();
+    let key = CredentialKey::for_https("https://git.example.test/ws/r.git", "rene").unwrap();
+    assert_eq!(
+        store.0.lock().unwrap().keys().cloned().collect::<Vec<_>>(),
+        [key]
+    );
+    handle.forget_https_credential("origin".into()).unwrap();
+    assert!(store.0.lock().unwrap().is_empty());
+}
+
 /// Receives events until the operation's `Completed`, without waiting for the channel to close.
 fn until_completed(event_rx: &mpsc::Receiver<TransferEvent>) {
     loop {

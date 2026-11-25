@@ -1,6 +1,10 @@
+import { hidesUserInfo } from "../lib/hiddenUserInfo";
+
 export function validateRemoteUrls(fetchUrl: string, pushUrl: string | null) {
   for (const url of [fetchUrl, pushUrl]) {
     if (url === null) continue;
+    // The backend keeps the saved URL for its own hidden form and refuses any other.
+    if (hidesUserInfo(url)) continue;
     const parsed = parseUrl(url);
     if (parsed === null) continue;
     if ((parsed.protocol === "http:" || parsed.protocol === "https:") && (parsed.username !== "" || parsed.password !== "")) {

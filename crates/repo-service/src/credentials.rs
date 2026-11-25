@@ -421,6 +421,8 @@ impl<S: CredentialStore, A: SshAgent> CredentialProvider for RemoteCredentialPro
     ) -> Result<git2::Cred, git2::Error> {
         match &self.profile {
             Some(RemoteAuthMode::HttpsToken { username }) => {
+                // libgit2 asks with the URL as configured, which can hold a user name (#1081).
+                let url = &git_core::remote::url_without_user_info(url);
                 let lookup = if self.without_prompt {
                     self.service
                         .lookup_https_without_prompt(url, Some(username))
@@ -678,6 +680,32 @@ mod tests {
             CredentialKey::for_https("https://git.example.test:8443/org/repo.git", "rene").unwrap();
 
         assert_eq!(key.account, "https://git.example.test:8443/rene");
+    }
+
+    /// libgit2 asks with the remote's URL, user information included; a remote cloned outside
+    /// the app can have a user name in it (#1081). The saved token is still found.
+    #[test]
+    fn https_provider_finds_the_saved_token_for_a_url_with_user_info() {
+        let store = MemoryCredentialStore::default();
+        let service = CredentialService::new(store);
+        service
+            .save_https("https://git.example.test/owner/repo.git", "rene", "token-1")
+            .unwrap();
+        let mut provider = RemoteCredentialProvider::new(&service, https_profile());
+
+        for url in [
+            "https://alice@git.example.test/owner/repo.git",
+            "https://alice:wrong@git.example.test/owner/repo.git",
+        ] {
+            let credential = provider
+                .credential(
+                    url,
+                    Some("alice"),
+                    git2::CredentialType::USER_PASS_PLAINTEXT,
+                )
+                .unwrap_or_else(|error| panic!("{url}: {}", error.message()));
+            assert!(credential.has_username());
+        }
     }
 
     #[test]

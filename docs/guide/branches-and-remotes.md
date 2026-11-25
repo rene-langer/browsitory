@@ -55,6 +55,16 @@ The menus offer:
     **Remove remote ⟨name⟩…** for each remote; they open the same dialogs (Remove still asks
     first), even while the Branches section is collapsed.
 
+    **A user name or token in a remote's URL.** Browsitory refuses an `https://` or `http://`
+    URL with a user name, token or password in it, but a repository cloned with Git or another
+    program can have one (Bitbucket copies its URLs as `https://alice@bitbucket.org/…`). Such a
+    remote is listed with `***` in place of the user name and password, everywhere: the remote's
+    menu, **Copy fetch URL**, **Edit remote…**. Fetch, pull and push use the URL as saved, as
+    Git does. In **Edit remote…**, a note under the URL says it is hidden: leave the URL as it
+    is (or only rename the remote) to keep the saved URL. To remove the user name, enter the URL
+    without it, save, and set the user name and token in **Manage credentials…**. A URL with
+    `***` that isn't the saved one is refused, like any other URL with a user name.
+
 ## Creating a branch
 
 The **+** button in the section header opens **New branch…**, **Add remote…** and **Show all
