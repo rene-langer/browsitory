@@ -11,6 +11,18 @@ export function joinPath(parent: string, name: string): string {
   return `${base}${separator}${name}`;
 }
 
+// GitHub, GitLab and Bitbucket/Atlassian token prefixes.
+const TOKEN_PREFIX =
+  /^(gh[pousr]_|github_pat_|gl(pat|dt|oas|rt|cbt|ptt|ft|imt|agent|soat|ffct)-|ATBB|ATATT|ATCTT)/;
+// Other tokens (Gitea's 40 hex characters, Azure DevOps' 52): one long run of letters and
+// digits. A user name that long has separators like `.` or no digits.
+const LONG_RANDOM = /^(?=.*[A-Za-z])(?=.*\d)[\w-]{32,}$/;
+
+/** A user name that is really an access token (#1092): it must never be shown on screen. */
+export function looksLikeToken(name: string): boolean {
+  return TOKEN_PREFIX.test(name) || LONG_RANDOM.test(name);
+}
+
 /**
  * An https URL with a user name and no password (Bitbucket's copy URL, or a token passed as
  * the user name), split into the URL without it and the decoded name; null for any other URL.

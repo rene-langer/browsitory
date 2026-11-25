@@ -85,6 +85,12 @@
       "groupName": null
     },
     {
+      "description": "tauri-driver (ci.yml's TAURI_DRIVER_VERSION, #1058) only runs the Tauri E2E job and is versioned independently of the Tauri crates/packages: its own PR, never grouped with them (which /^tauri/ above would match, #1095)",
+      "matchDatasources": ["crate"],
+      "matchPackageNames": ["tauri-driver"],
+      "groupName": null
+    },
+    {
       "description": "0.x minor bumps are breaking (Cargo and npm treat 0.y as major): own PR, after approval",
       "matchUpdateTypes": ["minor"],
       "matchCurrentVersion": "/^[\\^~=]?0\\./",

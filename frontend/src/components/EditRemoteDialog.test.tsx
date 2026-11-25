@@ -111,6 +111,29 @@ describe("EditRemoteDialog", () => {
     expect(props.onClose).not.toHaveBeenCalled();
   });
 
+  // #1081: a URL saved with a user name or token is listed with it hidden as `***`; sent back
+  // unchanged, the backend keeps the saved URL.
+  it("explains hidden user info in the fetch URL and sends it back unchanged on a rename", async () => {
+    const remote = { ...origin, fetchUrl: "https://***@bitbucket.example.test/ws/r.git" };
+    const { props, dialog } = renderDialog({ remote });
+    const fetchUrl = within(dialog).getByLabelText("Fetch URL");
+    expect(fetchUrl).toHaveAccessibleDescription(/user name or token, hidden as \*\*\*/);
+    expect(fetchUrl).toHaveAccessibleDescription(/Leave it as it is to keep it/);
+    expect(within(dialog).getByLabelText("Push URL")).not.toHaveAccessibleDescription(/hidden as/);
+    fireEvent.change(within(dialog).getByLabelText("Remote name"), { target: { value: "bitbucket" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save remote", hidden: true }));
+    await waitFor(() =>
+      expect(props.onUpdateUrls).toHaveBeenCalledWith("bitbucket", "https://***@bitbucket.example.test/ws/r.git", null),
+    );
+  });
+
+  it("explains hidden user info in the push URL only under the push URL", () => {
+    const remote = { ...origin, pushUrl: "https://***@push.example.test/ws/r.git" };
+    const { dialog } = renderDialog({ remote });
+    expect(within(dialog).getByLabelText("Push URL")).toHaveAccessibleDescription(/user name or token, hidden as \*\*\*/);
+    expect(within(dialog).getByLabelText("Fetch URL")).not.toHaveAccessibleDescription(/hidden as/);
+  });
+
   it("Cancel closes without saving", () => {
     const { props, dialog } = renderDialog();
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel", hidden: true }));

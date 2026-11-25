@@ -66,6 +66,10 @@ automatically** turned on (off by default), Browsitory fetches the open reposito
 in the background at the interval you chose. No other server is involved. The server's owner
 (for example GitHub, GitLab, Bitbucket or your company) handles that data under its own terms.
 
+A remote's `https://` or `http://` address that holds a user name, token or password (written
+by Git or another program, since Browsitory refuses such addresses) is shown with `***` in their
+place. Browsitory sends them only to that remote, as Git does, and never shows or logs them.
+
 ### Pull requests (only if you set them up)
 
 When you connect a pull request card to GitHub or Bitbucket with a personal access token,
@@ -124,8 +128,10 @@ header. Browsitory writes no other log files.
 
 The web storage holds the path of each repository it remembers something for, the text of
 your recent searches and commit messages, and the names of the branches you switched to
-recently (branch names can carry ticket numbers or customer names). It keeps them after a
-repository leaves **Recent repositories**, until you delete the web storage (see below).
+recently (branch names can carry ticket numbers or customer names). When a repository leaves
+**Recent repositories**, these entries and its **Fetch automatically** and **Prune** choices
+are deleted: at once when you remove it from the list (or **Locate…** it elsewhere), and the
+next time the list is shown when it drops off the end of the list, unless it is open in a tab.
 
 The operation log can hold what your hooks print, file and branch names, commit messages and
 remote addresses. It removes the user name and password from every URL and the value of every

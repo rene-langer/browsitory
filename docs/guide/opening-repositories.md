@@ -14,6 +14,8 @@ end of a row pins the repository: pinned repositories come first, in the order y
 stay there however many others you open, and don't count against the ten. Click the pin again
 to unpin it; it then goes back on top of the recent ones. The **×** takes a repository off the
 list, pinned or not (the folder stays where it is); opening the repository again puts it back.
+A repository that leaves the list also loses its recent searches, recent commit messages,
+recent branches and **Fetch automatically** / **Prune** choices (see [Privacy](privacy.md)).
 A repository whose folder is gone (moved, deleted, or on a drive that isn't connected) is marked
 **Folder not found** and doesn't open. **Locate…** in place of the pin lets you pick the folder's
 new place, which replaces the entry (pinned again if it was) and opens; **×** removes it. If such
@@ -55,7 +57,10 @@ folder and offers to open the result. The rest of this section is about the desk
   use it, **only after the clone succeeds**. SSH URLs use your SSH agent. Don't put the token in
   the URL — Browsitory refuses URLs that contain a password. A user name in an `https://` URL
   (`https://alice@bitbucket.org/…`, as Bitbucket copies it) moves to the **Username** field when
-  you click **Clone**, so it never lands in the repository's Git config.
+  you click **Clone**, so it never lands in the repository's Git config. A user name that looks
+  like an access token (`ghp_…`, `github_pat_…`, `glpat-…`, `ATBB…`, or a long random string) is
+  taken out of the URL but not shown: the clone doesn't start, and the dialog asks for your
+  username and the token in the **Token** field.
   If the keychain write fails, the clone still succeeds and a toast says "Cloned *name*, but the
   token couldn't be saved." — enter the token again later from the remote's **Manage
   credentials** action (right-click the remote in the Branches sidebar).

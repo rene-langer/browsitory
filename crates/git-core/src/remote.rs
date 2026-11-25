@@ -1448,22 +1448,16 @@ fn config_string(config: &git2::Config, key: &str) -> Result<Option<String>, git
     }
 }
 
+/// The repository's remotes. A URL with user information in it shows `***` in its place.
 pub fn list_remotes(repo: &Repository) -> Result<Vec<RemoteInfo>, RemoteError> {
     let config = repo.config()?;
     let mut remotes = Vec::new();
     for name in repo.remotes()?.iter().flatten().flatten() {
         let remote = repo.find_remote(name)?;
-        let fetch_url = remote.url()?;
-        let push_url = remote.pushurl()?;
-        if url_contains_embedded_credentials(fetch_url)
-            || push_url.is_some_and(url_contains_embedded_credentials)
-        {
-            return Err(RemoteError::CredentialBearingUrl);
-        }
         remotes.push(RemoteInfo {
             name: name.to_string(),
-            fetch_url: fetch_url.to_string(),
-            push_url: push_url.map(str::to_string),
+            fetch_url: listed_url(remote.url()?),
+            push_url: remote.pushurl()?.map(listed_url),
             prune: effective_prune(&config, name)?,
         });
     }
@@ -1544,18 +1538,34 @@ pub fn clear_remote_auth_profile(repo: &Repository, remote: &str) -> Result<(), 
     Ok(())
 }
 
+/// Sets `name`'s URLs. A URL that is the listed form of the stored one, its user information
+/// hidden (`list_remotes`, #1081), keeps the stored URL; any other user information in an
+/// http(s) URL is refused, and then nothing is written.
 pub fn update_remote_urls(
     repo: &Repository,
     name: &str,
     fetch_url: &str,
     push_url: Option<&str>,
 ) -> Result<(), RemoteError> {
-    validate_urls(fetch_url, push_url)?;
     let remote = repo.find_remote(name)?;
-    let has_push_url = remote.pushurl()?.is_some();
+    let stored_fetch_url = remote.url()?.to_string();
+    let stored_push_url = remote.pushurl()?.map(str::to_string);
     drop(remote);
-    repo.remote_set_url(name, fetch_url)?;
-    if push_url.is_some() || has_push_url {
+    let keeps_fetch_url = is_listed_form_of_hidden(fetch_url, &stored_fetch_url);
+    let keeps_push_url = match (push_url, stored_push_url.as_deref()) {
+        (Some(push_url), Some(stored)) => is_listed_form_of_hidden(push_url, stored),
+        _ => false,
+    };
+    if !keeps_fetch_url {
+        validate_url(fetch_url)?;
+    }
+    if let Some(push_url) = push_url.filter(|_| !keeps_push_url) {
+        validate_url(push_url)?;
+    }
+    if !keeps_fetch_url {
+        repo.remote_set_url(name, fetch_url)?;
+    }
+    if !keeps_push_url && (push_url.is_some() || stored_push_url.is_some()) {
         repo.remote_set_pushurl(name, push_url)?;
     }
     Ok(())
@@ -1996,9 +2006,12 @@ fn worktree_is_clean(repo: &Repository) -> Result<bool, RemoteError> {
 }
 
 fn validate_urls(fetch_url: &str, push_url: Option<&str>) -> Result<(), RemoteError> {
-    if url_contains_embedded_credentials(fetch_url)
-        || push_url.is_some_and(url_contains_embedded_credentials)
-    {
+    validate_url(fetch_url)?;
+    push_url.map_or(Ok(()), validate_url)
+}
+
+fn validate_url(url: &str) -> Result<(), RemoteError> {
+    if url_contains_embedded_credentials(url) {
         return Err(RemoteError::CredentialBearingUrl);
     }
     Ok(())
@@ -2006,6 +2019,42 @@ fn validate_urls(fetch_url: &str, push_url: Option<&str>) -> Result<(), RemoteEr
 
 fn url_contains_embedded_credentials(url: &str) -> bool {
     Url::parse(url).is_ok_and(|parsed| contains_embedded_credentials(&parsed))
+}
+
+/// What `list_remotes` shows for `url`: an http(s) URL written outside the app with user
+/// information (#1081) gets `***` in its place, so neither a user name, often a token, nor a
+/// password leaves git-core.
+fn listed_url(url: &str) -> String {
+    match Url::parse(url) {
+        Ok(mut parsed) if contains_embedded_credentials(&parsed) => {
+            // Infallible for http(s): both only fail for URLs without a host.
+            let _ = parsed.set_username(HIDDEN_USER_INFO);
+            let _ = parsed.set_password(None);
+            parsed.into()
+        }
+        _ => url.to_string(),
+    }
+}
+
+const HIDDEN_USER_INFO: &str = "***";
+
+/// Whether `url` is the listed form of a `stored` URL whose user information is hidden: Edit
+/// remote sends it back unchanged, and the stored URL is then kept.
+fn is_listed_form_of_hidden(url: &str, stored: &str) -> bool {
+    url_contains_embedded_credentials(stored) && url == listed_url(stored)
+}
+
+/// `url` without user information, for keying a saved HTTPS token: libgit2 asks for credentials
+/// with the URL as configured, and `list_remotes` shows a hidden one as `***`.
+pub fn url_without_user_info(url: &str) -> String {
+    match Url::parse(url) {
+        Ok(mut parsed) if contains_embedded_credentials(&parsed) => {
+            let _ = parsed.set_username("");
+            let _ = parsed.set_password(None);
+            parsed.into()
+        }
+        _ => url.to_string(),
+    }
 }
 
 /// An http(s) URL with any user information: a user name alone is often a token.

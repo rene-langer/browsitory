@@ -105,8 +105,10 @@ pub(super) fn save_https<S: CredentialStore>(
                 .ok_or_else(|| "could not find remote".into())
         })
         .and_then(|remote| {
+            // A listed URL can show user information hidden as `***` (#1081).
+            let url = git_core::remote::url_without_user_info(&remote.fetch_url);
             credentials
-                .save_https(&remote.fetch_url, &username, &token)
+                .save_https(&url, &username, &token)
                 .map_err(ErrorDto::from)
         });
     let _ = reply.send(result);
@@ -128,8 +130,9 @@ pub(super) fn forget_https<S: CredentialStore>(
             .into_iter()
             .find(|remote| remote.name == remote_name)
             .ok_or_else(|| "could not find remote".to_string())?;
+        let url = git_core::remote::url_without_user_info(&remote.fetch_url);
         credentials
-            .forget_https(&remote.fetch_url, &username)
+            .forget_https(&url, &username)
             .map_err(ErrorDto::from)
     })();
     let _ = reply.send(result);

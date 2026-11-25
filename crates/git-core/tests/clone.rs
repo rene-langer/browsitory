@@ -325,7 +325,7 @@ fn rejects_a_url_with_an_embedded_password() {
 }
 
 /// A token passed as the user name, and Bitbucket's copy URL: git would write the user name into
-/// `.git/config`, where `list_remotes` then refuses it (#1052).
+/// `.git/config` in plain text (#1052).
 #[test]
 fn rejects_an_http_url_with_a_user_name_or_token() {
     for url in [

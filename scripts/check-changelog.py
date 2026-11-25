@@ -11,10 +11,12 @@ once and both callers just invoke this script.
 """
 
 import argparse
+import json
 import os
 import posixpath
 import subprocess
 import sys
+from collections.abc import Collection
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from changelog_fragments import (  # noqa: E402
@@ -42,8 +44,46 @@ DEPENDENCY_FILES = frozenset(
 )
 
 
+# The package.json fields Renovate updates (#1094). A watched package.json whose
+# other fields change (an extension's `contributes`, `engines`, `scripts`) is not
+# a dependency-only change. frontend/package.json lies outside the watched
+# frontend/src/ and stays exempt: only its dependencies reach the app.
+PACKAGE_JSON = "package.json"
+DEPENDENCY_FIELDS = frozenset(
+    {
+        "dependencies",
+        "devDependencies",
+        "optionalDependencies",
+        "peerDependencies",
+        "packageManager",
+        "pnpm",
+    }
+)
+
+
 def is_dependency_file(path: str) -> bool:
     return posixpath.basename(path) in DEPENDENCY_FILES
+
+
+def changed_beyond_dependencies(old: str | None, new: str | None) -> bool:
+    """False only if old and new are package.json objects equal outside DEPENDENCY_FIELDS.
+
+    None stands for a file missing on that side: an added, deleted or
+    unparsable manifest counts as changed.
+    """
+    if old is None or new is None:
+        return True
+    try:
+        before, after = json.loads(old), json.loads(new)
+    except ValueError:
+        return True
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return True
+
+    def other_fields(manifest: dict) -> dict:
+        return {k: v for k, v in manifest.items() if k not in DEPENDENCY_FIELDS}
+
+    return other_fields(before) != other_fields(after)
 
 
 def fragment_files(changed_files: list[str]) -> list[str]:
@@ -51,15 +91,20 @@ def fragment_files(changed_files: list[str]) -> list[str]:
     return [f for f in changed_files if is_fragment(f)]
 
 
-def needs_changelog(changed_files: list[str]) -> bool:
+def needs_changelog(
+    changed_files: list[str],
+    manifests_beyond_dependencies: Collection[str] = frozenset(),
+) -> bool:
     """True if changed_files touch a watched path without a changelog entry.
 
     A changelog entry is CHANGELOG.md or a fragment (changelog.d/*.md other than
     README.md). Dependency manifests/lockfiles (DEPENDENCY_FILES) don't count as
-    touching a watched path; any other file under one still needs an entry.
+    touching a watched path, except the package.json files in
+    manifests_beyond_dependencies; any other file under one still needs an entry.
     """
     touches_watched_path = any(
-        f.startswith(WATCHED_PREFIXES) and not is_dependency_file(f)
+        f.startswith(WATCHED_PREFIXES)
+        and (not is_dependency_file(f) or f in manifests_beyond_dependencies)
         for f in changed_files
     )
     has_entry = CHANGELOG_FILE in changed_files or bool(fragment_files(changed_files))
@@ -119,6 +164,29 @@ def changed_files(base: str) -> list[str]:
     )
 
 
+def file_at(rev: str, path: str) -> str | None:
+    """path's content at rev, or None if it doesn't exist there."""
+    shown = subprocess.run(
+        ["git", "show", f"{rev}:{path}"],
+        capture_output=True,
+        encoding="utf-8",
+        errors="surrogateescape",
+    )
+    return shown.stdout if shown.returncode == 0 else None
+
+
+def manifests_changed_beyond_dependencies(base: str, files: list[str]) -> set[str]:
+    """The watched package.json files among files changed outside DEPENDENCY_FIELDS."""
+    merge_base = git("merge-base", "HEAD", base).strip()
+    return {
+        f
+        for f in files
+        if f.startswith(WATCHED_PREFIXES)
+        and posixpath.basename(f) == PACKAGE_JSON
+        and changed_beyond_dependencies(file_at(merge_base, f), file_at("HEAD", f))
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -132,7 +200,8 @@ def main() -> int:
         print("check-changelog: skipped via SKIP_CHANGELOG_CHECK=1")
         return 0
 
-    files = changed_files(args.base or default_base())
+    base = args.base or default_base()
+    files = changed_files(base)
 
     bad = False
     for path in stray_files(files):
@@ -152,11 +221,12 @@ def main() -> int:
         )
         return 1
 
-    if needs_changelog(files):
+    if needs_changelog(files, manifests_changed_beyond_dependencies(base, files)):
         print(
             f"check-changelog: code changed under {', '.join(WATCHED_PREFIXES)} "
             "but there is no changelog entry.\n"
-            "(Changes limited to dependency manifests/lockfiles are exempt.)\n"
+            "(Changes limited to dependency manifests/lockfiles are exempt; a "
+            "package.json only while just its dependency fields change.)\n"
             "Add a fragment, changelog.d/<issue>-<short-slug>.md (see "
             "changelog.d/README.md), or bypass with SKIP_CHANGELOG_CHECK=1 "
             "(local push) / the 'skip-changelog' PR label (CI).",

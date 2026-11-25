@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { CloneOutcome, RepoClient } from "../ipc/RepoClient";
 import { CloneError } from "../ipc/RepoClient";
-import { deriveRepoName, joinPath, splitHttpsUserName } from "../lib/cloneNames";
+import { deriveRepoName, joinPath, looksLikeToken, splitHttpsUserName } from "../lib/cloneNames";
 import { FormDialog } from "./primitives/FormDialog";
 import { InlineError } from "./primitives/InlineError";
 import { DialogActions } from "./primitives/DialogActions";
@@ -89,6 +89,18 @@ export function CloneDialog({
   };
 
   const submit = () => {
+    // The backend refuses a user name in an https URL (#1052): it moves to the Username field.
+    const split = splitHttpsUserName(url);
+    let user = username.trim();
+    // A token there (#1092) is taken out of the URL but never put on screen: refused instead.
+    if (split !== null && user === "" && looksLikeToken(split.username)) {
+      setUrl(split.url);
+      setHttpsOpen(true);
+      setError(
+        "The URL's user name looks like an access token, so it was taken out of the URL. Enter your username, and the token in the Token field.",
+      );
+      return;
+    }
     const id = crypto.randomUUID();
     operationId.current = id;
     setRunning(true);
@@ -96,9 +108,6 @@ export function CloneDialog({
     setProgress(null);
     setError(null);
     const trimmedBranch = branch.trim();
-    // The backend refuses a user name in an https URL (#1052): it moves to the Username field.
-    const split = splitHttpsUserName(url);
-    let user = username.trim();
     if (split !== null) {
       setUrl(split.url);
       if (user === "") {

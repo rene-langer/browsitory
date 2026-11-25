@@ -15,3 +15,9 @@
   align-items: center;
   gap: var(--space-1);
 }
+
+.note {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
