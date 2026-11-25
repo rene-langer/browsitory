@@ -537,29 +537,61 @@ impl From<git_core::stash::StashEntry> for StashEntryDto {
     }
 }
 
+/// A file's blame (#839, #1158): each commit once, in `commits`, and each line's text with its
+/// commit's index there; `lines[i]` is the file's line `i + 1`.
 #[derive(Serialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
-#[cfg_attr(any(test, feature = "ts"), ts(rename = "BlameLine"))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "Blame"))]
+pub struct BlameDto {
+    pub commits: Vec<BlameCommitDto>,
+    pub lines: Vec<BlameLineDto>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "BlameCommit"))]
 #[serde(rename_all = "camelCase")]
-pub struct BlameLineDto {
-    pub line_number: usize,
-    pub content: String,
+pub struct BlameCommitDto {
     pub commit_id: String,
     pub short_id: String,
     pub author_name: String,
-    pub timestamp: i64,
+    pub timestamp: i64, // Unix seconds, UTC
 }
 
-impl From<git_core::blame::BlameLine> for BlameLineDto {
-    fn from(l: git_core::blame::BlameLine) -> Self {
-        BlameLineDto {
-            line_number: l.line_number,
-            content: l.content,
-            commit_id: l.commit_id,
-            short_id: l.short_id,
-            author_name: l.author_name,
-            timestamp: l.timestamp,
-        }
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "BlameLine"))]
+pub struct BlameLineDto {
+    pub content: String,
+    /// The line's commit: its index in `BlameDto::commits`.
+    pub commit: usize,
+}
+
+impl From<Vec<git_core::blame::BlameLine>> for BlameDto {
+    fn from(lines: Vec<git_core::blame::BlameLine>) -> Self {
+        let mut commits = Vec::new();
+        let mut index_of = std::collections::HashMap::<String, usize>::new();
+        let lines = lines
+            .into_iter()
+            .map(|line| {
+                let commit = *index_of
+                    .entry(line.commit_id)
+                    .or_insert_with_key(|commit_id| {
+                        commits.push(BlameCommitDto {
+                            commit_id: commit_id.clone(),
+                            short_id: line.short_id,
+                            author_name: line.author_name,
+                            timestamp: line.timestamp,
+                        });
+                        commits.len() - 1
+                    });
+                BlameLineDto {
+                    content: line.content,
+                    commit,
+                }
+            })
+            .collect();
+        BlameDto { commits, lines }
     }
 }
 
@@ -3825,6 +3857,9 @@ pub enum ErrorKind {
     /// A file's diff over the size limit (#1066); the diff view offers to load it anyway
     /// (`noSizeLimit`).
     DiffTooLarge,
+    /// Blame refused a file over its size limit or a binary file (#1158); the blame view shows
+    /// the message.
+    BlameUnavailable,
 }
 
 impl ErrorKind {
@@ -3863,6 +3898,11 @@ impl ErrorKind {
             error.downcast_ref::<git_core::diff::DiffError>()
         {
             Some(Self::DiffTooLarge)
+        } else if let Some(
+            git_core::blame::BlameError::TooLarge { .. } | git_core::blame::BlameError::Binary,
+        ) = error.downcast_ref::<git_core::blame::BlameError>()
+        {
+            Some(Self::BlameUnavailable)
         } else if let Some(error) = error.downcast_ref::<RemoteError>() {
             match error {
                 RemoteError::DirtyWorktree => Some(Self::DirtyWorktree),
@@ -4037,6 +4077,8 @@ mod ts_bindings {
             PullStrategyDto,
             StashSwitchOutcomeDto,
             StashEntryDto,
+            BlameDto,
+            BlameCommitDto,
             BlameLineDto,
             GraphCommitDto,
             FileHistoryEntryDto,
@@ -4271,6 +4313,44 @@ mod update_settings_conversion {
                 check_automatically
             );
         }
+    }
+}
+
+/// #1158: a blame's lines point at their commit by its place in `commits`, each commit once.
+#[cfg(test)]
+mod blame_conversion {
+    use super::BlameDto;
+
+    fn line(content: &str, commit: &str) -> git_core::blame::BlameLine {
+        git_core::blame::BlameLine {
+            line_number: 0,
+            content: content.to_string(),
+            commit_id: commit.repeat(40),
+            short_id: commit.repeat(7),
+            author_name: format!("author {commit}"),
+            timestamp: 1,
+        }
+    }
+
+    #[test]
+    fn each_line_points_at_its_commit_listed_once_in_order_of_first_use() {
+        let blame = BlameDto::from(vec![
+            line("a", "1"),
+            line("b", "2"),
+            line("c", "1"),
+            line("d", "3"),
+            line("e", "2"),
+        ]);
+
+        let ids: Vec<&str> = blame.commits.iter().map(|c| &c.commit_id[..1]).collect();
+        assert_eq!(ids, ["1", "2", "3"]);
+        let lines: Vec<(&str, usize)> = blame
+            .lines
+            .iter()
+            .map(|l| (l.content.as_str(), l.commit))
+            .collect();
+        assert_eq!(lines, [("a", 0), ("b", 1), ("c", 0), ("d", 2), ("e", 1)]);
+        assert_eq!(blame.commits[1].author_name, "author 2");
     }
 }
 

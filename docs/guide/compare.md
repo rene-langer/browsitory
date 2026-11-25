@@ -25,4 +25,5 @@ the edits. In a working-tree compare that holds for renames git already tracks (
 move you staged); a file moved on disk but not yet added shows as a deletion plus a new
 untracked file. Each
 file has **Blame** (at the newer side, or at HEAD for the working tree) and **History**. With
-more than 50 files, every file starts collapsed; use **Expand all**.
+more than 50 files, every file starts collapsed; use **Expand all**. The list shows its first 200
+files; **Show 200 more** and **Show all** under it show the rest.

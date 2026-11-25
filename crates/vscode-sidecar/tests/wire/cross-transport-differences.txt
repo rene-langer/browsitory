@@ -5,7 +5,7 @@
 AppearanceSettings/default key-order
 AppearanceSettings/set key-order
 AppearanceSettings/small key-order
-BlameLine/plain key-order
+Blame/twoCommits key-order
 BranchInfo/local-only key-order
 BranchInfo/tracking key-order
 ChangedFile/plain key-order

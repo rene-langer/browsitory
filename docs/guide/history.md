@@ -214,6 +214,15 @@ anyway stays loaded while you stay on it, also after you stage part of it; anoth
 same file in another commit, asks again. A binary file over 20 MB shows the same note, and once
 loaded says it has no text differences.
 
+**Commits with many files** stay quick to open: when a commit (or a stash) changes more than 50
+files, every file starts collapsed, and a file's diff loads when you expand it (**Expand all**
+expands them all). The list shows its first 200 files; "N more files not shown." under it has
+**Show 200 more** and, with more than that left, **Show all**.
+
+**Blame** of a long file draws only the lines on screen, so it scrolls smoothly however long the
+file is. A file over 20 MB has no blame: the view says how large it is instead, without reading
+the file. A binary file says it has no line-by-line blame.
+
 With a screen reader, each line of a diff is read with what it is and its line number, such as
 "Added line 12", "Removed line 7" or "Unchanged line 3", before its text; the `+`/`−` markers
 and the line-number columns are not read. Where lines can be selected, each hunk's lines are a

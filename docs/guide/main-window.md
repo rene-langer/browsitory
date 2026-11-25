@@ -188,6 +188,9 @@ download server is down), it tries again after 10 minutes, then waits twice as l
 to 3 hours, until a check succeeds. When it is ready, a notice with the notifications says
 "Update v… ready" and stays until you restart.
 Click **Restart to update** to install it, or keep working: nothing changes until you restart.
+If installing fails (for example when you cancel the password prompt on Linux), the notice turns
+red and says "Couldn't install update v…" with the reason, which also goes to the
+[log file](troubleshooting.md); click **Restart to update** to try again.
 
 To stop the automatic checks, clear **Check for updates automatically** under **Updates** in
 **Preferences** (it is `check_automatically = false` under `[updates]` in `config.toml`).

@@ -307,7 +307,7 @@ pub fn shared_wire_cases(s: &mut impl WireCases) {
         PullStrategyDto::from,
     );
     s.add("StashFiles", fixtures::stash_files(), StashFilesDto::from);
-    s.add("BlameLine", fixtures::blame_lines(), BlameLineDto::from);
+    s.add("Blame", fixtures::blames(), BlameDto::from);
     s.add(
         "MergeOutcome",
         fixtures::merge_outcomes(),
