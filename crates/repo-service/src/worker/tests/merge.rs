@@ -243,3 +243,99 @@ fn resolve_add_delete_conflict_round_trips_through_the_worker() {
     assert_eq!(status.len(), 1);
     assert!(status[0].staged);
 }
+
+/// While a merge is paused no undo snapshot re-reads the index before a command; an unstage
+/// must still start from the index git wrote, not from the app's last status read (#1167).
+#[test]
+fn unstaging_during_a_paused_merge_keeps_what_was_staged_outside() {
+    let (dir, repo) = conflicting_branches();
+    let d = dir.path();
+    write_file(d, "c.txt", "c\n");
+    write_file(d, "d.txt", "d\n");
+    commit_all(&repo, "more files");
+    let worker = Worker::spawn(d.to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let outcome = handle
+        .start_merge(
+            "feature".into(),
+            git_core::merge::MergeOptions::default(),
+            no_events(),
+        )
+        .unwrap();
+    assert_eq!(
+        outcome,
+        MergeOutcome::Conflicted {
+            files: vec!["a.txt".to_string()]
+        }
+    );
+    write_file(d, "d.txt", "d, edited\n");
+    handle.stage_file("d.txt".into()).unwrap();
+    handle.get_status().unwrap();
+
+    // A terminal resolves the conflict and stages another file.
+    write_file(d, "a.txt", "resolved\n");
+    write_file(d, "c.txt", "c, edited\n");
+    let added = test_support::git(d, &["add", "a.txt", "c.txt"]);
+    assert!(added.status.success(), "{added:?}");
+    handle.unstage_file("d.txt".into()).unwrap();
+
+    let status = test_support::git(d, &["status", "--short"]);
+    assert_eq!(
+        String::from_utf8_lossy(&status.stdout),
+        "M  a.txt\nM  c.txt\n M d.txt\n"
+    );
+}
+
+/// The same for resolving the other conflict in the app: the conflict resolved outside stays
+/// resolved, the file staged outside stays staged (#1167).
+#[test]
+fn resolving_during_a_paused_merge_keeps_what_was_staged_outside() {
+    let (dir, repo) = init_repo();
+    let d = dir.path();
+    write_file(d, "a.txt", "base\n");
+    write_file(d, "b.txt", "base\n");
+    write_file(d, "c.txt", "c\n");
+    commit_all(&repo, "base");
+    let main = repo.head().unwrap().shorthand().unwrap().to_string();
+    let added = test_support::git(d, &["checkout", "-q", "-b", "feature"]);
+    assert!(added.status.success(), "{added:?}");
+    write_file(d, "a.txt", "feature\n");
+    write_file(d, "b.txt", "feature\n");
+    commit_all(&repo, "feature");
+    let switched = test_support::git(d, &["checkout", "-q", &main]);
+    assert!(switched.status.success(), "{switched:?}");
+    write_file(d, "a.txt", "main\n");
+    write_file(d, "b.txt", "main\n");
+    commit_all(&repo, "main");
+    let worker = Worker::spawn(d.to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let outcome = handle
+        .start_merge(
+            "feature".into(),
+            git_core::merge::MergeOptions::default(),
+            no_events(),
+        )
+        .unwrap();
+    assert_eq!(
+        outcome,
+        MergeOutcome::Conflicted {
+            files: vec!["a.txt".to_string(), "b.txt".to_string()]
+        }
+    );
+    handle.get_status().unwrap();
+
+    // A terminal resolves one conflict and stages another file.
+    write_file(d, "a.txt", "resolved\n");
+    write_file(d, "c.txt", "c, edited\n");
+    let added = test_support::git(d, &["add", "a.txt", "c.txt"]);
+    assert!(added.status.success(), "{added:?}");
+    handle
+        .resolve_conflict("b.txt".into(), "resolved b\n".into())
+        .unwrap();
+
+    let status = test_support::git(d, &["status", "--short"]);
+    assert_eq!(
+        String::from_utf8_lossy(&status.stdout),
+        "M  a.txt\nM  b.txt\nM  c.txt\n"
+    );
+}
