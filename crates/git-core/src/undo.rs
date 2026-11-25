@@ -420,10 +420,21 @@ fn local_config(repo: &Repository) -> Result<git2::Config, UndoError> {
 /// Every `branch.<name>.<variable>` setting of the repository's own config file, by branch name
 /// (#1151). A branch name may hold dots; the variable never does.
 fn branch_settings(repo: &Repository) -> Result<BTreeMap<String, BranchSettings>, UndoError> {
+    Ok(scan_branch_settings(repo)?.0)
+}
+
+/// [`branch_settings`], and the branches with a setting written without a value (`flag`
+/// alone), which libgit2 can't remove: its value pattern match reads the missing value.
+fn scan_branch_settings(
+    repo: &Repository,
+) -> Result<(BTreeMap<String, BranchSettings>, BTreeSet<String>), UndoError> {
     let mut settings: BTreeMap<String, BranchSettings> = BTreeMap::new();
+    let mut valueless = BTreeSet::new();
     let config = match local_config(repo) {
         Ok(config) => config,
-        Err(UndoError::Git(error)) if error.code() == ErrorCode::NotFound => return Ok(settings),
+        Err(UndoError::Git(error)) if error.code() == ErrorCode::NotFound => {
+            return Ok((settings, valueless))
+        }
         Err(error) => return Err(error),
     };
     let mut entries = config.entries(Some(r"^branch\..+\.[^.]+$"))?;
@@ -440,6 +451,7 @@ fn branch_settings(repo: &Repository) -> Result<BTreeMap<String, BranchSettings>
         let value = if entry.has_value() {
             String::from_utf8_lossy(entry.value_bytes()).into_owned()
         } else {
+            valueless.insert(branch.to_string());
             "true".to_string()
         };
         settings
@@ -447,7 +459,7 @@ fn branch_settings(repo: &Repository) -> Result<BTreeMap<String, BranchSettings>
             .or_default()
             .push((variable.to_string(), value));
     }
-    Ok(settings)
+    Ok((settings, valueless))
 }
 
 /// Replaces `branch`'s settings `current` with `wanted`, in `wanted`'s order.
@@ -776,12 +788,13 @@ pub fn restore(
     let settings = changed_branch_settings(expected, target);
     let mut config = None;
     if !settings.is_empty() {
-        let current = branch_settings(repo)?;
+        let (current, valueless) = scan_branch_settings(repo)?;
         // Like a ref: still the expected side's settings, or the restore would overwrite others.
-        if settings
-            .iter()
-            .any(|branch| current.get(*branch) != expected.branch_config.get(*branch))
-        {
+        // A setting without a value can't be removed safely (see `scan_branch_settings`).
+        if settings.iter().any(|branch| {
+            current.get(*branch) != expected.branch_config.get(*branch)
+                || valueless.contains(*branch)
+        }) {
             return Err(UndoError::RepositoryChanged);
         }
         config = Some((local_config(repo)?, current));
