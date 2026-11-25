@@ -15,11 +15,30 @@ changes the CLI the next release builds with. The workflow stamps the version in
 Every installer carries `THIRD_PARTY_NOTICES.md` (a Tauri resource), and
 `publish-vsix-release` also attaches it to the draft release. It is generated, so a release
 needs no extra step for it (see `docs/LICENSE_COMPLIANCE.md`). The `verify` job runs first on
-the tagged commit: `cargo test --workspace`, the frontend test suite,
+the tagged commit: `scripts/check-release-tag.py` (see [Preparing the
+changelog](#preparing-the-changelog), #1111), `cargo test --workspace`, the frontend test suite,
 `scripts/generate-third-party-notices.py --check`, so a stale notices file stops the release,
 and `scripts/fold-changelog.py --check`, so unfolded changelog fragments stop it too. Its
 `cargo test` restores the Rust cache `ci.yml`'s `rust` job saved on main (#1061) and never saves
 one.
+
+### Workflow permissions and pinned actions
+
+`release.yml` holds the release's credentials: the draft release that every installed app
+updates from, the signing key, the Marketplace sign-in and `OVSX_PAT`. So (#1109):
+
+- **Read-only token by default.** Only `build-release` (`tauri-action` creates the draft and
+  uploads the bundles) and `publish-vsix-release` (reads the draft, uploads the packages) get
+  `contents: write`. `verify` also gets `actions: read` to look up `ci.yml`'s runs; the publish
+  and dry-run jobs keep their own blocks (`id-token: write` only where `azure/login` runs).
+- **No token in `.git/config`.** No job pushes, so every checkout sets `persist-credentials:
+  false`; dependency installs, build scripts and later actions can't read the token from there.
+- **Actions pinned by commit.** Every `uses:` names a full commit SHA with the version in a
+  comment (`# v7.0.1`), like `tauri-action` (#399) and `renovate-notices.yml`, so a moved tag
+  can't change what runs next to the credentials. Renovate's `github-actions` manager updates the
+  SHA and the comment together, in the "GitHub Actions" group (majors and `tauri-action` in
+  their own PRs). Pin a new action the same way: `gh api repos/OWNER/REPO/commits/vX.Y.Z --jq
+  .sha`.
 
 ### Linux build image (glibc floor)
 
@@ -74,9 +93,26 @@ Pull requests don't edit `CHANGELOG.md`. Each adds a fragment, `changelog.d/<iss
 2. renames `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`, adds a new empty `## [Unreleased]`
    above it, and edits the text where needed.
 
-Merge it, then tag that commit. The `verify` job fails while any fragment is left
-(`scripts/fold-changelog.py --check`), because every VSIX ships `CHANGELOG.md` and the app's
-release notes are built from it.
+Merge it, wait for its `ci.yml` run on main to pass, then tag that commit. The `verify` job
+fails while any fragment is left (`scripts/fold-changelog.py --check`), because every VSIX ships
+`CHANGELOG.md` and the app's release notes are built from it. Before that,
+`scripts/check-release-tag.py` (#1111) fails, listing every problem, unless:
+
+- the tag is `release/MAJOR.MINOR.PATCH`;
+- `CHANGELOG.md` at the tagged commit has `## [X.Y.Z] - YYYY-MM-DD` for the tag's version, with
+  entries, as the first section under an empty `## [Unreleased]` (step 2 forgotten, or a tag
+  `release/0.18.0` on a heading `0.17.1`, would otherwise ship the release's notes as
+  "Unreleased" in every VSIX and show no notes in the app);
+- the commit is on `main` (`git merge-base --is-ancestor` against `origin/main`);
+- a `ci.yml` run on `main` passed for that commit. A run still in progress fails the check too:
+  re-run the `verify` job once CI is green; the tag doesn't need to move.
+
+Run the same check before pushing the tag (it needs `gh` signed in):
+
+```bash
+git fetch origin
+python3 scripts/check-release-tag.py --tag release/X.Y.Z --commit origin/main
+```
 
 ### Before a release: docs and screenshots
 
@@ -248,8 +284,13 @@ the desktop build, two jobs publish the same files:
 - **Visual Studio Marketplace** (`publish-vsix-marketplace`): GitHub OIDC into Microsoft Entra
   ID, no stored token. `azure/login`, then `vsce publish --azure-credential`.
 - **Open VSX** (`publish-vsix-open-vsx`): `OVSX_PAT`, a token for the Open VSX namespace
-  `browsitory`. `ovsx` runs via `npx` only (EPL-2.0, build-only tool; see
-  `docs/LICENSE_COMPLIANCE.md`).
+  `browsitory`. `ovsx` (EPL-2.0, a build-only tool; see `docs/LICENSE_COMPLIANCE.md`) comes
+  from `extension/publish/`, a pnpm project of its own with `ovsx` as its only dependency
+  (#1110). The job installs it with `pnpm install --frozen-lockfile --ignore-scripts` before the
+  step that gets `OVSX_PAT`, so every package in its tree is the one the lockfile names, with
+  its integrity hash, and no install script runs. Renovate proposes ovsx updates (JS group, a
+  day after release), and CI's `licenses` job checks the tree. It stays out of `extension/`'s own
+  tree, which ships.
 
 Both jobs run in the GitHub environment `marketplace` (deployment tags restricted to
 `release/*`), and all three secrets are **environment** secrets there: `AZURE_CLIENT_ID`,
@@ -308,8 +349,9 @@ Owner setup (once):
    (`repo:rene-langer/browsitory:environment:marketplace`). Store its client and tenant ids as
    `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` in the `marketplace` environment.
 3. Open VSX: create an account, sign the Eclipse publisher agreement, create the namespace
-   (`npx ovsx@1.3.0 create-namespace browsitory -p <token>`), and store the token as `OVSX_PAT`
-   in the `marketplace` environment.
+   (`pnpm --dir extension/publish install --frozen-lockfile`, then
+   `pnpm --dir extension/publish exec ovsx create-namespace browsitory -p <token>`), and store
+   the token as `OVSX_PAT` in the `marketplace` environment.
 4. Add the Entra app to the publisher. The Marketplace jobs print a notice with the Entra app's
    Marketplace member id (`az rest -u https://app.vssps.visualstudio.com/_apis/profile/profiles/me
    --resource 499b84ac-1321-427f-aa17-267ca6975798 --query id -o tsv`). Run the
@@ -382,8 +424,9 @@ What the jobs mean:
   **Contributor** at <https://marketplace.visualstudio.com/manage/publishers/browsitory>, then
   re-run the job. A failure in `azure/login` means the federated credential or the
   `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` secrets are wrong.
-- **dry-run-open-vsx** runs `ovsx verify-pat browsitory` with `OVSX_PAT`. It fails if the token
-  is invalid or cannot publish to the namespace.
+- **dry-run-open-vsx** installs `extension/publish/`'s locked `ovsx` like the publish job and runs
+  `ovsx verify-pat browsitory` with `OVSX_PAT`. It fails if the token is invalid or cannot
+  publish to the namespace.
 
 All three green means both sign-ins work, the Entra app holds some role on the Marketplace
 publisher, and the Open VSX token can publish to its namespace. It does not prove the
