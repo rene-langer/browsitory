@@ -447,7 +447,8 @@ menu's choice runs back through the session: the pick, the parent picker or a se
     does. Its `Index::read_tree` clears the mark on every entry (#1145): Reset, Abort
     (merge, cherry-pick, revert, the terminal sequence, a rebase's case-pair path) go through
     `reset_index_to_tree`, which puts it back on each path that keeps an entry, as git's reset
-    does; Undo's restore refuses an index with either mark. Reset hard checks out every path except a skip-worktree file the target keeps (same
+    does; Undo's restore does the same, and also puts back the intent-to-add marks its
+    snapshot recorded (#1174). Reset hard checks out every path except a skip-worktree file the target keeps (same
     blob and mode), one that is missing in a sparse checkout (`core.sparseCheckout`), and an
     intent-to-add file the target lacks (a forced checkout deleted it); it refuses, before
     writing anything, when the target changes a skip-worktree file with local edits (git:
@@ -958,7 +959,39 @@ certificate.
   and, for commands that touch the working tree, a "worktree tree" (HEAD tree with every
   modified/deleted/untracked file overlaid, raw bytes, no filters). Undo restores `before` over
   `after`, redo the reverse, touching only components that differ and only after verifying each
-  still equals the expected side (strict: any drift refuses).
+  still equals the expected side (strict: any drift refuses). Files are compared with the
+  snapshot's blobs in pieces (a different size differs at once) and written from an odb read
+  stream (`worktree_guard::replace_beneath_from`), so a big file is never held whole (#1089);
+  a packed blob, which libgit2 can't stream, is loaded.
+- **Index marks** (#1174): the snapshot records the index's intent-to-add paths
+  (`RepoSnapshot::intent_to_add`; the index tree holds them as empty files). `restore` checks the
+  current index's tree *and* intent-to-add paths against one side, and writes the index with
+  `index_marks::reset_index_marking`: the skip-worktree marks stay as they are now (as git's
+  reset keeps them), the target's intent-to-add paths get their mark back. So Undo works in a
+  sparse checkout; paths it adds back to the index aren't marked skip-worktree (as Reset, #1172).
+- **Branch settings** (#1151): the snapshot records every `branch.<name>.<variable>` of the
+  repository's own config file (`ConfigLevel::Local`) by branch name, split at the last dot, in
+  file order (`RepoSnapshot::branch_config`). `restore` writes a branch's settings only when it
+  creates or deletes that branch (its ref on one side only) and the sides' settings differ,
+  after checking the current settings are the expected side's (else `RepositoryChanged`): all of
+  the branch's entries removed, the target's added in order. So Undo of a rename moves them back
+  and Undo of a delete brings them back; settings an unrecorded command changed (Set upstream) on
+  a branch the entry doesn't create or delete are never touched. The recorder keeps them only for
+  such branches (`changed_refs_only`) and compares before and after once trimmed.
+- **Work-tree entries** (#1147): a `busy=Discard` command that runs while an operation is paused
+  (a marker or a pending entry) or while the index has conflicts gets an entry of its own when it
+  changes only the work tree (`DiscardPlan::worktree_only`: discards, Restore file version, a
+  commit's change or a patch applied to the work tree). Its snapshots come from
+  `undo::capture_worktree`: HEAD, refs and the work tree, no index (`index_tree: None`), so
+  conflicts don't stop it. It goes onto the undo stack directly, never into the pending entry,
+  and Undo/Redo run it during the pause through `undo::restore_worktree`, which restores only
+  the work-tree files with the usual checks, as raw bytes (no recorded index to check them out
+  from); every other entry answers "operation in progress" then. The `busy=Discard` commands
+  that change more (Reset hard, apply and stage a patch or a commit's change, apply as commits)
+  are refused in that state with the reason (`DISCARD_PAUSED`, `DISCARD_CONFLICTED`, or the
+  terminal rebase's own message), and one whose snapshot fails is refused too
+  (`UndoRecorder::begin` returns the reply; the worker answers it and runs nothing). The stored
+  operation's gate is checked first, so a gated command keeps the gate's reply.
 - **Size limit** (#1065): a `Full` snapshot stores no file over `SNAPSHOT_FILE_LIMIT` (50 MiB);
   it leaves the file out of the worktree tree and notes its stat data (size, mtime, inode, git
   mode) in `RepoSnapshot::skipped`, persisted in `undo.json` as an optional `skipped` map. Stored
@@ -970,7 +1003,11 @@ certificate.
   by its stat data instead of its contents, then written or removed as usual. The commands that
   destroy work-tree content with no other way back (policy `busy=Discard`: discards, restoring
   a file version, applying a commit's change or a patch, a hard reset) snapshot with
-  `FullUncapped`, which stores every file. Every other work-tree command leaves dirty and
+  `FullUncapped`: every file they can change is stored whatever its size or number, and since
+  #1104 only those (`DiscardPlan::whole`, `undo::capture_keeping`: the named files and
+  everything below named folders, matched ignoring case; a patch's paths from
+  `patch::touched_paths`; every file for Reset hard or an unparseable patch); the other files
+  fall under `Full`'s limits, the count taking only those. Every other work-tree command leaves dirty and
   untracked files as they are (git refuses to overwrite them), so for those a skipped file only
   ever needs to stay put.
 - **Untracked count limit** (#1090): a `Full` snapshot with more than `SNAPSHOT_UNTRACKED_LIMIT`
@@ -990,16 +1027,19 @@ certificate.
   where a path sorts. A file left out on the expected side that already has the target's
   contents is not rewritten (`holds_blob`): a command that crosses the limit (a mixed reset
   untracking files) would otherwise give those files new stat data on undo and redo would
-  refuse. `FullUncapped` has no count limit either: discarding a big untracked folder still
-  saves every file.
+  refuse. `FullUncapped` has no count limit for the paths it names either: discarding a big
+  untracked folder still saves every file in it.
 - **Format version** (#1093): `undo.json` is version 2 since the snapshots can leave files
-  out; this build reads versions 1 and 2 and writes 2. Older builds read only version 1 and
-  ignore any other file (and never overwrite it), so after a downgrade they start with an empty
-  history instead of restoring snapshots whose left-out files they don't know about (which
-  could delete such a file).
+  out, and version 3 since they record intent-to-add paths (`intentToAdd`), branch settings
+  (`branchConfig`) and work-tree entries without an index tree (`indexTree` absent); this build
+  reads versions 1 to 3 and writes 3. Older builds read only their own versions and ignore any
+  other file (and never overwrite it), so after a downgrade they start with an empty history
+  instead of restoring snapshots they misread (left-out files they don't know about, which
+  could delete such a file; intent-to-add entries as staged empty files).
 - **Recording** (`repo-service::worker::undo`): the worker snapshots before/after each
   recordable command; failed/no-op commands record nothing; operations that stop on conflicts
-  stay pending until completed (one entry) or aborted (none).
+  stay pending until completed (one entry) or aborted (none). Discards during the pause are
+  work-tree entries of their own (above, #1147).
 - **Command policy** (`repo-service::worker::policy`, #485): one function, `policy::of`, states
   for every worker `Command` the undo entry it records (label and snapshot scope), whether it
   takes the state lock, is refused while that lock stays busy (and with which text), has its
