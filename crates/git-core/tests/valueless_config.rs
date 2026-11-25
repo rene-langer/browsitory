@@ -1,0 +1,464 @@
+//! #1180: a setting written without a value (`flag` alone in `.git/config`, boolean true to git)
+//! never crashes the process. libgit2 dereferences the missing value when it removes or renames
+//! the setting's section (Delete branch, Rename branch, Rename remote, Remove remote), compares
+//! `branch.*.remote` with a remote's name (Rename remote, Remove remote) or adds a value next to
+//! it (Add remote's `fetch`). Each command runs in a child process (this test binary, running
+//! only that test), so a crash fails the test instead of killing the test binary.
+
+mod common;
+
+use std::io::Write as _;
+use std::path::Path;
+
+use common::{commit_all, git_ok, init_repo, write_file};
+use git2::Repository;
+use tempfile::TempDir;
+
+/// The child's repository folder; set only in the child.
+const CHILD_REPO: &str = "BROWSITORY_VALUELESS_CONFIG_CHILD_REPO";
+/// Marks the child's result line on its stdout.
+const RESULT: &str = "valueless-config-result: ";
+
+/// Runs `setup`, then `command` on its repository in a child process: this test binary, running
+/// only `test`. Returns the repository and `"ok"` or the command's error text; fails the test
+/// when the child crashed. In the child, only `command` runs, on the parent's repository.
+fn run_isolated(
+    test: &str,
+    setup: impl FnOnce() -> (TempDir, Repository),
+    command: impl FnOnce(&Repository) -> Result<(), String>,
+) -> (TempDir, Repository, String) {
+    if let Some(path) = std::env::var_os(CHILD_REPO) {
+        let repo = Repository::open(path).expect("open the parent's repository");
+        let result = command(&repo).err().unwrap_or_else(|| "ok".to_string());
+        // libtest has printed `test <name> ... ` without a line end.
+        println!("\n{RESULT}{}", result.replace('\n', " "));
+        std::io::stdout().flush().unwrap();
+        std::process::exit(0);
+    }
+    let (dir, repo) = setup();
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([test, "--exact", "--nocapture", "--test-threads=1"])
+        .env(CHILD_REPO, dir.path())
+        .output()
+        .expect("run the test binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "the command crashed the process: {}\nstdout: {stdout}\nstderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix(RESULT))
+        .unwrap_or_else(|| panic!("the child printed no result (test name {test:?}?): {stdout}"))
+        .to_string();
+    (dir, repo, result)
+}
+
+fn append_config(repo: &Repository, text: &str) {
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(repo.path().join("config"))
+        .unwrap();
+    file.write_all(text.as_bytes()).unwrap();
+}
+
+fn config_text(repo: &Repository) -> String {
+    std::fs::read_to_string(repo.path().join("config")).unwrap()
+}
+
+fn git_out(dir: &Path, args: &[&str]) -> String {
+    let output = test_support::git(dir, args);
+    assert!(output.status.success(), "git {args:?}: {output:?}");
+    String::from_utf8(output.stdout).unwrap()
+}
+
+/// The repository's own settings whose names match `pattern`, as `git config --get-regexp`
+/// lists them (empty when there is none).
+fn settings(dir: &Path, pattern: &str) -> String {
+    let output = test_support::git(dir, &["config", "--local", "--get-regexp", pattern]);
+    String::from_utf8(output.stdout).unwrap()
+}
+
+fn has_branch(repo: &Repository, name: &str) -> bool {
+    repo.find_branch(name, git2::BranchType::Local).is_ok()
+}
+
+/// A repository with a commit on `main` and a branch `flagged` at it.
+fn repo_with_flagged() -> (TempDir, Repository) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "base");
+    git_ok(dir.path(), &["branch", "-M", "main"]);
+    git_ok(dir.path(), &["branch", "flagged"]);
+    (dir, repo)
+}
+
+/// [`repo_with_flagged`] with a remote `origin` and its `origin/main`; no branch tracks it.
+fn repo_with_origin() -> (TempDir, Repository) {
+    let (dir, repo) = repo_with_flagged();
+    git_ok(
+        dir.path(),
+        &["remote", "add", "origin", "https://example.invalid/r.git"],
+    );
+    git_ok(
+        dir.path(),
+        &["update-ref", "refs/remotes/origin/main", "HEAD"],
+    );
+    (dir, repo)
+}
+
+/// [`repo_with_flagged`] with `text` appended to its config.
+fn flagged_with(text: &'static str) -> impl FnOnce() -> (TempDir, Repository) {
+    move || {
+        let (dir, repo) = repo_with_flagged();
+        append_config(&repo, text);
+        (dir, repo)
+    }
+}
+
+/// [`repo_with_origin`] with `text` appended to its config.
+fn origin_with(text: &'static str) -> impl FnOnce() -> (TempDir, Repository) {
+    move || {
+        let (dir, repo) = repo_with_origin();
+        append_config(&repo, text);
+        (dir, repo)
+    }
+}
+
+fn delete(name: &'static str) -> impl FnOnce(&Repository) -> Result<(), String> {
+    move |repo| git_core::branch::delete_branch(repo, name, true).map_err(|e| e.to_string())
+}
+
+fn rename(old: &'static str, new: &'static str) -> impl FnOnce(&Repository) -> Result<(), String> {
+    move |repo| git_core::branch::rename_branch(repo, old, new).map_err(|e| e.to_string())
+}
+
+/// The section goes whole, as with `git branch -D`; another branch's setting without a value
+/// stays as it is.
+#[test]
+fn delete_branch_removes_a_setting_written_without_a_value() {
+    let (dir, repo, result) = run_isolated(
+        "delete_branch_removes_a_setting_written_without_a_value",
+        || {
+            let (dir, repo) = repo_with_flagged();
+            git_ok(dir.path(), &["branch", "kept"]);
+            git_ok(
+                dir.path(),
+                &["config", "branch.flagged.description", "notes"],
+            );
+            append_config(
+                &repo,
+                "[branch \"flagged\"]\n\tflag\n[branch \"kept\"]\n\tflag\n",
+            );
+            (dir, repo)
+        },
+        delete("flagged"),
+    );
+
+    assert_eq!(result, "ok");
+    assert!(!has_branch(&repo, "flagged"));
+    assert_eq!(settings(dir.path(), r"^branch\.flagged\."), "");
+    let config = config_text(&repo);
+    assert!(config.ends_with("[branch \"kept\"]\n\tflag\n"), "{config}");
+}
+
+/// The setting moves with the branch, written as `true` (what git reads it as); the others move
+/// unchanged and nothing stays under the old name.
+#[test]
+fn rename_branch_carries_a_setting_written_without_a_value_as_true() {
+    let (dir, repo, result) = run_isolated(
+        "rename_branch_carries_a_setting_written_without_a_value_as_true",
+        || {
+            let (dir, repo) = repo_with_flagged();
+            git_ok(
+                dir.path(),
+                &["config", "branch.flagged.description", "notes"],
+            );
+            append_config(&repo, "[branch \"flagged\"]\n\tflag\n");
+            (dir, repo)
+        },
+        rename("flagged", "renamed"),
+    );
+    let d = dir.path();
+
+    assert_eq!(result, "ok");
+    assert!(has_branch(&repo, "renamed"));
+    assert!(!has_branch(&repo, "flagged"));
+    assert_eq!(
+        git_out(d, &["config", "--type=bool", "branch.renamed.flag"]),
+        "true\n"
+    );
+    assert_eq!(
+        git_out(d, &["config", "branch.renamed.description"]),
+        "notes\n"
+    );
+    assert_eq!(settings(d, r"^branch\.flagged\."), "");
+}
+
+/// A setting without a value left under the new name (by a branch deleted with a hand-edited
+/// config) is written as `true` too; the moved value joins it.
+#[test]
+fn rename_branch_onto_a_left_over_setting_written_without_a_value() {
+    let (dir, _repo, result) = run_isolated(
+        "rename_branch_onto_a_left_over_setting_written_without_a_value",
+        || {
+            let (dir, repo) = repo_with_flagged();
+            git_ok(dir.path(), &["config", "branch.flagged.flag", "yes"]);
+            append_config(&repo, "[branch \"renamed\"]\n\tflag\n");
+            (dir, repo)
+        },
+        rename("flagged", "renamed"),
+    );
+    let d = dir.path();
+
+    assert_eq!(result, "ok");
+    let mut values: Vec<String> = git_out(d, &["config", "--get-all", "branch.renamed.flag"])
+        .lines()
+        .map(str::to_string)
+        .collect();
+    values.sort();
+    assert_eq!(values, ["true", "yes"]);
+    assert_eq!(settings(d, r"^branch\.flagged\."), "");
+}
+
+const MULTI_VALUED: &str = "The setting 'branch.flagged.flag' has several values, one of them \
+     written without a value. Give that one a value or remove it (git config --edit), then try \
+     again.";
+
+const FLAG_TWICE: &str = "[branch \"flagged\"]\n\tflag = yes\n\tflag\n";
+
+/// libgit2 can't rewrite a setting with several values when one has none, and Browsitory can't
+/// give it one without touching the others: Delete branch refuses and changes nothing.
+#[test]
+fn delete_branch_refuses_a_setting_with_several_values_one_written_without_a_value() {
+    let (_dir, repo, result) = run_isolated(
+        "delete_branch_refuses_a_setting_with_several_values_one_written_without_a_value",
+        flagged_with(FLAG_TWICE),
+        delete("flagged"),
+    );
+
+    assert_eq!(result, MULTI_VALUED);
+    assert!(has_branch(&repo, "flagged"));
+    assert!(config_text(&repo).ends_with(FLAG_TWICE));
+}
+
+/// Rename branch refuses before it moves the ref (libgit2 moves the ref first, then the config).
+#[test]
+fn rename_branch_refuses_a_setting_with_several_values_one_written_without_a_value() {
+    let (_dir, repo, result) = run_isolated(
+        "rename_branch_refuses_a_setting_with_several_values_one_written_without_a_value",
+        flagged_with(FLAG_TWICE),
+        rename("flagged", "renamed"),
+    );
+
+    assert_eq!(result, MULTI_VALUED);
+    assert!(has_branch(&repo, "flagged"));
+    assert!(!has_branch(&repo, "renamed"));
+    assert!(config_text(&repo).ends_with(FLAG_TWICE));
+}
+
+/// A setting in a file the repository's config includes isn't in the file libgit2 rewrites, so it
+/// never crashed: Delete branch still works and leaves that file alone.
+#[test]
+fn delete_branch_leaves_an_included_setting_written_without_a_value_alone() {
+    let (_dir, repo, result) = run_isolated(
+        "delete_branch_leaves_an_included_setting_written_without_a_value_alone",
+        || {
+            let (dir, repo) = repo_with_flagged();
+            std::fs::write(
+                repo.path().join("extra.config"),
+                "[branch \"flagged\"]\n\tflag\n",
+            )
+            .unwrap();
+            git_ok(dir.path(), &["config", "include.path", "extra.config"]);
+            (dir, repo)
+        },
+        delete("flagged"),
+    );
+
+    assert_eq!(result, "ok");
+    assert!(!has_branch(&repo, "flagged"));
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("extra.config")).unwrap(),
+        "[branch \"flagged\"]\n\tflag\n"
+    );
+}
+
+/// libgit2 also rewrites the settings of a branch whose name continues the deleted one's after a
+/// dot (`release.1` for `release`), so one without a value there crashed it too.
+#[test]
+fn delete_branch_with_a_dotted_namesake_written_without_a_value() {
+    let (_dir, repo, result) = run_isolated(
+        "delete_branch_with_a_dotted_namesake_written_without_a_value",
+        || {
+            let (dir, repo) = repo_with_flagged();
+            git_ok(dir.path(), &["branch", "release"]);
+            git_ok(dir.path(), &["branch", "release.1"]);
+            append_config(&repo, "[branch \"release.1\"]\n\tflag\n");
+            (dir, repo)
+        },
+        delete("release"),
+    );
+
+    assert_eq!(result, "ok");
+    assert!(!has_branch(&repo, "release"));
+    assert!(has_branch(&repo, "release.1"));
+}
+
+/// A worktree add that fails after creating its branch deletes the branch again; a setting
+/// without a value left under that name must not crash it.
+#[test]
+fn a_failed_worktree_add_removes_its_branch_despite_a_setting_written_without_a_value() {
+    let (_dir, repo, result) = run_isolated(
+        "a_failed_worktree_add_removes_its_branch_despite_a_setting_written_without_a_value",
+        || {
+            let (dir, repo) = repo_with_flagged();
+            append_config(&repo, "[branch \"x\"]\n\tflag\n");
+            // A stale `.git/worktrees/wt` that libgit2 refuses to reuse: the add fails after
+            // creating the branch.
+            let admin = repo.path().join("worktrees").join("wt");
+            std::fs::create_dir_all(&admin).unwrap();
+            std::fs::write(admin.join("marker"), "kept").unwrap();
+            (dir, repo)
+        },
+        |repo| {
+            let linked = repo.workdir().unwrap().join("a").join("wt");
+            match git_core::worktree::create_worktree(repo, "wt", &linked, "x", Some("HEAD")) {
+                Ok(()) => Err("the add succeeded".to_string()),
+                Err(_) => Ok(()),
+            }
+        },
+    );
+
+    assert_eq!(result, "ok");
+    assert!(!has_branch(&repo, "x"));
+}
+
+/// The remote's setting moves with it, written as `true`; nothing stays under the old name.
+#[test]
+fn rename_remote_carries_a_setting_written_without_a_value_as_true() {
+    let (dir, _repo, result) = run_isolated(
+        "rename_remote_carries_a_setting_written_without_a_value_as_true",
+        origin_with("[remote \"origin\"]\n\tflag\n"),
+        |repo| {
+            git_core::remote::rename_remote(repo, "origin", "upstream").map_err(|e| e.to_string())
+        },
+    );
+    let d = dir.path();
+
+    assert_eq!(result, "ok");
+    assert_eq!(
+        git_out(d, &["config", "--type=bool", "remote.upstream.flag"]),
+        "true\n"
+    );
+    assert_eq!(
+        git_out(d, &["config", "remote.upstream.url"]),
+        "https://example.invalid/r.git\n"
+    );
+    assert_eq!(settings(d, r"^remote\.origin\."), "");
+}
+
+/// The remote's section goes whole, as with `git remote remove`.
+#[test]
+fn remove_remote_removes_a_setting_written_without_a_value() {
+    let (dir, repo, result) = run_isolated(
+        "remove_remote_removes_a_setting_written_without_a_value",
+        origin_with("[remote \"origin\"]\n\tflag\n"),
+        |repo| git_core::remote::remove_remote(repo, "origin").map_err(|e| e.to_string()),
+    );
+
+    assert_eq!(result, "ok");
+    assert_eq!(settings(dir.path(), r"^remote\.origin\."), "");
+    assert!(repo.find_remote("origin").is_err());
+}
+
+const BRANCH_REMOTE_MISSING: &str = "The setting 'branch.flagged.remote' is written without a \
+     value; git rejects it as a bad config variable. Give it a value or remove it (git config \
+     --edit), then try again.";
+
+const BRANCH_REMOTE: &str = "[branch \"flagged\"]\n\tremote\n";
+
+/// `branch.<name>.remote` must name a remote: git refuses `git remote rename` with one written
+/// without a value ("bad config variable"), and so does Rename remote, changing nothing.
+#[test]
+fn rename_remote_refuses_a_branch_remote_written_without_a_value() {
+    let (_dir, repo, result) = run_isolated(
+        "rename_remote_refuses_a_branch_remote_written_without_a_value",
+        origin_with(BRANCH_REMOTE),
+        |repo| {
+            git_core::remote::rename_remote(repo, "origin", "upstream").map_err(|e| e.to_string())
+        },
+    );
+
+    assert_eq!(result, BRANCH_REMOTE_MISSING);
+    let config = config_text(&repo);
+    assert!(config.contains("[remote \"origin\"]"), "{config}");
+    assert!(config.ends_with(BRANCH_REMOTE), "{config}");
+    assert!(repo.find_reference("refs/remotes/origin/main").is_ok());
+}
+
+#[test]
+fn remove_remote_refuses_a_branch_remote_written_without_a_value() {
+    let (_dir, repo, result) = run_isolated(
+        "remove_remote_refuses_a_branch_remote_written_without_a_value",
+        origin_with(BRANCH_REMOTE),
+        |repo| git_core::remote::remove_remote(repo, "origin").map_err(|e| e.to_string()),
+    );
+
+    assert_eq!(result, BRANCH_REMOTE_MISSING);
+    let config = config_text(&repo);
+    assert!(config.contains("[remote \"origin\"]"), "{config}");
+    assert!(config.ends_with(BRANCH_REMOTE), "{config}");
+    assert!(repo.find_reference("refs/remotes/origin/main").is_ok());
+}
+
+/// The refusal comes before the upstreams are cleared: `main` still tracks `origin/main`.
+#[test]
+fn remove_remote_and_clear_upstreams_refuses_before_clearing_any() {
+    let (_dir, repo, result) = run_isolated(
+        "remove_remote_and_clear_upstreams_refuses_before_clearing_any",
+        || {
+            let (dir, repo) = repo_with_origin();
+            git_ok(dir.path(), &["branch", "-u", "origin/main", "main"]);
+            append_config(&repo, BRANCH_REMOTE);
+            (dir, repo)
+        },
+        |repo| {
+            git_core::remote::remove_remote_and_clear_upstreams(repo, "origin")
+                .map_err(|e| e.to_string())
+        },
+    );
+
+    assert_eq!(result, BRANCH_REMOTE_MISSING);
+    let config = config_text(&repo);
+    assert!(
+        config.contains("[branch \"main\"]\n\tremote = origin\n\tmerge = refs/heads/main\n"),
+        "{config}"
+    );
+    assert!(config.ends_with(BRANCH_REMOTE), "{config}");
+}
+
+/// A `fetch` without a value left under the new remote's name: libgit2 adds the remote's refspec
+/// next to it and crashed. git refuses it as a bad config variable, and so does Add remote.
+#[test]
+fn add_remote_refuses_a_left_over_fetch_written_without_a_value() {
+    let (_dir, repo, result) = run_isolated(
+        "add_remote_refuses_a_left_over_fetch_written_without_a_value",
+        flagged_with("[remote \"new\"]\n\tfetch\n"),
+        |repo| {
+            git_core::remote::add_remote(repo, "new", "https://example.invalid/new.git", None)
+                .map_err(|e| e.to_string())
+        },
+    );
+
+    assert_eq!(
+        result,
+        "The setting 'remote.new.fetch' is written without a value; git rejects it as a bad \
+         config variable. Give it a value or remove it (git config --edit), then try again."
+    );
+    let config = config_text(&repo);
+    assert!(config.ends_with("[remote \"new\"]\n\tfetch\n"), "{config}");
+    assert!(!config.contains("new.git"), "{config}");
+}
