@@ -169,34 +169,136 @@ fn a_hard_reset_writes_only_the_new_paths_inside_the_cone_as_git_does() {
     assert_same_as_git(ours.path(), twin.path());
 }
 
+/// [`history`], then `three` adds `OUTER/top.rs`, `OUTER/INNER/deep.rs` and `OUTER/OTHER/o.rs`
+/// (no other folder named `outer` in any case, so it works on a drive where case folds); HEAD
+/// at `one`, `git sparse-checkout set app lib/core outer/inner`, `core.ignorecase` as given.
+fn upper_case_folders(d: &Path, ignore_case: bool) -> String {
+    let two = history(d);
+    git_ok(d, &["checkout", "-q", &two]);
+    for (path, content) in [
+        ("OUTER/top.rs", "outer top\n"),
+        ("OUTER/INNER/deep.rs", "inner\n"),
+        ("OUTER/OTHER/o.rs", "outer other\n"),
+    ] {
+        write_file(d, path, content);
+    }
+    commit(d, "three");
+    let three = rev(d, "HEAD");
+    git_ok(d, &["checkout", "-q", "main"]);
+    git_ok(
+        d,
+        &["sparse-checkout", "set", "app", "lib/core", "outer/inner"],
+    );
+    let ignore_case = if ignore_case { "true" } else { "false" };
+    git_ok(d, &["config", "core.ignorecase", ignore_case]);
+    three
+}
+
 /// git compares the cone's folders ignoring case under `core.ignorecase`.
 #[test]
 fn the_cone_matches_folders_ignoring_case_under_core_ignorecase() {
-    let build = |d: &Path| {
-        let two = history(d);
-        git_ok(d, &["checkout", "-q", &two]);
-        for (path, content) in [
-            ("LIB/CORE/up.rs", "up core\n"),
-            ("LIB/up.rs", "up lib\n"),
-            ("LIB/OTHER/up.rs", "up other\n"),
-            ("DOCS/up.md", "up doc\n"),
-        ] {
-            write_file(d, path, content);
-        }
-        commit(d, "three");
-        let three = rev(d, "HEAD");
-        git_ok(d, &["checkout", "-q", "main"]);
-        git_ok(d, &["sparse-checkout", "set", "app", "lib/core"]);
-        git_ok(d, &["config", "core.ignorecase", "true"]);
-        three
-    };
-    let (ours, our_three, twin, twin_three) = twins(build);
+    let (ours, our_three, twin, twin_three) = twins(|d| upper_case_folders(d, true));
     git_ok(twin.path(), &["reset", "-q", "--mixed", &twin_three]);
     let repo = git2::Repository::open(ours.path()).unwrap();
 
     reset_to(&repo, &our_three, ResetMode::Mixed).unwrap();
 
     assert_same_as_git(ours.path(), twin.path());
+    assert!(ls_files_v(ours.path()).contains("H OUTER/INNER/deep.rs\n"));
+}
+
+/// Without `core.ignorecase`, a folder of another case is outside the cone.
+#[test]
+fn the_cone_matches_folders_by_exact_case_without_core_ignorecase() {
+    let (ours, our_three, twin, twin_three) = twins(|d| upper_case_folders(d, false));
+    git_ok(twin.path(), &["reset", "-q", "--mixed", &twin_three]);
+    let repo = git2::Repository::open(ours.path()).unwrap();
+
+    reset_to(&repo, &our_three, ResetMode::Mixed).unwrap();
+
+    assert_same_as_git(ours.path(), twin.path());
+    assert!(ls_files_v(ours.path()).contains("S OUTER/INNER/deep.rs\n"));
+}
+
+/// [`history`], then `three` adds `we[ir]d/x.rs`, `weid/y.rs` and `werd/z.rs`; HEAD at `one`,
+/// `git sparse-checkout set --skip-checks app 'we[ir]d'`, which git writes escaped:
+/// `/we\[ir]d/`.
+fn glob_folder(d: &Path) -> String {
+    let two = history(d);
+    git_ok(d, &["checkout", "-q", &two]);
+    for (path, content) in [
+        ("we[ir]d/x.rs", "literal\n"),
+        ("weid/y.rs", "i\n"),
+        ("werd/z.rs", "r\n"),
+    ] {
+        write_file(d, path, content);
+    }
+    commit(d, "three");
+    let three = rev(d, "HEAD");
+    git_ok(d, &["checkout", "-q", "main"]);
+    git_ok(
+        d,
+        &["sparse-checkout", "set", "--skip-checks", "app", "we[ir]d"],
+    );
+    let patterns = std::fs::read_to_string(d.join(".git/info/sparse-checkout")).unwrap();
+    assert!(patterns.contains("/we\\[ir]d/\n"), "{patterns}");
+    three
+}
+
+/// A folder name with a glob character is matched literally, as git matches it.
+#[test]
+fn a_folder_name_with_a_glob_character_is_matched_literally() {
+    let (ours, our_three, twin, twin_three) = twins(glob_folder);
+    git_ok(twin.path(), &["reset", "-q", "--mixed", &twin_three]);
+    let repo = git2::Repository::open(ours.path()).unwrap();
+
+    reset_to(&repo, &our_three, ResetMode::Mixed).unwrap();
+
+    assert_same_as_git(ours.path(), twin.path());
+    assert!(ls_files_v(ours.path()).contains("H we[ir]d/x.rs\n"));
+}
+
+/// [`cone`] with `info/sparse-checkout` written by hand: a byte order mark, comments, a blank
+/// line, CRLF line ends and trailing spaces, which git skips or trims.
+fn hand_written(d: &Path) -> String {
+    let two = cone(d);
+    std::fs::write(
+        d.join(".git/info/sparse-checkout"),
+        "\u{feff}# chosen by hand\r\n/*\r\n!/*/\n\n/app/  \r\n/lib/\r\n#/docs/\n!/lib/*/\n/lib/core/ ",
+    )
+    .unwrap();
+    two
+}
+
+#[test]
+fn a_hand_written_cone_file_is_read_as_git_reads_it() {
+    let (ours, our_two, twin, twin_two) = twins(hand_written);
+    git_ok(twin.path(), &["reset", "-q", "--mixed", &twin_two]);
+    let repo = git2::Repository::open(ours.path()).unwrap();
+
+    reset_to(&repo, &our_two, ResetMode::Mixed).unwrap();
+
+    assert_same_as_git(ours.path(), twin.path());
+    assert!(ls_files_v(ours.path()).contains("S docs/new.md\n"));
+    assert!(ls_files_v(ours.path()).contains("H lib/new.rs\n"));
+}
+
+/// `/*` alone in cone mode: every path is in.
+#[test]
+fn a_full_cone_takes_every_new_path_in() {
+    let build = |d: &Path| {
+        let two = cone(d);
+        std::fs::write(d.join(".git/info/sparse-checkout"), "/*\n").unwrap();
+        two
+    };
+    let (ours, our_two, twin, twin_two) = twins(build);
+    git_ok(twin.path(), &["reset", "-q", "--mixed", &twin_two]);
+    let repo = git2::Repository::open(ours.path()).unwrap();
+
+    reset_to(&repo, &our_two, ResetMode::Mixed).unwrap();
+
+    assert_same_as_git(ours.path(), twin.path());
+    assert!(ls_files_v(ours.path()).contains("H docs/new.md\n"));
 }
 
 /// A linked worktree has its own patterns (`.git/worktrees/<name>/info/sparse-checkout`) and
@@ -347,6 +449,59 @@ fn a_pattern_outside_the_cone_format_turns_cone_matching_off() {
         ls_files_v(d)
     );
     assert_eq!(status_short(d), "");
+}
+
+/// Each line git doesn't accept in cone mode, after `/*`, `!/*/`, `/app/`: git reads the file
+/// as non-cone patterns, and so does Browsitory, which marks the missing `app/new.rs` (inside
+/// the cone it would stay unmarked).
+#[test]
+fn every_line_git_rejects_in_cone_mode_turns_cone_matching_off() {
+    for line in [
+        "/app",
+        "!/app/",
+        "!/docs/*/",
+        "/app/*/",
+        "/a/**/",
+        "/a?/",
+        "/x*y/",
+        "/[ab]/",
+        "a/",
+        "/",
+        "!/*",
+        "/lib/\n!/lib/*/\n/lib/",
+    ] {
+        let dir = tempfile::TempDir::new().unwrap();
+        let d = dir.path();
+        let two = cone(d);
+        std::fs::write(
+            d.join(".git/info/sparse-checkout"),
+            format!("/*\n!/*/\n/app/\n{line}\n"),
+        )
+        .unwrap();
+        let repo = git2::Repository::open(d).unwrap();
+
+        reset_to(&repo, &two, ResetMode::Mixed).unwrap();
+
+        assert!(ls_files_v(d).contains("S app/new.rs\n"), "{line:?}");
+    }
+}
+
+/// The same file without a rejected line stays in cone mode: `app/new.rs` isn't marked.
+#[test]
+fn the_cone_lines_alone_keep_cone_matching() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let d = dir.path();
+    let two = cone(d);
+    std::fs::write(d.join(".git/info/sparse-checkout"), "/*\n!/*/\n/app/\n").unwrap();
+    let repo = git2::Repository::open(d).unwrap();
+
+    reset_to(&repo, &two, ResetMode::Mixed).unwrap();
+
+    assert!(
+        ls_files_v(d).contains("H app/new.rs\n"),
+        "{}",
+        ls_files_v(d)
+    );
 }
 
 /// Undo of a Reset mixed from `two` back to `one` puts the paths it adds back to the index

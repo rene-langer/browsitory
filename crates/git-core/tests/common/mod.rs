@@ -6,6 +6,7 @@ use std::path::Path;
 use git2::{Oid, Repository};
 use tempfile::TempDir;
 
+#[allow(dead_code)]
 pub fn init_repo() -> (TempDir, Repository) {
     let dir = TempDir::new().expect("create temp dir");
     let repo = Repository::init(dir.path()).expect("init repo");
