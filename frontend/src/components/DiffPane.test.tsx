@@ -1121,6 +1121,20 @@ describe("DiffPane", () => {
       expect(screen.queryByText(/does not exist in the given tree/)).not.toBeInTheDocument();
     });
 
+    it("says why a file too large or binary has no blame, with no Retry (#1158)", async () => {
+      const message = "This file is 25.3 MB, over the 20 MB blame limit, so it isn't blamed.";
+      const getBlame = vi.fn(async () => {
+        throw new RepoError("BlameUnavailable", message);
+      });
+      renderUncommitted(fakeClient({ getBlame, getWorkingDiff: async () => [] }), status);
+
+      fireEvent.click(screen.getAllByText("Blame")[0]);
+
+      expect(await screen.findByText(message)).toBeInTheDocument();
+      expect(screen.queryByText("No blame available for this file at this revision.")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    });
+
     it("shows the raw error and a plain-language hint, plus a Retry that re-fetches, when the working diff fails", async () => {
       const singleFile: StatusEntry[] = [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }];
       const getWorkingDiff = vi.fn<RepoClient["getWorkingDiff"]>().mockResolvedValue([]);

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { blameOf } from "../test/blame";
+import { layoutInPane, ROW } from "../test/virtualLayout";
 import { cascadedValue, rulesOf, subjectOf } from "../test/cssCascade";
 import { BlameView } from "./BlameView";
 import styles from "./BlameView.module.css";
@@ -103,4 +104,59 @@ describe("BlameView layout (#986)", () => {
     const code = container.querySelector('[data-line-number="2"] [data-blame-code]');
     expect(code?.textContent).toBe("    return 1;");
   }, 20000);
+});
+
+// #1158: a long file's blame renders the lines in view, not one row per line of the file.
+describe("BlameView windowing (#1158)", () => {
+  const long = blameOf(
+    Array.from({ length: 5000 }, (_, i) => ({
+      content: `line ${i + 1}`,
+      commitId: i < 2500 ? "aaa111" : "bbb222",
+      shortId: i < 2500 ? "aaa1111" : "bbb2222",
+      authorName: "Rene",
+      timestamp: 1,
+    })),
+  );
+  // The element whose padding stands in for the lines not rendered: the table's parent.
+  const isList = (element: Element) => element.firstElementChild?.tagName === "TABLE";
+
+  it("renders only the lines in view of a long file, keeping the whole file's height", () => {
+    const { pane, restore } = layoutInPane(260, { rowTag: "TR", isList });
+    try {
+      render(<BlameView blame={long} onSelectRow={vi.fn()} />, { container: pane });
+
+      const rows = pane.querySelectorAll("tr[data-line-number]");
+      expect(rows.length).toBeLessThan(200);
+      expect(screen.getByText("line 1")).toBeInTheDocument();
+      expect(screen.queryByText("line 2500")).toBeNull();
+      const list = pane.querySelector("table")!.parentElement!;
+      const padding = parseFloat(list.style.paddingTop || "0") + parseFloat(list.style.paddingBottom || "0");
+      expect(padding + rows.length * ROW).toBe(5000 * ROW);
+    } finally {
+      restore();
+    }
+  });
+
+  it("renders the lines further down once scrolled there, with their own numbers and commit", () => {
+    const { pane, scrollTo, restore } = layoutInPane(260, { rowTag: "TR", isList });
+    try {
+      render(<BlameView blame={long} onSelectRow={vi.fn()} />, { container: pane });
+      scrollTo(ROW * 2495);
+
+      expect(screen.getByText("line 2501")).toBeInTheDocument();
+      expect(pane.querySelector('[data-line-number="2501"] [data-blame-code]')?.textContent).toBe("line 2501");
+      expect(screen.queryByText("line 1")).toBeNull();
+      // Line 2501 starts the second commit's run: its id shows there.
+      expect(screen.getByRole("button", { name: "bbb2222" })).toBeInTheDocument();
+    } finally {
+      restore();
+    }
+  });
+
+  it("marks a run's start with a shadow, not a border, so every row has one height", () => {
+    const rules = rulesOf(blameCss).filter(({ selector }) => selector.includes(".runStart"));
+    expect(rules.length).toBeGreaterThan(0);
+    expect(cascadedValue(rules, "border-top")).toBeNull();
+    expect(cascadedValue(rules, "box-shadow")).toBe("inset 0 1px 0 var(--color-border)");
+  });
 });

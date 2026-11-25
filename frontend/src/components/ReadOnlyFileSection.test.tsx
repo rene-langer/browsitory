@@ -196,6 +196,20 @@ describe("ReadOnlyFileSection", () => {
     await waitFor(() => expect(getBlame).toHaveBeenCalledWith("/repo", "HEAD", "a.txt"));
   });
 
+  it("says why a file too large or binary has no blame, with no Retry (#1158)", async () => {
+    const message = "This file is binary, so it has no line-by-line blame.";
+    const getBlame = vi.fn(async () => {
+      throw new RepoError("BlameUnavailable", message);
+    });
+    renderSection({ client: fakeRepoClient({ getBlame }) });
+    fireEvent.click(screen.getByRole("button", { name: "Blame" }));
+
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(screen.queryByText("No blame available for this file at this revision.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+
   it("puts Back to diff in the file header while blame shows, once (#986)", async () => {
     const getBlame = vi.fn(async () =>
       blameOf([{ lineNumber: 1, content: "x", commitId: "c1", shortId: "c111111", authorName: "A", timestamp: 1 }]),
