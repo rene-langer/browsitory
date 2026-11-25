@@ -359,6 +359,30 @@ fn refuses_when_a_touched_file_was_edited_and_writes_nothing() {
     );
 }
 
+/// #1089: files are compared with the snapshot's blobs in pieces, not by hash; an edit that
+/// keeps the size is still a change, for Undo and for Redo.
+#[test]
+fn refuses_when_a_touched_file_was_edited_to_the_same_size() {
+    let (_dir, repo) = seeded();
+    write(&repo, "a.txt", "precious edit\n");
+    let before = capture(&repo, SnapshotScope::FullUncapped).unwrap();
+    write(&repo, "a.txt", "one\n"); // the discard
+    let after = capture(&repo, SnapshotScope::FullUncapped).unwrap();
+
+    write(&repo, "a.txt", "two\n");
+    let result = restore(&repo, &after, &before, "browsitory: undo test");
+    assert!(matches!(result, Err(UndoError::RepositoryChanged)));
+    assert_eq!(read(&repo, "a.txt").as_deref(), Some("two\n"));
+
+    write(&repo, "a.txt", "one\n");
+    restore(&repo, &after, &before, "browsitory: undo test").unwrap();
+    assert_eq!(read(&repo, "a.txt").as_deref(), Some("precious edit\n"));
+    write(&repo, "a.txt", "PRECIOUS EDIT\n");
+    let result = restore(&repo, &before, &after, "browsitory: redo test");
+    assert!(matches!(result, Err(UndoError::RepositoryChanged)));
+    assert_eq!(read(&repo, "a.txt").as_deref(), Some("PRECIOUS EDIT\n"));
+}
+
 #[test]
 fn refuses_when_a_touched_ref_moved() {
     let (_dir, repo) = seeded();
