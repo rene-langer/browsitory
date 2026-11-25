@@ -239,6 +239,26 @@ fn a_hard_reset_writes_an_unedited_skip_worktree_file_and_keeps_its_mark() {
     assert_eq!(status_short(d), "");
 }
 
+/// Without a sparse checkout, `git reset --hard` writes a missing skip-worktree file that the
+/// target changes, and keeps its mark.
+#[test]
+fn a_hard_reset_outside_a_sparse_checkout_writes_a_missing_skip_worktree_file_it_changes() {
+    let dir = three_commits();
+    let d = dir.path();
+    git_ok(d, &["update-index", "--skip-worktree", "config.local"]);
+    std::fs::remove_file(d.join("config.local")).unwrap();
+    let repo = reopen(d);
+
+    git_core::reset::reset_to(&repo, &rev(d, "HEAD~2"), git_core::reset::ResetMode::Hard).unwrap();
+
+    assert_eq!(read(d, "config.local"), "default\n");
+    assert_eq!(
+        ls_files_v(d),
+        ["H a.txt", "H big/out.txt", "S config.local"]
+    );
+    assert_eq!(status_short(d), "");
+}
+
 /// In a sparse checkout a hard reset neither brings back the files outside the cone nor drops
 /// their marks, also where the target changes them.
 #[test]
