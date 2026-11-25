@@ -642,6 +642,7 @@ const ERROR_KINDS: ReadonlySet<string> = new Set<ErrorKind>([
   "MissingIdentity",
   "RestLeft",
   "DiffTooLarge",
+  "BlameUnavailable",
 ]);
 
 /**

@@ -568,11 +568,30 @@ pub struct BlameLineDto {
 }
 
 impl From<Vec<git_core::blame::BlameLine>> for BlameDto {
-    fn from(_lines: Vec<git_core::blame::BlameLine>) -> Self {
-        BlameDto {
-            commits: Vec::new(),
-            lines: Vec::new(),
-        }
+    fn from(lines: Vec<git_core::blame::BlameLine>) -> Self {
+        let mut commits = Vec::new();
+        let mut index_of = std::collections::HashMap::<String, usize>::new();
+        let lines = lines
+            .into_iter()
+            .map(|line| {
+                let commit = *index_of
+                    .entry(line.commit_id)
+                    .or_insert_with_key(|commit_id| {
+                        commits.push(BlameCommitDto {
+                            commit_id: commit_id.clone(),
+                            short_id: line.short_id,
+                            author_name: line.author_name,
+                            timestamp: line.timestamp,
+                        });
+                        commits.len() - 1
+                    });
+                BlameLineDto {
+                    content: line.content,
+                    commit,
+                }
+            })
+            .collect();
+        BlameDto { commits, lines }
     }
 }
 

@@ -35,8 +35,11 @@ function scrollParentOf(element: HTMLElement): HTMLElement | null {
  * The row height is measured from the list's first `li` after the first render (before paint)
  * and again when that row resizes (a zoom or UI size change). Until a height can be measured
  * (a hidden tab, or a test environment without layout) every row renders, as before.
+ *
+ * `rowSelector` finds the rows from the list when they aren't its `li` children: a table's
+ * (#1158), whose padding goes on an element around the table.
  */
-export function useVirtualRows(list: HTMLElement | null, count: number): VirtualRows {
+export function useVirtualRows(list: HTMLElement | null, count: number, rowSelector = ":scope > li"): VirtualRows {
   const [rowHeight, setRowHeight] = useState(0);
   // Whether a measurement has run; until then only the first rows render.
   const [measuredOnce, setMeasuredOnce] = useState(false);
@@ -44,13 +47,13 @@ export function useVirtualRows(list: HTMLElement | null, count: number): Virtual
   const parentRef = useRef<HTMLElement | null>(null);
 
   const measureRow = useCallback(() => {
-    const row = list?.querySelector<HTMLElement>(":scope > li");
+    const row = list?.querySelector<HTMLElement>(rowSelector);
     // Fractional: a whole-pixel height would drift by a row every few hundred rows.
     const height = row?.getBoundingClientRect().height ?? 0;
     // Hidden (no layout): keep what was measured while shown.
     if (height > 0) setRowHeight(height);
     setMeasuredOnce(true);
-  }, [list]);
+  }, [list, rowSelector]);
 
   const updateRange = useCallback(() => {
     const parent = parentRef.current;
@@ -87,7 +90,7 @@ export function useVirtualRows(list: HTMLElement | null, count: number): Virtual
       });
       observer = resizes;
       resizes.observe(parent);
-      const row = list.querySelector(":scope > li");
+      const row = list.querySelector(rowSelector);
       if (row !== null) resizes.observe(row);
 
       // Content above the list in the same scroller (a sidebar section opening, a placeholder
@@ -120,7 +123,7 @@ export function useVirtualRows(list: HTMLElement | null, count: number): Virtual
       observer?.disconnect();
       mutations?.disconnect();
     };
-  }, [list, measureRow, updateRange]);
+  }, [list, measureRow, updateRange, rowSelector]);
 
   const windowed = rowHeight > 0;
   const start = windowed ? Math.min(range.start, count) : 0;
@@ -131,7 +134,7 @@ export function useVirtualRows(list: HTMLElement | null, count: number): Virtual
       const parent = parentRef.current;
       if (list === null) return;
       if (parent === null || rowHeight === 0) {
-        const row = list.querySelector<HTMLElement>(`:scope > li[data-row-index="${index}"]`);
+        const row = list.querySelector<HTMLElement>(`${rowSelector}[data-row-index="${index}"]`);
         if (typeof row?.scrollIntoView === "function") row.scrollIntoView({ block: "nearest" });
         return;
       }
@@ -142,7 +145,7 @@ export function useVirtualRows(list: HTMLElement | null, count: number): Virtual
         parent.scrollTop = rowTop + rowHeight - parent.clientHeight;
       updateRange();
     },
-    [list, rowHeight, updateRange],
+    [list, rowHeight, updateRange, rowSelector],
   );
 
   return {

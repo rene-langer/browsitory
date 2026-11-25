@@ -1,5 +1,5 @@
 import { useContext, useEffect, useRef, useState, type KeyboardEvent } from "react";
-import type { BlameLine, DiffHunk, DiffOptions, DiffSource, HunkOptions, RepoClient, StatusEntry } from "../ipc/RepoClient";
+import type { Blame, DiffHunk, DiffOptions, DiffSource, HunkOptions, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { describeError, type DescribedError } from "../lib/errorMessages";
 import { imageMimeType, isSvgPath } from "../lib/imageTypes";
 import { OpenPreferencesContext } from "../state/openPreferences";
@@ -7,7 +7,8 @@ import { useDiffSettingsContext } from "../state/useDiffSettings";
 import { useWholeFile } from "../state/useWholeFile";
 import { useDiffSizeLimit } from "../state/useDiffSizeLimit";
 import { useWorkspaceActions } from "../state/useWorkspaceActions";
-import { BlameView } from "./BlameView";
+import { BlameUnavailableNote, BlameView } from "./BlameView";
+import { blameFailure, EMPTY_BLAME, isBlameRefusal, type BlameFailure } from "../lib/blame";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 import styles from "./DiffPane.module.css";
 import { DiffTooLarge, DiffView } from "./DiffView";
@@ -89,8 +90,8 @@ export function UncommittedFileViewer({
   // settings: after a settings change the shown hunks are still the old ones until the refetch
   // lands, and their (oldStart, newStart) only mean something under the options they came from.
   const [fetchedOptions, setFetchedOptions] = useState<DiffOptions | null>(null);
-  const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
-  const [error, setError] = useState<DescribedError | null>(null);
+  const [blame, setBlame] = useState<Blame>(EMPTY_BLAME);
+  const [error, setError] = useState<DescribedError | BlameFailure | null>(null);
   // A staged rename compares its old path in HEAD with its new path in the index (#137).
   const renamedFrom = entry.staged ? (entry.oldPath ?? null) : null;
   const diffSource: DiffSource = entry.staged ? { kind: "Staged", oldPath: renamedFrom } : { kind: "Unstaged" };
@@ -166,12 +167,12 @@ export function UncommittedFileViewer({
       .getBlame(repoPath, "HEAD", entry.path)
       .then((next) => {
         if (!ignore) {
-          setBlameLines(next);
+          setBlame(next);
           setError(null);
         }
       })
-      .catch(() => {
-        if (!ignore) setError({ message: "No blame available for this file at this revision." });
+      .catch((err: unknown) => {
+        if (!ignore) setError(blameFailure(err));
       });
     return () => {
       ignore = true;
@@ -257,10 +258,12 @@ export function UncommittedFileViewer({
       </div>
       <div className={styles.viewerBody} data-file-body="">
         {mode === "blame" ? (
-          error !== null ? (
+          isBlameRefusal(error) ? (
+            <BlameUnavailableNote message={error.message} />
+          ) : error !== null ? (
             <InlineError message={error.message} hint={error.hint} onDismiss={() => setError(null)} onRetry={loadBlame} />
           ) : (
-            <BlameView lines={blameLines} path={entry.path} onSelectRow={onSelectRow} />
+            <BlameView blame={blame} path={entry.path} onSelectRow={onSelectRow} />
           )
         ) : isConflicted ? (
           <ConflictResolutionPane
