@@ -119,6 +119,16 @@ describe("tauriRepoClient failure logging", () => {
     expect(logError).toHaveBeenCalledWith("Uncaught error: Error: push to https://***@example.test/r failed");
   });
 
+  it("reads a refused blame as BlameUnavailable (#1158)", async () => {
+    const message = "This file is binary, so it has no line-by-line blame.";
+    vi.mocked(invoke).mockRejectedValueOnce({ kind: "BlameUnavailable", message });
+
+    const error: unknown = await tauriRepoClient.getBlame(TEST_REPO_PATH, "HEAD", "a.bin").catch((caught: unknown) => caught);
+
+    expect((error as RepoError).kind).toBe("BlameUnavailable");
+    expect(String(error)).toBe(message);
+  });
+
   it("reads a bare string rejection, and a kind it doesn't know, as Other", async () => {
     vi.mocked(invoke).mockRejectedValueOnce("invalid args `repoPath` for command `get_status`");
     const bare: unknown = await tauriRepoClient.getStatus(TEST_REPO_PATH).catch((caught: unknown) => caught);

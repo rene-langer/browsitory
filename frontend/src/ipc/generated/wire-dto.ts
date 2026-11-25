@@ -9,7 +9,15 @@ export type BisectInfo = {
  */
 startedFrom: string, };
 
-export type BlameLine = { lineNumber: number, content: string, commitId: string, shortId: string, authorName: string, timestamp: number, };
+export type Blame = { commits: Array<BlameCommit>, lines: Array<BlameLine>, };
+
+export type BlameCommit = { commitId: string, shortId: string, authorName: string, timestamp: number, };
+
+export type BlameLine = { content: string, 
+/**
+ * The line's commit: its index in `BlameDto::commits`.
+ */
+commit: number, };
 
 export type BranchInfo = { name: string, isCurrent: boolean, upstream: string | null, ahead: number | null, behind: number | null, };
 
@@ -92,7 +100,7 @@ export type DiffSource = { "kind": "Unstaged" } | { "kind": "Staged", oldPath: s
 
 export type EditRest = "Commit" | "Discard";
 
-export type ErrorKind = "Other" | "WorkerStopped" | "CredentialStoreFailure" | "DirtyWorktree" | "PullFailed" | "Cancelled" | "AddDeleteConflict" | "InvalidSearchQuery" | "PermissionDenied" | "LocalChanges" | "MissingIdentity" | "RestLeft" | "DiffTooLarge";
+export type ErrorKind = "Other" | "WorkerStopped" | "CredentialStoreFailure" | "DirtyWorktree" | "PullFailed" | "Cancelled" | "AddDeleteConflict" | "InvalidSearchQuery" | "PermissionDenied" | "LocalChanges" | "MissingIdentity" | "RestLeft" | "DiffTooLarge" | "BlameUnavailable";
 
 export type ExternalToolSettings = { editor: string | null, terminal: string | null, };
 

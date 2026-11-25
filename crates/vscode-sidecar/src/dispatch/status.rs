@@ -4,9 +4,9 @@ use repo_service::wire::CommitStatsEntryDto;
 use repo_service::wire::ErrorDto;
 use repo_service::wire::StatusWithStampDto;
 use repo_service::wire::{
-    to_trailers, BlameLineDto, CommitLocationDto, CommitOutcomeDto, CommitSignatureDto,
-    DiffHunkDto, DiffOptionsDto, FileHistoryPageDto, GraphPageDto, GraphSelectionDto,
-    LineHistoryDto, LoadedGraphDto, StatusEntryDto,
+    to_trailers, BlameDto, CommitLocationDto, CommitOutcomeDto, CommitSignatureDto, DiffHunkDto,
+    DiffOptionsDto, FileHistoryPageDto, GraphPageDto, GraphSelectionDto, LineHistoryDto,
+    LoadedGraphDto, StatusEntryDto,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -547,10 +547,8 @@ pub(super) struct GetBlameParams {
 }
 
 pub(super) fn get_blame(params: GetBlameParams, repos: &Repos) -> Result<Value, ErrorDto> {
-    let lines: Vec<BlameLineDto> = worker_handle(repos, &params.repo_path)?
-        .get_blame(params.commit_id, params.path)?
-        .into_iter()
-        .map(BlameLineDto::from)
-        .collect();
-    serde_json::to_value(lines).map_err(ErrorDto::from_error)
+    let blame = BlameDto::from(
+        worker_handle(repos, &params.repo_path)?.get_blame(params.commit_id, params.path)?,
+    );
+    serde_json::to_value(blame).map_err(ErrorDto::from_error)
 }

@@ -39,6 +39,7 @@ export function UncommittedFileRow({
   editorLine,
   rowRef,
   name,
+  depth,
   folderFiles,
 }: {
   /**
@@ -49,6 +50,8 @@ export function UncommittedFileRow({
   entry: StatusEntry;
   /** In the tree layout (#729), the file's name in its folder: shown instead of the whole path. */
   name?: string;
+  /** In the tree layout, how many folders deep the row is: it indents by as many steps (#1157). */
+  depth?: number;
   /** The file the viewer shows; single-file keys act on it. */
   isCurrent: boolean;
   /** Part of the selection (`aria-selected`); the current file always is. */
@@ -137,6 +140,7 @@ export function UncommittedFileRow({
     >
       <div
         className={styles.fileRowMain}
+        style={depth === undefined ? undefined : { paddingLeft: `calc(var(--space-3) * ${depth + 1})` }}
         ref={rowRef}
         title={renamedFrom === null ? `${entry.path} (${kind})` : `${entry.path} (${kind} from ${renamedFrom})`}
         onContextMenu={

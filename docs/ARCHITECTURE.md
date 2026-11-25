@@ -2451,6 +2451,21 @@ work to a `HighlightTransport` (`highlightWorkerProtocol.ts`):
   binary rule. Hunk and line actions re-diff with `HunkOptions`, which carry no limit, so a file
   loaded anyway stages, discards, reverts and applies as before. The frontend's own collapsing of
   long diffs (#686, `lib/largeDiff.ts`) still applies to what does load.
+- Blame (#1158) reads a file only while it is at most `git_core::blame::BLAME_SIZE_LIMIT` (the
+  same 20 MiB, judged from the object header) and not binary (`Blob::is_binary`); otherwise it
+  answers `BlameError::TooLarge`/`Binary`, the wire `ErrorKind::BlameUnavailable`, whose message
+  the view shows as a note (no "anyway": a file that big has no useful blame). The answer
+  (`BlameDto`) carries each commit once and each line as its text and its commit's index, and
+  `BlameView` renders only the rows in view (`useVirtualRows` over the table's rows, padding on
+  the element around the table; a run's rule is an inset shadow, so all rows have one height).
+- A commit, stash or compare with more than `FILE_EXPAND_LIMIT` (50) files (#1153,
+  `lib/largeDiff.ts`) starts with every file section collapsed: each open section fetches its
+  own diff on the repository's serial read lane, so opening a 50,000-file commit would queue
+  50,000 reads. The sections render `FILE_SECTION_STEP` (200) at a time with "Show N more"
+  (`useFileSectionSteps`); they aren't windowed, since an open section's height is its diff's.
+- The working tree's Changes list renders only the rows in view in both layouts (#845, #1157):
+  the tree layout flattens its folders and the files of expanded folders into one row list
+  (`treeRows`), indented by depth, so `useVirtualRows`' one-row-height window applies to it.
 
 ## External tools
 

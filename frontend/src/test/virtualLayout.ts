@@ -1,15 +1,19 @@
 import { fireEvent } from "@testing-library/react";
 
-/** The height of every `li` in `layoutInPane`. */
+/** The height of every row in `layoutInPane`. */
 export const ROW = 26;
 
 /**
  * A scrolling pane for a windowed list's tests (`useVirtualRows`, #685/#775): jsdom has no
- * layout, so every `li` is `ROW` tall, the pane is `height` px high at the top of the page, and
- * a `ul` inside it starts at its top and moves up by the pane's `scrollTop`. Render into
- * `pane` (`render(..., { container: pane })`) and call `restore` when done.
+ * layout, so every row (an `li`, or the `rowTag` given) is `ROW` tall, the pane is `height` px
+ * high at the top of the page, and a list inside it (a `ul`, or what `isList` picks) starts at
+ * its top and moves up by the pane's `scrollTop`. Render into `pane`
+ * (`render(..., { container: pane })`) and call `restore` when done.
  */
-export function layoutInPane(height = 260) {
+export function layoutInPane(
+  height = 260,
+  { rowTag = "LI", isList = (element: Element) => element.tagName === "UL" }: { rowTag?: string; isList?: (element: Element) => boolean } = {},
+) {
   const pane = document.createElement("div");
   pane.style.overflowY = "auto";
   Object.defineProperty(pane, "clientHeight", { configurable: true, value: height });
@@ -17,8 +21,8 @@ export function layoutInPane(height = 260) {
 
   const original = Element.prototype.getBoundingClientRect;
   Element.prototype.getBoundingClientRect = function (this: Element) {
-    const rowHeight = this.tagName === "LI" ? ROW : 0;
-    const top = this.tagName === "UL" ? -pane.scrollTop : 0;
+    const rowHeight = this.tagName === rowTag ? ROW : 0;
+    const top = this !== pane && isList(this) ? -pane.scrollTop : 0;
     return {
       top,
       left: 0,

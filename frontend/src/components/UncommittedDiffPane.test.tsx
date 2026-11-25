@@ -9,7 +9,7 @@ import { testWorkspaceActions } from "../test/workspaceActions";
 import { fakeRepoClient } from "../test/fakeRepoClient";
 import { DiffPane, type DiscardRequest } from "./DiffPane";
 import { NO_HEAD_INFO } from "./diffPaneShared";
-import { layoutInPane } from "../test/virtualLayout";
+import { layoutInPane, ROW } from "../test/virtualLayout";
 
 const REPO = "/repo";
 
@@ -358,6 +358,13 @@ describe("file tree and path filter (#729)", () => {
     within(list)
       .queryAllByRole("option")
       .map((option) => option.querySelector("[title]")?.getAttribute("title"));
+  // The list's rows in order: a folder by its name, a file by its row's title.
+  const rowNames = (list: HTMLElement) =>
+    Array.from(list.querySelectorAll(":scope > li")).map((li) =>
+      li.getAttribute("role") === "option"
+        ? li.querySelector("[title]")?.getAttribute("title")
+        : li.querySelector("button[aria-expanded]")?.textContent,
+    );
   const filter = () => screen.getByRole("searchbox", { name: "Filter files" });
 
   it("is flat by default, with full paths", () => {
@@ -374,14 +381,16 @@ describe("file tree and path filter (#729)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Tree" }));
 
     expect(screen.getByRole("button", { name: "Tree" })).toHaveAttribute("aria-pressed", "true");
-    // A chain of single-child folders shows on one row.
-    const folder = within(unstagedList()).getByRole("group", { name: "src/lib" });
-    expect(optionNames(folder)).toEqual([
+    // A chain of single-child folders shows on one row. The list is one list of rows (#1157): a
+    // folder's row, then its files.
+    expect(rowNames(unstagedList())).toEqual([
+      "src/lib",
       "src/lib/a.ts (Modified)",
       "src/lib/b.ts (Modified)",
+      "README.md (Modified)",
     ]);
     // The row shows the file's name; its accessible name keeps the whole path.
-    const row = within(folder).getByRole("option", { name: /src\/lib\/a\.ts/ });
+    const row = within(unstagedList()).getByRole("option", { name: /src\/lib\/a\.ts/ });
     expect(within(row).getByText("a.ts")).toBeInTheDocument();
     expect(optionNames(unstagedList())).toEqual([
       "src/lib/a.ts (Modified)",
@@ -393,7 +402,7 @@ describe("file tree and path filter (#729)", () => {
 
     unmount();
     render(<Pane client={client} status={nested} />);
-    expect(within(unstagedList()).getByRole("group", { name: "src/lib" })).toBeInTheDocument();
+    expect(within(unstagedList()).getByRole("button", { name: "src/lib" })).toBeInTheDocument();
   });
 
   it("collapses a folder, and the keys skip its files", async () => {
@@ -691,6 +700,61 @@ describe("windowed change list (#845)", () => {
       const rendered = within(screen.getByRole("listbox", { name: "Unstaged changes" })).getAllByRole("option");
       expect(rendered.length).toBeLessThan(200);
       expect(screen.getByText("Changes (3000)")).toBeInTheDocument();
+    } finally {
+      restore();
+    }
+  });
+
+  // #1157: in the tree layout too. 100 folders of 30 files: each folder is 31 rows.
+  const tree = Array.from({ length: 3000 }, (_, i) =>
+    entry(`dir${String(Math.floor(i / 30)).padStart(3, "0")}/file${String(i).padStart(4, "0")}.txt`, false),
+  );
+  const unstagedList = () => screen.getByRole("listbox", { name: "Unstaged changes" });
+
+  it("renders only the rows in view of a long tree", () => {
+    localStorage.setItem("working-tree-file-layout", "tree");
+    const { pane, restore } = layoutInPane(260);
+    try {
+      render(<Pane client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")} status={tree} />, {
+        container: pane,
+      });
+      expect(within(unstagedList()).getAllByRole("option").length).toBeLessThan(200);
+      expect(within(unstagedList()).getByRole("button", { name: "dir000" })).toBeInTheDocument();
+      expect(within(unstagedList()).queryByRole("button", { name: "dir050" })).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it("renders the tree's rows further down once scrolled there, folders and files alike", () => {
+    localStorage.setItem("working-tree-file-layout", "tree");
+    const { pane, scrollTo, restore } = layoutInPane(260);
+    try {
+      render(<Pane client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")} status={tree} />, {
+        container: pane,
+      });
+      scrollTo(ROW * 31 * 50);
+      expect(within(unstagedList()).getByRole("button", { name: "dir050" })).toBeInTheDocument();
+      expect(within(unstagedList()).getByRole("option", { name: /^dir050\/file1500\.txt/ })).toBeInTheDocument();
+      expect(within(unstagedList()).queryByRole("button", { name: "dir000" })).toBeNull();
+      expect(within(unstagedList()).queryByRole("option", { name: /^dir000\/file0000\.txt/ })).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it("leaves a collapsed folder's files out of the tree's rows", () => {
+    localStorage.setItem("working-tree-file-layout", "tree");
+    const { pane, restore } = layoutInPane(260);
+    try {
+      render(<Pane client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")} status={tree} />, {
+        container: pane,
+      });
+      fireEvent.click(within(unstagedList()).getByRole("button", { name: "dir000" }));
+      // dir001 now follows dir000 directly, and its files come after it.
+      expect(within(unstagedList()).getByRole("button", { name: "dir001" })).toBeInTheDocument();
+      expect(within(unstagedList()).getByRole("option", { name: /^dir001\/file0030\.txt/ })).toBeInTheDocument();
+      expect(within(unstagedList()).queryByRole("option", { name: /^dir000\// })).toBeNull();
     } finally {
       restore();
     }

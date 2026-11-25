@@ -33,6 +33,8 @@ type Loosen<T, K extends keyof T> = Flat<Omit<T, K> & Partial<Pick<T, K>>>;
 
 export type DtoContract = [
   Expect<Equal<Hand.BisectInfo, Wire.BisectInfo>>,
+  Expect<Equal<Hand.Blame, Wire.Blame>>,
+  Expect<Equal<Hand.BlameCommit, Wire.BlameCommit>>,
   Expect<Equal<Hand.BlameLine, Wire.BlameLine>>,
   Expect<Equal<Hand.BranchInfo, Loosen<Wire.BranchInfo, "upstream" | "ahead" | "behind">>>,
   Expect<Equal<Hand.ChangedFile, Wire.ChangedFile>>,
