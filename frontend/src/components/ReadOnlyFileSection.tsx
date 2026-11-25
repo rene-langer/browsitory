@@ -1,6 +1,6 @@
 import { MoreHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { BlameLine, CommitHunk, DiffHunk, DiffOptions, DiffSource, FileStats, RepoClient } from "../ipc/RepoClient";
+import type { Blame, CommitHunk, DiffHunk, DiffOptions, DiffSource, FileStats, RepoClient } from "../ipc/RepoClient";
 import { describeError, type DescribedError } from "../lib/errorMessages";
 import type { SelectedRow } from "../state/useAppState";
 import type { ExternalToolsApi } from "../state/useExternalTools";
@@ -8,7 +8,8 @@ import { useDiffSettingsContext } from "../state/useDiffSettings";
 import { useWholeFile } from "../state/useWholeFile";
 import { useDiffSizeLimit } from "../state/useDiffSizeLimit";
 import { LineHistoryButton } from "./LineHistoryButton";
-import { BlameView } from "./BlameView";
+import { BlameUnavailableNote, BlameView } from "./BlameView";
+import { blameFailure, EMPTY_BLAME, isBlameRefusal, type BlameFailure } from "../lib/blame";
 import { CollapseToggle } from "./CollapseToggle";
 import styles from "./DiffPane.module.css";
 import { DiffTooLarge, DiffView, type HunkHeaderAction } from "./DiffView";
@@ -144,8 +145,8 @@ export function ReadOnlyFileSection({
   const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
   // The options `hunks` were fetched with: a hunk action finds the hunk again with them (#469).
   const [fetchedOptions, setFetchedOptions] = useState<DiffOptions | null>(null);
-  const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
-  const [error, setError] = useState<DescribedError | null>(null);
+  const [blame, setBlame] = useState<Blame>(EMPTY_BLAME);
+  const [error, setError] = useState<DescribedError | BlameFailure | null>(null);
 
   const { settings } = useDiffSettingsContext();
   const wholeFile = useWholeFile(settings.contextLines);
@@ -209,13 +210,13 @@ export function ReadOnlyFileSection({
       .getBlame(repoPath, blameAt, path)
       .then((next) => {
         if (!ignore) {
-          setBlameLines(next);
+          setBlame(next);
           setError(null);
         }
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         if (!ignore) {
-          setError({ message: "No blame available for this file at this revision." });
+          setError(blameFailure(err));
         }
       });
     return () => {
@@ -318,7 +319,9 @@ export function ReadOnlyFileSection({
       {!collapsed && (
         <div className={styles.fileSectionBody} ref={bodyRef}>
           {mode === "blame" ? (
-            error !== null ? (
+            isBlameRefusal(error) ? (
+              <BlameUnavailableNote message={error.message} />
+            ) : error !== null ? (
               <InlineError
                 message={error.message}
                 hint={error.hint}
@@ -326,7 +329,7 @@ export function ReadOnlyFileSection({
                 onRetry={loadBlame}
               />
             ) : (
-              <BlameView lines={blameLines} path={path} onSelectRow={onSelectRow} />
+              <BlameView blame={blame} path={path} onSelectRow={onSelectRow} />
             )
           ) : showImage && previewSource !== undefined ? (
             <>

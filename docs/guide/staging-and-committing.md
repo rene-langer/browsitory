@@ -73,7 +73,8 @@ type (upper and lower case alike; Escape clears it), and the group headings coun
 folders first; a chain of folders that only hold one folder shows on one row (`src/lib`). Click
 a folder, or press Left and Right on it, to collapse and expand it; the arrow keys then skip its
 files. The **+** or **−** on a folder stages or unstages all its files (conflicts are left out,
-as with **Stage all**). Conflicts stay in their own flat list above the tree. The layout is
+as with **Stage all**). Conflicts stay in their own flat list above the tree. Like the flat list,
+the tree draws only the rows on screen, so thousands of changed files scroll smoothly. The layout is
 remembered on this computer for every repository, and **Preferences → Diff → Show changed files
 as a tree** sets it too.
 

@@ -11,11 +11,10 @@ import styles from "./CompareDiffPane.module.css";
 import diffStyles from "./DiffPane.module.css";
 import { InlineError } from "./primitives/InlineError";
 import { ReadOnlyFileSection } from "./ReadOnlyFileSection";
+import { useFileSectionSteps } from "./FileSectionSteps";
+import { FILE_EXPAND_LIMIT } from "../lib/largeDiff";
 import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
 import { DiffViewOptionsProvider } from "../state/DiffViewOptionsProvider";
-
-/** Above this many files every section starts collapsed: each open section fetches its own diff. */
-export const COMPARE_EXPAND_LIMIT = 50;
 
 export function CompareDiffPane({
   repoPath,
@@ -83,7 +82,7 @@ export function CompareDiffPane({
         setError(null);
         if (collapseInitializedFor.current !== rangeKey) {
           collapseInitializedFor.current = rangeKey;
-          setCollapsedPaths(next.length > COMPARE_EXPAND_LIMIT ? new Set(next.map((f) => f.path)) : new Set());
+          setCollapsedPaths(next.length > FILE_EXPAND_LIMIT ? new Set(next.map((f) => f.path)) : new Set());
         }
       },
       (err: unknown) => {
@@ -113,6 +112,7 @@ export function CompareDiffPane({
       else next.add(path);
       return next;
     });
+  const steps = useFileSectionSteps(files?.length ?? 0, rangeKey ?? "");
   const allCollapsed = files !== null && files.length > 0 && files.every((f) => collapsedPaths.has(f.path));
 
   const fetchFor = (file: ChangedFile) => (opts: DiffOptions) =>
@@ -143,7 +143,7 @@ export function CompareDiffPane({
           />
         </div>
         <ul className={diffStyles.fileList}>
-          {files.map((file) => (
+          {files.slice(0, steps.shown).map((file) => (
             <ReadOnlyFileSection
               key={`${file.oldPath ?? ""}→${file.path}`}
               repoPath={repoPath}
@@ -166,6 +166,7 @@ export function CompareDiffPane({
             />
           ))}
         </ul>
+        {steps.more}
       </>
     );
   }

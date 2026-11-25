@@ -17,6 +17,25 @@ fn get_blame_reflects_a_commit() {
 }
 
 #[test]
+fn get_blame_refuses_a_binary_file_as_blame_unavailable() {
+    let (dir, repo) = init_repo();
+    std::fs::write(dir.path().join("data.bin"), b"\0\x01\x02\nmore\n").unwrap();
+    commit_all(&repo, "add binary");
+
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let error = worker
+        .handle()
+        .get_blame("HEAD".into(), "data.bin".into())
+        .unwrap_err();
+
+    assert_eq!(error.kind, crate::wire::ErrorKind::BlameUnavailable);
+    assert_eq!(
+        error.message,
+        "This file is binary, so it has no line-by-line blame."
+    );
+}
+
+#[test]
 fn get_file_history_and_rename_diff_round_trip_through_the_worker() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "file.txt", "l1\nl2\nl3\nl4\nl5\n");

@@ -4,6 +4,7 @@ import type { FileContent, RepoClient, TreeEntry, TreeListing } from "../ipc/Rep
 import { CommitTreeBrowser, FILTER_DEBOUNCE_MS } from "./CommitTreeBrowser";
 import { fakeRepoClient } from "../test/fakeRepoClient";
 import { describedByText } from "../test/describedBy";
+import { NO_BLAME } from "../test/blame";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 
@@ -40,7 +41,7 @@ function fakeClient(overrides: Partial<RepoClient> = {}) {
     getFileAtCommit: vi.fn(async (_repo: string, _commit: string, path: string) => CONTENTS[path]!),
     saveFileVersion: vi.fn(async (): Promise<string | null> => "/home/me/README.txt"),
     getWorkingTreeCompareDiff: vi.fn(async () => []),
-    getBlame: vi.fn(async () => []),
+    getBlame: vi.fn(async () => NO_BLAME),
   };
   return fakeRepoClient({ ...client, ...overrides }) as typeof client & RepoClient;
 }
