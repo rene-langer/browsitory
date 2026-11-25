@@ -239,6 +239,60 @@ signatures (they sign the bundle, not the URL), and upload the file with
 `gh release upload release/X.Y.Z latest.json --clobber`. (The check above then reports those
 URLs as not API asset URLs; that is expected.)
 
+### RPM signing key
+
+rpm 6 (Fedora 45 and newer) refuses to install a package without an OpenPGP signature
+(`%_pkgverify_level` is `all`). The in-app update installs a `.rpm` with plain `rpm -U`
+(`tauri-plugin-updater`), so an unsigned `.rpm` can never update itself there (#1077). The Tauri
+bundler signs the `.rpm` when the environment variable `TAURI_SIGNING_RPM_KEY` holds an
+ASCII-armored OpenPGP secret key (the key itself, not a path), with
+`TAURI_SIGNING_RPM_KEY_PASSPHRASE` as its passphrase (`crates/tauri-bundler/src/bundle/linux/rpm.rs`
+at the `tauri-cli-v<version>` tag, the [Tauri RPM guide](https://v2.tauri.app/distribute/rpm/)).
+Without the variable it builds an unsigned package and says nothing.
+
+`build-release` passes the repository secrets `RPM_SIGNING_KEY` and
+`RPM_SIGNING_KEY_PASSPHRASE` to it on Linux. Before building, it fails when `RPM_SIGNING_KEY` is
+empty or `packaging/browsitory-rpm-signing-key.asc` isn't a public key. After `tauri-action`, it
+imports that file into an empty rpm database and fails unless the `.rpm` has a header signature
+(`RSAHEADER` or `DSAHEADER`) that `rpmkeys -K` verifies with it. `tauri-action` has uploaded the
+`.rpm` to the draft by then; the failed job keeps the release a draft. `publish-vsix-release`
+attaches the public key file to the release, which is where `docs/guide/install.md` tells users
+to import it from (`releases/latest/download/browsitory-rpm-signing-key.asc`).
+
+One-time setup by the owner, on a trusted machine:
+
+1. Create an RSA 4096 signing key (RSA puts the signature in `RSAHEADER`, which every rpm
+   version reads; leave the passphrase empty or note it for step 3):
+
+   ```bash
+   gpg --quick-gen-key "Browsitory release signing <EMAIL>" rsa4096 sign never
+   gpg --list-secret-keys --keyid-format long    # note the key's fingerprint
+   ```
+
+2. Export both halves:
+
+   ```bash
+   gpg --armor --export FINGERPRINT > packaging/browsitory-rpm-signing-key.asc
+   gpg --armor --export-secret-keys FINGERPRINT > rpm-signing-secret.asc   # never commit
+   ```
+
+3. In the repository's **Settings → Secrets and variables → Actions**, create the repository
+   secrets `RPM_SIGNING_KEY` (the whole content of `rpm-signing-secret.asc`, `BEGIN` and `END`
+   lines included) and, if the key has one, `RPM_SIGNING_KEY_PASSPHRASE`. Then delete
+   `rpm-signing-secret.asc` and keep a backup of the secret key offline.
+4. Commit `packaging/browsitory-rpm-signing-key.asc` to `main` before the next release tag.
+
+To check a release by hand: `rpm --import packaging/browsitory-rpm-signing-key.asc` (or into a
+scratch database with `rpmkeys --dbpath DIR --import`), then `rpm -Kv Browsitory-*.rpm` must
+show `Header V4 RSA/SHA256 Signature, key ID …: OK` (rpm 6: `Header OpenPGP V4 RSA/SHA256
+signature, key ID …, key fingerprint: …: OK`). Without the signature only digest lines appear,
+and `rpm -K` still succeeds.
+
+Changing the key: every `.rpm` install trusts only the keys imported into its rpm database, so a
+new key makes rpm 6 refuse the next update until users import it. Release a version signed with
+the old key that tells users about the new one first, or document the manual `rpm --import` in
+the release notes.
+
 ### Publishing the extension
 
 The same tag builds one `.vsix` per platform (`build-vsix-release`, version stamped from the
