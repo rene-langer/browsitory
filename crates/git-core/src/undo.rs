@@ -34,6 +34,9 @@ pub struct RepoSnapshot {
     /// `refs/heads/*` and `refs/tags/*` -> oid.
     pub refs: BTreeMap<String, String>,
     pub index_tree: String,
+    /// The index's intent-to-add paths (`git add -N`, #1174): `index_tree` holds them as empty
+    /// files, and `restore` puts the mark back.
+    pub intent_to_add: BTreeSet<String>,
     /// HEAD tree with every modified/deleted/untracked (not ignored) file overlaid. `None` for
     /// `SnapshotScope::RefsAndIndex`.
     pub worktree_tree: Option<String>,
@@ -312,6 +315,7 @@ fn capture_with(repo: &Repository, worktree: Option<Limits>) -> Result<RepoSnaps
         head: head_state(repo)?,
         refs: local_refs(repo)?,
         index_tree,
+        intent_to_add: BTreeSet::new(),
         worktree_tree,
         skipped,
         unsaved_untracked,

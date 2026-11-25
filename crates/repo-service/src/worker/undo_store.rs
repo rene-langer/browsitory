@@ -153,6 +153,7 @@ impl From<StoredSnapshot> for RepoSnapshot {
             },
             refs: stored.refs,
             index_tree: stored.index_tree,
+            intent_to_add: BTreeSet::new(),
             worktree_tree: stored.worktree_tree,
             unsaved_untracked: stored.unsaved_untracked,
             skipped: stored
@@ -558,6 +559,69 @@ mod tests {
         assert_eq!(reloaded.undo, stacks.undo);
         store.save(&repo, &reloaded).unwrap();
         assert_eq!(undo_json(&repo)["version"], 3);
+    }
+
+    /// The previous format (#1093) still loads, and is saved as the current version.
+    #[test]
+    fn a_version_2_file_still_loads() {
+        let (_dir, repo) = repo_with_commit();
+        let (mut store, mut stacks) = UndoStore::open(&repo);
+        stacks.undo.push(with_a_skipped_file(&repo));
+        store.save(&repo, &stacks).unwrap();
+        let mut json = undo_json(&repo);
+        json["version"] = 2.into();
+        std::fs::write(
+            repo.path().join("browsitory/undo.json"),
+            serde_json::to_vec(&json).unwrap(),
+        )
+        .unwrap();
+
+        let (mut store, reloaded) = UndoStore::open(&repo);
+        assert!(!store.is_blocked());
+        assert_eq!(reloaded.undo, stacks.undo);
+        store.save(&repo, &reloaded).unwrap();
+        assert_eq!(undo_json(&repo)["version"], 3);
+    }
+
+    /// #1174: a snapshot's intent-to-add paths (`git add -N`) are saved and reloaded; a snapshot
+    /// without any writes no key.
+    #[test]
+    fn saves_and_reloads_intent_to_add_paths() {
+        let (dir, repo) = repo_with_commit();
+        std::fs::write(dir.path().join("new.txt"), "new\n").unwrap();
+        let output = test_support::git(dir.path(), &["add", "-N", "new.txt"]);
+        assert!(output.status.success(), "{output:?}");
+        let with = capture(&repo, SnapshotScope::RefsAndIndex).unwrap();
+        assert_eq!(with.intent_to_add, BTreeSet::from(["new.txt".to_string()]));
+        let (mut store, mut stacks) = UndoStore::open(&repo);
+        stacks.undo.push(UndoEntry {
+            label: "Stage a.txt".into(),
+            before: with.clone(),
+            after: with,
+        });
+        stacks.undo.push(entry(&repo, "Commit"));
+        store.save(&repo, &stacks).unwrap();
+
+        let json = undo_json(&repo);
+        assert_eq!(json["version"], 3);
+        assert_eq!(
+            json["undo"][0]["before"]["intentToAdd"],
+            serde_json::json!(["new.txt"])
+        );
+        let (_, reloaded) = UndoStore::open(&repo);
+        assert_eq!(reloaded.undo, stacks.undo);
+        let output = test_support::git(dir.path(), &["reset", "-q", "new.txt"]);
+        assert!(output.status.success(), "{output:?}");
+        let without = capture(&repo, SnapshotScope::RefsAndIndex).unwrap();
+        stacks.undo = vec![UndoEntry {
+            label: "Stage a.txt".into(),
+            before: without.clone(),
+            after: without,
+        }];
+        store.save(&repo, &stacks).unwrap();
+        assert!(undo_json(&repo)["undo"][0]["before"]
+            .get("intentToAdd")
+            .is_none());
     }
 
     #[test]
