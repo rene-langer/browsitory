@@ -10,3 +10,5 @@
 - Added: the release workflow's `verify` job fails unless `CHANGELOG.md` has a section for the
   tag's version right under an empty `## [Unreleased]`, the tagged commit is on `main`, and CI
   passed for it (`scripts/check-release-tag.py`) (#1111).
+- Changed: the Marketplace publish and dry-run jobs install `vsce` without restoring a pnpm store
+  cache, so nothing from an Actions cache runs with the Azure session (#1170).

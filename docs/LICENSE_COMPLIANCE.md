@@ -156,7 +156,7 @@ whole tree with integrity hashes, and Renovate and the `licenses` job cover it.
 
 | Package | License | Notes |
 |---|---|---|
-| ovsx | EPL-2.0 | dev only; a build-time CI tool, in the dev-tree exceptions below. Listed from 2026-11-02 under "Build-only CI tools" while the jobs ran it through `npx`; as a locked dev dependency of this package it is a dev-tree exception (#1110). EPL-2.0 is weak copyleft: it only covers changes to ovsx itself, which we neither make nor distribute. Never add it to `extension/` or any shipped tree. Its dependencies include `@vscode/vsce` (and through it `@vscode/vsce-sign` and the secretlint packages), covered by the exceptions below like `extension/`'s. Source: `npm info ovsx@1.3.0 license`, verified 2026-11-02 and 2026-11-25. |
+| ovsx | EPL-2.0 | dev only; a build-time CI tool, in the dev-tree exceptions below. Listed from 2026-11-02 under "Build-only CI tools" while the jobs ran it through `npx`; as a locked dev dependency of this package it is a dev-tree exception. Owner decision 2026-11-25 (#1110). EPL-2.0 is weak copyleft: it only covers changes to ovsx itself, which we neither make nor distribute. Never add it to `extension/` or any shipped tree. Its dependencies include `@vscode/vsce` (and through it `@vscode/vsce-sign` and the secretlint packages), covered by the exceptions below like `extension/`'s. Source: `npm info ovsx@1.3.0 license`, verified 2026-11-02 and 2026-11-25. |
 
 ## Python, user guide site (`docs/requirements.txt`)
 
@@ -325,7 +325,7 @@ not a lookalike such as `lightningcss-plugin`. Owner decision 2026-11-03 (#273).
 | stream-buffers | 3 | Unlicense | `@wdio/local-runner` (`e2e/` only). |
 | @promptbook/utils | 0 | CC-BY-4.0 | `@wdio/utils` > `locate-app` (`e2e/` only). |
 | binaryextensions, editions, istextorbinary, textextensions, version-range | 6, 6, 9, 6, 4 | Artistic-2.0 | `@vscode/vsce` > secretlint > `istextorbinary` (packaging only). |
-| ovsx | 1 | EPL-2.0 | Open VSX's publishing tool, run only by `release.yml` from `extension/publish/` (#1110); before that the same version ran through `npx` as a build-only CI tool. |
+| ovsx | 1 | EPL-2.0 | Open VSX's publishing tool, run only by `release.yml` from `extension/publish/` (#1110); before that the same version ran through `npx` as a build-only CI tool. Owner decision 2026-11-25 (#1110). |
 | @vscode/vsce-sign, @vscode/vsce-sign-*-* | 2 | Microsoft licence terms (`SEE LICENSE IN LICENSE.txt`, reported as Unknown) | Required by Microsoft's own publishing tool `@vscode/vsce`. Used only to package and publish, locally and in CI; never redistributed in the VSIX or the app. |
 
 | Clarified package | Versions | License | Reason |

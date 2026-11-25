@@ -346,6 +346,10 @@ the desktop build, two jobs publish the same files:
   day after release), and CI's `licenses` job checks the tree. It stays out of `extension/`'s own
   tree, which ships.
 
+The Marketplace jobs (`publish-vsix-marketplace`, `dry-run-marketplace`) install `extension/`
+the same way, without a pnpm cache (#1170): an Actions cache restored into a job that later
+holds the Azure session could swap the code `vsce` runs.
+
 Both jobs run in the GitHub environment `marketplace` (deployment tags restricted to
 `release/*`), and all three secrets are **environment** secrets there: `AZURE_CLIENT_ID`,
 `AZURE_TENANT_ID`, `OVSX_PAT`. Each job skips with a notice while its secret is empty.
