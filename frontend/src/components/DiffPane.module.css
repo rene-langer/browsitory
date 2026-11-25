@@ -237,6 +237,17 @@ li.fileRow.current {
   font-size: var(--text-sm);
 }
 
+/* Under a long list of file sections: how many more there are, and buttons to show them (#1153). */
+.moreFiles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
 /* A read-only file section (a commit, a stash, a compare): header and diff. */
 .fileSection {
   flex-direction: column;

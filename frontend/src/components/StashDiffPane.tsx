@@ -11,6 +11,8 @@ import { ReasonButton } from "./primitives/ReasonButton";
 import { disabledReason } from "../lib/actions/action";
 import { InlineError } from "./primitives/InlineError";
 import { ReadOnlyFileSection } from "./ReadOnlyFileSection";
+import { useFileSectionSteps } from "./FileSectionSteps";
+import { FILE_EXPAND_LIMIT } from "../lib/largeDiff";
 import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
 import { stashActions as stashActionRules, stashDetails, stashTitle } from "../lib/actions/stashActions";
 
@@ -46,6 +48,11 @@ export function StashDiffPane({
         if (!ignore) {
           setFiles(next);
           setError(null);
+          // Each open section fetches its diff: many files start collapsed (#1153).
+          const many = next.tracked.length + next.untracked.length > FILE_EXPAND_LIMIT;
+          setCollapsedPaths(
+            many ? new Set([...next.tracked.map((path) => `t:${path}`), ...next.untracked.map((path) => `u:${path}`)]) : new Set(),
+          );
         }
       })
       .catch((err: unknown) => {
@@ -71,6 +78,9 @@ export function StashDiffPane({
       return next;
     });
   };
+
+  const trackedSteps = useFileSectionSteps(files?.tracked.length ?? 0);
+  const untrackedSteps = useFileSectionSteps(files?.untracked.length ?? 0);
 
   const rules = stashActionRules(actions.blockers, stash);
   const dropDisabledReason = actions.blockers.drop;
@@ -130,7 +140,7 @@ export function StashDiffPane({
                 <span>Changes ({files.tracked.length})</span>
               </div>
               <ul className={styles.fileList}>
-                {files.tracked.map((path) => (
+                {files.tracked.slice(0, trackedSteps.shown).map((path) => (
                   <ReadOnlyFileSection
                     key={path}
                     repoPath={repoPath}
@@ -148,6 +158,7 @@ export function StashDiffPane({
                   />
                 ))}
               </ul>
+              {trackedSteps.more}
             </>
           )}
           {files.untracked.length > 0 && untrackedCommitId !== null && (
@@ -156,7 +167,7 @@ export function StashDiffPane({
                 <span>Untracked ({files.untracked.length})</span>
               </div>
               <ul className={styles.fileList}>
-                {files.untracked.map((path) => (
+                {files.untracked.slice(0, untrackedSteps.shown).map((path) => (
                   <ReadOnlyFileSection
                     key={path}
                     repoPath={repoPath}
@@ -174,6 +185,7 @@ export function StashDiffPane({
                   />
                 ))}
               </ul>
+              {untrackedSteps.more}
             </>
           )}
         </>

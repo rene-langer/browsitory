@@ -20,6 +20,8 @@ import styles from "./DiffPane.module.css";
 import { InlineError } from "./primitives/InlineError";
 import { ReadOnlyFileSection, type CommitFilePatchActions } from "./ReadOnlyFileSection";
 import { CommitTreeBrowser } from "./CommitTreeBrowser";
+import { useFileSectionSteps } from "./FileSectionSteps";
+import { FILE_EXPAND_LIMIT } from "../lib/largeDiff";
 import treeStyles from "./CommitTreeBrowser.module.css";
 
 /** A commit's file's `CommitFilePatchActions`, from `DiffPane`'s. */
@@ -123,6 +125,8 @@ export function CommitDiffPane({
         if (!ignore) {
           setFiles(next);
           setError(null);
+          // Each open section fetches its diff: many files start collapsed (#1153).
+          setCollapsedPaths(next.length > FILE_EXPAND_LIMIT ? new Set(next.map((file) => file.path)) : new Set());
         }
       })
       .catch((err: unknown) => {
@@ -163,6 +167,7 @@ export function CommitDiffPane({
   );
 
   const allCollapsed = files.length > 0 && files.every((file) => collapsedPaths.has(file.path));
+  const steps = useFileSectionSteps(files.length, otherParent ?? "");
 
   const toggleCollapse = (path: string) => {
     setCollapsedPaths((prev) => {
@@ -291,7 +296,7 @@ export function CommitDiffPane({
             </div>
           )}
           <ul className={styles.fileList}>
-            {files.map(({ path, oldPath }) => (
+            {files.slice(0, steps.shown).map(({ path, oldPath }) => (
               <ReadOnlyFileSection
                 key={`${oldPath ?? ""}→${path}`}
                 repoPath={repoPath}
@@ -315,6 +320,7 @@ export function CommitDiffPane({
               />
             ))}
           </ul>
+          {steps.more}
         </>
       )}
     </div>
