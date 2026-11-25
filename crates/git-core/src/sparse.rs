@@ -153,10 +153,7 @@ impl Cone {
         if self.full {
             return true;
         }
-        let mut full = Vec::with_capacity(path.len() + 1);
-        full.push(b'/');
-        full.extend_from_slice(path);
-        let full = self.fold(full);
+        let full = self.fold([&b"/"[..], path].concat());
         if self.recursive.contains(&full) {
             return true;
         }
@@ -181,29 +178,23 @@ impl Cone {
 
 /// git's `trim_trailing_spaces`: trailing spaces go, unless escaped with a backslash.
 fn trim_trailing_spaces(line: &[u8]) -> &[u8] {
-    let mut end = line.len();
     let mut last_space = None;
-    let mut at = 0;
-    while at < line.len() {
-        match line[at] {
+    let mut bytes = line.iter().enumerate();
+    while let Some((at, byte)) = bytes.next() {
+        match byte {
             b' ' => {
                 last_space.get_or_insert(at);
             }
             b'\\' => {
-                at += 1;
-                if at == line.len() {
+                if bytes.next().is_none() {
                     return line;
                 }
                 last_space = None;
             }
             _ => last_space = None,
         }
-        at += 1;
     }
-    if let Some(space) = last_space {
-        end = space;
-    }
-    &line[..end]
+    &line[..last_space.unwrap_or(line.len())]
 }
 
 /// No glob character in `pattern` after its leading `/`, except an escaped one or a final
