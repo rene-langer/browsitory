@@ -47,7 +47,7 @@ pub fn fold_staged_into(
     if index.has_conflicts() {
         return Err(RebaseError::OperationInProgress);
     }
-    let staged = repo.find_tree(index.write_tree()?)?;
+    let staged = repo.find_tree(crate::index_marks::committed_tree(repo, &mut index)?)?;
     if staged.id() == head.tree_id() {
         return Err(RebaseError::NothingStaged);
     }

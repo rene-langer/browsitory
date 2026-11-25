@@ -118,7 +118,8 @@ pub fn status(repo: &git2::Repository) -> Result<Vec<StatusEntry>, StatusError> 
 
 /// The entries of a scan made with [`status_options`] against `index`. A skip-worktree file
 /// that is missing (every file outside a sparse checkout's cone) isn't listed as deleted, as
-/// git doesn't list it (#1146).
+/// git doesn't list it (#1146); an intent-to-add entry is an unstaged new file, as with git
+/// (#1164).
 pub(crate) fn entries(
     statuses: &git2::Statuses<'_>,
     expansion: &crate::untracked::Expansion,
@@ -149,6 +150,22 @@ pub(crate) fn entries(
                 kind: StatusKind::Conflicted,
                 untracked_folder: false,
                 external_filter: None,
+            });
+            continue;
+        }
+
+        if flags.is_index_new()
+            && crate::index_marks::marks(index, path) & crate::index_marks::INTENT_TO_ADD != 0
+        {
+            // `git add -N`: not staged, one unstaged new file (deleted when it is gone).
+            let kind = if flags.is_wt_deleted() {
+                StatusKind::Deleted
+            } else {
+                StatusKind::New
+            };
+            entries.push(StatusEntry {
+                kind,
+                ..new_file(path.to_string())
             });
             continue;
         }

@@ -678,7 +678,7 @@ fn commit_mail(
     if reload_index {
         index.read(true)?;
     }
-    let tree = repo.find_tree(index.write_tree()?)?;
+    let tree = repo.find_tree(crate::index_marks::committed_tree(repo, &mut index)?)?;
     let parent = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
     let author = match mail.time {
         Some((seconds, offset)) => git2::Signature::new(

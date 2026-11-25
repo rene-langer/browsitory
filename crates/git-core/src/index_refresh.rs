@@ -26,9 +26,6 @@ use git2::Binding;
 /// what precedes it (the last 20 bytes of a SHA-256 trailer tell versions apart just as well).
 const TRAILER_LEN: u64 = 20;
 
-/// `GIT_INDEX_ENTRY_INTENT_TO_ADD` in an entry's extended flags.
-const INTENT_TO_ADD: u16 = 1 << 13;
-
 extern "C" {
     /// libgit2's `git_index_set_caps`, which git2 doesn't wrap.
     fn git_index_set_caps(index: *mut c_void, caps: c_int) -> c_int;
@@ -137,7 +134,7 @@ fn refreshing_scan(repo: &git2::Repository) -> Option<(git2::Statuses<'_>, git2:
     // libgit2 would drop the intent-to-add mark of a refreshed entry; git keeps it.
     if scratch
         .iter()
-        .any(|entry| entry.flags_extended & INTENT_TO_ADD != 0)
+        .any(|entry| entry.flags_extended & crate::index_marks::INTENT_TO_ADD != 0)
     {
         return None;
     }

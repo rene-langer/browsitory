@@ -36,10 +36,7 @@ fn intent_to_add() -> (tempfile::TempDir, git2::Repository) {
     git_ok(d, &["add", "a.txt"]);
     write_file(d, "new.txt", "my new content\n");
     git_ok(d, &["add", "-N", "new.txt"]);
-    assert_eq!(
-        git_out(d, &["status", "--short"]),
-        "M  a.txt\n A new.txt\n"
-    );
+    assert_eq!(git_out(d, &["status", "--short"]), "M  a.txt\n A new.txt\n");
     // Opened again, so its index is the one git wrote (as the worker re-reads it, #1167).
     drop(repo);
     let repo = git2::Repository::open(d).unwrap();
@@ -84,10 +81,12 @@ fn a_commit_leaves_an_intent_to_add_file_out() {
     let (dir, mut repo) = intent_to_add();
     let d = dir.path();
 
-    git_core::commit::commit(&mut repo, "second", git_core::hooks::HookOptions::default())
-        .unwrap();
+    git_core::commit::commit(&mut repo, "second", git_core::hooks::HookOptions::default()).unwrap();
 
-    assert_eq!(git_out(d, &["ls-tree", "-r", "--name-only", "HEAD"]), "a.txt\n");
+    assert_eq!(
+        git_out(d, &["ls-tree", "-r", "--name-only", "HEAD"]),
+        "a.txt\n"
+    );
     assert_eq!(git_out(d, &["status", "--short"]), " A new.txt\n");
     assert_eq!(
         std::fs::read_to_string(d.join("new.txt")).unwrap(),
@@ -108,7 +107,10 @@ fn an_amend_leaves_an_intent_to_add_file_out() {
     )
     .unwrap();
 
-    assert_eq!(git_out(d, &["ls-tree", "-r", "--name-only", "HEAD"]), "a.txt\n");
+    assert_eq!(
+        git_out(d, &["ls-tree", "-r", "--name-only", "HEAD"]),
+        "a.txt\n"
+    );
     assert_eq!(git_out(d, &["show", "HEAD:a.txt"]), "a, edited\n");
     assert_eq!(git_out(d, &["status", "--short"]), " A new.txt\n");
 }

@@ -685,7 +685,7 @@ pub fn rebase_commit_part(
     if index.has_conflicts() {
         return Err(RebaseError::OperationInProgress);
     }
-    let tree = repo.find_tree(index.write_tree()?)?;
+    let tree = repo.find_tree(crate::index_marks::committed_tree(repo, &mut index)?)?;
     let parent = repo.head()?.peel_to_commit()?;
     if tree.id() == parent.tree_id() {
         return Err(RebaseError::NothingStagedForPart);
@@ -778,7 +778,7 @@ fn land_or_close_split(
     if editing_entry(state).is_some() {
         let mut index = repo.index()?;
         index.read(false)?;
-        let staged = index.write_tree()?;
+        let staged = crate::index_marks::committed_tree(repo, &mut index)?;
         if staged == repo.head()?.peel_to_commit()?.tree_id() {
             return after_landed(repo, state, hooks);
         }
@@ -1198,7 +1198,7 @@ fn land_current_step(
     // Re-read the index from disk: a terminal `git add` during the pause must be seen.
     let mut index = repo.index()?;
     index.read(false)?;
-    let tree_id = index.write_tree()?;
+    let tree_id = crate::index_marks::committed_tree(repo, &mut index)?;
     let tree = repo.find_tree(tree_id)?;
     let parent = repo.head()?.peel_to_commit()?;
     let committer = repo.signature()?;

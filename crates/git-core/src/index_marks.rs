@@ -12,6 +12,29 @@ use std::path::Path;
 use git2::IndexEntryExtendedFlag;
 
 pub(crate) const SKIP_WORKTREE: u16 = IndexEntryExtendedFlag::SKIP_WORKTREE.bits();
+pub(crate) const INTENT_TO_ADD: u16 = IndexEntryExtendedFlag::INTENT_TO_ADD.bits();
+
+/// The tree a commit of `index` records: the index's tree without its intent-to-add entries,
+/// which git leaves out of a commit (#1164). Written from an in-memory copy when there are any.
+pub(crate) fn committed_tree(
+    repo: &git2::Repository,
+    index: &mut git2::Index,
+) -> Result<git2::Oid, git2::Error> {
+    if !index
+        .iter()
+        .any(|entry| entry.flags_extended & INTENT_TO_ADD != 0)
+    {
+        return index.write_tree();
+    }
+    let mut committed = git2::Index::new()?;
+    for entry in index
+        .iter()
+        .filter(|entry| entry.flags_extended & INTENT_TO_ADD == 0)
+    {
+        committed.add(&entry)?;
+    }
+    committed.write_tree_to(repo)
+}
 
 /// The extended flags of `path`'s stage-0 entry in `index`, 0 when there is none.
 pub(crate) fn marks(index: &git2::Index, path: &str) -> u16 {
