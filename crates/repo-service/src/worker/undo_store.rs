@@ -11,7 +11,12 @@ use git_core::undo::{HeadState, RepoSnapshot, SkippedFile};
 use serde::{Deserialize, Serialize};
 
 pub(super) const UNDO_LIMIT: usize = 50;
-const FORMAT_VERSION: u32 = 1;
+/// Version 2 (#1093) marks snapshots that can leave files unsaved (#1065, #1090): a build that
+/// reads only version 1 ignores the whole file rather than act on snapshots it misreads.
+const FORMAT_VERSION: u32 = 2;
+/// Version 1 is what older builds wrote (and builds with #1088 alone, whose `skipped` files
+/// this build understands), so it still loads.
+const READABLE_VERSIONS: std::ops::RangeInclusive<u32> = 1..=FORMAT_VERSION;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct UndoEntry {
@@ -51,11 +56,14 @@ struct StoredSnapshot {
     refs: BTreeMap<String, String>,
     index_tree: String,
     worktree_tree: Option<String>,
-    /// The files the snapshot didn't store for their size (#1065); absent when there are none,
-    /// so such a file reads as before. A build that predates it ignores it: such a file is then
-    /// simply not in either tree, and stays as it is.
+    /// The files the snapshot didn't store for their size (#1065); absent when there are none.
+    /// Builds that predate it never read it: they ignore a version 2 file (#1093).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     skipped: BTreeMap<String, StoredSkipped>,
+    /// The blob listing the untracked files the snapshot didn't store for their number (#1090);
+    /// absent when there are none. Pinned by the anchor like the trees.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    unsaved_untracked: Option<String>,
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -105,7 +113,7 @@ struct StoredPending {
     operation: String,
 }
 
-/// Version 1 throughout: `pending` is optional, and builds that predate it ignore it (no
+/// `pending` is optional (added within version 1): builds that predate it ignore it (no
 /// `deny_unknown_fields`) and drop it on their next save, which only loses the pending entry.
 #[derive(Serialize, Deserialize)]
 struct StoredFile {
@@ -126,6 +134,7 @@ impl From<&RepoSnapshot> for StoredSnapshot {
             refs: snapshot.refs.clone(),
             index_tree: snapshot.index_tree.clone(),
             worktree_tree: snapshot.worktree_tree.clone(),
+            unsaved_untracked: snapshot.unsaved_untracked.clone(),
             skipped: snapshot
                 .skipped
                 .iter()
@@ -145,6 +154,7 @@ impl From<StoredSnapshot> for RepoSnapshot {
             refs: stored.refs,
             index_tree: stored.index_tree,
             worktree_tree: stored.worktree_tree,
+            unsaved_untracked: stored.unsaved_untracked,
             skipped: stored
                 .skipped
                 .into_iter()
@@ -263,7 +273,7 @@ impl UndoStore {
             return UndoStacks::default();
         };
         match serde_json::from_slice::<StoredFile>(&bytes) {
-            Ok(file) if file.version == FORMAT_VERSION => UndoStacks {
+            Ok(file) if READABLE_VERSIONS.contains(&file.version) => UndoStacks {
                 undo: from_stored(file.undo),
                 redo: from_stored(file.redo),
                 pending: file.pending.map(|pending| PendingEntry {
@@ -311,6 +321,9 @@ impl UndoStore {
             )?;
             if let Some(tree) = &snapshot.worktree_tree {
                 builder.insert(format!("{name}-worktree"), Oid::from_str(tree)?, 0o040000)?;
+            }
+            if let Some(list) = &snapshot.unsaved_untracked {
+                builder.insert(format!("{name}-untracked"), Oid::from_str(list)?, 0o100644)?;
             }
             if let HeadState::Detached(oid) = &snapshot.head {
                 referenced.insert(Oid::from_str(oid)?);
@@ -488,6 +501,63 @@ mod tests {
         assert!(json["undo"][0]["before"].get("skipped").is_some());
         assert!(json["undo"][0]["after"].get("skipped").is_none());
         assert!(json["undo"][1]["before"].get("skipped").is_none());
+    }
+
+    fn with_a_skipped_file(repo: &Repository) -> UndoEntry {
+        let mut entry = entry(repo, "Switch to main");
+        entry.before.skipped.insert(
+            "dump.sql".into(),
+            git_core::undo::SkippedFile {
+                size: 60 << 20,
+                mtime: (1_700_000_000, 0),
+                ino: 7,
+                mode: 0o100644,
+            },
+        );
+        entry
+    }
+
+    fn undo_json(repo: &Repository) -> serde_json::Value {
+        serde_json::from_slice(&std::fs::read(repo.path().join("browsitory/undo.json")).unwrap())
+            .unwrap()
+    }
+
+    /// #1093: builds before the skipped files (#1065) read only version 1 and ignore any other,
+    /// so they never act on snapshots whose skipped files they would not know about.
+    #[test]
+    fn a_file_with_skipped_files_is_not_version_1() {
+        let (_dir, repo) = repo_with_commit();
+        let (mut store, mut stacks) = UndoStore::open(&repo);
+        stacks.undo.push(with_a_skipped_file(&repo));
+        store.save(&repo, &stacks).unwrap();
+
+        assert_eq!(undo_json(&repo)["version"], 2);
+        let (_, reloaded) = UndoStore::open(&repo);
+        assert_eq!(reloaded.undo, stacks.undo);
+    }
+
+    /// #1093: the history an older build (or a build with #1088 alone) wrote stays usable, and
+    /// the next save writes it as version 2.
+    #[test]
+    fn a_version_1_file_still_loads_and_is_saved_as_version_2() {
+        let (_dir, repo) = repo_with_commit();
+        let (mut store, mut stacks) = UndoStore::open(&repo);
+        stacks.undo.push(with_a_skipped_file(&repo));
+        stacks.undo.push(entry(&repo, "Stage a.txt"));
+        store.save(&repo, &stacks).unwrap();
+        let mut json = undo_json(&repo);
+        json["version"] = 1.into();
+        std::fs::write(
+            repo.path().join("browsitory/undo.json"),
+            serde_json::to_vec(&json).unwrap(),
+        )
+        .unwrap();
+
+        let (mut store, reloaded) = UndoStore::open(&repo);
+        assert!(!store.is_blocked());
+        assert_eq!(reloaded.undo, stacks.undo);
+        store.save(&repo, &reloaded).unwrap();
+        assert_eq!(undo_json(&repo)["version"], 2);
     }
 
     #[test]
@@ -742,6 +812,46 @@ mod tests {
         assert!(reopened.find_blob(blob).is_ok(), "untracked blob pruned");
     }
 
+    /// #1090: the list of a snapshot's unsaved untracked files survives a save and reload, is
+    /// absent from `undo.json` when there is none, and is pinned by the anchor across gc.
+    #[test]
+    fn saves_reloads_and_pins_the_unsaved_untracked_list() {
+        if Process::new("git").arg("--version").output().is_err() {
+            eprintln!("git CLI not found; skipping gc test");
+            return;
+        }
+        let (dir, repo) = repo_with_commit();
+        let list = repo.blob(b"a list only this snapshot has").unwrap();
+        let mut with_list = entry(&repo, "Switch to main");
+        with_list.before.unsaved_untracked = Some(list.to_string());
+        let (mut store, mut stacks) = UndoStore::open(&repo);
+        stacks.undo.push(with_list);
+        store.save(&repo, &stacks).unwrap();
+
+        let (_, reloaded) = UndoStore::open(&repo);
+        assert_eq!(reloaded.undo, stacks.undo);
+        let json = undo_json(&repo);
+        assert_eq!(json["version"], 2);
+        assert_eq!(
+            json["undo"][0]["before"]["unsavedUntracked"],
+            list.to_string()
+        );
+        assert!(json["undo"][0]["after"].get("unsavedUntracked").is_none());
+
+        for args in [
+            &["reflog", "expire", "--all", "--expire=now"][..],
+            &["gc", "--prune=now", "--quiet"][..],
+        ] {
+            assert!(test_support::git_command(dir.path())
+                .args(args)
+                .status()
+                .unwrap()
+                .success());
+        }
+        let reopened = Repository::open(dir.path()).unwrap();
+        assert!(reopened.find_blob(list).is_ok(), "unsaved list pruned");
+    }
+
     fn pending(repo: &Repository, label: &str) -> PendingEntry {
         PendingEntry {
             label: label.into(),
@@ -765,7 +875,7 @@ mod tests {
             &std::fs::read(repo.path().join("browsitory/undo.json")).unwrap(),
         )
         .unwrap();
-        assert_eq!(json["version"], 1);
+        assert_eq!(json["version"], 2);
         assert_eq!(json["pending"]["label"], "Merge feature");
         assert_eq!(json["pending"]["operation"], "merge abc def");
     }
@@ -807,7 +917,7 @@ mod tests {
         store.save(&repo, &stacks).unwrap();
         let bytes = std::fs::read(repo.path().join("browsitory/undo.json")).unwrap();
         let old: OldStoredFile = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(old.version, 1);
+        assert_eq!(old.version, 2);
         assert_eq!(old.undo.len(), 1);
     }
 

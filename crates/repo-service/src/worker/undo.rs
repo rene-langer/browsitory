@@ -587,7 +587,7 @@ impl UndoRecorder {
                     message: held.to_string(),
                 })
             }
-            Err(error @ UndoError::NotSaved(_)) => {
+            Err(error @ (UndoError::NotSaved(_) | UndoError::NotSavedUntracked(_))) => {
                 return Ok(UndoOutcome::FileNotSaved {
                     label,
                     message: error.to_string(),

@@ -10,6 +10,7 @@ use git2::{
     ErrorCode, Index, IndexEntry, IndexEntryExtendedFlag, IndexTime, ObjectType, Oid, Repository,
     Status, StatusOptions, TreeWalkMode, TreeWalkResult,
 };
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::worktree_guard::{Content, Leaf};
@@ -39,10 +40,20 @@ pub struct RepoSnapshot {
     /// Work-tree files over the size limit, by path (#1065): left out of `worktree_tree` (not
     /// stored), only identified by their stat data.
     pub skipped: BTreeMap<String, SkippedFile>,
+    /// Blob listing the untracked files a snapshot with more than `SNAPSHOT_UNTRACKED_LIMIT` of
+    /// them left out of `worktree_tree` (#1090), each identified like a [`SkippedFile`]; read
+    /// with [`unsaved_untracked`]. One blob, not a map, so a folder of tens of thousands of
+    /// files costs each snapshot an object id in memory and in `undo.json`, and identical lists
+    /// share one object.
+    pub unsaved_untracked: Option<String>,
 }
 
 /// The largest work-tree file a `SnapshotScope::Full` snapshot stores (#1065).
 pub const SNAPSHOT_FILE_LIMIT: u64 = 50 * 1024 * 1024;
+
+/// The most untracked files a `SnapshotScope::Full` snapshot stores (#1090): with more, it stores
+/// none of them, only identifies them (`RepoSnapshot::unsaved_untracked`).
+pub const SNAPSHOT_UNTRACKED_LIMIT: usize = 10_000;
 
 /// A work-tree file a snapshot did not store for its size (#1065): what `restore` compares the
 /// file on disk with to tell whether it is still the one the snapshot saw.
@@ -61,10 +72,11 @@ pub struct SkippedFile {
 pub enum SnapshotScope {
     RefsAndIndex,
     /// Refs, index and work tree; a work-tree file over `SNAPSHOT_FILE_LIMIT` is not stored, only
-    /// identified (`RepoSnapshot::skipped`, #1065).
+    /// identified (`RepoSnapshot::skipped`, #1065), and neither is any untracked file when there
+    /// are more than `SNAPSHOT_UNTRACKED_LIMIT` (`RepoSnapshot::unsaved_untracked`, #1090).
     Full,
-    /// `Full` with every file stored whatever its size: for the commands that destroy work-tree
-    /// content with no other way back (discards, a hard reset, #1065).
+    /// `Full` with every file stored whatever its size or their number: for the commands that
+    /// destroy work-tree content with no other way back (discards, a hard reset, #1065, #1090).
     FullUncapped,
 }
 
@@ -79,6 +91,13 @@ pub enum UndoError {
         limit = SNAPSHOT_FILE_LIMIT / (1024 * 1024)
     )]
     NotSaved(String),
+    /// Like `NotSaved`, for an untracked file the snapshot did not store because there were too
+    /// many (#1090).
+    #[error(
+        "{0} is one of more than {limit} untracked files, so its contents weren't saved for undo, and it has changed since.",
+        limit = grouped(SNAPSHOT_UNTRACKED_LIMIT)
+    )]
+    NotSavedUntracked(String),
     /// A branch to move, delete or check out is held by another worktree: checked out, being
     /// rebased or bisected, or used by a paused cherry-pick or revert there (#291, #293).
     #[error(transparent)]
@@ -115,8 +134,8 @@ pub enum UndoError {
 pub fn capture(repo: &Repository, scope: SnapshotScope) -> Result<RepoSnapshot, UndoError> {
     match scope {
         SnapshotScope::RefsAndIndex => capture_with(repo, None),
-        SnapshotScope::Full => capture_with(repo, Some(Some(SNAPSHOT_FILE_LIMIT))),
-        SnapshotScope::FullUncapped => capture_with(repo, Some(None)),
+        SnapshotScope::Full => capture_with(repo, Some(Limits::FULL)),
+        SnapshotScope::FullUncapped => capture_with(repo, Some(Limits::NONE)),
     }
 }
 
@@ -124,25 +143,126 @@ pub fn capture(repo: &Repository, scope: SnapshotScope) -> Result<RepoSnapshot, 
 /// `SNAPSHOT_FILE_LIMIT`: a test seam, so tests need no 50 MB files.
 #[doc(hidden)]
 pub fn capture_limited(repo: &Repository, limit: u64) -> Result<RepoSnapshot, UndoError> {
-    capture_with(repo, Some(Some(limit)))
+    let limits = Limits {
+        file_size: Some(limit),
+        ..Limits::FULL
+    };
+    capture_with(repo, Some(limits))
 }
 
-/// `worktree`: `None` for refs and index only, else the work tree too, with its per-file limit.
-fn capture_with(
+/// [`capture`] with `SnapshotScope::Full` and an untracked-file limit other than
+/// `SNAPSHOT_UNTRACKED_LIMIT`: a test seam, so tests need no 10,000 files.
+#[doc(hidden)]
+pub fn capture_counted(
     repo: &Repository,
-    worktree: Option<Option<u64>>,
+    untracked_limit: usize,
 ) -> Result<RepoSnapshot, UndoError> {
+    let limits = Limits {
+        untracked: Some(untracked_limit),
+        ..Limits::FULL
+    };
+    capture_with(repo, Some(limits))
+}
+
+/// What a work-tree snapshot leaves unsaved: files over `file_size`, and every untracked file
+/// when there are more than `untracked`.
+#[derive(Clone, Copy)]
+struct Limits {
+    file_size: Option<u64>,
+    untracked: Option<usize>,
+}
+
+impl Limits {
+    const FULL: Self = Self {
+        file_size: Some(SNAPSHOT_FILE_LIMIT),
+        untracked: Some(SNAPSHOT_UNTRACKED_LIMIT),
+    };
+    const NONE: Self = Self {
+        file_size: None,
+        untracked: None,
+    };
+}
+
+/// The blob behind `RepoSnapshot::unsaved_untracked`: each file as
+/// `[size, mtime seconds, mtime nanoseconds, inode, git mode]`.
+#[derive(Serialize, Deserialize)]
+struct UnsavedList {
+    files: BTreeMap<String, (u64, i64, u32, u64, u32)>,
+}
+
+/// The untracked files `snapshot` identified instead of storing (#1090), by path.
+pub fn unsaved_untracked(
+    repo: &Repository,
+    snapshot: &RepoSnapshot,
+) -> Result<BTreeMap<String, SkippedFile>, UndoError> {
+    let Some(id) = &snapshot.unsaved_untracked else {
+        return Ok(BTreeMap::new());
+    };
+    let blob = repo.find_blob(Oid::from_str(id)?)?;
+    let list: UnsavedList = serde_json::from_slice(blob.content())
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    Ok(list
+        .files
+        .into_iter()
+        .map(|(path, (size, secs, nanos, ino, mode))| {
+            let file = SkippedFile {
+                size,
+                mtime: (secs, nanos),
+                ino,
+                mode,
+            };
+            (path, file)
+        })
+        .collect())
+}
+
+fn write_unsaved_list(
+    repo: &Repository,
+    files: &BTreeMap<String, SkippedFile>,
+) -> Result<Option<String>, UndoError> {
+    if files.is_empty() {
+        return Ok(None);
+    }
+    let list = UnsavedList {
+        files: files
+            .iter()
+            .map(|(path, file)| {
+                let fields = (file.size, file.mtime.0, file.mtime.1, file.ino, file.mode);
+                (path.clone(), fields)
+            })
+            .collect(),
+    };
+    let bytes = serde_json::to_vec(&list).map_err(io::Error::other)?;
+    Ok(Some(repo.blob(&bytes)?.to_string()))
+}
+
+/// `n` with a comma between each group of three digits.
+fn grouped(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, digit) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
+}
+
+/// `worktree`: `None` for refs and index only, else the work tree too, with its limits.
+fn capture_with(repo: &Repository, worktree: Option<Limits>) -> Result<RepoSnapshot, UndoError> {
     let mut index = repo.index()?;
     index.read(false)?;
     if index.has_conflicts() {
         return Err(UndoError::ConflictedIndex);
     }
     let index_tree = index.write_tree()?.to_string();
-    let (worktree_tree, skipped) = match worktree {
-        None => (None, BTreeMap::new()),
-        Some(limit) => {
-            let (tree, skipped) = build_worktree_tree(repo, limit)?;
-            (Some(tree.to_string()), skipped)
+    let (worktree_tree, skipped, unsaved_untracked) = match worktree {
+        None => (None, BTreeMap::new(), None),
+        Some(limits) => {
+            let worktree = build_worktree_tree(repo, limits)?;
+            let list = write_unsaved_list(repo, &worktree.unsaved_untracked)?;
+            (Some(worktree.tree.to_string()), worktree.skipped, list)
         }
     };
     Ok(RepoSnapshot {
@@ -151,6 +271,7 @@ fn capture_with(
         index_tree,
         worktree_tree,
         skipped,
+        unsaved_untracked,
     })
 }
 
@@ -193,18 +314,23 @@ pub(crate) fn worktree_config(repo: &Repository) -> Result<WorktreeConfig, UndoE
     })
 }
 
-/// The work tree as a tree, and the files over `limit` it leaves out (#1065). Each stored file
+struct WorktreeSnapshot {
+    tree: Oid,
+    skipped: BTreeMap<String, SkippedFile>,
+    unsaved_untracked: BTreeMap<String, SkippedFile>,
+}
+
+/// The work tree as a tree, and the files it leaves out: those over the size limit (#1065), and
+/// every untracked one when there are more than the untracked limit (#1090). Each stored file
 /// streams from its opened handle into the object database (raw bytes, no filters), so a big
-/// one is never held in memory; one over `limit` is not read at all.
-fn build_worktree_tree(
-    repo: &Repository,
-    limit: Option<u64>,
-) -> Result<(Oid, BTreeMap<String, SkippedFile>), UndoError> {
+/// one is never held in memory; one left out is not read at all.
+fn build_worktree_tree(repo: &Repository, limits: Limits) -> Result<WorktreeSnapshot, UndoError> {
     use crate::worktree_guard::Opened;
     let workdir = repo.workdir().ok_or(UndoError::Bare)?;
     let config = worktree_config(repo)?;
     let mut overlay = Index::new()?;
     let mut skipped = BTreeMap::new();
+    let mut unsaved_untracked = BTreeMap::new();
     if let Ok(head) = repo.head() {
         overlay.read_tree(&head.peel_to_tree()?)?;
     }
@@ -214,15 +340,19 @@ fn build_worktree_tree(
         .recurse_untracked_dirs(true)
         .include_ignored(false)
         .exclude_submodules(true);
-    for entry in repo.statuses(Some(&mut options))?.iter() {
-        if entry.status().contains(Status::IGNORED) {
-            continue;
-        }
+    let statuses = repo.statuses(Some(&mut options))?;
+    // An untracked nested repository is reported as "dir/"; it is not ours to snapshot.
+    let entries = || {
+        statuses.iter().filter(|entry| {
+            !entry.status().contains(Status::IGNORED) && !entry.path_bytes().ends_with(b"/")
+        })
+    };
+    let untracked = |entry: &git2::StatusEntry| entry.status().contains(Status::WT_NEW);
+    let list_untracked = limits
+        .untracked
+        .is_some_and(|limit| entries().filter(untracked).count() > limit);
+    for entry in entries() {
         let path = entry.path()?.to_string();
-        // An untracked nested repository is reported as "dir/"; it is not ours to snapshot.
-        if path.ends_with('/') {
-            continue;
-        }
         let previous_mode = overlay.get_path(Path::new(&path), 0).map(|e| e.mode);
         match crate::worktree_guard::open_leaf_beneath(workdir, &path)? {
             Some(Opened::Link { target, .. }) => {
@@ -235,8 +365,15 @@ fn build_worktree_tree(
                 stat,
             }) => {
                 let mode = file_mode(&config, executable, previous_mode);
-                if limit.is_some_and(|limit| stat.size > limit) {
-                    skipped.insert(path.clone(), SkippedFile::of(&stat, mode));
+                let left_out = if list_untracked && untracked(&entry) {
+                    Some(&mut unsaved_untracked)
+                } else if limits.file_size.is_some_and(|limit| stat.size > limit) {
+                    Some(&mut skipped)
+                } else {
+                    None
+                };
+                if let Some(left_out) = left_out {
+                    left_out.insert(path.clone(), SkippedFile::of(&stat, mode));
                     let _ = overlay.remove_path(Path::new(&path));
                     continue;
                 }
@@ -249,7 +386,11 @@ fn build_worktree_tree(
             }
         }
     }
-    Ok((overlay.write_tree_to(repo)?, skipped))
+    Ok(WorktreeSnapshot {
+        tree: overlay.write_tree_to(repo)?,
+        skipped,
+        unsaved_untracked,
+    })
 }
 
 impl SkippedFile {
@@ -382,7 +523,11 @@ pub fn restore(
         .collect();
     let index_differs = expected.index_tree != target.index_tree;
     let worktree = match (&expected.worktree_tree, &target.worktree_tree) {
-        (Some(from), Some(to)) if from != to || expected.skipped != target.skipped => {
+        (Some(from), Some(to))
+            if from != to
+                || expected.skipped != target.skipped
+                || expected.unsaved_untracked != target.unsaved_untracked =>
+        {
             Some(WorktreeChange::new(repo, expected, target, from, to)?)
         }
         _ => None,
@@ -535,13 +680,65 @@ struct WorktreeChange {
     /// Target files equal to their index entry once the index is written: checked out from the
     /// index (so smudge filters and `core.autocrlf` apply) rather than written as raw bytes.
     from_index: BTreeSet<String>,
-    /// Files the target didn't store for their size (#1065), unless the expected side skipped
-    /// them alike (the command didn't touch them): they must already be as the target saw them,
-    /// else `NotSaved`. Never written.
-    keep: Vec<(String, SkippedFile)>,
-    /// Files only the expected side didn't store for their size (in `paths`): checked by their
-    /// stat data, not their contents, then written or removed like any other path.
+    /// Files the target didn't store (#1065, #1090), unless the expected side left them out
+    /// alike (the command didn't touch them): they must already be as the target saw them,
+    /// else `NotSaved` or `NotSavedUntracked`. Never written.
+    keep: Vec<(String, SkippedFile, LeftOut)>,
+    /// Files only the expected side didn't store (in `paths`): checked by their stat data, not
+    /// their contents, then written or removed like any other path.
     from_skipped: BTreeMap<String, SkippedFile>,
+}
+
+/// Why a snapshot left a file out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LeftOut {
+    TooBig,
+    TooManyUntracked,
+}
+
+/// Every file `snapshot` left out, by path; its untracked list only when `with_list` (when both
+/// sides share one list, its files are left out alike and need no reading).
+fn left_out(
+    repo: &Repository,
+    snapshot: &RepoSnapshot,
+    with_list: bool,
+) -> Result<BTreeMap<String, (SkippedFile, LeftOut)>, UndoError> {
+    let mut files: BTreeMap<String, (SkippedFile, LeftOut)> = snapshot
+        .skipped
+        .iter()
+        .map(|(path, file)| (path.clone(), (*file, LeftOut::TooBig)))
+        .collect();
+    if with_list {
+        for (path, file) in unsaved_untracked(repo, snapshot)? {
+            files.insert(path, (file, LeftOut::TooManyUntracked));
+        }
+    }
+    Ok(files)
+}
+
+/// Whether the work-tree file `rel` already has the blob `id` with `mode`; read only when its
+/// size matches.
+fn holds_blob(
+    repo: &Repository,
+    workdir: &Path,
+    rel: &str,
+    config: &WorktreeConfig,
+    (id, mode): (Oid, u32),
+) -> Result<bool, UndoError> {
+    let Some(current) = identify_worktree_file(workdir, rel, config, Some(mode))? else {
+        return Ok(false);
+    };
+    if current.size != repo.odb()?.read_header(id)?.0 as u64 {
+        return Ok(false);
+    }
+    Ok(
+        match read_worktree_file(workdir, rel, config, Some(mode))? {
+            Some((bytes, disk_mode)) => {
+                disk_mode == mode && Oid::hash_object(ObjectType::Blob, &bytes)? == id
+            }
+            None => false,
+        },
+    )
 }
 
 impl WorktreeChange {
@@ -565,20 +762,34 @@ impl WorktreeChange {
             .filter(|path| from.get(*path) != to.get(*path))
             .cloned()
             .collect();
+        let lists_differ = expected.unsaved_untracked != target.unsaved_untracked;
+        let expected_left = left_out(repo, expected, lists_differ)?;
+        let target_left = left_out(repo, target, lists_differ)?;
         let mut keep = Vec::new();
-        for (path, file) in &target.skipped {
-            if expected.skipped.get(path) != Some(file) {
-                keep.push((path.clone(), *file));
+        for (path, (file, why)) in &target_left {
+            if expected_left.get(path).map(|(file, _)| file) != Some(file) {
+                keep.push((path.clone(), *file, *why));
             }
             paths.remove(path);
         }
-        let from_skipped: BTreeMap<String, SkippedFile> = expected
-            .skipped
-            .iter()
-            .filter(|(path, _)| !target.skipped.contains_key(*path))
-            .map(|(path, file)| (path.clone(), *file))
-            .collect();
-        paths.extend(from_skipped.keys().cloned());
+        let workdir = repo.workdir().ok_or(UndoError::Bare)?;
+        let config = worktree_config(repo)?;
+        let mut from_skipped = BTreeMap::new();
+        for (path, (file, _)) in &expected_left {
+            if target_left.contains_key(path) {
+                continue;
+            }
+            // Already what the target wants (a file untracked by the command, its count then
+            // over the limit): left as it is, so it still matches what the other side noted.
+            if let Some(&wanted) = to.get(path) {
+                if holds_blob(repo, workdir, path, &config, wanted)? {
+                    paths.remove(path);
+                    continue;
+                }
+            }
+            paths.insert(path.clone());
+            from_skipped.insert(path.clone(), *file);
+        }
         let paths: Vec<String> = paths.into_iter().collect();
         // Ignore files stay raw writes: apply needs them on disk before the index is written.
         // When the index isn't rewritten, the entry checked out is the current one, which may
@@ -636,9 +847,12 @@ impl WorktreeChange {
         let config = worktree_config(repo)?;
         let mut index = repo.index()?;
         index.read(false)?;
-        for (path, file) in &self.keep {
+        for (path, file, why) in &self.keep {
             if identify_worktree_file(workdir, path, &config, Some(file.mode))? != Some(*file) {
-                return Err(UndoError::NotSaved(path.clone()));
+                return Err(match why {
+                    LeftOut::TooBig => UndoError::NotSaved(path.clone()),
+                    LeftOut::TooManyUntracked => UndoError::NotSavedUntracked(path.clone()),
+                });
             }
         }
         for path in &self.paths {
@@ -931,4 +1145,17 @@ fn write_worktree_file(
             UndoError::Io(error)
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::grouped;
+
+    #[test]
+    fn grouped_puts_a_comma_between_groups_of_three_digits() {
+        assert_eq!(grouped(999), "999");
+        assert_eq!(grouped(10_000), "10,000");
+        assert_eq!(grouped(100_000), "100,000");
+        assert_eq!(grouped(1_234_567), "1,234,567");
+    }
 }

@@ -52,6 +52,16 @@ contents weren't saved for undo, and it has changed since." Discards, **Reset ha
 a file, and applying a patch or a commit's change still save every file they replace, however
 big, so Undo brings it back; for a big file they take longer.
 
+**More than 10,000 untracked files.** The same goes for a folder of many small files that isn't
+ignored (build output, a downloaded dataset): when there are more than 10,000 untracked files,
+those operations save none of them for Undo and only note each file's size and time. Undo
+leaves them as they are, and refuses if it would have to bring back the old contents of one
+that changed since: "Can't undo Ignore build/: build/a.o is one of more than 10,000 untracked
+files, so its contents weren't saved for undo, and it has changed since." Discards and the
+other operations above still save every file, however many. Ignoring such a folder (its row's
+**Ignore folder**, see [Staging and committing](staging-and-committing.md#the-file-list)) keeps
+those operations quickest.
+
 Undo and Redo write each restored file next to the old one and swap it in only when it is
 complete. If writing fails (for example a full disk), that file stays as it was. Files restored
 before the failure keep their restored content. Fix the problem and run Undo or Redo again: it
