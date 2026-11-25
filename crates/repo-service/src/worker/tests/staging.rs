@@ -359,3 +359,30 @@ fn a_diff_over_the_size_limit_is_diff_too_large_and_stages_once_loaded_anyway() 
         .unwrap();
     assert_eq!(staged.len(), 1);
 }
+
+/// A stage refused because another program held `index.lock` doesn't take effect with the
+/// next command that writes the index (#1166).
+#[test]
+fn a_stage_that_failed_on_a_locked_index_is_not_applied_by_the_next_stage() {
+    let (dir, repo) = init_repo();
+    let d = dir.path();
+    write_file(d, "a.txt", "a\n");
+    write_file(d, "b.txt", "b\n");
+    commit_all(&repo, "base");
+    write_file(d, "a.txt", "a, edited\n");
+    write_file(d, "b.txt", "b, edited\n");
+    let worker = Worker::spawn(d.to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let lock = repo.path().join("index.lock");
+    std::fs::write(&lock, "").unwrap();
+
+    assert!(handle.stage_file("a.txt".into()).is_err());
+    std::fs::remove_file(&lock).unwrap();
+    handle.stage_file("b.txt".into()).unwrap();
+
+    let status = test_support::git(d, &["status", "--short"]);
+    assert_eq!(
+        String::from_utf8_lossy(&status.stdout),
+        " M a.txt\nM  b.txt\n"
+    );
+}

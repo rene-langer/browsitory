@@ -885,7 +885,7 @@ fn write_commit(
     if hooked.reload_index {
         index.read(true)?;
     }
-    let tree_id = index.write_tree()?;
+    let tree_id = crate::index_marks::committed_tree(repo, &mut index)?;
     let tree = repo.find_tree(tree_id)?;
     let signature = repo.signature()?;
 
@@ -1336,7 +1336,7 @@ fn rewrite_head(
         if hooked.reload_index {
             index.read(true)?;
         }
-        let tree_id = index.write_tree()?;
+        let tree_id = crate::index_marks::committed_tree(repo, &mut index)?;
         repo.find_tree(tree_id)?
     };
     let committer = repo.signature()?;

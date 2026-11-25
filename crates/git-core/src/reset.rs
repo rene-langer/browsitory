@@ -34,6 +34,10 @@ pub enum ResetError {
     /// A file to write uses an external filter driver (#1063); nothing changed.
     #[error(transparent)]
     ExternalFilter(#[from] crate::ExternalFilter),
+    /// A hard reset would overwrite the local changes of a skip-worktree file, which the status
+    /// hides and Undo can't bring back; git refuses too ("not uptodate"). Nothing changed (#1145).
+    #[error("'{0}' has local changes git doesn't show (it is marked skip-worktree), and the reset would overwrite them. Nothing was changed.")]
+    SkipWorktreeEdited(String),
 }
 
 /// Moves the current branch (or detached HEAD) to `commit_id`. Soft keeps index + working tree,
@@ -56,37 +60,116 @@ pub fn reset_to(repo: &Repository, commit_id: &str, mode: ResetMode) -> Result<(
         repo.reset(target.as_object(), ResetType::Soft, None)?;
     } else {
         let tree = target.tree()?;
+        let mut index = repo.index()?;
+        index.read(false)?;
+        // Read before the checkout, which rewrites the entries it writes without the mark.
+        let skip_worktree = crate::index_marks::skip_worktree_paths(&index);
         if mode == ResetMode::Hard {
-            // A forced checkout writes (and deletes) through a symlink that replaced a tracked
-            // file or folder; remove such links first, like git (#114).
-            crate::worktree_guard::prepare_forced_checkout::<ResetError, &str>(
-                repo,
-                Some(&crate::worktree_guard::GuardSource::Tree(&tree)),
-                None,
-            )?;
-            let mut checkout = git2::build::CheckoutBuilder::new();
-            checkout.force();
-            let filters = crate::hardlink::on_checkout(repo, &mut checkout);
-            // A file another program holds open: say so, not libgit2's raw error (#303).
-            repo.checkout_tree(tree.as_object(), Some(&mut checkout))
-                .map_err(crate::worktree_guard::held_open::<ResetError>(
-                    repo.workdir(),
-                    crate::HeldDuring::Reset,
-                ))?;
-            filters.check()?;
+            let left_alone = left_alone(repo, &index, &tree)?;
+            let paths = if left_alone.is_empty() {
+                None
+            } else {
+                Some(crate::index_marks::paths_except(repo, &tree, |path| {
+                    left_alone.contains(path)
+                })?)
+            };
+            // No paths would mean the whole tree.
+            if paths.as_ref().is_none_or(|paths| !paths.is_empty()) {
+                check_out(repo, &tree, paths.as_deref())?;
+            }
         }
         // git's order: the index first, the ref last (#796). Moving HEAD first left a window in
         // which HEAD named the target while the index still held the old tree, and a reset whose
         // index write failed (another command's `index.lock`) moved HEAD anyway.
-        let mut index = repo.index()?;
-        index.read_tree(&tree)?;
-        index.write()?;
+        crate::index_marks::reset_index_to_tree(&mut index, &tree, &skip_worktree)?;
         move_head(repo, target.id())?;
         crate::commit::clear_operation_files(repo)?;
     }
     // Like git's `remove_branch_state`: a reset abandons a pending squash merge's message.
     crate::merge::clear_squash_message(repo)?;
     Ok(())
+}
+
+/// The hard reset's forced checkout of `tree`, limited to the literal `paths` when given.
+fn check_out(
+    repo: &Repository,
+    tree: &git2::Tree<'_>,
+    paths: Option<&[Vec<u8>]>,
+) -> Result<(), ResetError> {
+    // A forced checkout writes (and deletes) through a symlink that replaced a tracked file or
+    // folder; remove such links first, like git (#114).
+    crate::worktree_guard::prepare_forced_checkout::<ResetError, Vec<u8>>(
+        repo,
+        Some(&crate::worktree_guard::GuardSource::Tree(tree)),
+        paths,
+    )?;
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.force();
+    if let Some(paths) = paths {
+        checkout.disable_pathspec_match(true);
+        for path in paths {
+            checkout.path(crate::worktree_guard::path_from_bytes(path));
+        }
+    }
+    let filters = crate::hardlink::on_checkout(repo, &mut checkout);
+    // A file another program holds open: say so, not libgit2's raw error (#303).
+    repo.checkout_tree(tree.as_object(), Some(&mut checkout))
+        .map_err(crate::worktree_guard::held_open::<ResetError>(
+            repo.workdir(),
+            crate::HeldDuring::Reset,
+        ))?;
+    filters.check()?;
+    Ok(())
+}
+
+/// The paths a hard reset to `tree` leaves alone, as `git reset --hard` does (#1145): a
+/// skip-worktree file the target keeps (same blob and mode), and in a sparse checkout one that
+/// is missing; an intent-to-add file the target doesn't have, which stays as an untracked file.
+/// A skip-worktree file with local changes that the target changes is refused.
+fn left_alone(
+    repo: &Repository,
+    index: &git2::Index,
+    tree: &git2::Tree<'_>,
+) -> Result<std::collections::HashSet<Vec<u8>>, ResetError> {
+    use crate::index_marks::{INTENT_TO_ADD, SKIP_WORKTREE};
+    let mut kept = std::collections::HashSet::new();
+    let marked: Vec<git2::IndexEntry> = index
+        .iter()
+        .filter(|entry| entry.flags_extended & (SKIP_WORKTREE | INTENT_TO_ADD) != 0)
+        .collect();
+    if marked.is_empty() {
+        return Ok(kept);
+    }
+    let (_, edited) = crate::index_marks::edited_skip_worktree::<ResetError>(repo)?;
+    let sparse = repo
+        .config()?
+        .get_bool("core.sparseCheckout")
+        .unwrap_or(false);
+    let workdir = repo.workdir();
+    for entry in marked {
+        let path = crate::worktree_guard::path_from_bytes(&entry.path);
+        let target = tree.get_path(&path).ok();
+        if entry.flags_extended & SKIP_WORKTREE == 0 {
+            if target.is_none() {
+                kept.insert(entry.path);
+            }
+            continue;
+        }
+        let unchanged = target.is_some_and(|target| {
+            target.id() == entry.id && u32::try_from(target.filemode()) == Ok(entry.mode)
+        });
+        let name = String::from_utf8_lossy(&entry.path).into_owned();
+        if unchanged {
+            kept.insert(entry.path);
+        } else if edited.contains(&name) {
+            return Err(ResetError::SkipWorktreeEdited(name));
+        } else if sparse
+            && workdir.is_some_and(|workdir| workdir.join(&path).symlink_metadata().is_err())
+        {
+            kept.insert(entry.path);
+        }
+    }
+    Ok(kept)
 }
 
 /// Points the ref HEAD ends at (a branch, or HEAD itself when detached) at `target`, with git's

@@ -440,6 +440,25 @@ menu's choice runs back through the session: the pick, the parent picker or a se
   with an unhelpful error at the call site.
 - `StringArray::iter()` (from `Repository::remotes()`) yields `Result<Option<&str>, Error>` per
   slot — needs `.iter().flatten().flatten()`, not a single `.flatten()`.
+- libgit2 handles two per-entry index marks differently from git (`git_core::index_marks`):
+  - **skip-worktree** (`git update-index --skip-worktree`, every file outside a sparse
+    checkout's cone). Its status reports a *missing* skip-worktree file as deleted (#1146), so
+    `status::entries` drops that deletion, and `stage_file` refuses such a path as `git add`
+    does. Its `Index::read_tree` clears the mark on every entry (#1145): Reset, Abort
+    (merge, cherry-pick, revert, the terminal sequence, a rebase's case-pair path) go through
+    `reset_index_to_tree`, which puts it back on each path that keeps an entry, as git's reset
+    does; Undo's restore refuses an index with either mark. Reset hard checks out every path except a skip-worktree file the target keeps (same
+    blob and mode), one that is missing in a sparse checkout (`core.sparseCheckout`), and an
+    intent-to-add file the target lacks (a forced checkout deleted it); it refuses, before
+    writing anything, when the target changes a skip-worktree file with local edits (git:
+    "Entry '…' not uptodate"), since the status hides that edit and Undo couldn't bring it back.
+    A path new in the target that lies outside the sparse cone is written and not marked:
+    Browsitory doesn't read the sparse patterns.
+  - **intent-to-add** (`git add -N`): an entry with the empty blob. libgit2's status reports it
+    as a staged new file and `write_tree` commits the empty blob (#1164). The status lists it as
+    one unstaged new file (deleted when its file is gone), and every commit made from the
+    repository's index writes its tree with `committed_tree`, which leaves such entries out.
+    `read_tree` drops them, as `git reset` does; the file stays, untracked.
 - libgit2 1.9.6's path-limited stash (`stash_save_ext` with a pathspec) is unusable: after
   stashing the paths it resets the *whole* index and worktree to HEAD (forced checkout, plus
   removing untracked files), discarding every change outside the paths, and its untracked commit
@@ -799,6 +818,16 @@ state and loop are `worker/worker_loop.rs`'s `WorkerLoop`: its `step` takes the 
 (`acquire`), does the undo bookkeeping and operation gate (`before`), runs the command
 (`dispatch`, the `match` over `Command` in `worker_loop/dispatch.rs`), then finishes the undo
 entry and releases the lock (`after`) (#486).
+
+The worker's `Repository` keeps one index object in memory, shared by every command, and libgit2
+writes that copy out whole; git commands read the index file first. So `before` re-reads it
+(`index.read(false)`, a stat call when the file is unchanged) ahead of every command, and no
+write saves a copy older than what a terminal or another tool staged since (#1167; before, only
+an undo snapshot or a status read re-read it, and there is no snapshot while an operation is
+paused). A command whose write fails reads the index back from disk (`index.read(true)`), so a
+failed change doesn't stay in memory for the next write to save (#1166): `stage_file`,
+`stage_paths`/`unstage_paths`, `unstage_file`, and `index_marks::reset_index_to_tree` (Reset,
+Abort, Undo).
 
 **Reads during a transfer (#734).** A fetch, pull or push runs on a helper thread with its own
 `Repository` (`worker/transfer_thread.rs`), and the worker waits for it. While it waits, the

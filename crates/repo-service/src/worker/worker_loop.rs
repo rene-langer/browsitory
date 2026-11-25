@@ -307,6 +307,13 @@ where
         guard: Option<&StateGuard>,
         unrecorded: bool,
     ) -> (Command, UndoTurn) {
+        // libgit2 keeps the index in memory and writes that copy out whole; git commands read
+        // the file first. Re-read here (a stat call when nothing changed), so no command writes
+        // over what another program staged since the last status read or undo snapshot (#1167).
+        // A failure surfaces in the command itself.
+        if let Ok(mut index) = self.repo.index() {
+            let _ = index.read(false);
+        }
         self.undo_recorder
             .settle(&self.repo, guard, || self.operations.marker(&self.repo));
         let plan = policy.undo.filter(|_| !unrecorded);

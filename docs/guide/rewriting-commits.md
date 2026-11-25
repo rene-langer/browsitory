@@ -39,6 +39,14 @@ cherry-pick** and **Abort cherry-pick** (or revert) in the status strip.
     ⟨branch⟩)…** asks for the parent to keep (parent 1 undoes what the merge brought in), and the
     message names it like `git revert -m` does.
 
+    Reset and the aborts keep the files git hides: those outside a sparse checkout and those
+    marked with `git update-index --skip-worktree` stay marked. **Reset hard** leaves such a file
+    as it is when the commit you reset to has the same version of it, and doesn't bring back the
+    files outside a sparse checkout. When that commit changes a marked file that has local
+    edits, the reset is refused and names the file, as `git reset --hard` refuses it ("not
+    uptodate"), because Undo couldn't bring those edits back; nothing is changed. A file added
+    with `git add -N` stays on disk as an untracked file.
+
     Cherry-pick, revert, check out, reset and **Create tag at…** also work for a commit selected
     in the search results or a file history that is older than the history loaded in the graph;
     the history edits need the commit in the graph, so load more history (or use **Go to

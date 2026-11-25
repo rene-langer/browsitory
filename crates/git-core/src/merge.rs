@@ -1450,6 +1450,12 @@ pub(crate) fn plan_operation_reset(repo: &Repository) -> Result<OperationReset, 
 /// it stays in the index for the next abort.
 fn apply_operation_reset(repo: &Repository, reset: OperationReset) -> Result<(), MergeError> {
     let OperationReset { touched, pairs } = reset;
+    // Before the checkout below, which rewrites the entries it writes without the mark.
+    let skip_worktree = {
+        let mut index = repo.index()?;
+        index.read(false)?;
+        crate::index_marks::skip_worktree_paths(&index)
+    };
     // A case pair's names are put back directly, never by the forced checkout (#511).
     let touched: Vec<Vec<u8>> = touched
         .into_iter()
@@ -1540,8 +1546,7 @@ fn apply_operation_reset(repo: &Repository, reset: OperationReset) -> Result<(),
     }
     let mut index = repo.index()?;
     index.read(true)?;
-    index.read_tree(&head_tree)?;
-    index.write()?;
+    crate::index_marks::reset_index_to_tree(&mut index, &head_tree, &skip_worktree)?;
     Ok(())
 }
 

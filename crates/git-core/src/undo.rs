@@ -585,8 +585,8 @@ pub fn restore(
     }
     if index_differs {
         let mut index = repo.index()?;
-        index.read_tree(&repo.find_tree(Oid::from_str(&target.index_tree)?)?)?;
-        index.write()?;
+        let tree = repo.find_tree(Oid::from_str(&target.index_tree)?)?;
+        crate::index_marks::reset_index_to_tree(&mut index, &tree, &[])?;
     }
     if let Some(change) = &worktree {
         change.checkout_from_index(repo)?;

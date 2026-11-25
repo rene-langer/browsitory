@@ -625,7 +625,7 @@ fn step(
         return Ok(StepResult::Conflicted(conflicted_paths(&index)?));
     }
 
-    let tree_id = index.write_tree()?;
+    let tree_id = crate::index_marks::committed_tree(repo, &mut index)?;
     if tree_id == head.tree_id() {
         clear_state(repo)?;
         return Ok(StepResult::Empty);
@@ -1142,7 +1142,7 @@ fn finish_paused(
         return Err(PickError::HeadMoved);
     }
     let current = state.commits[state.next].clone();
-    let tree_id = index.write_tree()?;
+    let tree_id = crate::index_marks::committed_tree(repo, &mut index)?;
     // Before any hook: an empty resolution is skipped, as git's `--continue` would refuse it.
     if tree_id == head.tree_id() {
         clear_state(repo)?;
@@ -1188,14 +1188,14 @@ fn finish_paused(
         index.read(true)?;
         // A `pre-commit` that put the step back to HEAD's tree emptied it: skip it like an empty
         // resolution rather than commit nothing.
-        if index.write_tree()? == head.tree_id() {
+        if crate::index_marks::committed_tree(repo, &mut index)? == head.tree_id() {
             clear_state(repo)?;
             state.skipped.push(current);
             state.next += 1;
             return Ok(Paused::Done);
         }
     }
-    let tree = repo.find_tree(index.write_tree()?)?;
+    let tree = repo.find_tree(crate::index_marks::committed_tree(repo, &mut index)?)?;
     crate::commit::create_commit_reporting(
         repo,
         hooks,
@@ -1614,12 +1614,13 @@ fn set_case_pair_entries(
     }
     let mut index = repo.index()?;
     index.read(true)?;
+    let skip_worktree = crate::index_marks::skip_worktree_paths(&index);
     let kept: Vec<git2::IndexEntry> = index
         .iter()
         .filter(|entry| !pairs.covers(&entry.path))
         .collect();
     let wanted: std::collections::HashSet<(Vec<u8>, u16)> = kept.iter().map(key).collect();
-    index.read_tree(tree)?;
+    crate::index_marks::read_tree_marking(&mut index, tree, &skip_worktree)?;
     let stale: Vec<(Vec<u8>, u16)> = index
         .iter()
         .filter(|entry| !pairs.covers(&entry.path))

@@ -172,7 +172,7 @@ fn local_changes_message(paths: &[String]) -> String {
 /// path. Untracked and ignored files are not counted (git doesn't either; onto's checkout
 /// refuses an untracked file in its way). Submodule changes are ignored, as `git rebase`
 /// ignores them. A skip-worktree file counts when it exists and its content differs from the
-/// index ([`edited_skip_worktree`]); libgit2's status hides that edit but would report a
+/// index ([`crate::index_marks::edited_skip_worktree`]); libgit2's status hides that edit but would report a
 /// sparse checkout's missing file, which git (and a forced checkout, which recreates it) don't
 /// mind.
 fn local_changes(repo: &Repository) -> Result<Vec<String>, RebaseError> {
@@ -192,7 +192,7 @@ fn local_changes(repo: &Repository) -> Result<Vec<String>, RebaseError> {
         | git2::Status::WT_DELETED
         | git2::Status::WT_TYPECHANGE
         | git2::Status::WT_RENAMED;
-    let (skip_worktree, mut paths) = edited_skip_worktree(repo)?;
+    let (skip_worktree, mut paths) = crate::index_marks::edited_skip_worktree::<RebaseError>(repo)?;
     paths.extend(
         repo.statuses(Some(&mut options))?
             .iter()
@@ -210,59 +210,6 @@ fn local_changes(repo: &Repository) -> Result<Vec<String>, RebaseError> {
     paths.sort();
     paths.dedup();
     Ok(paths)
-}
-
-/// Every skip-worktree path in the index, and those whose file exists with content (after
-/// git's filters, e.g. `core.autocrlf`) other than the index's blob (#170). A file read through
-/// a symlinked folder, or that can't be read, counts as edited.
-fn edited_skip_worktree(
-    repo: &Repository,
-) -> Result<(std::collections::HashSet<Vec<u8>>, Vec<String>), RebaseError> {
-    let mut all = std::collections::HashSet::new();
-    let mut edited = Vec::new();
-    let Some(workdir) = repo.workdir() else {
-        return Ok((all, edited));
-    };
-    let mut index = repo.index()?;
-    index.read(false)?;
-    let skip = git2::IndexEntryExtendedFlag::SKIP_WORKTREE.bits();
-    let entries: Vec<_> = index
-        .iter()
-        .filter(|entry| entry.flags_extended & skip != 0)
-        .collect();
-    if entries.is_empty() {
-        return Ok((all, edited));
-    }
-    let config = crate::undo::worktree_config(repo)
-        .map_err(|error| git2::Error::from_str(&error.to_string()))?;
-    for entry in entries {
-        all.insert(entry.path.clone());
-        if entry.mode == 0o160000 {
-            continue;
-        }
-        let path = String::from_utf8_lossy(&entry.path).into_owned();
-        let changed =
-            match crate::undo::read_worktree_file(workdir, &path, &config, Some(entry.mode)) {
-                Ok(None) => false,
-                Ok(Some((bytes, mode))) => {
-                    let raw = git2::Oid::hash_object(git2::ObjectType::Blob, &bytes)?;
-                    if raw == entry.id {
-                        false
-                    } else if mode == crate::undo::MODE_LINK {
-                        true
-                    } else {
-                        // Apply git's filters as status would (`core.autocrlf`, attributes); this
-                        // writes a loose object, only when the raw bytes differ.
-                        crate::undo::filtered_blob::<RebaseError>(repo, &path, &bytes)? != entry.id
-                    }
-                }
-                Err(_) => true,
-            };
-        if changed {
-            edited.push(path);
-        }
-    }
-    Ok((all, edited))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -685,7 +632,7 @@ pub fn rebase_commit_part(
     if index.has_conflicts() {
         return Err(RebaseError::OperationInProgress);
     }
-    let tree = repo.find_tree(index.write_tree()?)?;
+    let tree = repo.find_tree(crate::index_marks::committed_tree(repo, &mut index)?)?;
     let parent = repo.head()?.peel_to_commit()?;
     if tree.id() == parent.tree_id() {
         return Err(RebaseError::NothingStagedForPart);
@@ -778,7 +725,7 @@ fn land_or_close_split(
     if editing_entry(state).is_some() {
         let mut index = repo.index()?;
         index.read(false)?;
-        let staged = index.write_tree()?;
+        let staged = crate::index_marks::committed_tree(repo, &mut index)?;
         if staged == repo.head()?.peel_to_commit()?.tree_id() {
             return after_landed(repo, state, hooks);
         }
@@ -1198,7 +1145,7 @@ fn land_current_step(
     // Re-read the index from disk: a terminal `git add` during the pause must be seen.
     let mut index = repo.index()?;
     index.read(false)?;
-    let tree_id = index.write_tree()?;
+    let tree_id = crate::index_marks::committed_tree(repo, &mut index)?;
     let tree = repo.find_tree(tree_id)?;
     let parent = repo.head()?.peel_to_commit()?;
     let committer = repo.signature()?;
@@ -1453,7 +1400,12 @@ fn restore_original_branch(
     if pairs.is_empty() {
         check_out_original(repo, &tree, &original_tree, None)?;
     } else {
-        let others = paths_except(repo, &tree, &pairs)?;
+        let skip_worktree = {
+            let mut index = repo.index()?;
+            index.read(false)?;
+            crate::index_marks::skip_worktree_paths(&index)
+        };
+        let others = crate::index_marks::paths_except(repo, &tree, |path| pairs.contains(path))?;
         // No paths would mean the whole tree.
         if !others.is_empty() {
             check_out_original(repo, &tree, &original_tree, Some(&others))?;
@@ -1463,34 +1415,11 @@ fn restore_original_branch(
         // conflict on them) go too.
         let mut index = repo.index()?;
         index.read(true)?;
-        index.read_tree(&tree)?;
-        index.write()?;
+        crate::index_marks::reset_index_to_tree(&mut index, &tree, &skip_worktree)?;
     }
     repo.set_head(branch_ref)?;
     crate::commit::clear_operation_files(repo)?;
     Ok(())
-}
-
-/// Every path of `tree`, HEAD's tree and the index (any stage), except those in `except`.
-fn paths_except(
-    repo: &Repository,
-    tree: &git2::Tree,
-    except: &crate::worktree_guard::CasePairs,
-) -> Result<Vec<Vec<u8>>, RebaseError> {
-    let head_tree = repo.head().and_then(|head| head.peel_to_tree()).ok();
-    let mut paths = std::collections::BTreeSet::new();
-    for tree in std::iter::once(tree).chain(head_tree.as_ref()) {
-        let mut flat = git2::Index::new()?;
-        flat.read_tree(tree)?;
-        paths.extend(flat.iter().map(|entry| entry.path));
-    }
-    let mut index = repo.index()?;
-    index.read(false)?;
-    paths.extend(index.iter().map(|entry| entry.path));
-    Ok(paths
-        .into_iter()
-        .filter(|path| !except.contains(path))
-        .collect())
 }
 
 /// `restore_original_branch`'s forced checkout of `tree`, limited to the literal `paths` when
