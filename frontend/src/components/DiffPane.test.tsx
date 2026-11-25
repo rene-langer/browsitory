@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_DIFF_OPTIONS, RepoError, WHOLE_FILE_CONTEXT_LINES, WHOLE_FILE_LINE_LIMIT } from "../ipc/RepoClient";
-import type { BlameLine, ConflictSegment, DiffAlgorithm, DiffHunk, DiffOptions, RepoClient, StatusEntry } from "../ipc/RepoClient";
+import type { ConflictSegment, DiffAlgorithm, DiffHunk, DiffOptions, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { useState, type ReactNode } from "react";
 import { DiffSettingsContext } from "../state/useDiffSettings";
 import { CommitMessageSettingsContext } from "../state/useCommitMessageSettings";
@@ -17,6 +17,7 @@ import { describedByText } from "../test/describedBy";
 import { chooseCommitMenuItem, commitMenuItems } from "../test/commitMenu";
 import { chooseViewOption } from "../test/viewMenu";
 import { FILE_EXPAND_LIMIT, FILE_SECTION_STEP } from "../lib/largeDiff";
+import { blameOf, NO_BLAME } from "../test/blame";
 
 const TEST_REPO_PATH = "/repo";
 
@@ -1066,9 +1067,9 @@ describe("DiffPane", () => {
     });
 
     it("puts Back to diff in the viewer's header while blame shows, once (#986)", async () => {
-      const blameLines: BlameLine[] = [
+      const blameLines = blameOf([
         { lineNumber: 1, content: "hello", commitId: "abc123", shortId: "abc1234", authorName: "Rene", timestamp: 1 },
-      ];
+      ]);
       renderUncommitted(fakeClient({ getBlame: vi.fn(async () => blameLines), getWorkingDiff: async () => [] }), status);
 
       fireEvent.click(screen.getAllByText("Blame")[0]);
@@ -1082,9 +1083,9 @@ describe("DiffPane", () => {
     });
 
     it("clicking Blame fetches and renders blame for that file", async () => {
-      const blameLines: BlameLine[] = [
+      const blameLines = blameOf([
         { lineNumber: 1, content: "hello", commitId: "abc123", shortId: "abc1234", authorName: "Rene", timestamp: 1 },
-      ];
+      ]);
       const getBlame = vi.fn(async () => blameLines);
       renderUncommitted(fakeClient({ getBlame, getWorkingDiff: async () => [] }), status);
 
@@ -1095,9 +1096,9 @@ describe("DiffPane", () => {
     });
 
     it("clicking a blame line's commit id calls onSelectRow with that commit", async () => {
-      const blameLines: BlameLine[] = [
+      const blameLines = blameOf([
         { lineNumber: 1, content: "hello", commitId: "abc123", shortId: "abc1234", authorName: "Rene", timestamp: 1 },
-      ];
+      ]);
       const getBlame = vi.fn(async () => blameLines);
       const onSelectRow = vi.fn();
       renderUncommitted(fakeClient({ getBlame, getWorkingDiff: async () => [] }), status, { onSelectRow });
@@ -1146,7 +1147,7 @@ describe("DiffPane", () => {
       const getBlame = vi
         .fn<RepoClient["getBlame"]>()
         .mockRejectedValueOnce(new Error("git operation failed: no such revision"))
-        .mockResolvedValueOnce([]);
+        .mockResolvedValueOnce(NO_BLAME);
       renderUncommitted(fakeClient({ getBlame, getWorkingDiff: async () => [] }), status);
 
       fireEvent.click(screen.getAllByText("Blame")[0]);
@@ -1160,9 +1161,9 @@ describe("DiffPane", () => {
     });
 
     it("Back to diff switches that section back to the diff view", async () => {
-      const blameLines: BlameLine[] = [
+      const blameLines = blameOf([
         { lineNumber: 1, content: "hello", commitId: "abc123", shortId: "abc1234", authorName: "Rene", timestamp: 1 },
-      ];
+      ]);
       const getBlame = vi.fn(async () => blameLines);
       const getWorkingDiff = vi.fn(async () => []);
       renderUncommitted(fakeClient({ getBlame, getWorkingDiff }), status);
@@ -1666,9 +1667,9 @@ describe("DiffPane", () => {
     });
 
     it("clicking Blame fetches and renders blame for that commit's file", async () => {
-      const blameLines: BlameLine[] = [
+      const blameLines = blameOf([
         { lineNumber: 1, content: "fn main() {}", commitId: "abc123", shortId: "abc1234", authorName: "Rene", timestamp: 1 },
-      ];
+      ]);
       const getBlame = vi.fn(async () => blameLines);
       renderCommit(fakeClient({ getCommitFiles, getCommitDiff, getBlame }), "abc123");
 
@@ -1680,9 +1681,9 @@ describe("DiffPane", () => {
     });
 
     it("clicking a blame line's commit id calls onSelectRow with that commit", async () => {
-      const blameLines: BlameLine[] = [
+      const blameLines = blameOf([
         { lineNumber: 1, content: "fn main() {}", commitId: "abc123", shortId: "abc1234", authorName: "Rene", timestamp: 1 },
-      ];
+      ]);
       const getBlame = vi.fn(async () => blameLines);
       const onSelectRow = vi.fn();
       renderCommit(fakeClient({ getCommitFiles, getCommitDiff, getBlame }), "abc123", { onSelectRow });
@@ -2427,7 +2428,7 @@ describe("DiffPane stash view", () => {
     const client = fakeClient({
       getStashFiles: vi.fn(async () => files),
       getCommitDiff,
-      getBlame: async () => [],
+      getBlame: async () => NO_BLAME,
     });
     renderCommit(client, "s0", { stashes: [stash], stashActions: actions });
     return { getCommitDiff, client, actions };
@@ -2523,7 +2524,7 @@ describe("DiffPane stash view", () => {
     const client = fakeClient({
       getStashFiles: vi.fn(async () => ({ tracked: ["a.txt"], untracked: [], untrackedCommitId: null })),
       getCommitDiff: vi.fn(async () => []),
-      getBlame: async () => [],
+      getBlame: async () => NO_BLAME,
     });
     renderCommit(client, "s0", { stashes: [staged], stashActions: actions });
     const view = await screen.findByRole("region", { name: "Stash details" });
@@ -2553,7 +2554,7 @@ describe("DiffPane stash view", () => {
     const client = fakeClient({
       getStashFiles: vi.fn(async () => ({ tracked: ["a.txt"], untracked: [], untrackedCommitId: null })),
       getCommitDiff: vi.fn(async () => []),
-      getBlame: async () => [],
+      getBlame: async () => NO_BLAME,
     });
     const actions = stashActions();
     const props = (current: StashActions) => ({
@@ -2589,7 +2590,7 @@ describe("DiffPane stash view", () => {
     const client = fakeClient({
       getStashFiles: vi.fn(async () => ({ tracked: ["a.txt"], untracked: [], untrackedCommitId: null })),
       getCommitDiff: vi.fn(async () => []),
-      getBlame: async () => [],
+      getBlame: async () => NO_BLAME,
     });
     const actions = stashActions();
     const props = (current: StashActions) => ({
@@ -2721,7 +2722,7 @@ describe("DiffPane external tools", () => {
     const client = fakeClient({
       getStashFiles: vi.fn(async () => ({ tracked: ["a.txt"], untracked: ["new.txt"], untrackedCommitId: "u1" })),
       getCommitDiff: vi.fn(async () => []),
-      getBlame: async () => [],
+      getBlame: async () => NO_BLAME,
     });
     renderCommit(client, "s0", {
       stashes: [stash],
@@ -2947,7 +2948,7 @@ describe("DiffPane image preview", () => {
         getFileSides,
         getStashFiles: vi.fn(async () => ({ tracked: ["logo.png"], untracked: [], untrackedCommitId: null })),
         getCommitDiff: vi.fn(async () => []),
-        getBlame: async () => [],
+        getBlame: async () => NO_BLAME,
       }),
       "s0",
       {

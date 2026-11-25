@@ -7,13 +7,14 @@ import { ReadOnlyFileSection } from "./ReadOnlyFileSection";
 import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
 import { DiffViewOptionsProvider } from "../state/DiffViewOptionsProvider";
 import { fakeRepoClient } from "../test/fakeRepoClient";
+import { blameOf, NO_BLAME } from "../test/blame";
 import { UserCommandsContext } from "../state/userCommandsContext";
 import { chooseViewOption, viewOptionState } from "../test/viewMenu";
 
 function renderSection(overrides: Partial<Parameters<typeof ReadOnlyFileSection>[0]> = {}) {
   const props: Parameters<typeof ReadOnlyFileSection>[0] = {
     repoPath: "/repo",
-    client: fakeRepoClient({ getBlame: vi.fn(async () => []) }),
+    client: fakeRepoClient({ getBlame: vi.fn(async () => NO_BLAME) }),
     path: "a.txt",
     diffKey: "k1",
     fetchDiff: vi.fn(async () => []),
@@ -44,7 +45,7 @@ describe("ReadOnlyFileSection", () => {
         <DiffOptionsToolbar />
         <ReadOnlyFileSection
           repoPath="/repo"
-          client={fakeRepoClient({ getBlame: vi.fn(async () => []) })}
+          client={fakeRepoClient({ getBlame: vi.fn(async () => NO_BLAME) })}
           path="a.txt"
           diffKey="k1"
           fetchDiff={fetchDiff}
@@ -117,7 +118,7 @@ describe("ReadOnlyFileSection", () => {
       <UserCommandsContext.Provider value={{ commands: [lint], run }}>
         <ReadOnlyFileSection
           repoPath="/repo"
-          client={fakeRepoClient({ getBlame: vi.fn(async () => []) })}
+          client={fakeRepoClient({ getBlame: vi.fn(async () => NO_BLAME) })}
           path="a.txt"
           diffKey="k1"
           fetchDiff={vi.fn(async () => [])}
@@ -150,7 +151,7 @@ describe("ReadOnlyFileSection", () => {
       <DiffSettingsContext.Provider value={{ settings, update: vi.fn(), error: null, dismissError: vi.fn() }}>
         <ReadOnlyFileSection
           repoPath="/repo"
-          client={fakeRepoClient({ getBlame: vi.fn(async () => []) })}
+          client={fakeRepoClient({ getBlame: vi.fn(async () => NO_BLAME) })}
           path="a.txt"
           diffKey="k1"
           fetchDiff={fetchDiff}
@@ -189,16 +190,16 @@ describe("ReadOnlyFileSection", () => {
   });
 
   it("blames at blameAt", async () => {
-    const getBlame = vi.fn(async () => []);
+    const getBlame = vi.fn(async () => NO_BLAME);
     renderSection({ client: fakeRepoClient({ getBlame }), blameAt: "HEAD" });
     fireEvent.click(screen.getByRole("button", { name: "Blame" }));
     await waitFor(() => expect(getBlame).toHaveBeenCalledWith("/repo", "HEAD", "a.txt"));
   });
 
   it("puts Back to diff in the file header while blame shows, once (#986)", async () => {
-    const getBlame = vi.fn(async () => [
-      { lineNumber: 1, content: "x", commitId: "c1", shortId: "c111111", authorName: "A", timestamp: 1 },
-    ]);
+    const getBlame = vi.fn(async () =>
+      blameOf([{ lineNumber: 1, content: "x", commitId: "c1", shortId: "c111111", authorName: "A", timestamp: 1 }]),
+    );
     const { props } = renderSection({ client: fakeRepoClient({ getBlame }) });
     fireEvent.click(screen.getByRole("button", { name: "Blame" }));
     const table = (await screen.findByText("c111111")).closest("table")!;
@@ -278,14 +279,16 @@ describe("ReadOnlyFileSection", () => {
 
     it("opens the history of lines selected in the blame view", async () => {
       const onOpenLineHistory = vi.fn();
-      const blame = [1, 2, 3].map((n) => ({
-        lineNumber: n,
-        content: `line ${n}`,
-        commitId: "c",
-        shortId: "c",
-        authorName: "A",
-        timestamp: 0,
-      }));
+      const blame = blameOf(
+        [1, 2, 3].map((n) => ({
+          lineNumber: n,
+          content: `line ${n}`,
+          commitId: "c",
+          shortId: "c",
+          authorName: "A",
+          timestamp: 0,
+        })),
+      );
       renderSection({ client: fakeRepoClient({ getBlame: vi.fn(async () => blame) }), onOpenLineHistory });
       fireEvent.click(screen.getByRole("button", { name: "Blame" }));
       await screen.findByText("line 3");

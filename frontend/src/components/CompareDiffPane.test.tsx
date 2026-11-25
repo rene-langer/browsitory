@@ -7,6 +7,7 @@ import type { ExternalToolsApi } from "../state/useExternalTools";
 import { CompareDiffPane } from "./CompareDiffPane";
 import { fakeRepoClient } from "../test/fakeRepoClient";
 import { FILE_SECTION_STEP } from "../lib/largeDiff";
+import { NO_BLAME } from "../test/blame";
 
 const A = "a".repeat(40);
 const B = "b".repeat(40);
@@ -31,7 +32,7 @@ function client(overrides: Partial<RepoClient> = {}): RepoClient {
     getRangeDiff: vi.fn(async () => []),
     getWorkingTreeCompareFiles: vi.fn(async (): Promise<ChangedFile[]> => []),
     getWorkingTreeCompareDiff: vi.fn(async () => []),
-    getBlame: vi.fn(async () => []),
+    getBlame: vi.fn(async () => NO_BLAME),
     ...overrides,
   });
 }
@@ -150,7 +151,7 @@ describe("CompareDiffPane", () => {
 
   it("a working-tree compare reloads on refresh and blames at HEAD", async () => {
     const getWorkingTreeCompareFiles = vi.fn(async () => [{ path: "a.txt", oldPath: null }]);
-    const getBlame = vi.fn(async () => []);
+    const getBlame = vi.fn(async () => NO_BLAME);
     const c = client({ getWorkingTreeCompareFiles, getBlame });
     const compare: CompareState = { target: { kind: "workingTree", commitId: A }, range: { fromId: A, toId: null }, error: null };
     const { rerender, props } = renderPane({ client: c, compare });

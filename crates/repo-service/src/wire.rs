@@ -537,28 +537,41 @@ impl From<git_core::stash::StashEntry> for StashEntryDto {
     }
 }
 
+/// A file's blame (#839, #1158): each commit once, in `commits`, and each line's text with its
+/// commit's index there; `lines[i]` is the file's line `i + 1`.
 #[derive(Serialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
-#[cfg_attr(any(test, feature = "ts"), ts(rename = "BlameLine"))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "Blame"))]
+pub struct BlameDto {
+    pub commits: Vec<BlameCommitDto>,
+    pub lines: Vec<BlameLineDto>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "BlameCommit"))]
 #[serde(rename_all = "camelCase")]
-pub struct BlameLineDto {
-    pub line_number: usize,
-    pub content: String,
+pub struct BlameCommitDto {
     pub commit_id: String,
     pub short_id: String,
     pub author_name: String,
-    pub timestamp: i64,
+    pub timestamp: i64, // Unix seconds, UTC
 }
 
-impl From<git_core::blame::BlameLine> for BlameLineDto {
-    fn from(l: git_core::blame::BlameLine) -> Self {
-        BlameLineDto {
-            line_number: l.line_number,
-            content: l.content,
-            commit_id: l.commit_id,
-            short_id: l.short_id,
-            author_name: l.author_name,
-            timestamp: l.timestamp,
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "BlameLine"))]
+pub struct BlameLineDto {
+    pub content: String,
+    /// The line's commit: its index in `BlameDto::commits`.
+    pub commit: usize,
+}
+
+impl From<Vec<git_core::blame::BlameLine>> for BlameDto {
+    fn from(_lines: Vec<git_core::blame::BlameLine>) -> Self {
+        BlameDto {
+            commits: Vec::new(),
+            lines: Vec::new(),
         }
     }
 }
@@ -4045,6 +4058,8 @@ mod ts_bindings {
             PullStrategyDto,
             StashSwitchOutcomeDto,
             StashEntryDto,
+            BlameDto,
+            BlameCommitDto,
             BlameLineDto,
             GraphCommitDto,
             FileHistoryEntryDto,

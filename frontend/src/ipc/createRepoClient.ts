@@ -36,7 +36,7 @@ import type {
   MergeToolOutcome,
   CommitOutcome,
   CommitSignature,
-  BlameLine,
+  Blame,
   BranchInfo,
   ConflictSegment,
   CreatePullRequest,
@@ -388,7 +388,7 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
     dropStash: (repoPath: string, index: number, commitId: string) =>
       call<void>("drop_stash", { repoPath, index, commitId }),
     getBlame: (repoPath: string, commitId: string, path: string) =>
-      call<BlameLine[]>("get_blame", { repoPath, commitId, path }),
+      call<Blame>("get_blame", { repoPath, commitId, path }),
     mergeBranch: (repoPath: string, branchName: string, options: MergeOptions) =>
       call<MergeOutcome>("start_merge", { repoPath, branchName, options }),
     getMergeOptions: (repoPath: string) => call<MergeOptions>("get_merge_options", { repoPath }),

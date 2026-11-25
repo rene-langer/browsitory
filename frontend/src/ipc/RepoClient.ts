@@ -973,13 +973,27 @@ export interface SearchPage {
   scanned: number;
 }
 
-export interface BlameLine {
-  lineNumber: number;
-  content: string;
+/**
+ * A file's blame (#839, #1158): each commit once, in `commits`, and each line's text with its
+ * commit's index there. `lines[i]` is the file's line `i + 1`.
+ */
+export interface Blame {
+  commits: BlameCommit[];
+  lines: BlameLine[];
+}
+
+export interface BlameCommit {
   commitId: string;
   shortId: string;
   authorName: string;
+  /** Unix seconds. */
   timestamp: number;
+}
+
+export interface BlameLine {
+  content: string;
+  /** Its commit's index in `Blame.commits`. */
+  commit: number;
 }
 
 export type MergeOutcome =
@@ -1714,7 +1728,8 @@ export interface RepoClient {
   /** Files of the stash whose commit is `commitId`; rejects for an id that is not a stash. */
   getStashFiles(repoPath: string, commitId: string): Promise<StashFiles>;
   dropStash(repoPath: string, index: number, commitId: string): Promise<void>;
-  getBlame(repoPath: string, commitId: string, path: string): Promise<BlameLine[]>;
+  /** Rejects with kind `BlameUnavailable` for a file over the size limit or a binary file. */
+  getBlame(repoPath: string, commitId: string, path: string): Promise<Blame>;
   /** Merges a local branch name, or a full ref (`refs/remotes/...`), into the current branch. */
   mergeBranch(repoPath: string, branchName: string, options: MergeOptions): Promise<MergeOutcome>;
   /** The merge dialog's preselection: the choice remembered for this repo, else `merge.ff`. */

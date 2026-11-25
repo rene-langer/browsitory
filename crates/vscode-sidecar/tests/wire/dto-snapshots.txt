@@ -243,7 +243,8 @@ PullStrategy/Rebase "Rebase"
 PullStrategy/FastForwardOnly "FastForwardOnly"
 StashFiles/with-untracked {"tracked":["a.txt"],"untracked":["new.txt"],"untrackedCommitId":"1616161616161616161616161616161616161616"}
 StashFiles/tracked-only {"tracked":["a.txt"],"untracked":[],"untrackedCommitId":null}
-BlameLine/plain {"authorName":"Ada Lovelace","commitId":"1717171717171717171717171717171717171717","content":"fn main() {}\n","lineNumber":1,"shortId":"1717171","timestamp":1700000300}
+Blame/empty {"commits":[],"lines":[]}
+Blame/twoCommits {"commits":[{"authorName":"Ada Lovelace","commitId":"1111111111111111111111111111111111111111","shortId":"1111111","timestamp":1700000300},{"authorName":"Grace Hopper","commitId":"2222222222222222222222222222222222222222","shortId":"2222222","timestamp":1700000400}],"lines":[{"commit":0,"content":"fn main() {"},{"commit":1,"content":"    run();"},{"commit":0,"content":"}"}]}
 MergeOutcome/UpToDate {"kind":"UpToDate"}
 MergeOutcome/FastForwarded {"kind":"FastForwarded"}
 MergeOutcome/Merged {"kind":"Merged"}
