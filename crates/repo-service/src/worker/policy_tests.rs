@@ -1218,6 +1218,92 @@ fn a_stored_operation_refuses_by_gate_and_scope() {
     assert_eq!(gate(stash, &detached), None);
 }
 
+/// #1147: which commands that destroy work-tree content change nothing but the work tree (so a
+/// paused operation or a conflicted index records them as work-tree entries) and which change
+/// more (refused then).
+#[test]
+fn discards_that_change_only_the_work_tree() {
+    let s = |text: &str| text.to_string();
+    let op = || "op-1".into();
+    let change = |stage: bool| super::CommitChange {
+        commit_id: s(ONTO),
+        path: s("a.txt"),
+        old_path: None,
+        hunk: None,
+        reverse: true,
+        stage,
+    };
+    let apply = |how| {
+        cmd!(ApplyPatch {
+            content: vec![],
+            how: how,
+            operation_id: op(),
+            events: channel().0
+        })
+    };
+    let rows = vec![
+        (
+            cmd!(DiscardHunk {
+                path: s("a.txt"),
+                old_start: 1,
+                new_start: 1,
+                hunk: HUNK
+            }),
+            true,
+        ),
+        (
+            cmd!(DiscardLines {
+                path: s("a.txt"),
+                old_start: 1,
+                new_start: 1,
+                hunk: HUNK,
+                line_indices: vec![],
+                expected_lines: vec![]
+            }),
+            true,
+        ),
+        (cmd!(DiscardFile { path: s("a.txt") }), true),
+        (cmd!(DiscardAllUnstaged { paths: vec![] }), true),
+        (
+            cmd!(RestoreFileVersion {
+                commit_id: s(ONTO),
+                path: s("a.txt")
+            }),
+            true,
+        ),
+        (
+            cmd!(ApplyCommitChange {
+                change: change(false)
+            }),
+            true,
+        ),
+        (
+            cmd!(ApplyCommitChange {
+                change: change(true)
+            }),
+            false,
+        ),
+        (apply(git_core::patch::PatchApply::WorkTree), true),
+        (apply(git_core::patch::PatchApply::Stage), false),
+        (apply(git_core::patch::PatchApply::Commits), false),
+        (
+            cmd!(ResetToCommit {
+                commit_id: s(ONTO),
+                mode: ResetMode::Hard
+            }),
+            false,
+        ),
+    ];
+    for ((name, command), expected) in rows {
+        let discard = policy::of(&command).undo.and_then(|plan| plan.discard);
+        assert_eq!(
+            discard.map(|discard| discard.worktree_only),
+            Some(expected),
+            "{name}"
+        );
+    }
+}
+
 /// A command's discard plan's paths: `None` without a plan, `Some(None)` for every file.
 type Whole = Option<Option<Vec<&'static str>>>;
 

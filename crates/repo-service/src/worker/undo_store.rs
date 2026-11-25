@@ -56,7 +56,9 @@ enum StoredHead {
 struct StoredSnapshot {
     head: StoredHead,
     refs: BTreeMap<String, String>,
-    index_tree: String,
+    /// Absent for a work-tree entry's snapshot (#1147), which records no index.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    index_tree: Option<String>,
     /// The index's intent-to-add paths (#1174); absent when there are none.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     intent_to_add: BTreeSet<String>,
@@ -327,11 +329,9 @@ impl UndoStore {
         let mut builder = repo.treebuilder(None)?;
         let mut referenced: BTreeSet<Oid> = BTreeSet::new();
         for (name, snapshot) in snapshots {
-            builder.insert(
-                format!("{name}-index"),
-                Oid::from_str(&snapshot.index_tree)?,
-                0o040000,
-            )?;
+            if let Some(tree) = &snapshot.index_tree {
+                builder.insert(format!("{name}-index"), Oid::from_str(tree)?, 0o040000)?;
+            }
             if let Some(tree) = &snapshot.worktree_tree {
                 builder.insert(format!("{name}-worktree"), Oid::from_str(tree)?, 0o040000)?;
             }
@@ -636,6 +636,28 @@ mod tests {
             .is_none());
     }
 
+    /// #1147: a work-tree entry's snapshots record no index: saved without `indexTree`, reloaded
+    /// as such, and its work-tree trees still pinned.
+    #[test]
+    fn saves_and_reloads_a_work_tree_entry() {
+        let (dir, repo) = repo_with_commit();
+        std::fs::write(dir.path().join("a.txt"), "edited\n").unwrap();
+        let snapshot = git_core::undo::capture_worktree(&repo, None).unwrap();
+        assert_eq!(snapshot.index_tree, None);
+        let (mut store, mut stacks) = UndoStore::open(&repo);
+        stacks.undo.push(UndoEntry {
+            label: "Discard changes to a.txt".into(),
+            before: snapshot.clone(),
+            after: snapshot,
+        });
+        store.save(&repo, &stacks).unwrap();
+
+        let json = undo_json(&repo);
+        assert!(json["undo"][0]["before"].get("indexTree").is_none());
+        let (_, reloaded) = UndoStore::open(&repo);
+        assert_eq!(reloaded.undo, stacks.undo);
+    }
+
     /// #1151: a snapshot's branch settings are saved and reloaded, in order; none, no key.
     #[test]
     fn saves_and_reloads_branch_settings() {
@@ -890,7 +912,7 @@ mod tests {
         std::fs::write(dir.path().join("untracked.txt"), "only in the worktree\n").unwrap();
         let snapshot = capture(&repo, SnapshotScope::Full).unwrap();
         let head_tree = repo.head().unwrap().peel_to_commit().unwrap().tree_id();
-        let index_tree = Oid::from_str(&snapshot.index_tree).unwrap();
+        let index_tree = Oid::from_str(snapshot.index_tree.as_ref().unwrap()).unwrap();
         let worktree_tree = Oid::from_str(snapshot.worktree_tree.as_ref().unwrap()).unwrap();
         assert_ne!(index_tree, head_tree);
         let blob = repo
@@ -1059,7 +1081,7 @@ mod tests {
         index.write().unwrap();
         std::fs::write(dir.path().join("untracked.txt"), "only in the worktree\n").unwrap();
         let before = pending(&repo, "Merge feature");
-        let index_tree = Oid::from_str(&before.before.index_tree).unwrap();
+        let index_tree = Oid::from_str(before.before.index_tree.as_ref().unwrap()).unwrap();
         let worktree_tree = Oid::from_str(before.before.worktree_tree.as_ref().unwrap()).unwrap();
         let (mut store, mut stacks) = UndoStore::open(&repo);
         stacks.pending = Some(before);

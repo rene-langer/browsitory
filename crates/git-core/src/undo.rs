@@ -33,7 +33,8 @@ pub struct RepoSnapshot {
     pub head: HeadState,
     /// `refs/heads/*` and `refs/tags/*` -> oid.
     pub refs: BTreeMap<String, String>,
-    pub index_tree: String,
+    /// `None` for a work-tree snapshot (#1147, [`capture_worktree`]): no index recorded.
+    pub index_tree: Option<String>,
     /// The index's intent-to-add paths (`git add -N`, #1174): `index_tree` holds them as empty
     /// files, and `restore` puts the mark back.
     pub intent_to_add: BTreeSet<String>,
@@ -181,6 +182,30 @@ pub fn capture_keeping(repo: &Repository, whole: &[String]) -> Result<RepoSnapsh
     capture_with(repo, Some(limits))
 }
 
+/// A work-tree snapshot (#1147): HEAD, refs and the work tree as `FullUncapped` takes them
+/// (narrowed to `whole` as [`capture_keeping`] does, when given), and no index, so an index with
+/// conflicts doesn't stop it. Restored with [`restore_worktree`].
+pub fn capture_worktree(
+    repo: &Repository,
+    whole: Option<&[String]>,
+) -> Result<RepoSnapshot, UndoError> {
+    match whole {
+        Some(whole) => capture_keeping(repo, whole),
+        None => capture(repo, SnapshotScope::FullUncapped),
+    }
+}
+
+/// Restores the work-tree files of `target` over `expected`, two work-tree snapshots (#1147),
+/// checking each as [`restore`] does; HEAD, refs and the index are left alone, and it runs while
+/// an operation is in progress.
+pub fn restore_worktree(
+    repo: &Repository,
+    expected: &RepoSnapshot,
+    target: &RepoSnapshot,
+) -> Result<(), UndoError> {
+    restore(repo, expected, target, "")
+}
+
 /// [`capture_keeping`] with limits other than `SNAPSHOT_FILE_LIMIT` and
 /// `SNAPSHOT_UNTRACKED_LIMIT`: a test seam.
 #[doc(hidden)]
@@ -318,7 +343,7 @@ fn capture_with(repo: &Repository, worktree: Option<Limits>) -> Result<RepoSnaps
     Ok(RepoSnapshot {
         head: head_state(repo)?,
         refs: local_refs(repo)?,
-        index_tree,
+        index_tree: Some(index_tree),
         intent_to_add,
         branch_config: branch_settings(repo)?,
         worktree_tree,
@@ -660,8 +685,14 @@ pub fn restore(
         .into_iter()
         .filter(|name| expected.refs.get(*name) != target.refs.get(*name))
         .collect();
-    let index_differs =
-        expected.index_tree != target.index_tree || expected.intent_to_add != target.intent_to_add;
+    // The index tree to write; never when a side recorded none (a work-tree snapshot, #1147).
+    let index_target = match (&expected.index_tree, &target.index_tree) {
+        (Some(from), Some(to)) if from != to || expected.intent_to_add != target.intent_to_add => {
+            Some(to)
+        }
+        _ => None,
+    };
+    let index_differs = index_target.is_some();
     let worktree = match (&expected.worktree_tree, &target.worktree_tree) {
         (Some(from), Some(to))
             if from != to
@@ -712,7 +743,7 @@ pub fn restore(
         // intent-to-add entry is an empty file in the tree, so its mark counts too (#1174).
         let current = (index.write_tree()?.to_string(), intent_to_add(&index));
         let side = |snapshot: &RepoSnapshot| {
-            current.0 == snapshot.index_tree && current.1 == snapshot.intent_to_add
+            snapshot.index_tree.as_ref() == Some(&current.0) && current.1 == snapshot.intent_to_add
         };
         if !side(expected) && !side(target) {
             return Err(UndoError::RepositoryChanged);
@@ -736,9 +767,9 @@ pub fn restore(
     if let Some(change) = &worktree {
         change.apply(repo)?;
     }
-    if index_differs {
+    if let Some(index_tree) = index_target {
         let mut index = repo.index()?;
-        let tree = repo.find_tree(Oid::from_str(&target.index_tree)?)?;
+        let tree = repo.find_tree(Oid::from_str(index_tree)?)?;
         // The skip-worktree marks stay as they are now, as git's reset keeps them (#1145); the
         // intent-to-add ones are the target's (#1174).
         let skip_worktree = crate::index_marks::skip_worktree_paths(&index);
@@ -1005,11 +1036,25 @@ impl WorktreeChange {
         from: &str,
         to: &str,
     ) -> Result<Self, UndoError> {
-        let target_index = flatten_tree(repo, &target.index_tree)?;
-        let tracked = flatten_tree(repo, &expected.index_tree)?
+        let flatten_index = |snapshot: &RepoSnapshot| match &snapshot.index_tree {
+            Some(id) => flatten_tree(repo, id),
+            None => Ok(TreeFiles::new()),
+        };
+        let target_index = flatten_index(target)?;
+        let mut tracked: BTreeSet<String> = flatten_index(expected)?
             .into_keys()
             .chain(target_index.keys().cloned())
             .collect();
+        if expected.index_tree.is_none() || target.index_tree.is_none() {
+            // A work-tree snapshot has no index of its own (#1147): what the index tracks now.
+            let mut index = repo.index()?;
+            index.read(false)?;
+            tracked.extend(
+                index
+                    .iter()
+                    .map(|entry| String::from_utf8_lossy(&entry.path).into_owned()),
+            );
+        }
         let from = flatten_tree(repo, from)?;
         let to = flatten_tree(repo, to)?;
         let mut paths: BTreeSet<String> = from
@@ -1057,12 +1102,17 @@ impl WorktreeChange {
         // checkout of one of them can drop the other from its ignore-case index or rename its
         // entry (#403), and `prepare_forced_checkout` refuses it.
         let in_pair: BTreeSet<Vec<u8>> = if crate::worktree_guard::core_ignorecase(repo)? {
-            let index_tree = repo.find_tree(Oid::from_str(&target.index_tree)?)?;
+            let index_tree = match &target.index_tree {
+                Some(id) => Some(repo.find_tree(Oid::from_str(id)?)?),
+                None => None,
+            };
             let head_tree = repo.head().and_then(|head| head.peel_to_tree()).ok();
-            let mut sources = vec![
-                crate::worktree_guard::GuardSource::Tree(&index_tree),
-                crate::worktree_guard::GuardSource::Index(&index),
-            ];
+            let mut sources = vec![crate::worktree_guard::GuardSource::Index(&index)];
+            sources.extend(
+                index_tree
+                    .as_ref()
+                    .map(crate::worktree_guard::GuardSource::Tree),
+            );
             sources.extend(
                 head_tree
                     .as_ref()

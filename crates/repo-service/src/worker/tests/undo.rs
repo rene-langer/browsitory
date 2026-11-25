@@ -745,6 +745,166 @@ fn redo_of_a_remote_branch_checkout_keeps_the_upstream() {
     assert_eq!(upstream_of(d, "feature"), "origin/feature\n");
 }
 
+/// `conflicting_branches` plus `b.txt` ("b") committed on the current branch and then edited
+/// ("work in progress"), and a merge of `feature` stopped on its conflict in `a.txt`.
+fn paused_merge_with_work_in_b() -> (TempDir, Repository, Worker, super::super::WorkerHandle) {
+    let (dir, repo) = conflicting_branches();
+    write_file(dir.path(), "b.txt", "b\n");
+    commit_all(&repo, "add b");
+    write_file(dir.path(), "b.txt", "work in progress\n");
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    assert!(matches!(
+        handle
+            .start_merge(
+                "feature".into(),
+                git_core::merge::MergeOptions::default(),
+                no_events(),
+            )
+            .unwrap(),
+        MergeOutcome::Conflicted { .. }
+    ));
+    (dir, repo, worker, handle)
+}
+
+fn read(dir: &Path, path: &str) -> String {
+    std::fs::read_to_string(dir.join(path)).unwrap()
+}
+
+/// #1147: a discard while a merge is paused is an undo step of its own, which Undo and Redo run
+/// during the pause; the merge stays paused, and the steps before it still wait for it.
+#[test]
+fn a_discard_during_a_paused_merge_is_its_own_undo_step() {
+    let (dir, repo, _worker, handle) = paused_merge_with_work_in_b();
+    let d = dir.path();
+
+    handle.discard_file("b.txt".into()).unwrap();
+    assert_eq!(read(d, "b.txt"), "b\n");
+    assert_eq!(
+        handle.get_undo_state().unwrap().undo.as_deref(),
+        Some("Discard changes to b.txt")
+    );
+
+    let done = UndoOutcome::Done {
+        label: "Discard changes to b.txt".into(),
+    };
+    assert_eq!(handle.undo().unwrap(), done);
+    assert_eq!(read(d, "b.txt"), "work in progress\n");
+    assert_eq!(repo.state(), git2::RepositoryState::Merge);
+    assert_eq!(porcelain(d), "UU a.txt\n M b.txt\n");
+    assert_eq!(handle.undo().unwrap(), UndoOutcome::OperationInProgress);
+
+    assert_eq!(handle.redo().unwrap(), done);
+    assert_eq!(read(d, "b.txt"), "b\n");
+    assert_eq!(porcelain(d), "UU a.txt\n");
+}
+
+/// #1147: aborting the merge drops the merge's own entry but not the discard's, which still
+/// brings the file back.
+#[test]
+fn a_discard_during_a_merge_still_undoes_after_the_merge_is_aborted() {
+    let (dir, _repo, _worker, handle) = paused_merge_with_work_in_b();
+    handle.discard_file("b.txt".into()).unwrap();
+
+    handle.abort_merge().unwrap();
+
+    assert_eq!(
+        handle.undo().unwrap(),
+        UndoOutcome::Done {
+            label: "Discard changes to b.txt".into()
+        }
+    );
+    assert_eq!(read(dir.path(), "b.txt"), "work in progress\n");
+}
+
+/// `a.txt` stashed ("stashed"), then changed and committed ("other"), so popping the stash
+/// conflicts: the index has conflicts and no operation is in progress. `b.txt` ("b") committed.
+fn conflicted_stash_pop() -> (TempDir, Repository, Worker, super::super::WorkerHandle) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "base\n");
+    write_file(dir.path(), "b.txt", "b\n");
+    commit_all(&repo, "base");
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    write_file(dir.path(), "a.txt", "stashed\n");
+    handle
+        .save_stash(git_core::stash::StashOptions::default())
+        .unwrap();
+    write_file(dir.path(), "a.txt", "other\n");
+    commit_all(&repo, "other");
+    let stash = handle.list_stashes().unwrap()[0].commit_id.clone();
+    assert!(matches!(
+        handle.pop_stash(0, stash, false).unwrap(),
+        git_core::stash::StashApplyOutcome::Conflicted { .. }
+    ));
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    (dir, repo, worker, handle)
+}
+
+/// #1147: after a conflicted stash pop the index has conflicts; a discard is still recorded, and
+/// its Undo (also after a restart) brings the file back.
+#[test]
+fn a_discard_while_the_index_has_conflicts_is_recorded() {
+    let (dir, _repo, worker, handle) = conflicted_stash_pop();
+    let d = dir.path();
+    write_file(d, "b.txt", "an hour of work\n");
+
+    handle.discard_file("b.txt".into()).unwrap();
+    assert_eq!(read(d, "b.txt"), "b\n");
+    let (_worker, handle) = restart(worker, handle, d);
+
+    assert_eq!(
+        handle.undo().unwrap(),
+        UndoOutcome::Done {
+            label: "Discard changes to b.txt".into()
+        }
+    );
+    assert_eq!(read(d, "b.txt"), "an hour of work\n");
+    assert_eq!(porcelain(d), "UU a.txt\n M b.txt\n");
+}
+
+/// #1147: a hard reset can't be recorded while the index has conflicts (its index can't be
+/// brought back), so it is refused with the reason, and changes nothing.
+#[test]
+fn a_hard_reset_while_the_index_has_conflicts_is_refused() {
+    let (dir, repo, _worker, handle) = conflicted_stash_pop();
+    let d = dir.path();
+    write_file(d, "b.txt", "an hour of work\n");
+    let head = repo.head().unwrap().target().unwrap().to_string();
+
+    let result = handle.reset_to_commit(head, git_core::reset::ResetMode::Hard);
+
+    assert_eq!(
+        result,
+        Err(crate::wire::ErrorDto::from(
+            super::super::undo::DISCARD_CONFLICTED
+        ))
+    );
+    assert_eq!(read(d, "b.txt"), "an hour of work\n");
+    assert_eq!(porcelain(d), "UU a.txt\n M b.txt\n");
+    assert_eq!(handle.get_undo_state().unwrap().undo, None);
+}
+
+/// #1147: applying and staging a patch changes the index, which a paused merge's step can't
+/// record: refused with the reason, nothing changed.
+#[test]
+fn applying_and_staging_a_patch_during_a_paused_merge_is_refused() {
+    let (dir, _repo, _worker, handle) = paused_merge_with_work_in_b();
+    let patch = b"diff --git a/c.txt b/c.txt\nnew file mode 100644\n--- /dev/null\n+++ b/c.txt\n\
+@@ -0,0 +1 @@\n+c\n"
+        .to_vec();
+
+    let result = handle.apply_patch(patch, git_core::patch::PatchApply::Stage);
+
+    assert_eq!(
+        result,
+        Err(crate::wire::ErrorDto::from(
+            super::super::undo::DISCARD_PAUSED
+        ))
+    );
+    assert!(!dir.path().join("c.txt").exists());
+}
+
 /// `git status --porcelain` in `dir` (the git CLI is the reference).
 fn porcelain(dir: &Path) -> String {
     let output = test_support::git(dir, &["status", "--porcelain"]);

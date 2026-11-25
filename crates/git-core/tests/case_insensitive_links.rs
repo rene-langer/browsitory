@@ -619,7 +619,7 @@ fn run_rows(order: Order, ignore_case: IgnoreCase, rows: &mut Vec<Row>) {
             target
                 .refs
                 .insert("refs/heads/main".into(), fx.evil.to_string());
-            target.index_tree = evil_tree.clone();
+            target.index_tree = Some(evil_tree.clone());
             target.worktree_tree = Some(evil_tree);
             undo::restore(&repo, &now, &target, "undo")
         })();

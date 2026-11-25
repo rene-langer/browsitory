@@ -141,7 +141,10 @@ impl CommandPolicy {
     fn discarding(label: String, whole: Option<Vec<String>>) -> Self {
         let mut policy = Self::recorded(label, FullUncapped).refused_when_busy(BusyReply::Discard);
         if let Some(plan) = policy.undo.as_mut() {
-            plan.discard = Some(DiscardPlan { whole });
+            plan.discard = Some(DiscardPlan {
+                whole,
+                worktree_only: false,
+            });
         }
         policy
     }

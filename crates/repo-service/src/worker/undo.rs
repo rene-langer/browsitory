@@ -40,7 +40,19 @@ pub(super) struct UndoPlan {
 pub(super) struct DiscardPlan {
     /// The paths its snapshots store whatever their size or number (#1104); `None`: every file.
     pub whole: Option<Vec<String>>,
+    /// It changes nothing but the work tree, so while an operation is paused or the index has
+    /// conflicts it is recorded as a work-tree entry; the others are refused then (#1147).
+    pub worktree_only: bool,
 }
+
+/// The reply of a `busy=Discard` command that changes more than the work tree while an
+/// operation is paused (#1147): no entry could take it back.
+pub(super) const DISCARD_PAUSED: &str = "A merge, rebase, cherry-pick or revert is paused. \
+Finish or abort it first, so this change can be undone.";
+
+/// Like [`DISCARD_PAUSED`], while the index has conflicts.
+pub(super) const DISCARD_CONFLICTED: &str =
+    "The index has conflicts. Resolve them first, so this change can be undone.";
 
 /// While another holder keeps the state lock past `LOCK_WAIT`, a command whose policy refuses it
 /// then (`CommandPolicy::busy`) gets `busy`'s text and must not run: Undo/Redo (D7-A), and the
