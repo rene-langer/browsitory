@@ -283,6 +283,35 @@ fn a_hand_written_cone_file_is_read_as_git_reads_it() {
     assert!(ls_files_v(ours.path()).contains("H lib/new.rs\n"));
 }
 
+/// Lines git accepts in cone mode though `git sparse-checkout` never writes them: a
+/// one-letter folder, `/*/` (a folder named `*`), an escaped glob character followed by
+/// trailing spaces, and a file's path written as a folder (`/docs/new.md/`, which takes that
+/// file in).
+fn unusual_lines(d: &Path) -> String {
+    let two = cone(d);
+    std::fs::write(
+        d.join(".git/info/sparse-checkout"),
+        "/*\n!/*/\n/app/\n/x/\n/*/\n/a\\[b]/  \n/docs/new.md/\n",
+    )
+    .unwrap();
+    two
+}
+
+#[test]
+fn unusual_cone_lines_are_read_as_git_reads_them() {
+    let (ours, our_two, twin, twin_two) = twins(unusual_lines);
+    git_ok(twin.path(), &["reset", "-q", "--mixed", &twin_two]);
+    let repo = git2::Repository::open(ours.path()).unwrap();
+
+    reset_to(&repo, &our_two, ResetMode::Mixed).unwrap();
+
+    assert_same_as_git(ours.path(), twin.path());
+    let marks = ls_files_v(ours.path());
+    assert!(marks.contains("H docs/new.md\n"), "{marks}");
+    assert!(marks.contains("S docs/sub/s.md\n"), "{marks}");
+    assert!(marks.contains("H app/new.rs\n"), "{marks}");
+}
+
 /// `/*` alone in cone mode: every path is in.
 #[test]
 fn a_full_cone_takes_every_new_path_in() {
@@ -404,6 +433,26 @@ fn a_mixed_reset_with_non_cone_patterns_marks_the_new_paths_whose_files_are_miss
     for path in outside {
         assert!(twin_marks.contains(&format!("S {path}\n")), "{twin_marks}");
     }
+}
+
+/// Without `core.sparseCheckoutCone`, a file in the cone format is read as non-cone patterns,
+/// as git reads it: `/app/` alone leaves the top-level files out, so the missing `top2.txt` is
+/// marked (in cone mode it would be in).
+#[test]
+fn cone_style_lines_without_cone_mode_are_non_cone_patterns() {
+    let (ours, our_two, twin, twin_two) = twins(|d| {
+        let two = history(d);
+        git_ok(d, &["sparse-checkout", "set", "--no-cone", "/app/"]);
+        two
+    });
+    git_ok(twin.path(), &["reset", "-q", "--mixed", &twin_two]);
+    let repo = git2::Repository::open(ours.path()).unwrap();
+
+    reset_to(&repo, &our_two, ResetMode::Mixed).unwrap();
+
+    assert!(ls_files_v(twin.path()).contains("S top2.txt\n"));
+    assert!(ls_files_v(ours.path()).contains("S top2.txt\n"));
+    assert_eq!(status_short(ours.path()), "");
 }
 
 /// Non-cone patterns, Reset hard: no new file is written.
