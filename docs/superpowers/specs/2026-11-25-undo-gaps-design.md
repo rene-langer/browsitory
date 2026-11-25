@@ -125,3 +125,5 @@ empty and never overwrite it (#1093).
    restored.
 5. Discard snapshots keep whole only the paths the command names; a Discard all keeps the
    confirmed list. An unparseable patch keeps every file.
+6. A branch setting written without a value (`flag` alone) is recorded as `true`; a restore
+   that would remove one refuses instead, since libgit2 crashes removing it (#1180).
