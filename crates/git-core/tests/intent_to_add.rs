@@ -114,3 +114,75 @@ fn an_amend_leaves_an_intent_to_add_file_out() {
     assert_eq!(git_out(d, &["show", "HEAD:a.txt"]), "a, edited\n");
     assert_eq!(git_out(d, &["status", "--short"]), " A new.txt\n");
 }
+
+/// Every entry left in the index is intent-to-add: the commit records an empty tree.
+#[test]
+fn a_commit_of_an_index_holding_only_an_intent_to_add_entry_records_an_empty_tree() {
+    let (dir, repo) = init_repo();
+    let d = dir.path();
+    write_file(d, "a.txt", "a\n");
+    commit_all(&repo, "base");
+    git_ok(d, &["rm", "-q", "--cached", "a.txt"]);
+    write_file(d, "new.txt", "my new content\n");
+    git_ok(d, &["add", "-N", "new.txt"]);
+    drop(repo);
+    let mut repo = git2::Repository::open(d).unwrap();
+
+    git_core::commit::commit(&mut repo, "drop a", git_core::hooks::HookOptions::default()).unwrap();
+
+    assert_eq!(git_out(d, &["ls-tree", "-r", "--name-only", "HEAD"]), "");
+    assert_eq!(git_out(d, &["status", "--short"]), " A new.txt\n?? a.txt\n");
+}
+
+/// `a.txt` committed, then `new.txt` ("committed") in a second commit; the index and HEAD put
+/// back to the first, and `new.txt` ("mine") added with `git add -N`. Returns the second commit.
+fn intent_to_add_the_target_has(d: &Path) -> String {
+    let repo = git2::Repository::init(d).unwrap();
+    {
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "Test User").unwrap();
+        config.set_str("user.email", "test@example.com").unwrap();
+        config.set_bool("core.autocrlf", false).unwrap();
+    }
+    write_file(d, "a.txt", "a\n");
+    commit_all(&repo, "one");
+    write_file(d, "new.txt", "committed\n");
+    commit_all(&repo, "two");
+    let two = git_out(d, &["rev-parse", "HEAD"]).trim().to_string();
+    git_ok(d, &["reset", "-q", "--mixed", "HEAD~1"]);
+    write_file(d, "new.txt", "mine\n");
+    git_ok(d, &["add", "-N", "new.txt"]);
+    two
+}
+
+/// A hard reset to a commit that has the intent-to-add path does what `git reset --hard` does
+/// in the same repository (the git CLI on a twin is the reference).
+#[test]
+fn a_hard_reset_to_a_commit_with_an_intent_to_add_path_matches_git() {
+    let twin = tempfile::TempDir::new().unwrap();
+    let ours = tempfile::TempDir::new().unwrap();
+    let twin_target = intent_to_add_the_target_has(twin.path());
+    let our_target = intent_to_add_the_target_has(ours.path());
+    git_ok(twin.path(), &["reset", "-q", "--hard", &twin_target]);
+    let repo = git2::Repository::open(ours.path()).unwrap();
+
+    let ours_result =
+        git_core::reset::reset_to(&repo, &our_target, git_core::reset::ResetMode::Hard);
+
+    assert!(ours_result.is_ok(), "{ours_result:?}");
+    for args in [
+        &["ls-files", "-v", "-s"][..],
+        &["status", "--short"][..],
+        &["rev-parse", "HEAD^{tree}"][..],
+    ] {
+        assert_eq!(
+            git_out(ours.path(), args),
+            git_out(twin.path(), args),
+            "{args:?}"
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(ours.path().join("new.txt")).unwrap(),
+        std::fs::read_to_string(twin.path().join("new.txt")).unwrap()
+    );
+}
