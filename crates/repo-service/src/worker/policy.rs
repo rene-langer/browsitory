@@ -137,16 +137,26 @@ impl CommandPolicy {
 
     /// Records a command that destroys work-tree content with no other way back, and refuses it
     /// rather than run it unrecorded (#225): a `FullUncapped` snapshot that stores `whole` (the
-    /// paths it can change; `None`: every file) whatever their size or number (#1104).
+    /// paths it can change; `None`: every file) whatever their size or number (#1104). It changes
+    /// only the work tree unless [`Self::beyond_worktree`] says otherwise (#1147).
     fn discarding(label: String, whole: Option<Vec<String>>) -> Self {
         let mut policy = Self::recorded(label, FullUncapped).refused_when_busy(BusyReply::Discard);
         if let Some(plan) = policy.undo.as_mut() {
             plan.discard = Some(DiscardPlan {
                 whole,
-                worktree_only: false,
+                worktree_only: true,
             });
         }
         policy
+    }
+
+    /// A discarding command that also changes the index or HEAD: refused, not recorded as a
+    /// work-tree entry, while an operation is paused or the index has conflicts (#1147).
+    fn beyond_worktree(mut self) -> Self {
+        if let Some(discard) = self.undo.as_mut().and_then(|plan| plan.discard.as_mut()) {
+            discard.worktree_only = false;
+        }
+        self
     }
 
     /// Records nothing and ends nothing, but holds the state lock.
@@ -363,7 +373,12 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         // and like a discard refused rather than run unrecorded (it may merge into local edits).
         Command::ApplyCommitChange { change, .. } => {
             let paths = std::iter::once(&change.path).chain(&change.old_path);
-            P::discarding(commit_change_label(change), Some(paths.cloned().collect()))
+            let policy = P::discarding(commit_change_label(change), Some(paths.cloned().collect()));
+            if change.stage {
+                policy.beyond_worktree()
+            } else {
+                policy
+            }
         }
         // As commits (#658) it moves HEAD, so like a commit it can't run under a stored rebase or
         // sequence.
@@ -371,10 +386,12 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
             let paths = git_core::patch::touched_paths(content);
             match how {
                 PatchApply::WorkTree => P::discarding("Apply patch".to_string(), paths),
-                PatchApply::Stage => P::discarding("Apply and stage patch".to_string(), paths),
-                PatchApply::Commits => {
-                    P::discarding("Apply patch as commits".to_string(), paths).gated(Refused)
+                PatchApply::Stage => {
+                    P::discarding("Apply and stage patch".to_string(), paths).beyond_worktree()
                 }
+                PatchApply::Commits => P::discarding("Apply patch as commits".to_string(), paths)
+                    .beyond_worktree()
+                    .gated(Refused),
             }
         }
 
@@ -444,7 +461,9 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         } => {
             let label = reset_label(commit_id, *mode);
             match mode {
-                ResetMode::Hard => P::discarding(label, None).gated(Refused),
+                ResetMode::Hard => P::discarding(label, None)
+                    .beyond_worktree()
+                    .gated(Refused),
                 // A reset that keeps the work tree runs unrecorded instead.
                 ResetMode::Soft | ResetMode::Mixed => P::recorded(label, Full).gated(Refused),
             }

@@ -189,21 +189,31 @@ pub fn capture_worktree(
     repo: &Repository,
     whole: Option<&[String]>,
 ) -> Result<RepoSnapshot, UndoError> {
-    match whole {
-        Some(whole) => capture_keeping(repo, whole),
-        None => capture(repo, SnapshotScope::FullUncapped),
-    }
+    let limits = match whole {
+        Some(whole) => Limits {
+            whole,
+            ..Limits::FULL
+        },
+        None => Limits::NONE,
+    };
+    snapshot_with(repo, Some(limits), false)
 }
 
 /// Restores the work-tree files of `target` over `expected`, two work-tree snapshots (#1147),
 /// checking each as [`restore`] does; HEAD, refs and the index are left alone, and it runs while
-/// an operation is in progress.
+/// an operation is in progress. Files are written as the snapshot stored them (raw bytes):
+/// there is no recorded index to check them out from.
 pub fn restore_worktree(
     repo: &Repository,
     expected: &RepoSnapshot,
     target: &RepoSnapshot,
 ) -> Result<(), UndoError> {
-    restore(repo, expected, target, "")
+    let Some(change) = worktree_change(repo, expected, target)? else {
+        return Ok(());
+    };
+    verify_worktree(repo, &change, target)?;
+    change.apply(repo)?;
+    change.checkout_from_index(repo)
 }
 
 /// [`capture_keeping`] with limits other than `SNAPSHOT_FILE_LIMIT` and
@@ -325,13 +335,26 @@ fn grouped(n: usize) -> String {
 
 /// `worktree`: `None` for refs and index only, else the work tree too, with its limits.
 fn capture_with(repo: &Repository, worktree: Option<Limits>) -> Result<RepoSnapshot, UndoError> {
-    let mut index = repo.index()?;
-    index.read(false)?;
-    if index.has_conflicts() {
-        return Err(UndoError::ConflictedIndex);
-    }
-    let index_tree = index.write_tree()?.to_string();
-    let intent_to_add = intent_to_add(&index);
+    snapshot_with(repo, worktree, true)
+}
+
+/// [`capture_with`]; `with_index` false records no index (a work-tree snapshot, #1147), so
+/// conflicts in it don't matter.
+fn snapshot_with(
+    repo: &Repository,
+    worktree: Option<Limits>,
+    with_index: bool,
+) -> Result<RepoSnapshot, UndoError> {
+    let (index_tree, intent_to_add) = if with_index {
+        let mut index = repo.index()?;
+        index.read(false)?;
+        if index.has_conflicts() {
+            return Err(UndoError::ConflictedIndex);
+        }
+        (Some(index.write_tree()?.to_string()), intent_to_add(&index))
+    } else {
+        (None, BTreeSet::new())
+    };
     let (worktree_tree, skipped, unsaved_untracked) = match worktree {
         None => (None, BTreeMap::new(), None),
         Some(limits) => {
@@ -343,7 +366,7 @@ fn capture_with(repo: &Repository, worktree: Option<Limits>) -> Result<RepoSnaps
     Ok(RepoSnapshot {
         head: head_state(repo)?,
         refs: local_refs(repo)?,
-        index_tree: Some(index_tree),
+        index_tree,
         intent_to_add,
         branch_config: branch_settings(repo)?,
         worktree_tree,
@@ -516,7 +539,9 @@ fn build_worktree_tree(repo: &Repository, limits: Limits) -> Result<WorktreeSnap
         let path = entry.path()?.to_string();
         let kept = kept(&entry);
         let previous_mode = overlay.get_path(Path::new(&path), 0).map(|e| e.mode);
-        match crate::worktree_guard::open_leaf_beneath(workdir, &path)? {
+        // A file that can't be read is named: a discard refused for it says which (#1147).
+        let named = |error: io::Error| io::Error::new(error.kind(), format!("{path}: {error}"));
+        match crate::worktree_guard::open_leaf_beneath(workdir, &path).map_err(named)? {
             Some(Opened::Link { target, .. }) => {
                 let id = repo.blob(&target)?;
                 overlay.add(&index_entry(&path, id, MODE_LINK))?;
@@ -542,7 +567,7 @@ fn build_worktree_tree(repo: &Repository, limits: Limits) -> Result<WorktreeSnap
                     continue;
                 }
                 let mut writer = repo.blob_writer(None)?;
-                io::copy(&mut file, &mut writer)?;
+                io::copy(&mut file, &mut writer).map_err(named)?;
                 overlay.add(&index_entry(&path, writer.commit()?, mode))?;
             }
             None => {
@@ -664,6 +689,44 @@ pub(crate) fn index_entry(path: &str, id: Oid, mode: u32) -> IndexEntry {
     }
 }
 
+/// The work-tree files to change from `expected` to `target`; `None` when they are the same.
+fn worktree_change(
+    repo: &Repository,
+    expected: &RepoSnapshot,
+    target: &RepoSnapshot,
+) -> Result<Option<WorktreeChange>, UndoError> {
+    Ok(match (&expected.worktree_tree, &target.worktree_tree) {
+        (Some(from), Some(to))
+            if from != to
+                || expected.skipped != target.skipped
+                || expected.unsaved_untracked != target.unsaved_untracked =>
+        {
+            Some(WorktreeChange::new(repo, expected, target, from, to)?)
+        }
+        _ => None,
+    })
+}
+
+/// Checks `change` against the work tree, writing nothing.
+fn verify_worktree(
+    repo: &Repository,
+    change: &WorktreeChange,
+    target: &RepoSnapshot,
+) -> Result<(), UndoError> {
+    change.verify(repo)?;
+    // The raw writes come before the forced checkout's own guard, so a target that brings in a
+    // case-colliding link and folder (#156) is refused here, writing nothing.
+    if let Some(to) = &target.worktree_tree {
+        let tree = repo.find_tree(Oid::from_str(to)?)?;
+        crate::worktree_guard::refuse_case_collision::<UndoError, _>(
+            repo,
+            &crate::worktree_guard::GuardSource::Tree(&tree),
+            Some(&change.paths),
+        )?;
+    }
+    Ok(())
+}
+
 pub fn restore(
     repo: &Repository,
     expected: &RepoSnapshot,
@@ -693,16 +756,7 @@ pub fn restore(
         _ => None,
     };
     let index_differs = index_target.is_some();
-    let worktree = match (&expected.worktree_tree, &target.worktree_tree) {
-        (Some(from), Some(to))
-            if from != to
-                || expected.skipped != target.skipped
-                || expected.unsaved_untracked != target.unsaved_untracked =>
-        {
-            Some(WorktreeChange::new(repo, expected, target, from, to)?)
-        }
-        _ => None,
-    };
+    let worktree = worktree_change(repo, expected, target)?;
 
     // 1. Verify, writing nothing.
     if head_differs && head_state(repo)? != expected.head {
@@ -750,17 +804,7 @@ pub fn restore(
         }
     }
     if let Some(change) = &worktree {
-        change.verify(repo)?;
-        // The raw writes below come before the forced checkout's own guard, so a target that
-        // brings in a case-colliding link and folder (#156) is refused here, writing nothing.
-        if let Some(to) = &target.worktree_tree {
-            let tree = repo.find_tree(Oid::from_str(to)?)?;
-            crate::worktree_guard::refuse_case_collision::<UndoError, _>(
-                repo,
-                &crate::worktree_guard::GuardSource::Tree(&tree),
-                Some(&change.paths),
-            )?;
-        }
+        verify_worktree(repo, change, target)?;
     }
 
     // 2. Write: worktree first (most likely to fail), then index, refs, HEAD.

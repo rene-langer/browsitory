@@ -67,6 +67,16 @@ pub(super) fn reply_busy(command: &mut Command, busy: BusyReply) {
     }
 }
 
+/// A command that destroys work-tree content but can't be recorded now (`UndoRecorder::begin`'s
+/// refusal, #1147): answered with `refusal`, and replaced by a no-op so it doesn't run.
+pub(super) fn refuse_unrecordable(mut command: Command, refusal: String) -> Command {
+    if let Some(reply) = reply_of(&mut command) {
+        reply.refuse(refusal.as_str().into());
+    }
+    let (reply, _) = std::sync::mpsc::channel();
+    Command::Ping { reply }
+}
+
 /// "Amend “<summary>”", or a fallback for an empty message.
 pub(super) fn amend_label(message: &str) -> String {
     if message.trim().is_empty() {
@@ -427,18 +437,57 @@ impl UndoRecorder {
 
     /// Snapshots before a recordable command. Skipped while an operation is paused: whatever
     /// runs then (staging, resolving, the final commit) belongs to that operation's entry.
-    pub fn begin(&mut self, repo: &Repository, plan: UndoPlan, marker: Option<&str>) {
-        if self.stacks.pending.is_some() || marker.is_some() {
-            return;
-        }
-        match snapshot(repo, &plan) {
-            Ok(before) => self.active = Some((plan, before)),
-            Err(error) => {
-                eprintln!(
-                    "browsitory: not recording \"{}\" for undo: {error}",
-                    plan.label
-                )
+    ///
+    /// A command that destroys work-tree content (`UndoPlan::discard`) is recorded or refused,
+    /// never run unrecorded (#225, #1147): while an operation is paused or the index has
+    /// conflicts it gets a work-tree entry of its own when it changes only the work tree, and is
+    /// refused otherwise; a snapshot that fails refuses it too. `Some(reply)`: refused, with
+    /// that reply, and the command must not run.
+    pub fn begin(
+        &mut self,
+        repo: &Repository,
+        plan: UndoPlan,
+        marker: Option<&str>,
+    ) -> Option<String> {
+        let paused = self.stacks.pending.is_some() || marker.is_some();
+        let Some(discard) = &plan.discard else {
+            if !paused {
+                match snapshot(repo, &plan) {
+                    Ok(before) => self.active = Some((plan, before)),
+                    Err(error) => eprintln!(
+                        "browsitory: not recording \"{}\" for undo: {error}",
+                        plan.label
+                    ),
+                }
             }
+            return None;
+        };
+        let conflicted = !paused && index_has_conflicts(repo);
+        let before = if paused || conflicted {
+            if !discard.worktree_only {
+                // A terminal rebase's own reason says how to go on with it (#263).
+                let terminal = git_core::repo::terminal_rebase(repo).map(|rebase| {
+                    git_core::repo::TerminalRebaseInProgress(rebase.kind).to_string()
+                });
+                let reply = match terminal {
+                    Some(reply) => reply,
+                    None if paused => DISCARD_PAUSED.to_string(),
+                    None => DISCARD_CONFLICTED.to_string(),
+                };
+                return Some(reply);
+            }
+            git_core::undo::capture_worktree(repo, discard.whole.as_deref())
+        } else {
+            snapshot(repo, &plan)
+        };
+        match before {
+            Ok(before) => {
+                self.active = Some((plan, before));
+                None
+            }
+            Err(error) => Some(format!(
+                "Couldn't save the files for undo, so nothing was changed: {error}"
+            )),
         }
     }
 
@@ -461,7 +510,9 @@ impl UndoRecorder {
             let Some(_exclusive) = self.exclusive(guard, Duration::ZERO) else {
                 return;
             };
-            if let Some(operation) = marker() {
+            // A work-tree entry is its own step, even during a pause (#1147).
+            let operation = marker().filter(|_| !is_worktree_entry(&before));
+            if let Some(operation) = operation {
                 // Added to the freshly loaded stacks, so another writer's entries survive.
                 self.stacks.pending = Some(PendingEntry {
                     label: plan.label,
@@ -516,7 +567,13 @@ impl UndoRecorder {
         if ends_pending {
             self.stacks.pending = None;
         }
-        let after = match snapshot(repo, &plan) {
+        let after = if is_worktree_entry(&before) {
+            let whole = plan.discard.as_ref().and_then(|d| d.whole.as_deref());
+            git_core::undo::capture_worktree(repo, whole)
+        } else {
+            snapshot(repo, &plan)
+        };
+        let after = match after {
             Ok(after) => after,
             Err(error) => {
                 eprintln!("browsitory: not recording \"{label}\" for undo: {error}");
@@ -584,14 +641,18 @@ impl UndoRecorder {
         let Some(_exclusive) = self.exclusive(guard, LOCK_WAIT) else {
             return Err(UNDO_BUSY.into());
         };
-        if marker().is_some() || self.stacks.pending.is_some() {
-            return Ok(UndoOutcome::OperationInProgress);
-        }
+        let in_operation = marker().is_some() || self.stacks.pending.is_some();
         let (source, verb) = match direction {
             Direction::Undo => (&self.stacks.undo, "undo"),
             Direction::Redo => (&self.stacks.redo, "redo"),
         };
-        let Some(entry) = source.last() else {
+        // Only a work-tree entry (#1147) runs while an operation is paused.
+        let entry = source.last();
+        let worktree_only = entry.is_some_and(|entry| is_worktree_entry(&entry.before));
+        if in_operation && !worktree_only {
+            return Ok(UndoOutcome::OperationInProgress);
+        }
+        let Some(entry) = entry else {
             return Ok(UndoOutcome::Nothing);
         };
         let (expected, target) = match direction {
@@ -599,12 +660,17 @@ impl UndoRecorder {
             Direction::Redo => (&entry.before, &entry.after),
         };
         let label = entry.label.clone();
-        match restore(
-            repo,
-            expected,
-            target,
-            &format!("browsitory: {verb} {label}"),
-        ) {
+        let restored = if worktree_only {
+            git_core::undo::restore_worktree(repo, expected, target)
+        } else {
+            restore(
+                repo,
+                expected,
+                target,
+                &format!("browsitory: {verb} {label}"),
+            )
+        };
+        match restored {
             Ok(()) => {}
             Err(UndoError::RepositoryChanged) => {
                 return Ok(UndoOutcome::RepositoryChanged { label })
@@ -643,6 +709,19 @@ impl UndoRecorder {
             eprintln!("browsitory: could not save undo history: {error}");
         }
     }
+}
+
+/// Whether an entry with this snapshot is a work-tree entry (#1147): no index recorded.
+fn is_worktree_entry(snapshot: &RepoSnapshot) -> bool {
+    snapshot.index_tree.is_none()
+}
+
+/// Whether the index has conflicts (read from disk); false when it can't be read, so the
+/// snapshot that follows fails instead and says why.
+fn index_has_conflicts(repo: &Repository) -> bool {
+    repo.index()
+        .and_then(|mut index| index.read(false).map(|()| index.has_conflicts()))
+        .unwrap_or(false)
 }
 
 /// The snapshot `plan` asks for: a discard's names the paths it stores whole (#1104).
