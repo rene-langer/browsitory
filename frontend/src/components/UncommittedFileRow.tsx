@@ -18,6 +18,7 @@ import { ContextMenu } from "./primitives/ContextMenu";
 import { ListRow } from "./primitives/ListRow";
 import { useMarkResolved } from "./useMarkResolved";
 import { statusLetter } from "../lib/statusLetter";
+import { filteredFileReason } from "../lib/externalFilters";
 
 /**
  * One file in the working tree's list (#639): its status letter and path, its "⋯" menu and its
@@ -170,6 +171,11 @@ export function UncommittedFileRow({
         {entry.untrackedFolder === true && (
           <span className={styles.folderNote}>untracked folder, more than 500 files</span>
         )}
+        {entry.externalFilter !== undefined && (
+          <span className={styles.folderNote} title={filteredFileReason(entry.externalFilter)}>
+            &apos;{entry.externalFilter}&apos; filter
+          </span>
+        )}
         <div className={styles.rowActions}>
           {folderFiles !== undefined && (
             <button
@@ -233,7 +239,8 @@ export function UncommittedFileRow({
               type="button"
               className={styles.stageToggle}
               aria-label={`Stage ${entry.path}`}
-              title="Stage"
+              title={entry.externalFilter === undefined ? "Stage" : filteredFileReason(entry.externalFilter)}
+              disabled={entry.externalFilter !== undefined}
               onClick={(event) => {
                 event.stopPropagation();
                 onStageFile(entry.path);

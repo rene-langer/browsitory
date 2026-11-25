@@ -696,3 +696,91 @@ describe("windowed change list (#845)", () => {
     }
   });
 });
+
+// #1087: files under a filter driver Browsitory can't run (git-crypt, Git LFS).
+describe("external filter drivers (#1087)", () => {
+  beforeEach(() => localStorage.clear());
+
+  const secret: StatusEntry = { ...entry("secret.env", false), externalFilter: "crypt" };
+  const unstagedList = () => screen.getByRole("listbox", { name: "Unstaged changes" });
+
+  it("says which filters the repository uses, until dismissed", () => {
+    render(
+      <Pane
+        client={fakeRepoClient({}, "empty")}
+        status={[]}
+        headInfo={{ ...NO_HEAD_INFO, headId: "abc", externalFilters: ["crypt", "lfs"] }}
+      />,
+    );
+    const notice = screen.getByText(/uses the 'crypt' and 'lfs' filters, which Browsitory can't run/);
+    expect(notice).toHaveTextContent("use git on the command line");
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss notice" }));
+    expect(screen.queryByText(/which Browsitory can't run/)).toBeNull();
+    expect(screen.getByText("Working tree clean")).toBeInTheDocument();
+  });
+
+  it("names a single filter", () => {
+    render(
+      <Pane
+        client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")}
+        status={status}
+        headInfo={{ ...NO_HEAD_INFO, headId: "abc", externalFilters: ["lfs"] }}
+      />,
+    );
+    expect(screen.getByText(/This repository uses the 'lfs' filter, which Browsitory can't run/)).toBeInTheDocument();
+  });
+
+  it("shows no notice without filters", () => {
+    render(<Pane client={fakeRepoClient({}, "empty")} status={[]} headInfo={{ ...NO_HEAD_INFO, headId: "abc" }} />);
+    expect(screen.queryByText(/which Browsitory can't run/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Dismiss notice" })).toBeNull();
+  });
+
+  it("marks a filtered file and doesn't offer to stage it", () => {
+    const onStageFile = vi.fn();
+    render(
+      <Pane
+        client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")}
+        status={[secret, entry("a.txt", false)]}
+        actions={{ onStageFile }}
+      />,
+    );
+    const row = within(unstagedList()).getByRole("option", { name: /^secret\.env/ });
+    expect(row).toHaveTextContent("'crypt' filter");
+    const stage = within(row).getByRole("button", { name: "Stage secret.env" });
+    expect(stage).toBeDisabled();
+    expect(stage).toHaveAttribute("title", expect.stringContaining("can't run the 'crypt' filter"));
+    fireEvent.click(stage);
+    expect(onStageFile).not.toHaveBeenCalled();
+    const plain = within(unstagedList()).getByRole("option", { name: /^a\.txt/ });
+    expect(plain).not.toHaveTextContent("filter");
+    expect(within(plain).getByRole("button", { name: "Stage a.txt" })).toBeEnabled();
+  });
+
+  it("leaves filtered files out of Stage all", () => {
+    const onStageAllFiles = vi.fn();
+    render(
+      <Pane
+        client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")}
+        status={[secret, entry("a.txt", false)]}
+        actions={{ onStageAllFiles }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Stage all" }));
+    expect(onStageAllFiles).toHaveBeenCalledWith(["a.txt"]);
+  });
+
+  it("says above a filtered file's diff that the difference may be only the filter's", async () => {
+    render(
+      <Pane client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")} status={[secret, entry("a.txt", false)]} />,
+    );
+    fireEvent.click(within(unstagedList()).getByRole("option", { name: /^secret\.env/ }));
+    expect(await screen.findByText("unstaged secret.env")).toBeInTheDocument();
+    expect(screen.getByText(/Browsitory can't run the 'crypt' filter/)).toHaveTextContent(
+      "the difference may be only the filter's",
+    );
+    fireEvent.click(within(unstagedList()).getByRole("option", { name: /^a\.txt/ }));
+    expect(await screen.findByText("unstaged a.txt")).toBeInTheDocument();
+    expect(screen.queryByText(/Browsitory can't run the 'crypt' filter/)).toBeNull();
+  });
+});

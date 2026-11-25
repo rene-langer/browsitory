@@ -2305,11 +2305,31 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
     covers `stash_save2`'s reset, which takes no callbacks), an abort's reset of the touched
     paths, and patch apply and preview (the patch's added or changed files).
   Not refused: status and diffs (a git-crypt file can show as modified: raw bytes against the
-  encrypted blob), side files and the VSCode content provider (see "External tools"), a fresh
+  encrypted blob; see below), side files and the VSCode content provider (see "External tools"), a fresh
   clone and a new worktree (nothing of the user's to overwrite; files the driver would smudge
   stay as stored, as with git without the driver installed), Undo's snapshot (raw bytes,
   internal), unstaging. A checkout that itself brings in the `.gitattributes` adding a filter
   isn't refused for the files that become covered (new files, nothing overwritten).
+
+  What the app shows (#1087): git decides whether a filtered file changed by running the clean
+  filter on it, which Browsitory doesn't do (a refresh would run arbitrary programs on every
+  stat-dirty file). `external_filter::annotate`, in the app's status reads
+  (`status_refreshing_index`, `status_with_stamp`, `untracked_folder_files`; not
+  `status::status`, which the write commands read), sets `StatusEntry.external_filter` (wire
+  `externalFilter`) to the driver's name on an unstaged entry other than a deletion whose
+  work-tree file (not a link) is filtered. It drops one case: a modified file under a driver
+  whose `process` (else `clean`) command's first word is `git-lfs`, whose stage-0 blob is a
+  canonical LFS pointer (`version https://git-lfs.github.com/spec/v1`, `oid sha256:<hex>`,
+  `size <n>`, no extension lines, at most 1 KiB) and whose file has `n` bytes with that SHA-256
+  (`sha2`, streamed): git-lfs's clean output would be exactly that blob (git runs the driver
+  before CRLF and `ident`, which leave a pointer unchanged). Other drivers (git-crypt's keyed
+  ciphertext) can't be decided without running them, so their files stay listed and marked;
+  any error leaves an entry as it is. `HeadInfo.external_filters` (`externalFilters`) names the
+  configured drivers that a `filter=<name>` of the tracked `.gitattributes` (work tree, else
+  index), the top-level one, `info/attributes` or `core.attributesFile` uses (system-wide and
+  default global attribute files aren't read). The Changes pane shows a dismissible notice for
+  them, marks the rows, disables their Stage button and leaves them out of Stage all
+  (`lib/stagePaths`); the refusals above are unchanged.
 - Folder/link pairs in the index (#157): `stage_file` of `d/f` below a symlinked `d` removes
   `d/f`'s stage-0 entry (stages its deletion; git sees no file there) and reads nothing through
   the link; conflict entries there are still refused (`BeyondSymlink`), as are hunk and line

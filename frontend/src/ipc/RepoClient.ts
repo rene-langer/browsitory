@@ -15,6 +15,12 @@ export interface StatusEntry {
    * `listUntrackedFolder` lists its files. Absent on every other entry.
    */
   untrackedFolder?: boolean;
+  /**
+   * The external filter driver (git-crypt, Git LFS) Browsitory can't run (#1087), on an unstaged
+   * file under it: Browsitory can't tell whether it really changed, and refuses to stage it.
+   * Absent on every other entry.
+   */
+  externalFilter?: string;
 }
 
 export type DiffLineOrigin = "Add" | "Remove" | "Context";
@@ -325,6 +331,11 @@ export interface HeadInfo {
   terminalRebase: TerminalRebase | null;
   /** The branch HEAD names while it has no commit yet (a new repository, #983); absent otherwise. */
   unbornBranch?: string;
+  /**
+   * The external filter drivers (git-crypt, Git LFS) the repository's attributes name, which
+   * Browsitory can't run (#1087); absent when there are none.
+   */
+  externalFilters?: string[];
 }
 /**
  * A terminal rebase (`kind: "Rebase"`) or `git am` (`"Am"`). `branch` is the rebased branch's short

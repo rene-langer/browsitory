@@ -145,6 +145,7 @@ fn status_entry_dto_always_serializes_old_path() {
         staged: false,
         kind: StatusKind::Modified,
         untracked_folder: false,
+        external_filter: None,
     });
     assert_eq!(
         serde_json::to_value(plain).unwrap(),
@@ -156,6 +157,7 @@ fn status_entry_dto_always_serializes_old_path() {
         staged: true,
         kind: StatusKind::Renamed,
         untracked_folder: false,
+        external_filter: None,
     });
     assert_eq!(
         serde_json::to_value(renamed).unwrap()["oldPath"],

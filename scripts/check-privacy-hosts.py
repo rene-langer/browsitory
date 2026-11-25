@@ -53,6 +53,8 @@ NON_NETWORK_HOSTS = {
     "www.w3.org": "XML namespace in SVG files",
     "vite.dev": "documentation link in a comment (frontend/vite.config.ts)",
     "vitest.dev": "documentation link in a comment (frontend/src/jest-dom-vitest.d.ts)",
+    "git-lfs.github.com": "the version line of a Git LFS pointer, compared as text "
+    "(crates/git-core/src/external_filter.rs, #1087)",
 }
 
 # Lines whose URL has no literal host, by file: each entry is a snippet of the line, and why the
