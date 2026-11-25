@@ -7,9 +7,9 @@ exceptions below.
 
 The tables below list the direct dependencies, verified with `cargo info <crate>` (Rust) and
 `npm info <package> license` (JS) on 2026-08-12, against `crates/*/Cargo.toml`,
-`frontend/package.json`, `extension/package.json`, `e2e/package.json` and
-`extension/e2e/package.json`; dependencies added later carry their own verification date in
-the Notes column. CI checks the full transitive trees automatically (see "Automated checks").
+`frontend/package.json`, `extension/package.json`, `e2e/package.json`,
+`extension/e2e/package.json` and `extension/publish/package.json`; dependencies added later
+carry their own verification date in the Notes column. CI checks the full transitive trees automatically (see "Automated checks").
 
 ## Rust (`cargo info <crate>`)
 
@@ -93,10 +93,11 @@ extension-host typings; none are loaded by the packaged extension itself.
 These tools run only inside a GitHub Actions job. They are not declared in any `package.json`
 or `Cargo.toml`, are not linked into anything, and are not shipped. Running a tool places no
 licence obligation on Browsitory, so they may be under a licence outside the allowed list.
-Each tool is pinned to an exact version where it runs. GitHub Actions are pinned to a major
-tag like `v2` instead, and Renovate updates them. `renovate-notices.yml`, which can push to
-Renovate branches, pins its actions to a full commit SHA with the version in a comment;
-Renovate updates both. A GitHub Action is listed here only when its
+Each tool is pinned to an exact version where it runs. GitHub Actions in `ci.yml` and
+`docs.yml` are pinned to a major tag like `v2` instead, and Renovate updates them.
+`renovate-notices.yml`, which can push to Renovate branches, and `release.yml`, which holds the
+release's credentials (#1109), pin their actions to a full commit SHA with the version in a
+comment; Renovate updates both. A GitHub Action is listed here only when its
 licence is outside the policy.
 
 | Tool | License | Notes |
@@ -104,8 +105,7 @@ licence is outside the policy.
 | cargo-deny | MIT OR Apache-2.0 | `ci.yml`'s `licenses` job installs it with `taiki-e/install-action` and runs `cargo deny check licenses`. The exact version is pinned in that job's `CARGO_DENY_VERSION` (Renovate updates it). Licence verified with `cargo info cargo-deny@0.20.2` on 2026-11-03; re-check it when a Renovate PR bumps the version. |
 | cargo-about | MIT OR Apache-2.0 | `ci.yml`'s `licenses` job installs it with `taiki-e/install-action` and `scripts/generate-third-party-notices.py --check` runs `cargo about generate --format json` (configuration: `about.toml`) to collect the licence texts of the shipped Rust crates for `THIRD_PARTY_NOTICES.md`. Only its output, licence texts copied from the crates, ships. The exact version is pinned in that job's `CARGO_ABOUT_VERSION` (Renovate updates it). Owner approved it as a build-only tool on 2026-11-04 (#301). Licence verified with `cargo info cargo-about@0.9.3` on 2026-11-04; re-check it when a Renovate PR bumps the version. |
 | cargo-mutants | MIT | `ci.yml`'s `mutants` job (pull requests and dispatched runs only, informational) installs it with `taiki-e/install-action` and runs `cargo mutants` on the changed code. The exact version is pinned in that job's `MUTANTS_VERSION` (Renovate updates it). Licence verified with `cargo info cargo-mutants@27.1.0` on 2026-11-03; re-check it when a Renovate PR bumps the version. |
-| Swatinem/rust-cache v2 | LGPL-3.0 | A GitHub Action. `ci.yml`'s cargo jobs run it to cache `~/.cargo` and the dependency build output in `target/` (#308). LGPL-3.0 is weak copyleft: it only covers changes to the action itself, which we neither make nor distribute, and it runs on the CI runner only, so nothing of it is built into or shipped with Browsitory. The owner accepted it as a build-only tool (2026-11-03). Never add it as a dependency. Pinned to the `v2` major tag like the other actions (Renovate updates it). Source: the repository's `LICENSE` and `package.json` (`"license": "LGPL-3.0"`), checked for v2.9.3 on 2026-11-03. |
-| ovsx 1.3.0 | EPL-2.0 | `release.yml`'s `publish-vsix-open-vsx` job runs it as `npx --yes ovsx@1.3.0 publish` to upload the already-built `.vsix` files to Open VSX. EPL-2.0 is weak copyleft: it only covers changes to ovsx itself, which we neither make nor distribute. Never add it as a dependency. Source: `npm info ovsx@1.3.0 license`, verified 2026-11-02. |
+| Swatinem/rust-cache v2 | LGPL-3.0 | A GitHub Action. `ci.yml`'s cargo jobs run it to cache `~/.cargo` and the dependency build output in `target/` (#308). LGPL-3.0 is weak copyleft: it only covers changes to the action itself, which we neither make nor distribute, and it runs on the CI runner only, so nothing of it is built into or shipped with Browsitory. The owner accepted it as a build-only tool (2026-11-03). Never add it as a dependency. Pinned to the `v2` major tag in `ci.yml` and by commit SHA in `release.yml` (Renovate updates both). Source: the repository's `LICENSE` and `package.json` (`"license": "LGPL-3.0"`), checked for v2.9.3 on 2026-11-03. |
 
 ## JavaScript, `e2e/` (`npm info <package> license`)
 
@@ -144,6 +144,19 @@ library is involved, so this table has no dependency row for one.
 | @vscode/test-electron 2.5.2 | MIT | dev only; downloads/launches a real VSCode Extension Development Host for the harness. Source: `npm info @vscode/test-electron@2.5.2 license`, verified 2026-09-01. |
 | mocha 11.8.0 | MIT | dev only; test runner loaded by `suite/index.ts`. |
 | typescript 6.0.3 | Apache-2.0 | dev only; same package as the frontend row above. |
+
+## JavaScript, `extension/publish/` (`npm info <package> license`)
+
+`extension/publish/` is a separate pnpm package, not part of `extension/`'s tree: it only locks
+the publishing tool that `release.yml`'s `publish-vsix-open-vsx` and `dry-run-open-vsx` jobs run
+(`pnpm --dir extension/publish exec ovsx`, #1110). Nothing of it is built into, linked into or
+shipped with the app or the VSIX. Until #1110 the jobs ran `npx --yes ovsx@1.3.0`, which
+resolved ovsx's dependencies anew on every run, next to `OVSX_PAT`; the lockfile now fixes the
+whole tree with integrity hashes, and Renovate and the `licenses` job cover it.
+
+| Package | License | Notes |
+|---|---|---|
+| ovsx | EPL-2.0 | dev only; a build-time CI tool, in the dev-tree exceptions below. Listed from 2026-11-02 under "Build-only CI tools" while the jobs ran it through `npx`; as a locked dev dependency of this package it is a dev-tree exception (#1110). EPL-2.0 is weak copyleft: it only covers changes to ovsx itself, which we neither make nor distribute. Never add it to `extension/` or any shipped tree. Its dependencies include `@vscode/vsce` (and through it `@vscode/vsce-sign` and the secretlint packages), covered by the exceptions below like `extension/`'s. Source: `npm info ovsx@1.3.0 license`, verified 2026-11-02 and 2026-11-25. |
 
 ## Python, user guide site (`docs/requirements.txt`)
 
@@ -312,6 +325,7 @@ not a lookalike such as `lightningcss-plugin`. Owner decision 2026-11-03 (#273).
 | stream-buffers | 3 | Unlicense | `@wdio/local-runner` (`e2e/` only). |
 | @promptbook/utils | 0 | CC-BY-4.0 | `@wdio/utils` > `locate-app` (`e2e/` only). |
 | binaryextensions, editions, istextorbinary, textextensions, version-range | 6, 6, 9, 6, 4 | Artistic-2.0 | `@vscode/vsce` > secretlint > `istextorbinary` (packaging only). |
+| ovsx | 1 | EPL-2.0 | Open VSX's publishing tool, run only by `release.yml` from `extension/publish/` (#1110); before that the same version ran through `npx` as a build-only CI tool. |
 | @vscode/vsce-sign, @vscode/vsce-sign-*-* | 2 | Microsoft licence terms (`SEE LICENSE IN LICENSE.txt`, reported as Unknown) | Required by Microsoft's own publishing tool `@vscode/vsce`. Used only to package and publish, locally and in CI; never redistributed in the VSIX or the app. |
 
 | Clarified package | Versions | License | Reason |
@@ -329,10 +343,11 @@ every pull request, every push to `main` and the weekly scheduled run:
   `licenses` check runs: advisories stay with `cargo audit` in the `audit` job
   (`.cargo/audit.toml`), and cargo-deny's `bans` and `sources` checks aren't used.
 - **npm:** `scripts/check-dependency-licenses.py` (unit tests in
-  `scripts/test_check_dependency_licenses.py`). For each of `frontend/`, `extension/`, `e2e/`
-  and `extension/e2e/` it reads the installed tree with `pnpm licenses list --json`,
-  production and dev. The production trees of `frontend/` and `extension/` must use allowed
-  licences only; dev packages may also match the exceptions table above. pnpm installs only
+  `scripts/test_check_dependency_licenses.py`). For each of `frontend/`, `extension/`, `e2e/`,
+  `extension/e2e/` and `extension/publish/` it reads the installed tree with
+  `pnpm licenses list --json`, production and dev. The production trees of `frontend/` and
+  `extension/` must use allowed licences only; dev packages may also match the exceptions
+  table above. pnpm installs only
   the current platform's native binaries, so the script looks up every lockfile package that
   isn't installed (esbuild, rolldown, lightningcss, `@tauri-apps/cli`, `@vscode/vsce-sign`
   for other platforms) in the npm registry by exact `name@version`. A published version can't
@@ -361,7 +376,7 @@ Run them locally:
 ```bash
 cargo install cargo-deny --locked --version <CARGO_DENY_VERSION from ci.yml>   # once
 cargo deny check licenses
-# after `pnpm install` in frontend/, extension/, e2e/ and extension/e2e/ (see AGENTS.md):
+# after `pnpm install` in frontend/, extension/, e2e/, extension/e2e/ and extension/publish/:
 python3 scripts/check-dependency-licenses.py --summary
 ```
 
