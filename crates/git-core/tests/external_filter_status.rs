@@ -265,6 +265,38 @@ fn an_lfs_pointer_with_an_extension_line_is_not_trusted() {
     );
 }
 
+/// `filter.lfs.process` set to `command` alone, as some installers write it with a full path.
+fn configure_lfs_process(repo: &Repository, command: &str) {
+    let mut config = repo.config().unwrap();
+    config.set_str("filter.lfs.process", command).unwrap();
+}
+
+#[test]
+fn git_lfs_named_by_a_unix_path_is_trusted() {
+    let (_dir, repo) = lfs_fixture(&pointer(LFS_OID, LFS_CONTENT.len()), LFS_CONTENT);
+    configure_lfs_process(&repo, "/usr/local/bin/git-lfs filter-process");
+
+    let entries = app_status(&repo);
+
+    assert!(
+        !entries.iter().any(|entry| entry.path == "big.bin"),
+        "{entries:?}"
+    );
+}
+
+#[test]
+fn git_lfs_exe_named_by_a_windows_path_is_trusted() {
+    let (_dir, repo) = lfs_fixture(&pointer(LFS_OID, LFS_CONTENT.len()), LFS_CONTENT);
+    configure_lfs_process(&repo, "C:\\Tools\\git-lfs.exe filter-process");
+
+    let entries = app_status(&repo);
+
+    assert!(
+        !entries.iter().any(|entry| entry.path == "big.bin"),
+        "{entries:?}"
+    );
+}
+
 #[test]
 fn a_matching_pointer_under_a_driver_that_is_not_git_lfs_stays_listed() {
     let (_dir, repo) = lfs_fixture(&pointer(LFS_OID, LFS_CONTENT.len()), LFS_CONTENT);
