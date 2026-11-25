@@ -377,10 +377,14 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         )
         .gated(Refused),
 
-        // Branches and tags. Creating a branch checks it out.
-        Command::CreateBranch { name, .. } => {
-            P::recorded(fit(format!("Create branch {name}")), RefsAndIndex).gated(Refused)
-        }
+        // Branches and tags. Creating a branch and switching to it rewrites the work tree when
+        // the start point isn't HEAD's commit, so its entry covers the work tree, as a switch's
+        // does (#1154).
+        Command::CreateBranch { name, checkout, .. } => P::recorded(
+            fit(format!("Create branch {name}")),
+            if *checkout { Full } else { RefsAndIndex },
+        )
+        .gated(Refused),
         Command::SwitchBranch { name, .. } => {
             P::recorded(fit(format!("Switch to {name}")), Full).gated(Refused)
         }
