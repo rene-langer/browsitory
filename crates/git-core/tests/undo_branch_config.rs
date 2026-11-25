@@ -173,9 +173,10 @@ fn add_valueless_flag(repo: &git2::Repository, branch: &str) {
     std::fs::write(&config, text).unwrap();
 }
 
-/// A setting written without a value comes back true. (Deleted with the git CLI: libgit2's own
-/// branch delete crashes on such a setting.) Redo would have to remove one again, which libgit2
-/// can't do safely either, so it refuses and changes nothing.
+/// A setting written without a value comes back true. (Deleted with the git CLI, which keeps it
+/// as written until then; Browsitory's Delete branch writes it as `true` first, #1180.) Redo
+/// would have to remove one again, which libgit2 can't do safely, so it refuses and changes
+/// nothing.
 #[test]
 fn a_setting_without_a_value_comes_back_true_and_is_never_removed() {
     let (dir, repo) = init_repo();
