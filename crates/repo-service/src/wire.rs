@@ -3866,6 +3866,11 @@ impl ErrorKind {
             error.downcast_ref::<git_core::diff::DiffError>()
         {
             Some(Self::DiffTooLarge)
+        } else if let Some(
+            git_core::blame::BlameError::TooLarge { .. } | git_core::blame::BlameError::Binary,
+        ) = error.downcast_ref::<git_core::blame::BlameError>()
+        {
+            Some(Self::BlameUnavailable)
         } else if let Some(error) = error.downcast_ref::<RemoteError>() {
             match error {
                 RemoteError::DirtyWorktree => Some(Self::DirtyWorktree),

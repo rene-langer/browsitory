@@ -85,19 +85,22 @@ pub fn blame_file_limited(
     repo: &Repository,
     commit_id: &str,
     path: &str,
-    _limit: u64,
+    limit: u64,
 ) -> Result<Vec<BlameLine>, BlameError> {
     let oid = resolve_commit_id(repo, commit_id)?;
     let commit = repo.find_commit(oid)?;
 
-    let blob_content = commit
-        .tree()?
-        .get_path(Path::new(path))?
-        .to_object(repo)?
-        .peel_to_blob()?
-        .content()
-        .to_vec();
-    let content = String::from_utf8_lossy(&blob_content).into_owned();
+    let entry = commit.tree()?.get_path(Path::new(path))?;
+    let (size, _) = repo.odb()?.read_header(entry.id())?;
+    let size = size as u64;
+    if size > limit {
+        return Err(BlameError::TooLarge { size, limit });
+    }
+    let blob = entry.to_object(repo)?.peel_to_blob()?;
+    if blob.is_binary() {
+        return Err(BlameError::Binary);
+    }
+    let content = String::from_utf8_lossy(blob.content()).into_owned();
     let owners = line_owners(repo, oid, path)?;
 
     let mut commits: HashMap<Oid, (String, String, i64)> = HashMap::new();
