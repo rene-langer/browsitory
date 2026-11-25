@@ -406,7 +406,7 @@ pub(super) fn table() -> Vec<((&'static str, Command), &'static str)> {
                 start_point: s("HEAD"),
                 checkout: true
             }),
-            "undo(RefsAndIndex, Create branch topic) lock hold gate",
+            "undo(Full, Create branch topic) lock hold gate",
         ),
         (
             cmd!(CreateBranch {
