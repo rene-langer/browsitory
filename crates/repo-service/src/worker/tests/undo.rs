@@ -605,3 +605,391 @@ fn a_failed_multi_path_stage_records_nothing() {
     assert!(staged_paths(dir.path()).is_empty());
     assert_eq!(handle.get_undo_state().unwrap().undo, None);
 }
+
+/// #1104: discarding a file next to more untracked files than the limit stores none of those
+/// files for Undo (only the discarded one), and still undoes.
+#[test]
+fn a_discard_next_to_many_untracked_files_stores_only_its_own_file() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "one\n");
+    commit_all(&repo, "initial");
+    write_file(dir.path(), "a.txt", "precious\n");
+    std::fs::create_dir(dir.path().join("u")).unwrap();
+    for i in 0..=git_core::undo::SNAPSHOT_UNTRACKED_LIMIT {
+        write_file(
+            dir.path(),
+            &format!("u/{i}.txt"),
+            &format!("untracked {i}\n"),
+        );
+    }
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+
+    handle.discard_file("a.txt".into()).unwrap();
+    assert!(!blob_of_file_stored(&repo, &dir.path().join("u/0.txt")));
+    assert!(blob_of_file_stored(&repo, &dir.path().join("a.txt")));
+
+    assert_eq!(
+        handle.undo().unwrap(),
+        UndoOutcome::Done {
+            label: "Discard changes to a.txt".into()
+        }
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        "precious\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("u/7.txt")).unwrap(),
+        "untracked 7\n"
+    );
+}
+
+/// `git <args>` in `dir`, which must succeed; its output.
+fn git_out(dir: &Path, args: &[&str]) -> String {
+    let output = test_support::git(dir, args);
+    assert!(output.status.success(), "git {args:?}: {output:?}");
+    String::from_utf8(output.stdout).unwrap()
+}
+
+/// The branch `feature` (at HEAD) tracking `origin/feature`, a remote-tracking branch only.
+fn feature_tracking_origin() -> (TempDir, Repository) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "base");
+    let d = dir.path();
+    git_out(
+        d,
+        &["remote", "add", "origin", "https://example.invalid/r.git"],
+    );
+    git_out(d, &["update-ref", "refs/remotes/origin/feature", "HEAD"]);
+    (dir, repo)
+}
+
+fn upstream_of(dir: &Path, branch: &str) -> String {
+    git_out(
+        dir,
+        &[
+            "for-each-ref",
+            "--format=%(upstream:short)",
+            &format!("refs/heads/{branch}"),
+        ],
+    )
+}
+
+/// #1151: Undo of a rename gives the old name its upstream back and leaves nothing under the new
+/// name; Redo moves it again. Through the worker, whose entries keep only what changed.
+#[test]
+fn undo_and_redo_of_a_rename_keep_the_branch_upstream() {
+    let (dir, _repo) = feature_tracking_origin();
+    let d = dir.path();
+    git_out(d, &["branch", "feature"]);
+    git_out(d, &["branch", "-u", "origin/feature", "feature"]);
+    let worker = Worker::spawn(d.to_path_buf()).unwrap();
+    let handle = worker.handle();
+
+    handle
+        .rename_branch("feature".into(), "feat2".into())
+        .unwrap();
+    assert_eq!(upstream_of(d, "feat2"), "origin/feature\n");
+
+    assert_eq!(
+        handle.undo().unwrap(),
+        UndoOutcome::Done {
+            label: "Rename branch feature to feat2".into()
+        }
+    );
+    assert_eq!(upstream_of(d, "feature"), "origin/feature\n");
+    let config = git_out(d, &["config", "--local", "--list"]);
+    assert!(!config.contains("branch.feat2."), "{config}");
+
+    assert_eq!(
+        handle.redo().unwrap(),
+        UndoOutcome::Done {
+            label: "Rename branch feature to feat2".into()
+        }
+    );
+    assert_eq!(upstream_of(d, "feat2"), "origin/feature\n");
+    let config = git_out(d, &["config", "--local", "--list"]);
+    assert!(!config.contains("branch.feature."), "{config}");
+}
+
+/// #1151: the checkout of a remote branch (create and switch, then set its upstream): after its
+/// Undo and Redo the branch tracks the remote branch again.
+#[test]
+fn redo_of_a_remote_branch_checkout_keeps_the_upstream() {
+    let (dir, _repo) = feature_tracking_origin();
+    let d = dir.path();
+    let worker = Worker::spawn(d.to_path_buf()).unwrap();
+    let handle = worker.handle();
+    handle
+        .create_branch("feature".into(), "origin/feature".into(), true)
+        .unwrap();
+    handle
+        .set_current_upstream("origin".into(), "feature".into())
+        .unwrap();
+
+    assert_eq!(
+        handle.undo().unwrap(),
+        UndoOutcome::Done {
+            label: "Create branch feature".into()
+        }
+    );
+    assert_eq!(
+        handle.redo().unwrap(),
+        UndoOutcome::Done {
+            label: "Create branch feature".into()
+        }
+    );
+
+    assert_eq!(upstream_of(d, "feature"), "origin/feature\n");
+}
+
+/// `conflicting_branches` plus `b.txt` ("b") committed on the current branch and then edited
+/// ("work in progress"), and a merge of `feature` stopped on its conflict in `a.txt`.
+fn paused_merge_with_work_in_b() -> (TempDir, Repository, Worker, super::super::WorkerHandle) {
+    let (dir, repo) = conflicting_branches();
+    write_file(dir.path(), "b.txt", "b\n");
+    commit_all(&repo, "add b");
+    write_file(dir.path(), "b.txt", "work in progress\n");
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    assert!(matches!(
+        handle
+            .start_merge(
+                "feature".into(),
+                git_core::merge::MergeOptions::default(),
+                no_events(),
+            )
+            .unwrap(),
+        MergeOutcome::Conflicted { .. }
+    ));
+    (dir, repo, worker, handle)
+}
+
+fn read(dir: &Path, path: &str) -> String {
+    std::fs::read_to_string(dir.join(path)).unwrap()
+}
+
+/// #1147: a discard while a merge is paused is an undo step of its own, which Undo and Redo run
+/// during the pause; the merge stays paused, and the steps before it still wait for it.
+#[test]
+fn a_discard_during_a_paused_merge_is_its_own_undo_step() {
+    let (dir, repo, _worker, handle) = paused_merge_with_work_in_b();
+    let d = dir.path();
+
+    handle.discard_file("b.txt".into()).unwrap();
+    assert_eq!(read(d, "b.txt"), "b\n");
+    assert_eq!(
+        handle.get_undo_state().unwrap().undo.as_deref(),
+        Some("Discard changes to b.txt")
+    );
+
+    let done = UndoOutcome::Done {
+        label: "Discard changes to b.txt".into(),
+    };
+    assert_eq!(handle.undo().unwrap(), done);
+    assert_eq!(read(d, "b.txt"), "work in progress\n");
+    assert_eq!(repo.state(), git2::RepositoryState::Merge);
+    assert_eq!(porcelain(d), "UU a.txt\n M b.txt\n");
+    assert_eq!(handle.undo().unwrap(), UndoOutcome::OperationInProgress);
+
+    assert_eq!(handle.redo().unwrap(), done);
+    assert_eq!(read(d, "b.txt"), "b\n");
+    assert_eq!(porcelain(d), "UU a.txt\n");
+}
+
+/// #1147: aborting the merge drops the merge's own entry but not the discard's, which still
+/// brings the file back.
+#[test]
+fn a_discard_during_a_merge_still_undoes_after_the_merge_is_aborted() {
+    let (dir, _repo, _worker, handle) = paused_merge_with_work_in_b();
+    handle.discard_file("b.txt".into()).unwrap();
+
+    handle.abort_merge().unwrap();
+
+    assert_eq!(
+        handle.undo().unwrap(),
+        UndoOutcome::Done {
+            label: "Discard changes to b.txt".into()
+        }
+    );
+    assert_eq!(read(dir.path(), "b.txt"), "work in progress\n");
+}
+
+/// `a.txt` stashed ("stashed"), then changed and committed ("other"), so popping the stash
+/// conflicts: the index has conflicts and no operation is in progress. `b.txt` ("b") committed.
+fn conflicted_stash_pop() -> (TempDir, Repository, Worker, super::super::WorkerHandle) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "base\n");
+    write_file(dir.path(), "b.txt", "b\n");
+    commit_all(&repo, "base");
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    write_file(dir.path(), "a.txt", "stashed\n");
+    handle
+        .save_stash(git_core::stash::StashOptions::default())
+        .unwrap();
+    write_file(dir.path(), "a.txt", "other\n");
+    commit_all(&repo, "other");
+    let stash = handle.list_stashes().unwrap()[0].commit_id.clone();
+    assert!(matches!(
+        handle.pop_stash(0, stash, false).unwrap(),
+        git_core::stash::StashApplyOutcome::Conflicted { .. }
+    ));
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    (dir, repo, worker, handle)
+}
+
+/// #1147: after a conflicted stash pop the index has conflicts; a discard is still recorded, and
+/// its Undo (also after a restart) brings the file back.
+#[test]
+fn a_discard_while_the_index_has_conflicts_is_recorded() {
+    let (dir, _repo, worker, handle) = conflicted_stash_pop();
+    let d = dir.path();
+    write_file(d, "b.txt", "an hour of work\n");
+
+    handle.discard_file("b.txt".into()).unwrap();
+    assert_eq!(read(d, "b.txt"), "b\n");
+    let (_worker, handle) = restart(worker, handle, d);
+
+    assert_eq!(
+        handle.undo().unwrap(),
+        UndoOutcome::Done {
+            label: "Discard changes to b.txt".into()
+        }
+    );
+    assert_eq!(read(d, "b.txt"), "an hour of work\n");
+    assert_eq!(porcelain(d), "UU a.txt\n M b.txt\n");
+}
+
+/// #1147: a hard reset can't be recorded while the index has conflicts (its index can't be
+/// brought back), so it is refused with the reason, and changes nothing.
+#[test]
+fn a_hard_reset_while_the_index_has_conflicts_is_refused() {
+    let (dir, repo, _worker, handle) = conflicted_stash_pop();
+    let d = dir.path();
+    write_file(d, "b.txt", "an hour of work\n");
+    let head = repo.head().unwrap().target().unwrap().to_string();
+
+    let result = handle.reset_to_commit(head, git_core::reset::ResetMode::Hard);
+
+    assert_eq!(
+        result,
+        Err(crate::wire::ErrorDto::from(
+            super::super::undo::DISCARD_CONFLICTED
+        ))
+    );
+    assert_eq!(read(d, "b.txt"), "an hour of work\n");
+    assert_eq!(porcelain(d), "UU a.txt\n M b.txt\n");
+    assert_eq!(handle.get_undo_state().unwrap().undo, None);
+}
+
+/// #1147: applying and staging a patch changes the index, which a paused merge's step can't
+/// record: refused with the reason, nothing changed.
+#[test]
+fn applying_and_staging_a_patch_during_a_paused_merge_is_refused() {
+    let (dir, _repo, _worker, handle) = paused_merge_with_work_in_b();
+    let patch = b"diff --git a/c.txt b/c.txt\nnew file mode 100644\n--- /dev/null\n+++ b/c.txt\n\
+@@ -0,0 +1 @@\n+c\n"
+        .to_vec();
+
+    let result = handle.apply_patch(patch, git_core::patch::PatchApply::Stage);
+
+    assert_eq!(
+        result,
+        Err(crate::wire::ErrorDto::from(
+            super::super::undo::DISCARD_PAUSED
+        ))
+    );
+    assert!(!dir.path().join("c.txt").exists());
+}
+
+/// #1147: a discard whose files can't be saved for Undo (here an untracked file nobody may
+/// read) isn't made; the reply names the file.
+#[test]
+#[cfg(unix)]
+fn a_discard_whose_files_cannot_be_saved_is_refused() {
+    use std::os::unix::fs::PermissionsExt;
+    let (dir, repo) = init_repo();
+    let d = dir.path();
+    write_file(d, "a.txt", "one\n");
+    commit_all(&repo, "initial");
+    write_file(d, "a.txt", "precious\n");
+    let secret = d.join("secret.txt");
+    write_file(d, "secret.txt", "s\n");
+    std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read(&secret).is_ok() {
+        return; // root reads it anyway: no failure to provoke
+    }
+    let worker = Worker::spawn(d.to_path_buf()).unwrap();
+    let handle = worker.handle();
+
+    let error = handle.discard_file("a.txt".into()).unwrap_err();
+
+    std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(
+        error
+            .message
+            .starts_with("Couldn't save the files for undo, so nothing was changed: "),
+        "{error:?}"
+    );
+    assert!(error.message.contains("secret.txt"), "{error:?}");
+    assert_eq!(read(d, "a.txt"), "precious\n");
+    assert_eq!(handle.get_undo_state().unwrap().undo, None);
+}
+
+/// `git status --porcelain` in `dir` (the git CLI is the reference).
+fn porcelain(dir: &Path) -> String {
+    let output = test_support::git(dir, &["status", "--porcelain"]);
+    assert!(output.status.success(), "{output:?}");
+    String::from_utf8(output.stdout).unwrap()
+}
+
+/// #1154: a branch created from another commit and switched to rewrites the work tree; Undo
+/// takes the work tree back too, not only HEAD, the ref and the index.
+#[test]
+fn undo_of_create_and_switch_from_another_commit_restores_the_work_tree() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "base");
+    let base = repo.head().unwrap().shorthand().unwrap().to_string();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("other", &head, false).unwrap();
+    repo.set_head("refs/heads/other").unwrap();
+    write_file(dir.path(), "a.txt", "other\n");
+    write_file(dir.path(), "only-other.txt", "o\n");
+    commit_all(&repo, "other");
+    repo.set_head(&format!("refs/heads/{base}")).unwrap();
+    repo.checkout_head(Some(
+        git2::build::CheckoutBuilder::new()
+            .force()
+            .remove_untracked(true),
+    ))
+    .unwrap();
+    assert_eq!(porcelain(dir.path()), "");
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+
+    handle
+        .create_branch("feature".into(), "other".into(), true)
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        "other\n"
+    );
+    assert_eq!(
+        handle.undo().unwrap(),
+        UndoOutcome::Done {
+            label: "Create branch feature".into()
+        }
+    );
+
+    assert_eq!(repo.head().unwrap().shorthand().unwrap(), base);
+    assert_eq!(porcelain(dir.path()), "");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        "a\n"
+    );
+    assert!(!dir.path().join("only-other.txt").exists());
+}

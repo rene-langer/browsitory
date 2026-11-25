@@ -9,7 +9,11 @@ cherry-pick, revert, merge, rebase, pull, every discard and restoring a file fro
 recoverable. Up to 50 steps are kept, across restarts. An operation that stopped on a conflict
 or an edit step (merge, cherry-pick, revert, a multi-commit sequence, rebase) becomes one undo
 step when it finishes, even if you restarted the app in between; one aborted, or replaced by
-another operation outside Browsitory, leaves nothing to undo. A rebase started in a terminal
+another operation outside Browsitory, leaves nothing to undo. A discard made while such an
+operation is paused (or after a stash pop that conflicted) is an undo step of its own, which
+Undo and Redo run during the pause too, and which stays when the operation is aborted. **Reset
+hard** and applying and staging a patch can't be undone then, so they are refused until you
+finish or abort the operation, or resolve the conflicts. A rebase started in a terminal
 is one operation through all its steps; it is continued and finished in the terminal, so it
 leaves nothing to undo either. A `git bisect` started in a
 terminal doesn't count as an operation in progress: operations are recorded and Undo and Redo
@@ -50,7 +54,15 @@ file is no longer as Undo noted it and Undo would have to bring back its old con
 refuses and changes nothing: "Can't undo Switch to main: dump.sql is larger than 50 MB, so its
 contents weren't saved for undo, and it has changed since." Discards, **Reset hard**, restoring
 a file, and applying a patch or a commit's change still save every file they replace, however
-big, so Undo brings it back; for a big file they take longer.
+big, so Undo brings it back; for a big file they take longer. They save only the files they
+can change that way; other big files are noted as above.
+
+Undo and Redo of renaming or deleting a branch bring back its settings too: its upstream, its
+pull and push settings and its description. In a sparse checkout, and with files marked
+skip-worktree or added with intent to add (`git add -N`), Undo and Redo keep those marks.
+
+If the files a discard would replace can't be saved for Undo (a file that can't be read, for
+example), the discard isn't made, and the message names the file.
 
 **More than 10,000 untracked files.** The same goes for a folder of many small files that isn't
 ignored (build output, a downloaded dataset): when there are more than 10,000 untracked files,
@@ -58,7 +70,7 @@ those operations save none of them for Undo and only note each file's size and t
 leaves them as they are, and refuses if it would have to bring back the old contents of one
 that changed since: "Can't undo Ignore build/: build/a.o is one of more than 10,000 untracked
 files, so its contents weren't saved for undo, and it has changed since." Discards and the
-other operations above still save every file, however many. Ignoring such a folder (its row's
+other operations above still save every file they can change, however many. Ignoring such a folder (its row's
 **Ignore folder**, see [Staging and committing](staging-and-committing.md#the-file-list)) keeps
 those operations quickest.
 

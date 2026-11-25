@@ -406,7 +406,7 @@ pub(super) fn table() -> Vec<((&'static str, Command), &'static str)> {
                 start_point: s("HEAD"),
                 checkout: true
             }),
-            "undo(RefsAndIndex, Create branch topic) lock hold gate",
+            "undo(Full, Create branch topic) lock hold gate",
         ),
         (
             cmd!(CreateBranch {
@@ -1216,4 +1216,211 @@ fn a_stored_operation_refuses_by_gate_and_scope() {
     // Stash save only while the scope says so.
     assert_eq!(gate(stash, &rebase), in_progress);
     assert_eq!(gate(stash, &detached), None);
+}
+
+/// #1147: which commands that destroy work-tree content change nothing but the work tree (so a
+/// paused operation or a conflicted index records them as work-tree entries) and which change
+/// more (refused then).
+#[test]
+fn discards_that_change_only_the_work_tree() {
+    let s = |text: &str| text.to_string();
+    let op = || "op-1".into();
+    let change = |stage: bool| super::CommitChange {
+        commit_id: s(ONTO),
+        path: s("a.txt"),
+        old_path: None,
+        hunk: None,
+        reverse: true,
+        stage,
+    };
+    let apply = |how| {
+        cmd!(ApplyPatch {
+            content: vec![],
+            how: how,
+            operation_id: op(),
+            events: channel().0
+        })
+    };
+    let rows = vec![
+        (
+            cmd!(DiscardHunk {
+                path: s("a.txt"),
+                old_start: 1,
+                new_start: 1,
+                hunk: HUNK
+            }),
+            true,
+        ),
+        (
+            cmd!(DiscardLines {
+                path: s("a.txt"),
+                old_start: 1,
+                new_start: 1,
+                hunk: HUNK,
+                line_indices: vec![],
+                expected_lines: vec![]
+            }),
+            true,
+        ),
+        (cmd!(DiscardFile { path: s("a.txt") }), true),
+        (cmd!(DiscardAllUnstaged { paths: vec![] }), true),
+        (
+            cmd!(RestoreFileVersion {
+                commit_id: s(ONTO),
+                path: s("a.txt")
+            }),
+            true,
+        ),
+        (
+            cmd!(ApplyCommitChange {
+                change: change(false)
+            }),
+            true,
+        ),
+        (
+            cmd!(ApplyCommitChange {
+                change: change(true)
+            }),
+            false,
+        ),
+        (apply(git_core::patch::PatchApply::WorkTree), true),
+        (apply(git_core::patch::PatchApply::Stage), false),
+        (apply(git_core::patch::PatchApply::Commits), false),
+        (
+            cmd!(ResetToCommit {
+                commit_id: s(ONTO),
+                mode: ResetMode::Hard
+            }),
+            false,
+        ),
+    ];
+    for ((name, command), expected) in rows {
+        let discard = policy::of(&command).undo.and_then(|plan| plan.discard);
+        assert_eq!(
+            discard.map(|discard| discard.worktree_only),
+            Some(expected),
+            "{name}"
+        );
+    }
+}
+
+/// A command's discard plan's paths: `None` without a plan, `Some(None)` for every file.
+type Whole = Option<Option<Vec<&'static str>>>;
+
+/// #1104: what each command that destroys work-tree content stores whole in its snapshots: the
+/// paths it names (`None`: every file). Every other recorded command has no discard plan.
+#[test]
+fn discards_store_whole_only_the_paths_they_can_change() {
+    let s = |text: &str| text.to_string();
+    let op = || "op-1".into();
+    let patch = b"diff --git a/b.txt b/b.txt\n--- a/b.txt\n+++ b/b.txt\n@@ -1 +1 @@\n-one\n+two\n\
+diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-one\n+two\n"
+        .to_vec();
+    let change = |old_path: Option<String>, stage: bool| super::CommitChange {
+        commit_id: s(ONTO),
+        path: s("new.txt"),
+        old_path,
+        hunk: None,
+        reverse: false,
+        stage,
+    };
+    let lines = |path: &str| {
+        cmd!(DiscardLines {
+            path: s(path),
+            old_start: 1,
+            new_start: 1,
+            hunk: HUNK,
+            line_indices: vec![],
+            expected_lines: vec![]
+        })
+    };
+    let apply = |content: Vec<u8>, how| {
+        cmd!(ApplyPatch {
+            content: content,
+            how: how,
+            operation_id: op(),
+            events: channel().0
+        })
+    };
+    let rows: Vec<((&str, Command), Whole)> = vec![
+        (
+            cmd!(DiscardHunk {
+                path: s("a.txt"),
+                old_start: 1,
+                new_start: 1,
+                hunk: HUNK
+            }),
+            Some(Some(vec!["a.txt"])),
+        ),
+        (lines("b.txt"), Some(Some(vec!["b.txt"]))),
+        (cmd!(DiscardFile { path: s("d/") }), Some(Some(vec!["d/"]))),
+        (
+            cmd!(DiscardAllUnstaged {
+                paths: vec![s("a.txt"), s("u/")]
+            }),
+            Some(Some(vec!["a.txt", "u/"])),
+        ),
+        (
+            cmd!(RestoreFileVersion {
+                commit_id: s(ONTO),
+                path: s("a.txt")
+            }),
+            Some(Some(vec!["a.txt"])),
+        ),
+        (
+            cmd!(ApplyCommitChange {
+                change: change(Some(s("old.txt")), false)
+            }),
+            Some(Some(vec!["new.txt", "old.txt"])),
+        ),
+        (
+            cmd!(ApplyCommitChange {
+                change: change(None, true)
+            }),
+            Some(Some(vec!["new.txt"])),
+        ),
+        (
+            apply(patch.clone(), git_core::patch::PatchApply::WorkTree),
+            Some(Some(vec!["a.txt", "b.txt"])),
+        ),
+        (
+            apply(patch.clone(), git_core::patch::PatchApply::Stage),
+            Some(Some(vec!["a.txt", "b.txt"])),
+        ),
+        (
+            apply(patch, git_core::patch::PatchApply::Commits),
+            Some(Some(vec!["a.txt", "b.txt"])),
+        ),
+        (
+            apply(
+                b"not a patch\n".to_vec(),
+                git_core::patch::PatchApply::WorkTree,
+            ),
+            Some(None),
+        ),
+        (
+            cmd!(ResetToCommit {
+                commit_id: s(ONTO),
+                mode: ResetMode::Hard
+            }),
+            Some(None),
+        ),
+        (
+            cmd!(ResetToCommit {
+                commit_id: s(ONTO),
+                mode: ResetMode::Mixed
+            }),
+            None,
+        ),
+        (cmd!(StageFile { path: s("a.txt") }), None),
+    ];
+    for ((name, command), expected) in rows {
+        let actual = policy::of(&command)
+            .undo
+            .and_then(|plan| plan.discard)
+            .map(|discard| discard.whole);
+        let expected =
+            expected.map(|whole| whole.map(|paths| paths.into_iter().map(s).collect::<Vec<_>>()));
+        assert_eq!(actual, expected, "{name}");
+    }
 }

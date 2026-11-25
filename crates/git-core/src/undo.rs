@@ -7,8 +7,8 @@ use std::io;
 use std::path::Path;
 
 use git2::{
-    ErrorCode, Index, IndexEntry, IndexEntryExtendedFlag, IndexTime, ObjectType, Oid, Repository,
-    Status, StatusOptions, TreeWalkMode, TreeWalkResult,
+    ErrorCode, Index, IndexEntry, IndexTime, ObjectType, Oid, Repository, Status, StatusOptions,
+    TreeWalkMode, TreeWalkResult,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -33,7 +33,14 @@ pub struct RepoSnapshot {
     pub head: HeadState,
     /// `refs/heads/*` and `refs/tags/*` -> oid.
     pub refs: BTreeMap<String, String>,
-    pub index_tree: String,
+    /// `None` for a work-tree snapshot (#1147, [`capture_worktree`]): no index recorded.
+    pub index_tree: Option<String>,
+    /// The index's intent-to-add paths (`git add -N`, #1174): `index_tree` holds them as empty
+    /// files, and `restore` puts the mark back.
+    pub intent_to_add: BTreeSet<String>,
+    /// Each local branch's settings (`branch.<name>.*` in the repository's own config file, #1151)
+    /// by branch name: `(variable, value)` in file order. Only branches with settings.
+    pub branch_config: BTreeMap<String, Vec<(String, String)>>,
     /// HEAD tree with every modified/deleted/untracked (not ignored) file overlaid. `None` for
     /// `SnapshotScope::RefsAndIndex`.
     pub worktree_tree: Option<String>,
@@ -164,23 +171,100 @@ pub fn capture_counted(
     capture_with(repo, Some(limits))
 }
 
-/// What a work-tree snapshot leaves unsaved: files over `file_size`, and every untracked file
-/// when there are more than `untracked`.
-#[derive(Clone, Copy)]
-struct Limits {
-    file_size: Option<u64>,
-    untracked: Option<usize>,
+/// [`capture`] for a command that destroys work-tree content (#1104): `whole` (files, and
+/// everything below folders, matched ignoring case) are stored whatever their size or number,
+/// every other file under `SnapshotScope::Full`'s limits.
+pub fn capture_keeping(repo: &Repository, whole: &[String]) -> Result<RepoSnapshot, UndoError> {
+    let limits = Limits {
+        whole,
+        ..Limits::FULL
+    };
+    capture_with(repo, Some(limits))
 }
 
-impl Limits {
-    const FULL: Self = Self {
+/// A work-tree snapshot (#1147): HEAD, refs and the work tree as `FullUncapped` takes them
+/// (narrowed to `whole` as [`capture_keeping`] does, when given), and no index, so an index with
+/// conflicts doesn't stop it. Restored with [`restore_worktree`].
+pub fn capture_worktree(
+    repo: &Repository,
+    whole: Option<&[String]>,
+) -> Result<RepoSnapshot, UndoError> {
+    let limits = match whole {
+        Some(whole) => Limits {
+            whole,
+            ..Limits::FULL
+        },
+        None => Limits::NONE,
+    };
+    snapshot_with(repo, Some(limits), false)
+}
+
+/// Restores the work-tree files of `target` over `expected`, two work-tree snapshots (#1147),
+/// checking each as [`restore`] does; HEAD, refs and the index are left alone, and it runs while
+/// an operation is in progress. Files are written as the snapshot stored them (raw bytes):
+/// there is no recorded index to check them out from.
+pub fn restore_worktree(
+    repo: &Repository,
+    expected: &RepoSnapshot,
+    target: &RepoSnapshot,
+) -> Result<(), UndoError> {
+    let Some(change) = worktree_change(repo, expected, target)? else {
+        return Ok(());
+    };
+    verify_worktree(repo, &change, target)?;
+    change.apply(repo)?;
+    change.checkout_from_index(repo)
+}
+
+/// [`capture_keeping`] with limits other than `SNAPSHOT_FILE_LIMIT` and
+/// `SNAPSHOT_UNTRACKED_LIMIT`: a test seam.
+#[doc(hidden)]
+pub fn capture_limited_except(
+    repo: &Repository,
+    file_limit: u64,
+    untracked_limit: usize,
+    whole: &[String],
+) -> Result<RepoSnapshot, UndoError> {
+    let limits = Limits {
+        file_size: Some(file_limit),
+        untracked: Some(untracked_limit),
+        whole,
+    };
+    capture_with(repo, Some(limits))
+}
+
+/// What a work-tree snapshot leaves unsaved: files over `file_size`, and every untracked file
+/// when there are more than `untracked` of them; never a file `whole` names (#1104).
+#[derive(Clone, Copy)]
+struct Limits<'a> {
+    file_size: Option<u64>,
+    untracked: Option<usize>,
+    /// Files, and folders (everything below them), stored whatever the limits say; matched
+    /// ignoring case, so a spelling that differs only in case can only store more.
+    whole: &'a [String],
+}
+
+impl Limits<'_> {
+    const FULL: Limits<'static> = Limits {
         file_size: Some(SNAPSHOT_FILE_LIMIT),
         untracked: Some(SNAPSHOT_UNTRACKED_LIMIT),
+        whole: &[],
     };
-    const NONE: Self = Self {
+    const NONE: Limits<'static> = Limits {
         file_size: None,
         untracked: None,
+        whole: &[],
     };
+}
+
+/// Whether the work-tree path `path` is one of `whole` (lower-cased, without a trailing `/`),
+/// ignoring case, or lies below one of them.
+fn named_whole(whole: &[String], path: &str) -> bool {
+    let path = path.to_lowercase();
+    whole.iter().any(|name| {
+        path.strip_prefix(name.as_str())
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+    })
 }
 
 /// The blob behind `RepoSnapshot::unsaved_untracked`: each file as
@@ -251,12 +335,26 @@ fn grouped(n: usize) -> String {
 
 /// `worktree`: `None` for refs and index only, else the work tree too, with its limits.
 fn capture_with(repo: &Repository, worktree: Option<Limits>) -> Result<RepoSnapshot, UndoError> {
-    let mut index = repo.index()?;
-    index.read(false)?;
-    if index.has_conflicts() {
-        return Err(UndoError::ConflictedIndex);
-    }
-    let index_tree = index.write_tree()?.to_string();
+    snapshot_with(repo, worktree, true)
+}
+
+/// [`capture_with`]; `with_index` false records no index (a work-tree snapshot, #1147), so
+/// conflicts in it don't matter.
+fn snapshot_with(
+    repo: &Repository,
+    worktree: Option<Limits>,
+    with_index: bool,
+) -> Result<RepoSnapshot, UndoError> {
+    let (index_tree, intent_to_add) = if with_index {
+        let mut index = repo.index()?;
+        index.read(false)?;
+        if index.has_conflicts() {
+            return Err(UndoError::ConflictedIndex);
+        }
+        (Some(index.write_tree()?.to_string()), intent_to_add(&index))
+    } else {
+        (None, BTreeSet::new())
+    };
     let (worktree_tree, skipped, unsaved_untracked) = match worktree {
         None => (None, BTreeMap::new(), None),
         Some(limits) => {
@@ -269,10 +367,20 @@ fn capture_with(repo: &Repository, worktree: Option<Limits>) -> Result<RepoSnaps
         head: head_state(repo)?,
         refs: local_refs(repo)?,
         index_tree,
+        intent_to_add,
+        branch_config: branch_settings(repo)?,
         worktree_tree,
         skipped,
         unsaved_untracked,
     })
+}
+
+/// The intent-to-add paths of `index` (#1174).
+fn intent_to_add(index: &Index) -> BTreeSet<String> {
+    crate::index_marks::intent_to_add_paths(index)
+        .into_iter()
+        .map(|path| String::from_utf8_lossy(&path).into_owned())
+        .collect()
 }
 
 fn head_state(repo: &Repository) -> Result<HeadState, UndoError> {
@@ -299,6 +407,83 @@ fn local_refs(repo: &Repository) -> Result<BTreeMap<String, String>, UndoError> 
         }
     }
     Ok(refs)
+}
+
+/// A branch's settings: `(variable, value)` in file order.
+type BranchSettings = Vec<(String, String)>;
+
+/// The repository's own config file (`.git/config`), where git keeps branch settings.
+fn local_config(repo: &Repository) -> Result<git2::Config, UndoError> {
+    Ok(repo.config()?.open_level(git2::ConfigLevel::Local)?)
+}
+
+/// Every `branch.<name>.<variable>` setting of the repository's own config file, by branch name
+/// (#1151). A branch name may hold dots; the variable never does.
+fn branch_settings(repo: &Repository) -> Result<BTreeMap<String, BranchSettings>, UndoError> {
+    Ok(scan_branch_settings(repo)?.0)
+}
+
+/// [`branch_settings`], and the branches with a setting written without a value (`flag`
+/// alone), which libgit2 can't remove: its value pattern match reads the missing value.
+fn scan_branch_settings(
+    repo: &Repository,
+) -> Result<(BTreeMap<String, BranchSettings>, BTreeSet<String>), UndoError> {
+    let mut settings: BTreeMap<String, BranchSettings> = BTreeMap::new();
+    let mut valueless = BTreeSet::new();
+    let config = match local_config(repo) {
+        Ok(config) => config,
+        Err(UndoError::Git(error)) if error.code() == ErrorCode::NotFound => {
+            return Ok((settings, valueless))
+        }
+        Err(error) => return Err(error),
+    };
+    let mut entries = config.entries(Some(r"^branch\..+\.[^.]+$"))?;
+    while let Some(entry) = entries.next() {
+        let entry = entry?;
+        let name = String::from_utf8_lossy(entry.name_bytes());
+        let Some((branch, variable)) = name
+            .strip_prefix("branch.")
+            .and_then(|rest| rest.rsplit_once('.'))
+        else {
+            continue;
+        };
+        // A variable without `=` is boolean true.
+        let value = if entry.has_value() {
+            String::from_utf8_lossy(entry.value_bytes()).into_owned()
+        } else {
+            valueless.insert(branch.to_string());
+            "true".to_string()
+        };
+        settings
+            .entry(branch.to_string())
+            .or_default()
+            .push((variable.to_string(), value));
+    }
+    Ok((settings, valueless))
+}
+
+/// Replaces `branch`'s settings `current` with `wanted`, in `wanted`'s order.
+fn write_branch_settings(
+    config: &mut git2::Config,
+    branch: &str,
+    current: &[(String, String)],
+    wanted: &[(String, String)],
+) -> Result<(), UndoError> {
+    let variables: BTreeSet<&str> = current.iter().map(|(name, _)| name.as_str()).collect();
+    for variable in variables {
+        config.remove_multivar(&format!("branch.{branch}.{variable}"), ".*")?;
+    }
+    let mut written = BTreeSet::new();
+    for (variable, value) in wanted {
+        let name = format!("branch.{branch}.{variable}");
+        if written.insert(variable) {
+            config.set_str(&name, value)?;
+        } else {
+            // A further value of a multi-valued variable: a pattern no value matches adds it.
+            config.set_multivar(&name, "a^", value)?;
+        }
+    }
+    Ok(())
 }
 
 pub(crate) struct WorktreeConfig {
@@ -348,13 +533,27 @@ fn build_worktree_tree(repo: &Repository, limits: Limits) -> Result<WorktreeSnap
         })
     };
     let untracked = |entry: &git2::StatusEntry| entry.status().contains(Status::WT_NEW);
-    let list_untracked = limits
-        .untracked
-        .is_some_and(|limit| entries().filter(untracked).count() > limit);
+    let whole: Vec<String> = limits
+        .whole
+        .iter()
+        .map(|name| name.trim_end_matches('/').to_lowercase())
+        .collect();
+    let kept = |entry: &git2::StatusEntry| {
+        !whole.is_empty() && named_whole(&whole, &String::from_utf8_lossy(entry.path_bytes()))
+    };
+    let list_untracked = limits.untracked.is_some_and(|limit| {
+        entries()
+            .filter(|entry| untracked(entry) && !kept(entry))
+            .count()
+            > limit
+    });
     for entry in entries() {
         let path = entry.path()?.to_string();
+        let kept = kept(&entry);
         let previous_mode = overlay.get_path(Path::new(&path), 0).map(|e| e.mode);
-        match crate::worktree_guard::open_leaf_beneath(workdir, &path)? {
+        // A file that can't be read is named: a discard refused for it says which (#1147).
+        let named = |error: io::Error| io::Error::new(error.kind(), format!("{path}: {error}"));
+        match crate::worktree_guard::open_leaf_beneath(workdir, &path).map_err(named)? {
             Some(Opened::Link { target, .. }) => {
                 let id = repo.blob(&target)?;
                 overlay.add(&index_entry(&path, id, MODE_LINK))?;
@@ -365,7 +564,9 @@ fn build_worktree_tree(repo: &Repository, limits: Limits) -> Result<WorktreeSnap
                 stat,
             }) => {
                 let mode = file_mode(&config, executable, previous_mode);
-                let left_out = if list_untracked && untracked(&entry) {
+                let left_out = if kept {
+                    None
+                } else if list_untracked && untracked(&entry) {
                     Some(&mut unsaved_untracked)
                 } else if limits.file_size.is_some_and(|limit| stat.size > limit) {
                     Some(&mut skipped)
@@ -378,7 +579,7 @@ fn build_worktree_tree(repo: &Repository, limits: Limits) -> Result<WorktreeSnap
                     continue;
                 }
                 let mut writer = repo.blob_writer(None)?;
-                io::copy(&mut file, &mut writer)?;
+                io::copy(&mut file, &mut writer).map_err(named)?;
                 overlay.add(&index_entry(&path, writer.commit()?, mode))?;
             }
             None => {
@@ -500,6 +701,44 @@ pub(crate) fn index_entry(path: &str, id: Oid, mode: u32) -> IndexEntry {
     }
 }
 
+/// The work-tree files to change from `expected` to `target`; `None` when they are the same.
+fn worktree_change(
+    repo: &Repository,
+    expected: &RepoSnapshot,
+    target: &RepoSnapshot,
+) -> Result<Option<WorktreeChange>, UndoError> {
+    Ok(match (&expected.worktree_tree, &target.worktree_tree) {
+        (Some(from), Some(to))
+            if from != to
+                || expected.skipped != target.skipped
+                || expected.unsaved_untracked != target.unsaved_untracked =>
+        {
+            Some(WorktreeChange::new(repo, expected, target, from, to)?)
+        }
+        _ => None,
+    })
+}
+
+/// Checks `change` against the work tree, writing nothing.
+fn verify_worktree(
+    repo: &Repository,
+    change: &WorktreeChange,
+    target: &RepoSnapshot,
+) -> Result<(), UndoError> {
+    change.verify(repo)?;
+    // The raw writes come before the forced checkout's own guard, so a target that brings in a
+    // case-colliding link and folder (#156) is refused here, writing nothing.
+    if let Some(to) = &target.worktree_tree {
+        let tree = repo.find_tree(Oid::from_str(to)?)?;
+        crate::worktree_guard::refuse_case_collision::<UndoError, _>(
+            repo,
+            &crate::worktree_guard::GuardSource::Tree(&tree),
+            Some(&change.paths),
+        )?;
+    }
+    Ok(())
+}
+
 pub fn restore(
     repo: &Repository,
     expected: &RepoSnapshot,
@@ -521,17 +760,15 @@ pub fn restore(
         .into_iter()
         .filter(|name| expected.refs.get(*name) != target.refs.get(*name))
         .collect();
-    let index_differs = expected.index_tree != target.index_tree;
-    let worktree = match (&expected.worktree_tree, &target.worktree_tree) {
-        (Some(from), Some(to))
-            if from != to
-                || expected.skipped != target.skipped
-                || expected.unsaved_untracked != target.unsaved_untracked =>
-        {
-            Some(WorktreeChange::new(repo, expected, target, from, to)?)
+    // The index tree to write; never when a side recorded none (a work-tree snapshot, #1147).
+    let index_target = match (&expected.index_tree, &target.index_tree) {
+        (Some(from), Some(to)) if from != to || expected.intent_to_add != target.intent_to_add => {
+            Some(to)
         }
         _ => None,
     };
+    let index_differs = index_target.is_some();
+    let worktree = worktree_change(repo, expected, target)?;
 
     // 1. Verify, writing nothing.
     if head_differs && head_state(repo)? != expected.head {
@@ -548,45 +785,57 @@ pub fn restore(
         }
     }
     verify_checked_out_branches(repo, head_differs, &changed_refs, target)?;
+    let settings = changed_branch_settings(expected, target);
+    let mut config = None;
+    if !settings.is_empty() {
+        let (current, valueless) = scan_branch_settings(repo)?;
+        // Like a ref: still the expected side's settings, or the restore would overwrite others.
+        // A setting without a value can't be removed safely (see `scan_branch_settings`).
+        if settings.iter().any(|branch| {
+            current.get(*branch) != expected.branch_config.get(*branch)
+                || valueless.contains(*branch)
+        }) {
+            return Err(UndoError::RepositoryChanged);
+        }
+        config = Some((local_config(repo)?, current));
+    }
     if index_differs {
         let mut index = repo.index()?;
         index.read(false)?;
-        // Already the target's: a restore that stopped after writing the index (in the checkout
-        // from it) is being tried again (#251). The work tree is still checked below.
-        let current = index.write_tree()?.to_string();
-        if index.has_conflicts() || (current != expected.index_tree && current != target.index_tree)
-        {
+        if index.has_conflicts() {
             return Err(UndoError::RepositoryChanged);
         }
-        // Rewriting the index from a tree would silently drop these per-entry flags.
-        let flags =
-            (IndexEntryExtendedFlag::SKIP_WORKTREE | IndexEntryExtendedFlag::INTENT_TO_ADD).bits();
-        if index.iter().any(|entry| entry.flags_extended & flags != 0) {
+        // The target's already: a restore that stopped after writing the index (in the checkout
+        // from it) is being tried again (#251); the work tree is still checked below. An
+        // intent-to-add entry is an empty file in the tree, so its mark counts too (#1174).
+        let current = (index.write_tree()?.to_string(), intent_to_add(&index));
+        let side = |snapshot: &RepoSnapshot| {
+            snapshot.index_tree.as_ref() == Some(&current.0) && current.1 == snapshot.intent_to_add
+        };
+        if !side(expected) && !side(target) {
             return Err(UndoError::RepositoryChanged);
         }
     }
     if let Some(change) = &worktree {
-        change.verify(repo)?;
-        // The raw writes below come before the forced checkout's own guard, so a target that
-        // brings in a case-colliding link and folder (#156) is refused here, writing nothing.
-        if let Some(to) = &target.worktree_tree {
-            let tree = repo.find_tree(Oid::from_str(to)?)?;
-            crate::worktree_guard::refuse_case_collision::<UndoError, _>(
-                repo,
-                &crate::worktree_guard::GuardSource::Tree(&tree),
-                Some(&change.paths),
-            )?;
-        }
+        verify_worktree(repo, change, target)?;
     }
 
     // 2. Write: worktree first (most likely to fail), then index, refs, HEAD.
     if let Some(change) = &worktree {
         change.apply(repo)?;
     }
-    if index_differs {
+    if let Some(index_tree) = index_target {
         let mut index = repo.index()?;
-        let tree = repo.find_tree(Oid::from_str(&target.index_tree)?)?;
-        crate::index_marks::reset_index_to_tree(&mut index, &tree, &[])?;
+        let tree = repo.find_tree(Oid::from_str(index_tree)?)?;
+        // The skip-worktree marks stay as they are now, as git's reset keeps them (#1145); the
+        // intent-to-add ones are the target's (#1174).
+        let skip_worktree = crate::index_marks::skip_worktree_paths(&index);
+        let intent_to_add: Vec<Vec<u8>> = target
+            .intent_to_add
+            .iter()
+            .map(|path| path.as_bytes().to_vec())
+            .collect();
+        crate::index_marks::reset_index_marking(&mut index, &tree, &skip_worktree, &intent_to_add)?;
     }
     if let Some(change) = &worktree {
         change.checkout_from_index(repo)?;
@@ -597,6 +846,16 @@ pub fn restore(
                 repo.reference(name, Oid::from_str(oid)?, true, reflog_message)?;
             }
             None => repo.find_reference(name)?.delete()?,
+        }
+    }
+    if let Some((mut config, current)) = config {
+        for branch in settings {
+            write_branch_settings(
+                &mut config,
+                branch,
+                current.get(branch).map_or(&[], Vec::as_slice),
+                target.branch_config.get(branch).map_or(&[], Vec::as_slice),
+            )?;
         }
     }
     if head_differs {
@@ -612,6 +871,29 @@ pub fn restore(
     // Undoing (or redoing) moves away from whatever a pending squash merge staged.
     crate::merge::clear_squash_message(repo)?;
     Ok(())
+}
+
+/// The branches whose settings a restore from `expected` to `target` writes (#1151): those it
+/// creates or deletes (the ref is on one side only) whose settings differ between the sides.
+/// The settings of a branch that stays are never touched: an entry doesn't change them, and one
+/// changed since by an unrecorded command (Set upstream) is the user's.
+fn changed_branch_settings<'a>(
+    expected: &'a RepoSnapshot,
+    target: &'a RepoSnapshot,
+) -> Vec<&'a str> {
+    expected
+        .branch_config
+        .keys()
+        .chain(target.branch_config.keys())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .filter(|branch| {
+            let name = format!("refs/heads/{branch}");
+            expected.refs.contains_key(&name) != target.refs.contains_key(&name)
+                && expected.branch_config.get(*branch) != target.branch_config.get(*branch)
+        })
+        .map(String::as_str)
+        .collect()
 }
 
 /// A branch that is some worktree's HEAD must not be deleted or moved under it, and no two
@@ -725,20 +1007,82 @@ fn holds_blob(
     config: &WorktreeConfig,
     (id, mode): (Oid, u32),
 ) -> Result<bool, UndoError> {
-    let Some(current) = identify_worktree_file(workdir, rel, config, Some(mode))? else {
-        return Ok(false);
-    };
-    if current.size != repo.odb()?.read_header(id)?.0 as u64 {
-        return Ok(false);
-    }
-    Ok(
-        match read_worktree_file(workdir, rel, config, Some(mode))? {
-            Some((bytes, disk_mode)) => {
-                disk_mode == mode && Oid::hash_object(ObjectType::Blob, &bytes)? == id
+    worktree_holds(repo, workdir, rel, config, id, Some(mode))
+}
+
+/// Whether the work-tree path `rel` holds the blob `id` (raw bytes, as [`read_worktree_file`]
+/// reads them) and, when `mode` is given, has that git mode (as `read_worktree_file` with it as
+/// the previous mode gives it). A file of another size isn't read; one of the same size is
+/// compared with the blob in pieces, so neither is held in memory whole (#1089).
+fn worktree_holds(
+    repo: &Repository,
+    workdir: &Path,
+    rel: &str,
+    config: &WorktreeConfig,
+    id: Oid,
+    mode: Option<u32>,
+) -> Result<bool, UndoError> {
+    use crate::worktree_guard::Opened;
+    match crate::worktree_guard::open_leaf_beneath(workdir, rel)? {
+        None => Ok(false),
+        Some(Opened::Link { target, .. }) => Ok(mode.is_none_or(|mode| mode == MODE_LINK)
+            && Oid::hash_object(ObjectType::Blob, &target)? == id),
+        Some(Opened::File {
+            mut file,
+            executable,
+            stat,
+        }) => {
+            if mode.is_some_and(|mode| file_mode(config, executable, Some(mode)) != mode) {
+                return Ok(false);
             }
-            None => false,
-        },
-    )
+            if stat.size != repo.odb()?.read_header(id)?.0 as u64 {
+                return Ok(false);
+            }
+            blob_equals(repo, id, &mut file)
+        }
+    }
+}
+
+/// Whether `reader` yields exactly the blob `id`'s bytes. The blob is read as a stream where the
+/// object database can stream it (a loose object), else loaded (a packed one).
+fn blob_equals(repo: &Repository, id: Oid, reader: &mut dyn io::Read) -> Result<bool, UndoError> {
+    let odb = repo.odb()?;
+    if let Ok((mut stream, _, _)) = odb.reader(id) {
+        return Ok(same_bytes(&mut stream, reader)?);
+    }
+    let blob = repo.find_blob(id)?;
+    Ok(same_bytes(&mut blob.content(), reader)?)
+}
+
+/// Whether two readers yield the same bytes, compared in pieces.
+fn same_bytes(a: &mut dyn io::Read, b: &mut dyn io::Read) -> io::Result<bool> {
+    const PIECE: usize = 64 * 1024;
+    let mut left = vec![0; PIECE];
+    let mut right = vec![0; PIECE];
+    loop {
+        let n = read_up_to(a, &mut left)?;
+        let m = read_up_to(b, &mut right)?;
+        if left[..n] != right[..m] {
+            return Ok(false);
+        }
+        if n == 0 {
+            return Ok(true);
+        }
+    }
+}
+
+/// Reads until `buffer` is full or the reader ends; how many bytes it got.
+fn read_up_to(reader: &mut dyn io::Read, buffer: &mut [u8]) -> io::Result<usize> {
+    let mut filled = 0;
+    while filled < buffer.len() {
+        match reader.read(&mut buffer[filled..]) {
+            Ok(0) => break,
+            Ok(n) => filled += n,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(filled)
 }
 
 impl WorktreeChange {
@@ -749,11 +1093,25 @@ impl WorktreeChange {
         from: &str,
         to: &str,
     ) -> Result<Self, UndoError> {
-        let target_index = flatten_tree(repo, &target.index_tree)?;
-        let tracked = flatten_tree(repo, &expected.index_tree)?
+        let flatten_index = |snapshot: &RepoSnapshot| match &snapshot.index_tree {
+            Some(id) => flatten_tree(repo, id),
+            None => Ok(TreeFiles::new()),
+        };
+        let target_index = flatten_index(target)?;
+        let mut tracked: BTreeSet<String> = flatten_index(expected)?
             .into_keys()
             .chain(target_index.keys().cloned())
             .collect();
+        if expected.index_tree.is_none() || target.index_tree.is_none() {
+            // A work-tree snapshot has no index of its own (#1147): what the index tracks now.
+            let mut index = repo.index()?;
+            index.read(false)?;
+            tracked.extend(
+                index
+                    .iter()
+                    .map(|entry| String::from_utf8_lossy(&entry.path).into_owned()),
+            );
+        }
         let from = flatten_tree(repo, from)?;
         let to = flatten_tree(repo, to)?;
         let mut paths: BTreeSet<String> = from
@@ -801,12 +1159,17 @@ impl WorktreeChange {
         // checkout of one of them can drop the other from its ignore-case index or rename its
         // entry (#403), and `prepare_forced_checkout` refuses it.
         let in_pair: BTreeSet<Vec<u8>> = if crate::worktree_guard::core_ignorecase(repo)? {
-            let index_tree = repo.find_tree(Oid::from_str(&target.index_tree)?)?;
+            let index_tree = match &target.index_tree {
+                Some(id) => Some(repo.find_tree(Oid::from_str(id)?)?),
+                None => None,
+            };
             let head_tree = repo.head().and_then(|head| head.peel_to_tree()).ok();
-            let mut sources = vec![
-                crate::worktree_guard::GuardSource::Tree(&index_tree),
-                crate::worktree_guard::GuardSource::Index(&index),
-            ];
+            let mut sources = vec![crate::worktree_guard::GuardSource::Index(&index)];
+            sources.extend(
+                index_tree
+                    .as_ref()
+                    .map(crate::worktree_guard::GuardSource::Tree),
+            );
             sources.extend(
                 head_tree
                     .as_ref()
@@ -861,42 +1224,35 @@ impl WorktreeChange {
                 // Its contents were never stored: as the snapshot saw it, judged by its stat
                 // data, without reading it.
                 if identify_worktree_file(workdir, path, &config, Some(file.mode))? != Some(*file)
-                    && !self.already_restored(workdir, path, &config)?
+                    && !self.already_restored(repo, workdir, path, &config)?
                 {
                     return Err(UndoError::RepositoryChanged);
                 }
                 continue;
             }
             let expected = self.from.get(path).copied();
-            let previous_mode = expected.map(|(_, mode)| mode);
-            let disk = read_worktree_file(workdir, path, &config, previous_mode)?;
-            let current = disk
-                .as_ref()
-                .map(|(bytes, mode)| {
-                    Ok::<_, git2::Error>((Oid::hash_object(ObjectType::Blob, bytes)?, *mode))
-                })
-                .transpose()?;
+            let as_expected = match expected {
+                None => crate::worktree_guard::open_leaf_beneath(workdir, path)?.is_none(),
+                Some((id, mode)) => worktree_holds(repo, workdir, path, &config, id, Some(mode))?,
+            };
             // A path checked out from the index already, by a checkout that stopped part-way
             // (#268): filters (`core.autocrlf`) mean its bytes needn't be the target's raw ones.
             let checked_out = || {
                 self.from_index.contains(path)
                     && clean_against_index(repo, &index, path, self.to.get(path).copied())
             };
-            if current != expected
+            if !as_expected
                 && !clean_against_index(repo, &index, path, expected)
-                && !self.already_restored(workdir, path, &config)?
+                && !self.already_restored(repo, workdir, path, &config)?
                 && !checked_out()
             {
                 // Ignored files are not snapshotted: absent from the tree but present on disk
                 // is fine as long as the file is ignored and the target would not change it.
                 let ignored_untouched = expected.is_none()
-                    && disk.is_some()
                     && repo.is_path_ignored(path)?
-                    && match (self.to.get(path), &disk) {
-                        (Some((id, _)), Some((bytes, _))) => {
-                            Oid::hash_object(ObjectType::Blob, bytes)? == *id
-                        }
-                        _ => true,
+                    && match self.to.get(path) {
+                        Some(&(id, _)) => worktree_holds(repo, workdir, path, &config, id, None)?,
+                        None => true,
                     };
                 if !ignored_untouched {
                     return Err(UndoError::RepositoryChanged);
@@ -916,6 +1272,7 @@ impl WorktreeChange {
     /// since the operation (#251). Writing it again changes nothing.
     fn already_restored(
         &self,
+        repo: &Repository,
         workdir: &Path,
         path: &str,
         config: &WorktreeConfig,
@@ -927,14 +1284,7 @@ impl WorktreeChange {
                 Ok(meta) => meta.is_dir() && self.has_target_files_below(path),
             });
         };
-        Ok(
-            match read_worktree_file(workdir, path, config, Some(mode))? {
-                Some((bytes, disk_mode)) => {
-                    disk_mode == mode && Oid::hash_object(ObjectType::Blob, &bytes)? == id
-                }
-                None => false,
-            },
-        )
+        worktree_holds(repo, workdir, path, config, id, Some(mode))
     }
 
     /// Whether the target has files below `path` (which then is, or becomes, their folder).
@@ -1129,16 +1479,27 @@ fn write_worktree_file(
     mode: u32,
     config: &WorktreeConfig,
 ) -> Result<(), UndoError> {
-    let blob = repo.find_blob(id)?;
-    let content = if mode == MODE_LINK && config.symlinks {
-        Content::Link(blob.content())
+    let written = if mode == MODE_LINK && config.symlinks {
+        let blob = repo.find_blob(id)?;
+        crate::worktree_guard::replace_beneath(workdir, rel, Content::Link(blob.content()))
     } else {
-        Content::File {
-            bytes: blob.content(),
-            executable: mode == MODE_EXEC,
+        let executable = mode == MODE_EXEC;
+        // A loose object streams into the new file in pieces (#1089); a packed one is loaded.
+        match repo.odb()?.reader(id) {
+            Ok((mut stream, _, _)) => {
+                crate::worktree_guard::replace_beneath_from(workdir, rel, executable, &mut stream)
+            }
+            Err(_) => {
+                let blob = repo.find_blob(id)?;
+                let content = Content::File {
+                    bytes: blob.content(),
+                    executable,
+                };
+                crate::worktree_guard::replace_beneath(workdir, rel, content)
+            }
         }
     };
-    crate::worktree_guard::replace_beneath(workdir, rel, content).map_err(|error| {
+    written.map_err(|error| {
         if crate::worktree_guard::is_in_use(&error) {
             UndoError::FileInUse(rel.to_string())
         } else {

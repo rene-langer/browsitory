@@ -11,11 +11,13 @@ use git_core::undo::{HeadState, RepoSnapshot, SkippedFile};
 use serde::{Deserialize, Serialize};
 
 pub(super) const UNDO_LIMIT: usize = 50;
-/// Version 2 (#1093) marks snapshots that can leave files unsaved (#1065, #1090): a build that
-/// reads only version 1 ignores the whole file rather than act on snapshots it misreads.
-const FORMAT_VERSION: u32 = 2;
-/// Version 1 is what older builds wrote (and builds with #1088 alone, whose `skipped` files
-/// this build understands), so it still loads.
+/// Version 2 (#1093) marks snapshots that can leave files unsaved (#1065, #1090), version 3
+/// snapshots with intent-to-add paths (#1174), branch settings (#1151) and work-tree entries
+/// without an index tree (#1147): a build that reads only older versions ignores the whole file
+/// rather than act on snapshots it misreads, and never overwrites it.
+const FORMAT_VERSION: u32 = 3;
+/// Versions 1 and 2 are what older builds wrote (and builds with #1088 alone, whose `skipped`
+/// files this build understands), so they still load.
 const READABLE_VERSIONS: std::ops::RangeInclusive<u32> = 1..=FORMAT_VERSION;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,7 +56,16 @@ enum StoredHead {
 struct StoredSnapshot {
     head: StoredHead,
     refs: BTreeMap<String, String>,
-    index_tree: String,
+    /// Absent for a work-tree entry's snapshot (#1147), which records no index.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    index_tree: Option<String>,
+    /// The index's intent-to-add paths (#1174); absent when there are none.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    intent_to_add: BTreeSet<String>,
+    /// The settings (`[variable, value]`, in file order) of the branches the entry creates or
+    /// deletes (#1151); absent when there are none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    branch_config: BTreeMap<String, Vec<(String, String)>>,
     worktree_tree: Option<String>,
     /// The files the snapshot didn't store for their size (#1065); absent when there are none.
     /// Builds that predate it never read it: they ignore a version 2 file (#1093).
@@ -133,6 +144,8 @@ impl From<&RepoSnapshot> for StoredSnapshot {
             },
             refs: snapshot.refs.clone(),
             index_tree: snapshot.index_tree.clone(),
+            intent_to_add: snapshot.intent_to_add.clone(),
+            branch_config: snapshot.branch_config.clone(),
             worktree_tree: snapshot.worktree_tree.clone(),
             unsaved_untracked: snapshot.unsaved_untracked.clone(),
             skipped: snapshot
@@ -153,6 +166,8 @@ impl From<StoredSnapshot> for RepoSnapshot {
             },
             refs: stored.refs,
             index_tree: stored.index_tree,
+            intent_to_add: stored.intent_to_add,
+            branch_config: stored.branch_config,
             worktree_tree: stored.worktree_tree,
             unsaved_untracked: stored.unsaved_untracked,
             skipped: stored
@@ -314,11 +329,9 @@ impl UndoStore {
         let mut builder = repo.treebuilder(None)?;
         let mut referenced: BTreeSet<Oid> = BTreeSet::new();
         for (name, snapshot) in snapshots {
-            builder.insert(
-                format!("{name}-index"),
-                Oid::from_str(&snapshot.index_tree)?,
-                0o040000,
-            )?;
+            if let Some(tree) = &snapshot.index_tree {
+                builder.insert(format!("{name}-index"), Oid::from_str(tree)?, 0o040000)?;
+            }
             if let Some(tree) = &snapshot.worktree_tree {
                 builder.insert(format!("{name}-worktree"), Oid::from_str(tree)?, 0o040000)?;
             }
@@ -531,15 +544,15 @@ mod tests {
         stacks.undo.push(with_a_skipped_file(&repo));
         store.save(&repo, &stacks).unwrap();
 
-        assert_eq!(undo_json(&repo)["version"], 2);
+        assert_eq!(undo_json(&repo)["version"], 3);
         let (_, reloaded) = UndoStore::open(&repo);
         assert_eq!(reloaded.undo, stacks.undo);
     }
 
     /// #1093: the history an older build (or a build with #1088 alone) wrote stays usable, and
-    /// the next save writes it as version 2.
+    /// the next save writes it as the current version.
     #[test]
-    fn a_version_1_file_still_loads_and_is_saved_as_version_2() {
+    fn a_version_1_file_still_loads_and_is_saved_as_the_current_version() {
         let (_dir, repo) = repo_with_commit();
         let (mut store, mut stacks) = UndoStore::open(&repo);
         stacks.undo.push(with_a_skipped_file(&repo));
@@ -557,7 +570,129 @@ mod tests {
         assert!(!store.is_blocked());
         assert_eq!(reloaded.undo, stacks.undo);
         store.save(&repo, &reloaded).unwrap();
-        assert_eq!(undo_json(&repo)["version"], 2);
+        assert_eq!(undo_json(&repo)["version"], 3);
+    }
+
+    /// The previous format (#1093) still loads, and is saved as the current version.
+    #[test]
+    fn a_version_2_file_still_loads() {
+        let (_dir, repo) = repo_with_commit();
+        let (mut store, mut stacks) = UndoStore::open(&repo);
+        stacks.undo.push(with_a_skipped_file(&repo));
+        store.save(&repo, &stacks).unwrap();
+        let mut json = undo_json(&repo);
+        json["version"] = 2.into();
+        std::fs::write(
+            repo.path().join("browsitory/undo.json"),
+            serde_json::to_vec(&json).unwrap(),
+        )
+        .unwrap();
+
+        let (mut store, reloaded) = UndoStore::open(&repo);
+        assert!(!store.is_blocked());
+        assert_eq!(reloaded.undo, stacks.undo);
+        store.save(&repo, &reloaded).unwrap();
+        assert_eq!(undo_json(&repo)["version"], 3);
+    }
+
+    /// #1174: a snapshot's intent-to-add paths (`git add -N`) are saved and reloaded; a snapshot
+    /// without any writes no key.
+    #[test]
+    fn saves_and_reloads_intent_to_add_paths() {
+        let (dir, repo) = repo_with_commit();
+        std::fs::write(dir.path().join("new.txt"), "new\n").unwrap();
+        let output = test_support::git(dir.path(), &["add", "-N", "new.txt"]);
+        assert!(output.status.success(), "{output:?}");
+        let with = capture(&repo, SnapshotScope::RefsAndIndex).unwrap();
+        assert_eq!(with.intent_to_add, BTreeSet::from(["new.txt".to_string()]));
+        let (mut store, mut stacks) = UndoStore::open(&repo);
+        stacks.undo.push(UndoEntry {
+            label: "Stage a.txt".into(),
+            before: with.clone(),
+            after: with,
+        });
+        stacks.undo.push(entry(&repo, "Commit"));
+        store.save(&repo, &stacks).unwrap();
+
+        let json = undo_json(&repo);
+        assert_eq!(json["version"], 3);
+        assert_eq!(
+            json["undo"][0]["before"]["intentToAdd"],
+            serde_json::json!(["new.txt"])
+        );
+        let (_, reloaded) = UndoStore::open(&repo);
+        assert_eq!(reloaded.undo, stacks.undo);
+        let output = test_support::git(dir.path(), &["reset", "-q", "new.txt"]);
+        assert!(output.status.success(), "{output:?}");
+        let without = capture(&repo, SnapshotScope::RefsAndIndex).unwrap();
+        stacks.undo = vec![UndoEntry {
+            label: "Stage a.txt".into(),
+            before: without.clone(),
+            after: without,
+        }];
+        store.save(&repo, &stacks).unwrap();
+        assert!(undo_json(&repo)["undo"][0]["before"]
+            .get("intentToAdd")
+            .is_none());
+    }
+
+    /// #1147: a work-tree entry's snapshots record no index: saved without `indexTree`, reloaded
+    /// as such, and its work-tree trees still pinned.
+    #[test]
+    fn saves_and_reloads_a_work_tree_entry() {
+        let (dir, repo) = repo_with_commit();
+        std::fs::write(dir.path().join("a.txt"), "edited\n").unwrap();
+        let snapshot = git_core::undo::capture_worktree(&repo, None).unwrap();
+        assert_eq!(snapshot.index_tree, None);
+        let (mut store, mut stacks) = UndoStore::open(&repo);
+        stacks.undo.push(UndoEntry {
+            label: "Discard changes to a.txt".into(),
+            before: snapshot.clone(),
+            after: snapshot,
+        });
+        store.save(&repo, &stacks).unwrap();
+
+        let json = undo_json(&repo);
+        assert!(json["undo"][0]["before"].get("indexTree").is_none());
+        let (_, reloaded) = UndoStore::open(&repo);
+        assert_eq!(reloaded.undo, stacks.undo);
+    }
+
+    /// #1151: a snapshot's branch settings are saved and reloaded, in order; none, no key.
+    #[test]
+    fn saves_and_reloads_branch_settings() {
+        let (dir, repo) = repo_with_commit();
+        for args in [
+            ["config", "branch.topic.remote", "origin"],
+            ["config", "branch.topic.merge", "refs/heads/topic"],
+        ] {
+            let output = test_support::git(dir.path(), &args);
+            assert!(output.status.success(), "{output:?}");
+        }
+        let with = capture(&repo, SnapshotScope::RefsAndIndex).unwrap();
+        assert_eq!(
+            with.branch_config.get("topic"),
+            Some(&vec![
+                ("remote".to_string(), "origin".to_string()),
+                ("merge".to_string(), "refs/heads/topic".to_string()),
+            ])
+        );
+        let (mut store, mut stacks) = UndoStore::open(&repo);
+        stacks.undo.push(UndoEntry {
+            label: "Delete branch topic".into(),
+            before: with.clone(),
+            after: with,
+        });
+        stacks.undo.push(entry(&repo, "Stage a.txt"));
+        store.save(&repo, &stacks).unwrap();
+
+        let json = undo_json(&repo);
+        assert_eq!(
+            json["undo"][0]["before"]["branchConfig"]["topic"],
+            serde_json::json!([["remote", "origin"], ["merge", "refs/heads/topic"]])
+        );
+        let (_, reloaded) = UndoStore::open(&repo);
+        assert_eq!(reloaded.undo, stacks.undo);
     }
 
     #[test]
@@ -777,7 +912,7 @@ mod tests {
         std::fs::write(dir.path().join("untracked.txt"), "only in the worktree\n").unwrap();
         let snapshot = capture(&repo, SnapshotScope::Full).unwrap();
         let head_tree = repo.head().unwrap().peel_to_commit().unwrap().tree_id();
-        let index_tree = Oid::from_str(&snapshot.index_tree).unwrap();
+        let index_tree = Oid::from_str(snapshot.index_tree.as_ref().unwrap()).unwrap();
         let worktree_tree = Oid::from_str(snapshot.worktree_tree.as_ref().unwrap()).unwrap();
         assert_ne!(index_tree, head_tree);
         let blob = repo
@@ -831,7 +966,7 @@ mod tests {
         let (_, reloaded) = UndoStore::open(&repo);
         assert_eq!(reloaded.undo, stacks.undo);
         let json = undo_json(&repo);
-        assert_eq!(json["version"], 2);
+        assert_eq!(json["version"], 3);
         assert_eq!(
             json["undo"][0]["before"]["unsavedUntracked"],
             list.to_string()
@@ -875,7 +1010,7 @@ mod tests {
             &std::fs::read(repo.path().join("browsitory/undo.json")).unwrap(),
         )
         .unwrap();
-        assert_eq!(json["version"], 2);
+        assert_eq!(json["version"], 3);
         assert_eq!(json["pending"]["label"], "Merge feature");
         assert_eq!(json["pending"]["operation"], "merge abc def");
     }
@@ -917,7 +1052,7 @@ mod tests {
         store.save(&repo, &stacks).unwrap();
         let bytes = std::fs::read(repo.path().join("browsitory/undo.json")).unwrap();
         let old: OldStoredFile = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(old.version, 2);
+        assert_eq!(old.version, 3);
         assert_eq!(old.undo.len(), 1);
     }
 
@@ -946,7 +1081,7 @@ mod tests {
         index.write().unwrap();
         std::fs::write(dir.path().join("untracked.txt"), "only in the worktree\n").unwrap();
         let before = pending(&repo, "Merge feature");
-        let index_tree = Oid::from_str(&before.before.index_tree).unwrap();
+        let index_tree = Oid::from_str(before.before.index_tree.as_ref().unwrap()).unwrap();
         let worktree_tree = Oid::from_str(before.before.worktree_tree.as_ref().unwrap()).unwrap();
         let (mut store, mut stacks) = UndoStore::open(&repo);
         stacks.pending = Some(before);

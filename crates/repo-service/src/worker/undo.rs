@@ -1,6 +1,7 @@
 //! Undo stack: which worker commands are recorded, under which label, and the recorder that
 //! snapshots around them. See `docs/superpowers/specs/2026-10-18-parity-batch3b-design.md`.
 use crate::wire::ErrorDto;
+use std::collections::BTreeSet;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
@@ -30,7 +31,28 @@ undo history. Try again in a moment, so this change can be undone.";
 pub(super) struct UndoPlan {
     pub label: String,
     pub scope: SnapshotScope,
+    /// Only for the commands that destroy work-tree content (`busy=Discard`).
+    pub discard: Option<DiscardPlan>,
 }
+
+/// What a command that destroys work-tree content can touch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct DiscardPlan {
+    /// The paths its snapshots store whatever their size or number (#1104); `None`: every file.
+    pub whole: Option<Vec<String>>,
+    /// It changes nothing but the work tree, so while an operation is paused or the index has
+    /// conflicts it is recorded as a work-tree entry; the others are refused then (#1147).
+    pub worktree_only: bool,
+}
+
+/// The reply of a `busy=Discard` command that changes more than the work tree while an
+/// operation is paused (#1147): no entry could take it back.
+pub(super) const DISCARD_PAUSED: &str = "A merge, rebase, cherry-pick or revert is paused. \
+Finish or abort it first, so this change can be undone.";
+
+/// Like [`DISCARD_PAUSED`], while the index has conflicts.
+pub(super) const DISCARD_CONFLICTED: &str =
+    "The index has conflicts. Resolve them first, so this change can be undone.";
 
 /// While another holder keeps the state lock past `LOCK_WAIT`, a command whose policy refuses it
 /// then (`CommandPolicy::busy`) gets `busy`'s text and must not run: Undo/Redo (D7-A), and the
@@ -43,6 +65,16 @@ pub(super) fn reply_busy(command: &mut Command, busy: BusyReply) {
     if let Some(reply) = reply_of(command) {
         reply.refuse(busy.text().into());
     }
+}
+
+/// A command that destroys work-tree content but can't be recorded now (`UndoRecorder::begin`'s
+/// refusal, #1147): answered with `refusal`, and replaced by a no-op so it doesn't run.
+pub(super) fn refuse_unrecordable(mut command: Command, refusal: String) -> Command {
+    if let Some(reply) = reply_of(&mut command) {
+        reply.refuse(refusal.as_str().into());
+    }
+    let (reply, _) = std::sync::mpsc::channel();
+    Command::Ping { reply }
 }
 
 /// "Amend “<summary>”", or a fallback for an empty message.
@@ -405,18 +437,57 @@ impl UndoRecorder {
 
     /// Snapshots before a recordable command. Skipped while an operation is paused: whatever
     /// runs then (staging, resolving, the final commit) belongs to that operation's entry.
-    pub fn begin(&mut self, repo: &Repository, plan: UndoPlan, marker: Option<&str>) {
-        if self.stacks.pending.is_some() || marker.is_some() {
-            return;
-        }
-        match capture(repo, plan.scope) {
-            Ok(before) => self.active = Some((plan, before)),
-            Err(error) => {
-                eprintln!(
-                    "browsitory: not recording \"{}\" for undo: {error}",
-                    plan.label
-                )
+    ///
+    /// A command that destroys work-tree content (`UndoPlan::discard`) is recorded or refused,
+    /// never run unrecorded (#225, #1147): while an operation is paused or the index has
+    /// conflicts it gets a work-tree entry of its own when it changes only the work tree, and is
+    /// refused otherwise; a snapshot that fails refuses it too. `Some(reply)`: refused, with
+    /// that reply, and the command must not run.
+    pub fn begin(
+        &mut self,
+        repo: &Repository,
+        plan: UndoPlan,
+        marker: Option<&str>,
+    ) -> Option<String> {
+        let paused = self.stacks.pending.is_some() || marker.is_some();
+        let Some(discard) = &plan.discard else {
+            if !paused {
+                match snapshot(repo, &plan) {
+                    Ok(before) => self.active = Some((plan, before)),
+                    Err(error) => eprintln!(
+                        "browsitory: not recording \"{}\" for undo: {error}",
+                        plan.label
+                    ),
+                }
             }
+            return None;
+        };
+        let conflicted = !paused && index_has_conflicts(repo);
+        let before = if paused || conflicted {
+            if !discard.worktree_only {
+                // A terminal rebase's own reason says how to go on with it (#263).
+                let terminal = git_core::repo::terminal_rebase(repo).map(|rebase| {
+                    git_core::repo::TerminalRebaseInProgress(rebase.kind).to_string()
+                });
+                let reply = match terminal {
+                    Some(reply) => reply,
+                    None if paused => DISCARD_PAUSED.to_string(),
+                    None => DISCARD_CONFLICTED.to_string(),
+                };
+                return Some(reply);
+            }
+            git_core::undo::capture_worktree(repo, discard.whole.as_deref())
+        } else {
+            snapshot(repo, &plan)
+        };
+        match before {
+            Ok(before) => {
+                self.active = Some((plan, before));
+                None
+            }
+            Err(error) => Some(format!(
+                "Couldn't save the files for undo, so nothing was changed: {error}"
+            )),
         }
     }
 
@@ -439,7 +510,9 @@ impl UndoRecorder {
             let Some(_exclusive) = self.exclusive(guard, Duration::ZERO) else {
                 return;
             };
-            if let Some(operation) = marker() {
+            // A work-tree entry is its own step, even during a pause (#1147).
+            let operation = marker().filter(|_| !is_worktree_entry(&before));
+            if let Some(operation) = operation {
                 // Added to the freshly loaded stacks, so another writer's entries survive.
                 self.stacks.pending = Some(PendingEntry {
                     label: plan.label,
@@ -449,7 +522,7 @@ impl UndoRecorder {
                 self.persist(repo);
                 return;
             }
-            self.record(repo, plan.label, plan.scope, before, false);
+            self.record(repo, plan, before, false);
             return;
         }
         if marker().is_some() {
@@ -470,8 +543,12 @@ impl UndoRecorder {
             if aborted || stale_unsettled.as_ref() == Some(&pending.operation) {
                 self.persist(repo);
             } else {
-                let label = relabel.unwrap_or(pending.label);
-                self.record(repo, label, SnapshotScope::Full, pending.before, true);
+                let plan = UndoPlan {
+                    label: relabel.unwrap_or(pending.label),
+                    scope: SnapshotScope::Full,
+                    discard: None,
+                };
+                self.record(repo, plan, pending.before, true);
             }
         }
     }
@@ -482,15 +559,21 @@ impl UndoRecorder {
     fn record(
         &mut self,
         repo: &Repository,
-        label: String,
-        scope: SnapshotScope,
+        plan: UndoPlan,
         before: RepoSnapshot,
         ends_pending: bool,
     ) {
+        let label = plan.label.clone();
         if ends_pending {
             self.stacks.pending = None;
         }
-        let after = match capture(repo, scope) {
+        let after = if is_worktree_entry(&before) {
+            let whole = plan.discard.as_ref().and_then(|d| d.whole.as_deref());
+            git_core::undo::capture_worktree(repo, whole)
+        } else {
+            snapshot(repo, &plan)
+        };
+        let after = match after {
             Ok(after) => after,
             Err(error) => {
                 eprintln!("browsitory: not recording \"{label}\" for undo: {error}");
@@ -500,13 +583,15 @@ impl UndoRecorder {
                 return;
             }
         };
+        // Trimmed first: settings changed meanwhile on a branch the entry doesn't create or
+        // delete are not part of it, and alone make no entry.
+        let (before, after) = changed_refs_only(before, after);
         if after == before {
             if ends_pending {
                 self.persist(repo);
             }
             return;
         }
-        let (before, after) = changed_refs_only(before, after);
         self.stacks.undo.push(UndoEntry {
             label,
             before,
@@ -556,14 +641,18 @@ impl UndoRecorder {
         let Some(_exclusive) = self.exclusive(guard, LOCK_WAIT) else {
             return Err(UNDO_BUSY.into());
         };
-        if marker().is_some() || self.stacks.pending.is_some() {
-            return Ok(UndoOutcome::OperationInProgress);
-        }
+        let in_operation = marker().is_some() || self.stacks.pending.is_some();
         let (source, verb) = match direction {
             Direction::Undo => (&self.stacks.undo, "undo"),
             Direction::Redo => (&self.stacks.redo, "redo"),
         };
-        let Some(entry) = source.last() else {
+        // Only a work-tree entry (#1147) runs while an operation is paused.
+        let entry = source.last();
+        let worktree_only = entry.is_some_and(|entry| is_worktree_entry(&entry.before));
+        if in_operation && !worktree_only {
+            return Ok(UndoOutcome::OperationInProgress);
+        }
+        let Some(entry) = entry else {
             return Ok(UndoOutcome::Nothing);
         };
         let (expected, target) = match direction {
@@ -571,12 +660,17 @@ impl UndoRecorder {
             Direction::Redo => (&entry.before, &entry.after),
         };
         let label = entry.label.clone();
-        match restore(
-            repo,
-            expected,
-            target,
-            &format!("browsitory: {verb} {label}"),
-        ) {
+        let restored = if worktree_only {
+            git_core::undo::restore_worktree(repo, expected, target)
+        } else {
+            restore(
+                repo,
+                expected,
+                target,
+                &format!("browsitory: {verb} {label}"),
+            )
+        };
+        match restored {
             Ok(()) => {}
             Err(UndoError::RepositoryChanged) => {
                 return Ok(UndoOutcome::RepositoryChanged { label })
@@ -617,6 +711,31 @@ impl UndoRecorder {
     }
 }
 
+/// Whether an entry with this snapshot is a work-tree entry (#1147): no index recorded.
+fn is_worktree_entry(snapshot: &RepoSnapshot) -> bool {
+    snapshot.index_tree.is_none()
+}
+
+/// Whether the index has conflicts (read from disk); false when it can't be read, so the
+/// snapshot that follows fails instead and says why.
+fn index_has_conflicts(repo: &Repository) -> bool {
+    repo.index()
+        .and_then(|mut index| index.read(false).map(|()| index.has_conflicts()))
+        .unwrap_or(false)
+}
+
+/// The snapshot `plan` asks for: a discard's names the paths it stores whole (#1104).
+fn snapshot(repo: &Repository, plan: &UndoPlan) -> Result<RepoSnapshot, UndoError> {
+    let whole = plan
+        .discard
+        .as_ref()
+        .and_then(|discard| discard.whole.as_deref());
+    match whole {
+        Some(whole) => git_core::undo::capture_keeping(repo, whole),
+        None => capture(repo, plan.scope),
+    }
+}
+
 /// `restore` only checks and writes refs whose values differ between the two snapshots, so the
 /// rest is dropped: otherwise every entry would store (and the anchor pin) every branch and tag.
 /// A moved HEAD branch differs, so its commits stay in the entry and pinned.
@@ -634,6 +753,24 @@ fn changed_refs_only(
         before.refs.remove(name);
         after.refs.remove(name);
     }
+    // Only a branch the entry creates or deletes has its settings restored (#1151).
+    let created_or_deleted = |branch: &String| {
+        let name = format!("refs/heads/{branch}");
+        before.refs.contains_key(&name) != after.refs.contains_key(&name)
+    };
+    let kept: BTreeSet<String> = before
+        .branch_config
+        .keys()
+        .chain(after.branch_config.keys())
+        .filter(|branch| created_or_deleted(branch))
+        .cloned()
+        .collect();
+    before
+        .branch_config
+        .retain(|branch, _| kept.contains(branch));
+    after
+        .branch_config
+        .retain(|branch, _| kept.contains(branch));
     (before, after)
 }
 
@@ -717,6 +854,7 @@ mod tests {
         let plan = |label: &str| UndoPlan {
             label: label.into(),
             scope: SnapshotScope::Full,
+            discard: None,
         };
         // A merge stops on conflicts...
         recorder.begin(&repo, plan("Merge feature"), None);
@@ -734,6 +872,7 @@ mod tests {
         UndoPlan {
             label: label.into(),
             scope: SnapshotScope::Full,
+            discard: None,
         }
     }
 
@@ -929,6 +1068,64 @@ mod tests {
         );
     }
 
+    /// A repository with one commit on `main`, for the branch settings tests (#1151).
+    fn committed_repo() -> (tempfile::TempDir, Repository) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        {
+            let mut index = repo.index().unwrap();
+            let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+            let sig = git2::Signature::now("Test User", "test@example.com").unwrap();
+            repo.commit(Some("refs/heads/main"), &sig, &sig, "initial", &tree, &[])
+                .unwrap();
+        }
+        repo.set_head("refs/heads/main").unwrap();
+        (dir, repo)
+    }
+
+    fn set_config(repo: &Repository, name: &str, value: &str) {
+        repo.config()
+            .unwrap()
+            .open_level(git2::ConfigLevel::Local)
+            .unwrap()
+            .set_str(name, value)
+            .unwrap();
+    }
+
+    /// #1151: an entry keeps the settings of the branches it creates or deletes, and no others.
+    #[test]
+    fn entries_keep_the_settings_of_branches_they_create_or_delete_only() {
+        let (_dir, repo) = committed_repo();
+        set_config(&repo, "branch.main.remote", "origin");
+        let mut recorder = UndoRecorder::open(&repo);
+        recorder.begin(&repo, plan("Create branch x"), None);
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("x", &head, false).unwrap();
+        set_config(&repo, "branch.x.remote", "origin");
+        set_config(&repo, "branch.main.remote", "upstream");
+        recorder.finish(&repo, None, || None, false);
+
+        let entry = recorder.stacks.undo.last().unwrap();
+        assert!(entry.before.branch_config.is_empty());
+        assert_eq!(
+            entry.after.branch_config.keys().collect::<Vec<_>>(),
+            vec!["x"]
+        );
+    }
+
+    /// #1151: settings changed during a command on a branch it doesn't create or delete are not
+    /// part of its entry, and alone make none.
+    #[test]
+    fn settings_changed_alone_make_no_entry() {
+        let (_dir, repo) = committed_repo();
+        let mut recorder = UndoRecorder::open(&repo);
+        recorder.begin(&repo, plan("Stage nothing"), None);
+        set_config(&repo, "branch.main.remote", "origin");
+        recorder.finish(&repo, None, || None, false);
+
+        assert_eq!(recorder.state().undo, None);
+    }
+
     #[test]
     fn entries_store_only_the_refs_they_change() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -948,6 +1145,7 @@ mod tests {
         let plan = |label: &str| UndoPlan {
             label: label.into(),
             scope: SnapshotScope::RefsAndIndex,
+            discard: None,
         };
 
         let mut recorder = UndoRecorder::open(&repo);

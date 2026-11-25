@@ -292,7 +292,7 @@ fn undo_restoring_a_case_collision_is_refused_before_writing() {
     target
         .refs
         .insert("refs/heads/main".into(), fx.evil.to_string());
-    target.index_tree = evil_tree.clone();
+    target.index_tree = Some(evil_tree.clone());
     target.worktree_tree = Some(evil_tree);
     let error = undo::restore(&fx.repo, &now, &target, "undo").unwrap_err();
     assert!(matches!(error, UndoError::CaseCollision(_)));

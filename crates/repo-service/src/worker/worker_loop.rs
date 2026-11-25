@@ -323,17 +323,24 @@ where
         if track && policy.holds_reply {
             undo::hold_reply(&mut command, &mut held);
         }
-        if let Some(plan) = plan {
-            self.undo_recorder.begin(
-                &self.repo,
-                plan,
-                self.operations.marker(&self.repo).as_deref(),
-            );
-        }
         // While a cherry-pick/revert sequence or a rebase is stored, commands that would
-        // move HEAD or rewrite the index under it are refused before git-core runs.
-        if let Some(scope) = self.operations.probe().gate_scope(&self.repo) {
-            command = gate::gate_during_operation(command, &policy.gate, &scope);
+        // move HEAD or rewrite the index under it are refused before git-core runs, with the
+        // gate's reason; such a command records nothing.
+        let gated = match self.operations.probe().gate_scope(&self.repo) {
+            Some(scope) if policy.gate.refuses(&scope) => {
+                command = gate::gate_during_operation(command, &policy.gate, &scope);
+                true
+            }
+            _ => false,
+        };
+        if let Some(plan) = plan.filter(|_| !gated) {
+            let marker = self.operations.marker(&self.repo);
+            if let Some(refusal) = self
+                .undo_recorder
+                .begin(&self.repo, plan, marker.as_deref())
+            {
+                command = undo::refuse_unrecordable(command, refusal);
+            }
         }
         let turn = UndoTurn {
             track,

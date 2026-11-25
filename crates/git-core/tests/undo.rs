@@ -359,6 +359,82 @@ fn refuses_when_a_touched_file_was_edited_and_writes_nothing() {
     );
 }
 
+/// #1089: a file longer than one compared piece (64 KiB) that differs only after the first piece
+/// is a change; one equal throughout is written back byte for byte.
+#[test]
+fn a_file_longer_than_one_piece_is_compared_to_its_end() {
+    let (_dir, repo) = seeded();
+    let long: Vec<u8> = (0..100_000u32).map(|i| (i % 251) as u8).collect();
+    let path = repo.workdir().unwrap().join("a.txt");
+    fs::write(&path, &long).unwrap();
+    let before = capture(&repo, SnapshotScope::FullUncapped).unwrap();
+    write(&repo, "a.txt", "one\n"); // the discard
+    let after = capture(&repo, SnapshotScope::FullUncapped).unwrap();
+    restore(&repo, &after, &before, "browsitory: undo test").unwrap();
+    assert_eq!(fs::read(&path).unwrap(), long);
+
+    let mut edited = long.clone();
+    *edited.last_mut().unwrap() ^= 1;
+    fs::write(&path, &edited).unwrap();
+    let result = restore(&repo, &before, &after, "browsitory: redo test");
+    assert!(matches!(result, Err(UndoError::RepositoryChanged)));
+    assert_eq!(fs::read(&path).unwrap(), edited);
+}
+
+/// #1089: a snapshot blob that `git gc` packed can't be streamed by libgit2; it is loaded
+/// instead, for the check and for the write.
+#[test]
+fn undo_and_redo_read_a_packed_blob() {
+    let (dir, repo) = seeded();
+    write(&repo, "a.txt", "precious edit\n");
+    let before = capture(&repo, SnapshotScope::FullUncapped).unwrap();
+    write(&repo, "a.txt", "one\n"); // the discard
+    let after = capture(&repo, SnapshotScope::FullUncapped).unwrap();
+    // Reachable from a ref, so the repack packs it and drops the loose copy.
+    let blob = repo.blob(b"precious edit\n").unwrap();
+    repo.reference("refs/keep/blob", blob, true, "test")
+        .unwrap();
+    let output = test_support::git(dir.path(), &["repack", "-a", "-d", "-q"]);
+    assert!(output.status.success(), "{output:?}");
+    let output = test_support::git(dir.path(), &["prune-packed"]);
+    assert!(output.status.success(), "{output:?}");
+    let loose = repo.path().join(format!(
+        "objects/{}/{}",
+        &blob.to_string()[..2],
+        &blob.to_string()[2..]
+    ));
+    assert!(!loose.exists(), "test setup: the blob is still loose");
+
+    restore(&repo, &after, &before, "browsitory: undo test").unwrap();
+    assert_eq!(read(&repo, "a.txt").as_deref(), Some("precious edit\n"));
+    restore(&repo, &before, &after, "browsitory: redo test").unwrap();
+    assert_eq!(read(&repo, "a.txt").as_deref(), Some("one\n"));
+}
+
+/// #1089: files are compared with the snapshot's blobs in pieces, not by hash; an edit that
+/// keeps the size is still a change, for Undo and for Redo.
+#[test]
+fn refuses_when_a_touched_file_was_edited_to_the_same_size() {
+    let (_dir, repo) = seeded();
+    write(&repo, "a.txt", "precious edit\n");
+    let before = capture(&repo, SnapshotScope::FullUncapped).unwrap();
+    write(&repo, "a.txt", "one\n"); // the discard
+    let after = capture(&repo, SnapshotScope::FullUncapped).unwrap();
+
+    write(&repo, "a.txt", "two\n");
+    let result = restore(&repo, &after, &before, "browsitory: undo test");
+    assert!(matches!(result, Err(UndoError::RepositoryChanged)));
+    assert_eq!(read(&repo, "a.txt").as_deref(), Some("two\n"));
+
+    write(&repo, "a.txt", "one\n");
+    restore(&repo, &after, &before, "browsitory: undo test").unwrap();
+    assert_eq!(read(&repo, "a.txt").as_deref(), Some("precious edit\n"));
+    write(&repo, "a.txt", "PRECIOUS EDIT\n");
+    let result = restore(&repo, &before, &after, "browsitory: redo test");
+    assert!(matches!(result, Err(UndoError::RepositoryChanged)));
+    assert_eq!(read(&repo, "a.txt").as_deref(), Some("PRECIOUS EDIT\n"));
+}
+
 #[test]
 fn refuses_when_a_touched_ref_moved() {
     let (_dir, repo) = seeded();
@@ -714,8 +790,10 @@ fn undoes_a_commit_inside_a_linked_worktree() {
     });
 }
 
+/// #1174: rewriting the index keeps the skip-worktree mark, as git's reset does (#1145), so an
+/// index with such entries no longer refuses.
 #[test]
-fn refuses_to_rewrite_an_index_with_skip_worktree_entries() {
+fn rewrites_an_index_with_skip_worktree_entries_keeping_the_mark() {
     let (_dir, repo) = seeded();
     write(&repo, "b.txt", "b\n");
     stage(&repo, "b.txt");
@@ -742,11 +820,14 @@ fn refuses_to_rewrite_an_index_with_skip_worktree_entries() {
     index.write().unwrap();
     assert!(flagged(&repo), "test setup: flag not set");
     let result = restore(&repo, &after, &before, "browsitory: undo test");
-    assert!(
-        matches!(result, Err(UndoError::RepositoryChanged)),
-        "{result:?}"
-    );
+    assert!(result.is_ok(), "{result:?}");
     assert!(flagged(&repo));
+    assert_eq!(
+        capture(&repo, SnapshotScope::RefsAndIndex)
+            .unwrap()
+            .index_tree,
+        before.index_tree
+    );
 }
 
 /// `core.autocrlf=true` (the Git for Windows default): blobs hold LF, the worktree CRLF.
