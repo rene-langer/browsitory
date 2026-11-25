@@ -168,8 +168,11 @@ pub fn capture_counted(
 /// everything below folders, matched ignoring case) are stored whatever their size or number,
 /// every other file under `SnapshotScope::Full`'s limits.
 pub fn capture_keeping(repo: &Repository, whole: &[String]) -> Result<RepoSnapshot, UndoError> {
-    let _ = whole;
-    capture(repo, SnapshotScope::FullUncapped)
+    let limits = Limits {
+        whole,
+        ..Limits::FULL
+    };
+    capture_with(repo, Some(limits))
 }
 
 /// [`capture_keeping`] with limits other than `SNAPSHOT_FILE_LIMIT` and
@@ -181,31 +184,46 @@ pub fn capture_limited_except(
     untracked_limit: usize,
     whole: &[String],
 ) -> Result<RepoSnapshot, UndoError> {
-    let _ = whole;
     let limits = Limits {
         file_size: Some(file_limit),
         untracked: Some(untracked_limit),
+        whole,
     };
     capture_with(repo, Some(limits))
 }
 
 /// What a work-tree snapshot leaves unsaved: files over `file_size`, and every untracked file
-/// when there are more than `untracked`.
+/// when there are more than `untracked` of them; never a file `whole` names (#1104).
 #[derive(Clone, Copy)]
-struct Limits {
+struct Limits<'a> {
     file_size: Option<u64>,
     untracked: Option<usize>,
+    /// Files, and folders (everything below them), stored whatever the limits say; matched
+    /// ignoring case, so a spelling that differs only in case can only store more.
+    whole: &'a [String],
 }
 
-impl Limits {
-    const FULL: Self = Self {
+impl Limits<'_> {
+    const FULL: Limits<'static> = Limits {
         file_size: Some(SNAPSHOT_FILE_LIMIT),
         untracked: Some(SNAPSHOT_UNTRACKED_LIMIT),
+        whole: &[],
     };
-    const NONE: Self = Self {
+    const NONE: Limits<'static> = Limits {
         file_size: None,
         untracked: None,
+        whole: &[],
     };
+}
+
+/// Whether the work-tree path `path` is one of `whole` (lower-cased, without a trailing `/`),
+/// ignoring case, or lies below one of them.
+fn named_whole(whole: &[String], path: &str) -> bool {
+    let path = path.to_lowercase();
+    whole.iter().any(|name| {
+        path.strip_prefix(name.as_str())
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+    })
 }
 
 /// The blob behind `RepoSnapshot::unsaved_untracked`: each file as
@@ -373,11 +391,23 @@ fn build_worktree_tree(repo: &Repository, limits: Limits) -> Result<WorktreeSnap
         })
     };
     let untracked = |entry: &git2::StatusEntry| entry.status().contains(Status::WT_NEW);
-    let list_untracked = limits
-        .untracked
-        .is_some_and(|limit| entries().filter(untracked).count() > limit);
+    let whole: Vec<String> = limits
+        .whole
+        .iter()
+        .map(|name| name.trim_end_matches('/').to_lowercase())
+        .collect();
+    let kept = |entry: &git2::StatusEntry| {
+        !whole.is_empty() && named_whole(&whole, &String::from_utf8_lossy(entry.path_bytes()))
+    };
+    let list_untracked = limits.untracked.is_some_and(|limit| {
+        entries()
+            .filter(|entry| untracked(entry) && !kept(entry))
+            .count()
+            > limit
+    });
     for entry in entries() {
         let path = entry.path()?.to_string();
+        let kept = kept(&entry);
         let previous_mode = overlay.get_path(Path::new(&path), 0).map(|e| e.mode);
         match crate::worktree_guard::open_leaf_beneath(workdir, &path)? {
             Some(Opened::Link { target, .. }) => {
@@ -390,7 +420,9 @@ fn build_worktree_tree(repo: &Repository, limits: Limits) -> Result<WorktreeSnap
                 stat,
             }) => {
                 let mode = file_mode(&config, executable, previous_mode);
-                let left_out = if list_untracked && untracked(&entry) {
+                let left_out = if kept {
+                    None
+                } else if list_untracked && untracked(&entry) {
                     Some(&mut unsaved_untracked)
                 } else if limits.file_size.is_some_and(|limit| stat.size > limit) {
                     Some(&mut skipped)

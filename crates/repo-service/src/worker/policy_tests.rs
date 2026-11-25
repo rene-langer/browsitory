@@ -1218,6 +1218,9 @@ fn a_stored_operation_refuses_by_gate_and_scope() {
     assert_eq!(gate(stash, &detached), None);
 }
 
+/// A command's discard plan's paths: `None` without a plan, `Some(None)` for every file.
+type Whole = Option<Option<Vec<&'static str>>>;
+
 /// #1104: what each command that destroys work-tree content stores whole in its snapshots: the
 /// paths it names (`None`: every file). Every other recorded command has no discard plan.
 #[test]
@@ -1253,7 +1256,7 @@ diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-one\n+two\n"
             events: channel().0
         })
     };
-    let rows: Vec<((&str, Command), Option<Option<Vec<&str>>>)> = vec![
+    let rows: Vec<((&str, Command), Whole)> = vec![
         (
             cmd!(DiscardHunk {
                 path: s("a.txt"),

@@ -418,7 +418,7 @@ impl UndoRecorder {
         if self.stacks.pending.is_some() || marker.is_some() {
             return;
         }
-        match capture(repo, plan.scope) {
+        match snapshot(repo, &plan) {
             Ok(before) => self.active = Some((plan, before)),
             Err(error) => {
                 eprintln!(
@@ -458,7 +458,7 @@ impl UndoRecorder {
                 self.persist(repo);
                 return;
             }
-            self.record(repo, plan.label, plan.scope, before, false);
+            self.record(repo, plan, before, false);
             return;
         }
         if marker().is_some() {
@@ -479,8 +479,12 @@ impl UndoRecorder {
             if aborted || stale_unsettled.as_ref() == Some(&pending.operation) {
                 self.persist(repo);
             } else {
-                let label = relabel.unwrap_or(pending.label);
-                self.record(repo, label, SnapshotScope::Full, pending.before, true);
+                let plan = UndoPlan {
+                    label: relabel.unwrap_or(pending.label),
+                    scope: SnapshotScope::Full,
+                    discard: None,
+                };
+                self.record(repo, plan, pending.before, true);
             }
         }
     }
@@ -491,15 +495,15 @@ impl UndoRecorder {
     fn record(
         &mut self,
         repo: &Repository,
-        label: String,
-        scope: SnapshotScope,
+        plan: UndoPlan,
         before: RepoSnapshot,
         ends_pending: bool,
     ) {
+        let label = plan.label.clone();
         if ends_pending {
             self.stacks.pending = None;
         }
-        let after = match capture(repo, scope) {
+        let after = match snapshot(repo, &plan) {
             Ok(after) => after,
             Err(error) => {
                 eprintln!("browsitory: not recording \"{label}\" for undo: {error}");
@@ -623,6 +627,18 @@ impl UndoRecorder {
         if let Err(error) = self.store.save(repo, &self.stacks) {
             eprintln!("browsitory: could not save undo history: {error}");
         }
+    }
+}
+
+/// The snapshot `plan` asks for: a discard's names the paths it stores whole (#1104).
+fn snapshot(repo: &Repository, plan: &UndoPlan) -> Result<RepoSnapshot, UndoError> {
+    let whole = plan
+        .discard
+        .as_ref()
+        .and_then(|discard| discard.whole.as_deref());
+    match whole {
+        Some(whole) => git_core::undo::capture_keeping(repo, whole),
+        None => capture(repo, plan.scope),
     }
 }
 

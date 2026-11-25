@@ -17,8 +17,8 @@ use git_core::undo::SnapshotScope::{self, Full, FullUncapped, RefsAndIndex};
 
 use super::undo::{
     amend_label, count_label, fit, fold_staged_label, merge_label, quoted, reset_label,
-    reword_label, several, short, start_rebase_label, with_path, HeldReplies, UndoPlan,
-    DISCARD_BUSY, UNDO_BUSY,
+    reword_label, several, short, start_rebase_label, with_path, DiscardPlan, HeldReplies,
+    UndoPlan, DISCARD_BUSY, UNDO_BUSY,
 };
 use super::Command;
 
@@ -135,6 +135,17 @@ impl CommandPolicy {
         }
     }
 
+    /// Records a command that destroys work-tree content with no other way back, and refuses it
+    /// rather than run it unrecorded (#225): a `FullUncapped` snapshot that stores `whole` (the
+    /// paths it can change; `None`: every file) whatever their size or number (#1104).
+    fn discarding(label: String, whole: Option<Vec<String>>) -> Self {
+        let mut policy = Self::recorded(label, FullUncapped).refused_when_busy(BusyReply::Discard);
+        if let Some(plan) = policy.undo.as_mut() {
+            plan.discard = Some(DiscardPlan { whole });
+        }
+        policy
+    }
+
     /// Records nothing and ends nothing, but holds the state lock.
     fn locked() -> Self {
         CommandPolicy {
@@ -178,7 +189,6 @@ impl CommandPolicy {
 
 /// The policy of `command`. Every variant is named, so a new command must be placed here.
 pub(super) fn of(command: &Command) -> CommandPolicy {
-    use BusyReply::Discard;
     use CommandPolicy as P;
     use Gate::{Refused, StashSave};
     match command {
@@ -321,47 +331,49 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         }
 
         // Discards: recorded, and refused rather than run unrecorded. They and the other
-        // `busy=Discard` commands snapshot every file whatever its size (`FullUncapped`, #1065):
-        // the snapshot is the only way back to what they overwrite.
+        // `busy=Discard` commands snapshot the files they name whatever their size or number
+        // (`FullUncapped`, #1065, #1104): the snapshot is the only way back to what they
+        // overwrite.
         Command::DiscardHunk { path, .. } => {
-            P::recorded(with_path("Discard hunk in ", path, ""), FullUncapped).refused_when_busy(Discard)
+            P::discarding(with_path("Discard hunk in ", path, ""), Some(vec![path.clone()]))
         }
         Command::DiscardLines { path, .. } => {
-            P::recorded(with_path("Discard lines in ", path, ""), FullUncapped).refused_when_busy(Discard)
+            P::discarding(with_path("Discard lines in ", path, ""), Some(vec![path.clone()]))
         }
-        Command::DiscardFile { path, .. } => {
-            P::recorded(with_path("Discard changes to ", path, ""), FullUncapped).refused_when_busy(Discard)
-        }
-        Command::DiscardAllUnstaged { .. } => {
-            P::recorded("Discard all unstaged changes".to_string(), FullUncapped).refused_when_busy(Discard)
-        }
+        Command::DiscardFile { path, .. } => P::discarding(
+            with_path("Discard changes to ", path, ""),
+            Some(vec![path.clone()]),
+        ),
+        Command::DiscardAllUnstaged { paths, .. } => P::discarding(
+            "Discard all unstaged changes".to_string(),
+            Some(paths.clone()),
+        ),
         // Overwrites the work tree file, so it is a discard too (#446).
         Command::RestoreFileVersion {
             commit_id, path, ..
-        } => P::recorded(
+        } => P::discarding(
             with_path("Restore ", path, &format!(" from {}", short(commit_id))),
-            FullUncapped,
-        )
-        .refused_when_busy(Discard),
+            Some(vec![path.clone()]),
+        ),
 
         // A commit's file or hunk, or a patch file, applied to the working tree (#448): recorded,
         // and like a discard refused rather than run unrecorded (it may merge into local edits).
         Command::ApplyCommitChange { change, .. } => {
-            P::recorded(commit_change_label(change), FullUncapped).refused_when_busy(Discard)
+            let paths = std::iter::once(&change.path).chain(&change.old_path);
+            P::discarding(commit_change_label(change), Some(paths.cloned().collect()))
         }
         // As commits (#658) it moves HEAD, so like a commit it can't run under a stored rebase or
         // sequence.
-        Command::ApplyPatch { how, .. } => match how {
-            PatchApply::WorkTree => {
-                P::recorded("Apply patch".to_string(), FullUncapped).refused_when_busy(Discard)
+        Command::ApplyPatch { how, content, .. } => {
+            let paths = git_core::patch::touched_paths(content);
+            match how {
+                PatchApply::WorkTree => P::discarding("Apply patch".to_string(), paths),
+                PatchApply::Stage => P::discarding("Apply and stage patch".to_string(), paths),
+                PatchApply::Commits => {
+                    P::discarding("Apply patch as commits".to_string(), paths).gated(Refused)
+                }
             }
-            PatchApply::Stage => {
-                P::recorded("Apply and stage patch".to_string(), FullUncapped).refused_when_busy(Discard)
-            }
-            PatchApply::Commits => P::recorded("Apply patch as commits".to_string(), FullUncapped)
-                .refused_when_busy(Discard)
-                .gated(Refused),
-        },
+        }
 
         // Commits end a merge or pick, so they can't run under a stored rebase or sequence.
         Command::Commit { message, .. } => {
@@ -429,9 +441,7 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         } => {
             let label = reset_label(commit_id, *mode);
             match mode {
-                ResetMode::Hard => P::recorded(label, FullUncapped)
-                    .gated(Refused)
-                    .refused_when_busy(Discard),
+                ResetMode::Hard => P::discarding(label, None).gated(Refused),
                 // A reset that keeps the work tree runs unrecorded instead.
                 ResetMode::Soft | ResetMode::Mixed => P::recorded(label, Full).gated(Refused),
             }

@@ -929,8 +929,18 @@ fn split_mails(content: &[u8]) -> Vec<&[u8]> {
 /// Every path the patch file `content` names (old and new, each mail's), sorted; `None` when it
 /// can't be parsed. What applying it can change (#1104).
 pub fn touched_paths(content: &[u8]) -> Option<Vec<String>> {
-    let _ = content;
-    None
+    let mut paths = std::collections::BTreeSet::new();
+    for part in split_mails(content) {
+        let diff = parse(part).ok()?;
+        for delta in diff.deltas() {
+            for file in [delta.old_file(), delta.new_file()] {
+                if let Some(path) = file.path() {
+                    paths.insert(path.to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+    Some(paths.into_iter().collect())
 }
 
 fn parse(content: &[u8]) -> Result<git2::Diff<'static>, PatchError> {
