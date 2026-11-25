@@ -1,6 +1,7 @@
 //! Undo stack: which worker commands are recorded, under which label, and the recorder that
 //! snapshots around them. See `docs/superpowers/specs/2026-10-18-parity-batch3b-design.md`.
 use crate::wire::ErrorDto;
+use std::collections::BTreeSet;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
@@ -513,13 +514,15 @@ impl UndoRecorder {
                 return;
             }
         };
+        // Trimmed first: settings changed meanwhile on a branch the entry doesn't create or
+        // delete are not part of it, and alone make no entry.
+        let (before, after) = changed_refs_only(before, after);
         if after == before {
             if ends_pending {
                 self.persist(repo);
             }
             return;
         }
-        let (before, after) = changed_refs_only(before, after);
         self.stacks.undo.push(UndoEntry {
             label,
             before,
@@ -659,6 +662,24 @@ fn changed_refs_only(
         before.refs.remove(name);
         after.refs.remove(name);
     }
+    // Only a branch the entry creates or deletes has its settings restored (#1151).
+    let created_or_deleted = |branch: &String| {
+        let name = format!("refs/heads/{branch}");
+        before.refs.contains_key(&name) != after.refs.contains_key(&name)
+    };
+    let kept: BTreeSet<String> = before
+        .branch_config
+        .keys()
+        .chain(after.branch_config.keys())
+        .filter(|branch| created_or_deleted(branch))
+        .cloned()
+        .collect();
+    before
+        .branch_config
+        .retain(|branch, _| kept.contains(branch));
+    after
+        .branch_config
+        .retain(|branch, _| kept.contains(branch));
     (before, after)
 }
 

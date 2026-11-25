@@ -320,7 +320,7 @@ fn capture_with(repo: &Repository, worktree: Option<Limits>) -> Result<RepoSnaps
         refs: local_refs(repo)?,
         index_tree,
         intent_to_add,
-        branch_config: BTreeMap::new(),
+        branch_config: branch_settings(repo)?,
         worktree_tree,
         skipped,
         unsaved_untracked,
@@ -359,6 +359,71 @@ fn local_refs(repo: &Repository) -> Result<BTreeMap<String, String>, UndoError> 
         }
     }
     Ok(refs)
+}
+
+/// A branch's settings: `(variable, value)` in file order.
+type BranchSettings = Vec<(String, String)>;
+
+/// The repository's own config file (`.git/config`), where git keeps branch settings.
+fn local_config(repo: &Repository) -> Result<git2::Config, UndoError> {
+    Ok(repo.config()?.open_level(git2::ConfigLevel::Local)?)
+}
+
+/// Every `branch.<name>.<variable>` setting of the repository's own config file, by branch name
+/// (#1151). A branch name may hold dots; the variable never does.
+fn branch_settings(repo: &Repository) -> Result<BTreeMap<String, BranchSettings>, UndoError> {
+    let mut settings: BTreeMap<String, BranchSettings> = BTreeMap::new();
+    let config = match local_config(repo) {
+        Ok(config) => config,
+        Err(UndoError::Git(error)) if error.code() == ErrorCode::NotFound => return Ok(settings),
+        Err(error) => return Err(error),
+    };
+    let mut entries = config.entries(Some(r"^branch\..+\.[^.]+$"))?;
+    while let Some(entry) = entries.next() {
+        let entry = entry?;
+        let name = String::from_utf8_lossy(entry.name_bytes());
+        let Some((branch, variable)) = name
+            .strip_prefix("branch.")
+            .and_then(|rest| rest.rsplit_once('.'))
+        else {
+            continue;
+        };
+        // A variable without `=` is boolean true.
+        let value = if entry.has_value() {
+            String::from_utf8_lossy(entry.value_bytes()).into_owned()
+        } else {
+            "true".to_string()
+        };
+        settings
+            .entry(branch.to_string())
+            .or_default()
+            .push((variable.to_string(), value));
+    }
+    Ok(settings)
+}
+
+/// Replaces `branch`'s settings `current` with `wanted`, in `wanted`'s order.
+fn write_branch_settings(
+    config: &mut git2::Config,
+    branch: &str,
+    current: &[(String, String)],
+    wanted: &[(String, String)],
+) -> Result<(), UndoError> {
+    let variables: BTreeSet<&str> = current.iter().map(|(name, _)| name.as_str()).collect();
+    for variable in variables {
+        config.remove_multivar(&format!("branch.{branch}.{variable}"), ".*")?;
+    }
+    let mut written = BTreeSet::new();
+    for (variable, value) in wanted {
+        let name = format!("branch.{branch}.{variable}");
+        if written.insert(variable) {
+            config.set_str(&name, value)?;
+        } else {
+            // A further value of a multi-valued variable: a pattern no value matches adds it.
+            config.set_multivar(&name, "a^", value)?;
+        }
+    }
+    Ok(())
 }
 
 pub(crate) struct WorktreeConfig {
@@ -623,15 +688,28 @@ pub fn restore(
         }
     }
     verify_checked_out_branches(repo, head_differs, &changed_refs, target)?;
+    let settings = changed_branch_settings(expected, target);
+    let mut config = None;
+    if !settings.is_empty() {
+        let current = branch_settings(repo)?;
+        // Like a ref: still the expected side's settings, or the restore would overwrite others.
+        if settings
+            .iter()
+            .any(|branch| current.get(*branch) != expected.branch_config.get(*branch))
+        {
+            return Err(UndoError::RepositoryChanged);
+        }
+        config = Some((local_config(repo)?, current));
+    }
     if index_differs {
         let mut index = repo.index()?;
         index.read(false)?;
-        // Already the target's: a restore that stopped after writing the index (in the checkout
-        // from it) is being tried again (#251). The work tree is still checked below.
         if index.has_conflicts() {
             return Err(UndoError::RepositoryChanged);
         }
-        // An intent-to-add entry is an empty file in the tree, so its mark counts too (#1174).
+        // The target's already: a restore that stopped after writing the index (in the checkout
+        // from it) is being tried again (#251); the work tree is still checked below. An
+        // intent-to-add entry is an empty file in the tree, so its mark counts too (#1174).
         let current = (index.write_tree()?.to_string(), intent_to_add(&index));
         let side = |snapshot: &RepoSnapshot| {
             current.0 == snapshot.index_tree && current.1 == snapshot.intent_to_add
@@ -682,6 +760,16 @@ pub fn restore(
             None => repo.find_reference(name)?.delete()?,
         }
     }
+    if let Some((mut config, current)) = config {
+        for branch in settings {
+            write_branch_settings(
+                &mut config,
+                branch,
+                current.get(branch).map_or(&[], Vec::as_slice),
+                target.branch_config.get(branch).map_or(&[], Vec::as_slice),
+            )?;
+        }
+    }
     if head_differs {
         match &target.head {
             HeadState::Branch(name) => {
@@ -695,6 +783,29 @@ pub fn restore(
     // Undoing (or redoing) moves away from whatever a pending squash merge staged.
     crate::merge::clear_squash_message(repo)?;
     Ok(())
+}
+
+/// The branches whose settings a restore from `expected` to `target` writes (#1151): those it
+/// creates or deletes (the ref is on one side only) whose settings differ between the sides.
+/// The settings of a branch that stays are never touched: an entry doesn't change them, and one
+/// changed since by an unrecorded command (Set upstream) is the user's.
+fn changed_branch_settings<'a>(
+    expected: &'a RepoSnapshot,
+    target: &'a RepoSnapshot,
+) -> Vec<&'a str> {
+    expected
+        .branch_config
+        .keys()
+        .chain(target.branch_config.keys())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .filter(|branch| {
+            let name = format!("refs/heads/{branch}");
+            expected.refs.contains_key(&name) != target.refs.contains_key(&name)
+                && expected.branch_config.get(*branch) != target.branch_config.get(*branch)
+        })
+        .map(String::as_str)
+        .collect()
 }
 
 /// A branch that is some worktree's HEAD must not be deleted or moved under it, and no two

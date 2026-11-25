@@ -60,6 +60,10 @@ struct StoredSnapshot {
     /// The index's intent-to-add paths (#1174); absent when there are none.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     intent_to_add: BTreeSet<String>,
+    /// The settings (`[variable, value]`, in file order) of the branches the entry creates or
+    /// deletes (#1151); absent when there are none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    branch_config: BTreeMap<String, Vec<(String, String)>>,
     worktree_tree: Option<String>,
     /// The files the snapshot didn't store for their size (#1065); absent when there are none.
     /// Builds that predate it never read it: they ignore a version 2 file (#1093).
@@ -139,6 +143,7 @@ impl From<&RepoSnapshot> for StoredSnapshot {
             refs: snapshot.refs.clone(),
             index_tree: snapshot.index_tree.clone(),
             intent_to_add: snapshot.intent_to_add.clone(),
+            branch_config: snapshot.branch_config.clone(),
             worktree_tree: snapshot.worktree_tree.clone(),
             unsaved_untracked: snapshot.unsaved_untracked.clone(),
             skipped: snapshot
@@ -160,7 +165,7 @@ impl From<StoredSnapshot> for RepoSnapshot {
             refs: stored.refs,
             index_tree: stored.index_tree,
             intent_to_add: stored.intent_to_add,
-            branch_config: BTreeMap::new(),
+            branch_config: stored.branch_config,
             worktree_tree: stored.worktree_tree,
             unsaved_untracked: stored.unsaved_untracked,
             skipped: stored
