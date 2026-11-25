@@ -85,7 +85,7 @@ struct OneShotHttps<'a> {
     offered: bool,
 }
 
-/// `url`'s scheme, host and port, for an `https://` URL.
+/// `url`'s scheme, host and port, when its scheme is https.
 fn https_origin(url: &str) -> Option<url::Origin> {
     let parsed = url::Url::parse(url).ok()?;
     (parsed.scheme() == "https").then(|| parsed.origin())
