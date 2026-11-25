@@ -379,11 +379,8 @@ fn canonical_pointer(content: &[u8]) -> Option<(String, u64)> {
         .strip_prefix("oid sha256:")?;
     let (oid, rest) = rest.split_once('\n')?;
     let size = rest.strip_prefix("size ")?.strip_suffix('\n')?;
-    let hex = oid.len() == 64
-        && oid
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
-    let size: u64 = size.parse().ok().filter(|_| hex)?;
+    // An `oid` that isn't 64 lowercase hex digits never equals the digest it is compared with.
+    let size: u64 = size.parse().ok()?;
     // `parse` takes `+1` and `01`; git-lfs writes neither.
     (format!("{POINTER_VERSION}oid sha256:{oid}\nsize {size}\n") == text)
         .then(|| (oid.to_string(), size))
