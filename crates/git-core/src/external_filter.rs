@@ -282,7 +282,8 @@ pub(crate) fn annotate(repo: &Repository, entries: &mut Vec<StatusEntry>) {
     };
     let index = repo.index().ok();
     entries.retain_mut(|entry| {
-        if entry.staged || entry.untracked_folder || entry.kind == StatusKind::Deleted {
+        // A deletion or an untracked folder has no regular file at its path: `is_file` below.
+        if entry.staged {
             return true;
         }
         let Ok(Some(refusal)) = drivers.refusal(Path::new(&entry.path)) else {
@@ -322,7 +323,7 @@ fn lfs_unchanged(repo: &Repository, index: &git2::Index, path: &str, on_disk: &P
     let small = repo
         .odb()
         .and_then(|odb| odb.read_header(entry.id))
-        .is_ok_and(|(len, kind)| kind == git2::ObjectType::Blob && len <= MAX_POINTER_LEN);
+        .is_ok_and(|(len, _)| len <= MAX_POINTER_LEN);
     if !small {
         return false;
     }
@@ -338,29 +339,32 @@ fn lfs_unchanged(repo: &Repository, index: &git2::Index, path: &str, on_disk: &P
     if !file.metadata().is_ok_and(|meta| meta.len() == size) {
         return false;
     }
-    let mut hasher = Sha256::new();
-    let mut read = 0u64;
-    let mut buffer = vec![0; 64 * 1024];
-    loop {
-        match file.read(&mut buffer) {
-            Ok(0) => break,
-            Ok(n) => {
-                read += n as u64;
-                if read > size {
-                    return false;
-                }
-                hasher.update(&buffer[..n]);
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(_) => return false,
-        }
-    }
+    // One byte past `size`, so a file that grew since its length was read doesn't match.
+    let mut hasher = HashWriter(Sha256::new());
+    let Ok(read) = std::io::copy(&mut (&mut file).take(size + 1), &mut hasher) else {
+        return false;
+    };
     let digest: String = hasher
+        .0
         .finalize()
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
     read == size && digest == oid
+}
+
+/// Streams a file into the hash (`sha2` 0.11 has no `io::Write` of its own).
+struct HashWriter(Sha256);
+
+impl std::io::Write for HashWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.update(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 /// The first line of every Git LFS pointer (a spec URL, never contacted).
