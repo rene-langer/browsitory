@@ -2075,7 +2075,9 @@ fn a_failed_first_step_on_a_clean_tree_rolls_back_to_the_branch() {
     let branch = repo.head().unwrap().name().unwrap().to_string();
     let mut config = repo.config().unwrap();
     config.set_bool("commit.gpgSign", true).unwrap();
-    config.set_str("gpg.program", "/bin/false").unwrap();
+    common::user_config(&repo)
+        .set_str("gpg.program", "/bin/false")
+        .unwrap();
 
     let result = git_core::rebase::start_rebase(&repo, &onto, vec![pick(&g)]);
     assert!(result.is_err());
@@ -2158,7 +2160,9 @@ fn a_failed_first_step_never_touches_an_edited_skip_worktree_file() {
     write_file(dir.path(), "f.txt", "precious\n");
     let mut config = repo.config().unwrap();
     config.set_bool("commit.gpgSign", true).unwrap();
-    config.set_str("gpg.program", "/bin/false").unwrap();
+    common::user_config(&repo)
+        .set_str("gpg.program", "/bin/false")
+        .unwrap();
     let result = git_core::rebase::start_rebase(&repo, &onto, vec![pick(&g)]);
     assert!(
         matches!(&result, Err(RebaseError::LocalChanges { paths }) if paths == &["f.txt"]),

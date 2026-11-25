@@ -15,6 +15,7 @@ import "@wdio/types";
 // Shared with the VSCode suite; see that file's header for why it lives there.
 import { initFixtureRepo, setTestIdentity } from "../extension/e2e/src/support/fixtureRepo";
 import { FAKE_TOOL_HOME, needsFakeToolHome, prepareFakeToolHome } from "./support/fakeTool";
+import { needsSigningHome, prepareSigningHome, SIGNING_HOME } from "./support/signingHome";
 import { closeSharedForgeFixtureServer, startSharedForgeFixtureServer } from "./support/forgeFixtureServer";
 import { git } from "./support/git";
 import { registerDriverRestart } from "./support/session";
@@ -498,6 +499,13 @@ export const config: WebdriverIO.Config = {
       prepareFakeToolHome();
       driverEnv.HOME = FAKE_TOOL_HOME;
       driverEnv.XDG_CONFIG_HOME = path.join(FAKE_TOOL_HOME, ".config");
+    }
+    // commit-signing.spec.ts (#1121): the allowed signers file counts only from the user's own
+    // git config, so the app reads it from a HOME of its own (`support/signingHome.ts`).
+    if (needsSigningHome(specs)) {
+      prepareSigningHome();
+      driverEnv.HOME = SIGNING_HOME;
+      driverEnv.XDG_CONFIG_HOME = path.join(SIGNING_HOME, ".config");
     }
     resetFixtureRepo();
     await startTauriDriver();
