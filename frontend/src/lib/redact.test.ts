@@ -62,6 +62,20 @@ describe("redactCredentials (#1056)", () => {
     );
   });
 
+  // The same cases as `redact_ends_a_url_without_a_path_where_running_text_goes_on`.
+  it.each([
+    "see https://host.example.test or ask user@example.com",
+    `{"url":"https://host.example.test","by":"a@b.example"}`,
+    "<https://host.example.test>user@example.com",
+    "`https://host.example.test`user@example.com",
+  ])("ends a URL without a path where running text goes on: %s", (text) => {
+    expect(redactCredentials(text)).toBe(text);
+  });
+
+  it("removes a long password with a raw slash", () => {
+    expect(redactCredentials("https://alice:pa/ssssssss@host.example.test/r")).toBe("https://***@host.example.test/r");
+  });
+
   it("keeps text without credentials", () => {
     expect(redactCredentials("plain text")).toBe("plain text");
     expect(redactCredentials("")).toBe("");

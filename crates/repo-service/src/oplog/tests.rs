@@ -332,6 +332,29 @@ fn redact_keeps_an_at_sign_after_the_host() {
     );
 }
 
+/// #1125: a URL without a path still ends at white space, a double quote, `<`, `>` or a
+/// backtick, so an address after it keeps its `@`.
+#[test]
+fn redact_ends_a_url_without_a_path_where_running_text_goes_on() {
+    for text in [
+        "see https://host.example.test or ask user@example.com",
+        r#"{"url":"https://host.example.test","by":"a@b.example"}"#,
+        "<https://host.example.test>user@example.com",
+        "`https://host.example.test`user@example.com",
+    ] {
+        assert_eq!(redact(text), text, "{text}");
+    }
+}
+
+/// #1125: a long password with a raw `/`: the user information ends at the `@` after it.
+#[test]
+fn redact_removes_a_long_password_with_a_raw_slash() {
+    assert_eq!(
+        redact("https://alice:pa/ssssssss@host.example.test/r"),
+        "https://***@host.example.test/r"
+    );
+}
+
 /// The end of `journal`'s newest entry's first run's output, after finishing it with `output`.
 fn kept_output(journal: &Journal, output: String) -> String {
     let id = journal.begin(start("Commit"));
