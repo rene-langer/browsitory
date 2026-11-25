@@ -29,6 +29,39 @@ describe("redactCredentials (#1056)", () => {
     );
   });
 
+  // #1125: the same cases as `redact_removes_a_password_holding_characters_that_end_a_url_elsewhere`.
+  it.each([
+    ["https://alice:tok@host.example.test/r", "https://***@host.example.test/r"],
+    [
+      "unable to access 'https://alice:pa,ss@host.example.test/r/'",
+      "unable to access 'https://***@host.example.test/r/'",
+    ],
+    ["https://alice:p(a)ss@host.example.test/r", "https://***@host.example.test/r"],
+    ["https://alice:pa'ss@host.example.test/r", "https://***@host.example.test/r"],
+    ["https://alice:pa[ss@host.example.test/r", "https://***@host.example.test/r"],
+    ["https://alice:pa]ss@host.example.test/r", "https://***@host.example.test/r"],
+    ["https://alice:pa/ss@host.example.test/r", "https://***@host.example.test/r"],
+    ["https://alice:pa?ss@host.example.test/r", "https://***@host.example.test/r"],
+  ])("removes a password holding characters that end a URL elsewhere: %s", (text, redacted) => {
+    expect(redactCredentials(text)).toBe(redacted);
+  });
+
+  // #1125: the same cases as `redact_keeps_an_at_sign_after_the_host`.
+  it.each([
+    "(https://host.example.test/r) and git@host.example.test:o/r.git",
+    "https://host.example.test:8443/r?mail=a@b.example",
+    "https://[::1]/r@x",
+    "https://host.example.test/a@b, https://h2.example.test",
+  ])("keeps an @ after the host: %s", (text) => {
+    expect(redactCredentials(text)).toBe(text);
+  });
+
+  it("finds a second URL right after a first one without user information", () => {
+    expect(redactCredentials("https://host.example.test/x,https://u:p@h2.example.test/y")).toBe(
+      "https://host.example.test/x,https://***@h2.example.test/y",
+    );
+  });
+
   it("keeps text without credentials", () => {
     expect(redactCredentials("plain text")).toBe("plain text");
     expect(redactCredentials("")).toBe("");

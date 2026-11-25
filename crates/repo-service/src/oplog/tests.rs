@@ -272,6 +272,66 @@ fn redact_removes_user_information_and_authorization_values() {
     assert_eq!(redact("plain text"), "plain text");
 }
 
+/// #1125: `'`, `(`, `)`, `,`, `[` and `]` are legal in a password; a raw `/` makes the text
+/// before it no `host:port`.
+#[test]
+fn redact_removes_a_password_holding_characters_that_end_a_url_elsewhere() {
+    for (text, redacted) in [
+        (
+            "https://alice:tok@host.example.test/r",
+            "https://***@host.example.test/r",
+        ),
+        (
+            "unable to access 'https://alice:pa,ss@host.example.test/r/'",
+            "unable to access 'https://***@host.example.test/r/'",
+        ),
+        (
+            "https://alice:p(a)ss@host.example.test/r",
+            "https://***@host.example.test/r",
+        ),
+        (
+            "https://alice:pa'ss@host.example.test/r",
+            "https://***@host.example.test/r",
+        ),
+        (
+            "https://alice:pa[ss@host.example.test/r",
+            "https://***@host.example.test/r",
+        ),
+        (
+            "https://alice:pa]ss@host.example.test/r",
+            "https://***@host.example.test/r",
+        ),
+        (
+            "https://alice:pa/ss@host.example.test/r",
+            "https://***@host.example.test/r",
+        ),
+        (
+            "https://alice:pa?ss@host.example.test/r",
+            "https://***@host.example.test/r",
+        ),
+    ] {
+        assert_eq!(redact(text), redacted, "{text}");
+    }
+}
+
+/// #1125: an `@` after a URL without user information is kept: in the text after it, or in its
+/// path, also behind a port or an IPv6 host.
+#[test]
+fn redact_keeps_an_at_sign_after_the_host() {
+    for text in [
+        "(https://host.example.test/r) and git@host.example.test:o/r.git",
+        "https://host.example.test:8443/r?mail=a@b.example",
+        "https://[::1]/r@x",
+        "https://host.example.test/a@b, https://h2.example.test",
+    ] {
+        assert_eq!(redact(text), text, "{text}");
+    }
+    assert_eq!(
+        redact("https://host.example.test/x,https://u:p@h2.example.test/y"),
+        "https://host.example.test/x,https://***@h2.example.test/y"
+    );
+}
+
 /// The end of `journal`'s newest entry's first run's output, after finishing it with `output`.
 fn kept_output(journal: &Journal, output: String) -> String {
     let id = journal.begin(start("Commit"));
