@@ -645,6 +645,106 @@ fn a_discard_next_to_many_untracked_files_stores_only_its_own_file() {
     );
 }
 
+/// `git <args>` in `dir`, which must succeed; its output.
+fn git_out(dir: &Path, args: &[&str]) -> String {
+    let output = test_support::git(dir, args);
+    assert!(output.status.success(), "git {args:?}: {output:?}");
+    String::from_utf8(output.stdout).unwrap()
+}
+
+/// The branch `feature` (at HEAD) tracking `origin/feature`, a remote-tracking branch only.
+fn feature_tracking_origin() -> (TempDir, Repository) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "base");
+    let d = dir.path();
+    git_out(
+        d,
+        &["remote", "add", "origin", "https://example.invalid/r.git"],
+    );
+    git_out(d, &["update-ref", "refs/remotes/origin/feature", "HEAD"]);
+    (dir, repo)
+}
+
+fn upstream_of(dir: &Path, branch: &str) -> String {
+    git_out(
+        dir,
+        &[
+            "for-each-ref",
+            "--format=%(upstream:short)",
+            &format!("refs/heads/{branch}"),
+        ],
+    )
+}
+
+/// #1151: Undo of a rename gives the old name its upstream back and leaves nothing under the new
+/// name; Redo moves it again. Through the worker, whose entries keep only what changed.
+#[test]
+fn undo_and_redo_of_a_rename_keep_the_branch_upstream() {
+    let (dir, _repo) = feature_tracking_origin();
+    let d = dir.path();
+    git_out(d, &["branch", "feature"]);
+    git_out(d, &["branch", "-u", "origin/feature", "feature"]);
+    let worker = Worker::spawn(d.to_path_buf()).unwrap();
+    let handle = worker.handle();
+
+    handle
+        .rename_branch("feature".into(), "feat2".into())
+        .unwrap();
+    assert_eq!(upstream_of(d, "feat2"), "origin/feature\n");
+
+    assert_eq!(
+        handle.undo().unwrap(),
+        UndoOutcome::Done {
+            label: "Rename branch feature to feat2".into()
+        }
+    );
+    assert_eq!(upstream_of(d, "feature"), "origin/feature\n");
+    let config = git_out(d, &["config", "--local", "--list"]);
+    assert!(!config.contains("branch.feat2."), "{config}");
+
+    assert_eq!(
+        handle.redo().unwrap(),
+        UndoOutcome::Done {
+            label: "Rename branch feature to feat2".into()
+        }
+    );
+    assert_eq!(upstream_of(d, "feat2"), "origin/feature\n");
+    let config = git_out(d, &["config", "--local", "--list"]);
+    assert!(!config.contains("branch.feature."), "{config}");
+}
+
+/// #1151: the checkout of a remote branch (create and switch, then set its upstream): after its
+/// Undo and Redo the branch tracks the remote branch again.
+#[test]
+fn redo_of_a_remote_branch_checkout_keeps_the_upstream() {
+    let (dir, _repo) = feature_tracking_origin();
+    let d = dir.path();
+    let worker = Worker::spawn(d.to_path_buf()).unwrap();
+    let handle = worker.handle();
+    handle
+        .create_branch("feature".into(), "origin/feature".into(), true)
+        .unwrap();
+    handle
+        .set_current_upstream("origin".into(), "feature".into())
+        .unwrap();
+
+    assert_eq!(
+        handle.undo().unwrap(),
+        UndoOutcome::Done {
+            label: "Create branch feature".into()
+        }
+    );
+    assert_eq!(
+        handle.redo().unwrap(),
+        UndoOutcome::Done {
+            label: "Create branch feature".into()
+        }
+    );
+
+    assert_eq!(upstream_of(d, "feature"), "origin/feature\n");
+}
+
 /// `git status --porcelain` in `dir` (the git CLI is the reference).
 fn porcelain(dir: &Path) -> String {
     let output = test_support::git(dir, &["status", "--porcelain"]);

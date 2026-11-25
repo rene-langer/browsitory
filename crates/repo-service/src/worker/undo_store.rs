@@ -160,6 +160,7 @@ impl From<StoredSnapshot> for RepoSnapshot {
             refs: stored.refs,
             index_tree: stored.index_tree,
             intent_to_add: stored.intent_to_add,
+            branch_config: BTreeMap::new(),
             worktree_tree: stored.worktree_tree,
             unsaved_untracked: stored.unsaved_untracked,
             skipped: stored
@@ -628,6 +629,43 @@ mod tests {
         assert!(undo_json(&repo)["undo"][0]["before"]
             .get("intentToAdd")
             .is_none());
+    }
+
+    /// #1151: a snapshot's branch settings are saved and reloaded, in order; none, no key.
+    #[test]
+    fn saves_and_reloads_branch_settings() {
+        let (dir, repo) = repo_with_commit();
+        for args in [
+            ["config", "branch.topic.remote", "origin"],
+            ["config", "branch.topic.merge", "refs/heads/topic"],
+        ] {
+            let output = test_support::git(dir.path(), &args);
+            assert!(output.status.success(), "{output:?}");
+        }
+        let with = capture(&repo, SnapshotScope::RefsAndIndex).unwrap();
+        assert_eq!(
+            with.branch_config.get("topic"),
+            Some(&vec![
+                ("remote".to_string(), "origin".to_string()),
+                ("merge".to_string(), "refs/heads/topic".to_string()),
+            ])
+        );
+        let (mut store, mut stacks) = UndoStore::open(&repo);
+        stacks.undo.push(UndoEntry {
+            label: "Delete branch topic".into(),
+            before: with.clone(),
+            after: with,
+        });
+        stacks.undo.push(entry(&repo, "Stage a.txt"));
+        store.save(&repo, &stacks).unwrap();
+
+        let json = undo_json(&repo);
+        assert_eq!(
+            json["undo"][0]["before"]["branchConfig"]["topic"],
+            serde_json::json!([["remote", "origin"], ["merge", "refs/heads/topic"]])
+        );
+        let (_, reloaded) = UndoStore::open(&repo);
+        assert_eq!(reloaded.undo, stacks.undo);
     }
 
     #[test]

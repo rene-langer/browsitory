@@ -37,6 +37,9 @@ pub struct RepoSnapshot {
     /// The index's intent-to-add paths (`git add -N`, #1174): `index_tree` holds them as empty
     /// files, and `restore` puts the mark back.
     pub intent_to_add: BTreeSet<String>,
+    /// Each local branch's settings (`branch.<name>.*` in the repository's own config file, #1151)
+    /// by branch name: `(variable, value)` in file order. Only branches with settings.
+    pub branch_config: BTreeMap<String, Vec<(String, String)>>,
     /// HEAD tree with every modified/deleted/untracked (not ignored) file overlaid. `None` for
     /// `SnapshotScope::RefsAndIndex`.
     pub worktree_tree: Option<String>,
@@ -317,6 +320,7 @@ fn capture_with(repo: &Repository, worktree: Option<Limits>) -> Result<RepoSnaps
         refs: local_refs(repo)?,
         index_tree,
         intent_to_add,
+        branch_config: BTreeMap::new(),
         worktree_tree,
         skipped,
         unsaved_untracked,
