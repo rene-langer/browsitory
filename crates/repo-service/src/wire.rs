@@ -3825,6 +3825,9 @@ pub enum ErrorKind {
     /// A file's diff over the size limit (#1066); the diff view offers to load it anyway
     /// (`noSizeLimit`).
     DiffTooLarge,
+    /// Blame refused a file over its size limit or a binary file (#1158); the blame view shows
+    /// the message.
+    BlameUnavailable,
 }
 
 impl ErrorKind {

@@ -591,7 +591,9 @@ export type ErrorKind =
   | "MissingIdentity"
   | "RestLeft"
   /** A file's diff over the backend's size limit (#1066); `noSizeLimit` loads it anyway. */
-  | "DiffTooLarge";
+  | "DiffTooLarge"
+  /** Blame refused a file over its size limit or a binary file (#1158); the message says which. */
+  | "BlameUnavailable";
 
 /** A rejected request as the backend sends it (`repo_service::wire::ErrorDto`). */
 export interface RepoErrorPayload {

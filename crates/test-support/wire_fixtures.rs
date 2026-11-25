@@ -193,6 +193,17 @@ pub fn errors() -> Cases<repo_service::wire::ErrorDto> {
                 limit: git_core::diff::DIFF_SIZE_LIMIT,
             }),
         ),
+        case(
+            "BlameUnavailable",
+            ErrorDto::from_error(git_core::blame::BlameError::TooLarge {
+                size: 25 * 1024 * 1024 + 300 * 1024,
+                limit: git_core::blame::BLAME_SIZE_LIMIT,
+            }),
+        ),
+        case(
+            "BlameUnavailableBinary",
+            ErrorDto::from_error(git_core::blame::BlameError::Binary),
+        ),
     ];
     assert_every_variant!(
         cases
@@ -213,6 +224,7 @@ pub fn errors() -> Cases<repo_service::wire::ErrorDto> {
         ErrorKind::MissingIdentity,
         ErrorKind::RestLeft,
         ErrorKind::DiffTooLarge,
+        ErrorKind::BlameUnavailable,
     );
     cases
 }
