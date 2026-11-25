@@ -16,6 +16,7 @@ import { fakeRepoClient } from "../test/fakeRepoClient";
 import { describedByText } from "../test/describedBy";
 import { chooseCommitMenuItem, commitMenuItems } from "../test/commitMenu";
 import { chooseViewOption } from "../test/viewMenu";
+import { FILE_EXPAND_LIMIT, FILE_SECTION_STEP } from "../lib/largeDiff";
 
 const TEST_REPO_PATH = "/repo";
 
@@ -1754,6 +1755,76 @@ describe("DiffPane", () => {
       expect(screen.getByRole("button", { name: "Collapse src/lib.rs" })).toBeInTheDocument();
     });
 
+    // #1153: a commit with many files neither fetches nor renders every file's diff at once.
+    describe("many files (#1153)", () => {
+      const paths = (n: number) => Array.from({ length: n }, (_, i) => `f${String(i).padStart(4, "0")}.txt`);
+      const expandButtons = () => screen.queryAllByRole("button", { name: /^Expand f\d+\.txt$/ });
+
+      it("expands every section up to the limit", async () => {
+        const getDiff = vi.fn(async () => hunks);
+        renderCommit(fakeClient({ getCommitFiles: vi.fn(async () => paths(FILE_EXPAND_LIMIT)), getCommitDiff: getDiff }), "abc123");
+
+        expect(await screen.findByText("f0049.txt")).toBeInTheDocument();
+        await waitFor(() => expect(getDiff).toHaveBeenCalledTimes(FILE_EXPAND_LIMIT));
+        expect(expandButtons()).toHaveLength(0);
+      });
+
+      it("starts every section collapsed above the limit, and fetches a diff only when one is expanded", async () => {
+        const getDiff = vi.fn(async () => hunks);
+        renderCommit(
+          fakeClient({ getCommitFiles: vi.fn(async () => paths(FILE_EXPAND_LIMIT + 1)), getCommitDiff: getDiff }),
+          "abc123",
+        );
+
+        expect(await screen.findByText("f0050.txt")).toBeInTheDocument();
+        expect(expandButtons()).toHaveLength(FILE_EXPAND_LIMIT + 1);
+        expect(getDiff).not.toHaveBeenCalled();
+
+        fireEvent.click(screen.getByRole("button", { name: "Expand f0007.txt" }));
+        await waitFor(() => expect(getDiff).toHaveBeenCalledTimes(1));
+        expect(getDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "abc123", "f0007.txt", DEFAULT_DIFF_OPTIONS);
+      });
+
+      it("renders the sections in steps, with buttons for more", async () => {
+        const total = FILE_SECTION_STEP * 2 + 50;
+        const getDiff = vi.fn(async () => hunks);
+        renderCommit(fakeClient({ getCommitFiles: vi.fn(async () => paths(total)), getCommitDiff: getDiff }), "abc123");
+
+        expect(await screen.findByText(`${total - FILE_SECTION_STEP} more files not shown.`)).toBeInTheDocument();
+        expect(expandButtons()).toHaveLength(FILE_SECTION_STEP);
+        expect(screen.queryByText(`f${String(FILE_SECTION_STEP).padStart(4, "0")}.txt`)).toBeNull();
+
+        fireEvent.click(screen.getByRole("button", { name: `Show ${FILE_SECTION_STEP} more` }));
+        expect(expandButtons()).toHaveLength(FILE_SECTION_STEP * 2);
+        expect(screen.getByText("50 more files not shown.")).toBeInTheDocument();
+        // With no more than a step left, there is no "Show all".
+        expect(screen.queryByRole("button", { name: "Show all" })).toBeNull();
+
+        fireEvent.click(screen.getByRole("button", { name: "Show 50 more" }));
+        expect(expandButtons()).toHaveLength(total);
+        expect(screen.queryByText(/more files? not shown/)).toBeNull();
+        expect(getDiff).not.toHaveBeenCalled();
+      });
+
+      it("Show all renders every section", async () => {
+        const total = FILE_SECTION_STEP * 3;
+        renderCommit(fakeClient({ getCommitFiles: vi.fn(async () => paths(total)), getCommitDiff }), "abc123");
+
+        fireEvent.click(await screen.findByRole("button", { name: "Show all" }));
+        expect(expandButtons()).toHaveLength(total);
+      });
+
+      it("says one more file in the singular", async () => {
+        renderCommit(
+          fakeClient({ getCommitFiles: vi.fn(async () => paths(FILE_SECTION_STEP + 1)), getCommitDiff }),
+          "abc123",
+        );
+
+        expect(await screen.findByText("1 more file not shown.")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Show 1 more" })).toBeInTheDocument();
+      });
+    });
+
     describe("merge commit parent (#1009)", () => {
       const first = "1".repeat(40);
       const second = "2".repeat(40);
@@ -2377,6 +2448,28 @@ describe("DiffPane stash view", () => {
     });
     expect(client.getStashFiles).toHaveBeenCalledWith(TEST_REPO_PATH, "s0");
     expect(within(section).queryByRole("button", { name: /History of/ })).toBeNull();
+  });
+
+  it("starts every file collapsed above the limit and lists each group in steps (#1153)", async () => {
+    const tracked = Array.from({ length: FILE_SECTION_STEP + 10 }, (_, i) => `t${String(i).padStart(4, "0")}.txt`);
+    const { getCommitDiff } = renderStash({ tracked, untracked: ["new.txt"], untrackedCommitId: "u1" });
+
+    expect(await screen.findByText(`Changes (${FILE_SECTION_STEP + 10})`)).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^Expand t\d+\.txt$/ })).toHaveLength(FILE_SECTION_STEP);
+    expect(screen.getByRole("button", { name: "Expand new.txt" })).toBeInTheDocument();
+    expect(screen.getByText("10 more files not shown.")).toBeInTheDocument();
+    expect(getCommitDiff).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show 10 more" }));
+    expect(screen.getAllByRole("button", { name: /^Expand t\d+\.txt$/ })).toHaveLength(FILE_SECTION_STEP + 10);
+  });
+
+  it("expands every file of a stash up to the limit (#1153)", async () => {
+    const tracked = Array.from({ length: FILE_EXPAND_LIMIT - 1 }, (_, i) => `t${i}.txt`);
+    const { getCommitDiff } = renderStash({ tracked, untracked: ["new.txt"], untrackedCommitId: "u1" });
+
+    await waitFor(() => expect(getCommitDiff).toHaveBeenCalledTimes(FILE_EXPAND_LIMIT));
+    expect(screen.queryByRole("button", { name: /^Expand / })).toBeNull();
   });
 
   it("hides the Untracked group when the stash has none", async () => {

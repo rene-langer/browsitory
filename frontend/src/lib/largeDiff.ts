@@ -9,6 +9,14 @@ import type { DiffHunk } from "../ipc/RepoClient";
 export const LARGE_DIFF_LINES = 1000;
 export const DIFF_WINDOW_LINES = 2000;
 
+/**
+ * Many changed files (#1153): a commit, stash or compare with more files than
+ * `FILE_EXPAND_LIMIT` starts with every file's section collapsed, as each open one fetches its
+ * diff, and the sections render `FILE_SECTION_STEP` at a time, with buttons for more.
+ */
+export const FILE_EXPAND_LIMIT = 50;
+export const FILE_SECTION_STEP = 200;
+
 // File names package managers and build tools write: their diffs are rarely read line by line.
 const GENERATED_NAMES = new Set([
   "Cargo.lock",

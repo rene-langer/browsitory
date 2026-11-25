@@ -6,6 +6,7 @@ import type { CompareState } from "../state/useCompare";
 import type { ExternalToolsApi } from "../state/useExternalTools";
 import { CompareDiffPane } from "./CompareDiffPane";
 import { fakeRepoClient } from "../test/fakeRepoClient";
+import { FILE_SECTION_STEP } from "../lib/largeDiff";
 
 const A = "a".repeat(40);
 const B = "b".repeat(40);
@@ -121,6 +122,17 @@ describe("CompareDiffPane", () => {
     expect(await screen.findByText("51 files changed")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /^Expand f\d+\.txt$/ })).toHaveLength(51);
     expect(getRangeDiff).not.toHaveBeenCalled();
+  });
+
+  it("renders the sections in steps, with a button for more (#1153)", async () => {
+    const files = Array.from({ length: FILE_SECTION_STEP + 5 }, (_, i) => ({ path: `f${i}.txt`, oldPath: null }));
+    renderPane({ client: client({ getRangeFiles: vi.fn(async () => files), getRangeDiff: vi.fn(async () => []) }) });
+
+    expect(await screen.findByText(`${FILE_SECTION_STEP + 5} files changed`)).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^Expand f\d+\.txt$/ })).toHaveLength(FILE_SECTION_STEP);
+    expect(screen.getByText("5 more files not shown.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show 5 more" }));
+    expect(screen.getAllByRole("button", { name: /^Expand f\d+\.txt$/ })).toHaveLength(FILE_SECTION_STEP + 5);
   });
 
   it("previews an image file from both ends of the range, renames included", async () => {
