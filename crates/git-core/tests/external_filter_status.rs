@@ -432,3 +432,12 @@ fn head_info_reads_a_tracked_attributes_file_from_the_index_when_deleted_on_disk
 
     assert_eq!(head_filters(&repo), vec!["crypt".to_string()]);
 }
+
+#[test]
+fn head_info_reads_the_top_level_attributes_file_from_the_index_when_deleted_on_disk() {
+    let (dir, repo) = fixture();
+    std::fs::remove_file(dir.path().join(".gitattributes")).unwrap();
+    configure_driver(&repo);
+
+    assert_eq!(head_filters(&repo), vec!["crypt".to_string()]);
+}
