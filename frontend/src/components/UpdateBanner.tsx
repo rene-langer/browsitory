@@ -2,6 +2,7 @@ import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { checkForUpdate, type UpdateInfo } from "../ipc/updater";
 import { UpdateCheckContext, type UpdateCheckOutcome } from "../state/updateCheck";
 import { useUpdateSettingsContext } from "../state/useUpdateSettings";
+import { logFailure } from "../lib/logger";
 import styles from "./UpdateBanner.module.css";
 
 /** Time between checks while they succeed (no update found yet). */
@@ -26,6 +27,7 @@ const errorMessage = (error: unknown) => (error instanceof Error ? error.message
  */
 export function UpdateBanner() {
   const [readyUpdate, setReadyUpdate] = useState<UpdateInfo | null>(null);
+  const [installError, setInstallError] = useState<string | null>(null);
   const { settings, status } = useUpdateSettingsContext();
   const registry = useContext(UpdateCheckContext);
   const ready = useRef<UpdateInfo | null>(null);
@@ -97,18 +99,25 @@ export function UpdateBanner() {
 
   if (readyUpdate === null) return null;
 
+  // A failed install (rpm refusing the package, a cancelled password prompt, #1077) is shown and
+  // logged; the button stays so the user can try again.
+  const install = () => {
+    setInstallError(null);
+    readyUpdate.installAndRelaunch().catch((error: unknown) => {
+      logFailure(`Installing update v${readyUpdate.version} failed`, error);
+      setInstallError(errorMessage(error));
+    });
+  };
+
   return (
     // No role of its own: it sits in the toast region, which is the live region (#1000).
-    <div className={styles.banner}>
-      <span>Update v{readyUpdate.version} ready</span>
-      <button
-        className={styles.restartButton}
-        onClick={() =>
-          void readyUpdate
-            .installAndRelaunch()
-            .catch((e) => console.error("Restart failed", e))
-        }
-      >
+    <div className={installError === null ? styles.banner : `${styles.banner} ${styles.failed}`}>
+      <span>
+        {installError === null
+          ? `Update v${readyUpdate.version} ready`
+          : `Couldn't install update v${readyUpdate.version}: ${installError}`}
+      </span>
+      <button className={styles.restartButton} onClick={install}>
         Restart to update
       </button>
     </div>
