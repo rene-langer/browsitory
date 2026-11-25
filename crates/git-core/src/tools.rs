@@ -295,7 +295,7 @@ fn trusted_entry(config: &Config, key: &str) -> Result<Option<Entry>, git2::Erro
         .map(|(_, (_, entry))| entry))
 }
 
-fn trusted_string(
+pub(crate) fn trusted_string(
     config: &Config,
     key: &str,
 ) -> Result<Option<(String, ConfigSource)>, git2::Error> {
@@ -306,7 +306,7 @@ fn trusted_string(
 }
 
 /// The value of `key` set at any untrusted level (a repository's own config).
-fn untrusted_string(
+pub(crate) fn untrusted_string(
     config: &Config,
     key: &str,
 ) -> Result<Option<(String, ConfigSource)>, git2::Error> {

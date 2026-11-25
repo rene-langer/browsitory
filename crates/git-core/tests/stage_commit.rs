@@ -424,7 +424,7 @@ fn hung_signer_repo() -> (tempfile::TempDir, git2::Repository, tempfile::TempDir
     git_core::stage::stage_file(&repo, "a.txt").unwrap();
     let mut config = repo.config().unwrap();
     config.set_bool("commit.gpgSign", true).unwrap();
-    config
+    common::user_config(&repo)
         .set_str("gpg.program", signer.to_str().unwrap())
         .unwrap();
     (dir, repo, bin)

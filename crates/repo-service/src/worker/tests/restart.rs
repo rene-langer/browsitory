@@ -1095,10 +1095,11 @@ fn a_pending_entry_recorded_by_another_worker_is_not_recorded_twice() {
 fn a_continue_that_loses_head_to_another_writer_saves_nothing() {
     use std::os::unix::fs::PermissionsExt;
     let (dir, repo) = init_repo();
-    let (_worker, handle, _, tip) = paused_for_edit(dir.path(), &repo);
     let tools = TempDir::new().unwrap();
     let mark = tools.path().join("called-once");
     let script = tools.path().join("fake-gpg");
+    super::set_user_config(&repo, "gpg.program", script.to_str().unwrap());
+    let (_worker, handle, _, tip) = paused_for_edit(dir.path(), &repo);
     std::fs::write(
         &script,
         format!(
@@ -1109,13 +1110,10 @@ fn a_continue_that_loses_head_to_another_writer_saves_nothing() {
     )
     .unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    {
-        let mut config = repo.config().unwrap();
-        config.set_bool("commit.gpgSign", true).unwrap();
-        config
-            .set_str("gpg.program", script.to_str().unwrap())
-            .unwrap();
-    }
+    repo.config()
+        .unwrap()
+        .set_bool("commit.gpgSign", true)
+        .unwrap();
     let stored = std::fs::read_to_string(rebase_file(&repo)).unwrap();
 
     assert!(handle.rebase_continue().is_err());
@@ -1140,18 +1138,16 @@ fn a_continue_that_loses_head_to_another_writer_saves_nothing() {
 fn cancelling_a_rebase_steps_signer_stops_it() {
     use std::os::unix::fs::PermissionsExt;
     let (dir, repo) = init_repo();
-    let (_worker, handle, _, _tip) = paused_for_edit(dir.path(), &repo);
     let tools = TempDir::new().unwrap();
     let script = tools.path().join("hung-gpg");
     std::fs::write(&script, "#!/bin/sh\nsleep 30\n").unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    {
-        let mut config = repo.config().unwrap();
-        config.set_bool("commit.gpgSign", true).unwrap();
-        config
-            .set_str("gpg.program", script.to_str().unwrap())
-            .unwrap();
-    }
+    super::set_user_config(&repo, "gpg.program", script.to_str().unwrap());
+    let (_worker, handle, _, _tip) = paused_for_edit(dir.path(), &repo);
+    repo.config()
+        .unwrap()
+        .set_bool("commit.gpgSign", true)
+        .unwrap();
     let started = std::time::Instant::now();
     let (events_tx, events) = mpsc::channel();
 

@@ -139,7 +139,7 @@ fn missing_signer_program_is_reported_by_name() {
     {
         let mut config = repo.config().unwrap();
         config.set_bool("commit.gpgSign", true).unwrap();
-        config
+        common::user_config(&repo)
             .set_str("gpg.program", "browsitory-no-such-gpg")
             .unwrap();
     }
@@ -219,7 +219,7 @@ fn signs_with_a_literal_ssh_public_key_through_the_agent() {
         config
             .set_str("user.signingKey", &format!("key::{}", key.public_line))
             .unwrap();
-        config
+        common::user_config(&repo)
             .set_str("gpg.ssh.program", signer.to_str().unwrap())
             .unwrap();
     }
@@ -495,8 +495,7 @@ fn verifies_ssh_signature_as_good_with_allowed_signers() {
         return;
     };
     let id = signed_head(dir.path(), &mut repo);
-    repo.config()
-        .unwrap()
+    common::user_config(&repo)
         .set_str(
             "gpg.ssh.allowedSignersFile",
             keys.path().join("allowed_signers").to_str().unwrap(),
@@ -542,8 +541,7 @@ fn unlisted_ssh_signer_is_good_untrusted() {
     let id = signed_head(dir.path(), &mut repo);
     let other = keys.path().join("other_signers");
     std::fs::write(&other, "someone@example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGq2pQ0lYkTzUuWQnqf8NYvU0bS7u9a8m2g5Yb2G8b9h\n").unwrap();
-    repo.config()
-        .unwrap()
+    common::user_config(&repo)
         .set_str("gpg.ssh.allowedSignersFile", other.to_str().unwrap())
         .unwrap();
 
@@ -651,8 +649,7 @@ fn rebase_continue_can_be_retried_after_the_squash_collapse_fails_to_sign() {
     assert_eq!(result, RebaseStepResult::PausedForEdit);
     // Signer calls on continue: 1 = step a, 2 = step b, 3 = the collapse commit (fails), 4 = retry.
     let program = flaky_ssh_program(keys.path(), 3);
-    repo.config()
-        .unwrap()
+    common::user_config(&repo)
         .set_str("gpg.ssh.program", program.to_str().unwrap())
         .unwrap();
 
@@ -678,8 +675,7 @@ fn ssh_verifier_failure_that_is_not_a_forgery_is_error_not_bad() {
         &program,
         "#!/bin/sh\necho 'unknown option -- Y' >&2\nexit 1\n",
     );
-    repo.config()
-        .unwrap()
+    common::user_config(&repo)
         .set_str("gpg.ssh.program", program.to_str().unwrap())
         .unwrap();
 

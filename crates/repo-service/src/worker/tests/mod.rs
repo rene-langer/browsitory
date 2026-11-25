@@ -73,6 +73,35 @@ fn init_repo() -> (TempDir, Repository) {
     (dir, repo)
 }
 
+/// The user's own git config for `repo`, as a worker spawned afterwards sees it: a file in the
+/// repository's git dir that `add_user_config` adds to the worker's repository at the global
+/// level. Signing programs count only from such a level (#1121); the hermetic setup leaves the
+/// real global level empty.
+const USER_CONFIG: &str = "user.gitconfig";
+
+fn set_user_config(repo: &Repository, key: &str, value: &str) {
+    git2::Config::open(&repo.path().join(USER_CONFIG))
+        .unwrap()
+        .set_str(key, value)
+        .unwrap();
+}
+
+/// Called by `Worker::spawn` in tests on the repository it opened.
+pub(super) fn add_user_config(repo: &Repository) {
+    let path = repo.path().join(USER_CONFIG);
+    if path.exists() {
+        let mut config = repo.config().unwrap();
+        config
+            .add_file(&path, git2::ConfigLevel::Global, true)
+            .unwrap();
+        // libgit2 writes to the newest file added after it opened the repository's config;
+        // adding the local one again keeps the worker's own writes there.
+        config
+            .add_file(&repo.path().join("config"), git2::ConfigLevel::Local, true)
+            .unwrap();
+    }
+}
+
 #[cfg(unix)]
 fn install_hook(repo: &Repository, name: &str, body: &str) {
     use std::os::unix::fs::PermissionsExt;

@@ -393,31 +393,52 @@ fn redact_authorization(line: &str) -> String {
     format!("{} {REDACTED}{ending}", &line[..end])
 }
 
-/// Whether `c` ends a URL's authority (`user:pass@host:port`).
-fn ends_authority(c: char) -> bool {
-    matches!(
-        c,
-        '/' | '?' | '#' | '"' | '\'' | '<' | '>' | '(' | ')' | '[' | ']' | '`' | ','
-    ) || c.is_whitespace()
+/// Whether `c` ends a URL in running text. `'`, `(`, `)`, `,`, `[` and `]` don't: a password may
+/// hold them unencoded (#1125).
+fn ends_url(c: char) -> bool {
+    matches!(c, '"' | '<' | '>' | '`') || c.is_whitespace()
+}
+
+fn ends_host(c: char) -> bool {
+    matches!(c, '/' | '?' | '#')
+}
+
+/// Where the user information of `url` (the text after `://`) ends: its last `@` before the host
+/// ends, as git reads it. A password with a raw `/`, `?` or `#` (`user:pa/ss@host`) leaves a
+/// `user:pa` before that which can't be `host:port`; then it is the last `@` before the end of
+/// the host that follows the next `@`.
+fn userinfo_end(url: &str) -> Option<usize> {
+    let host_end = url.find(ends_host).unwrap_or(url.len());
+    let before = &url[..host_end];
+    if let Some(at) = before.rfind('@') {
+        return Some(at);
+    }
+    let port = &before[before.rfind(':')? + 1..];
+    if before.starts_with('[') || (!port.is_empty() && port.bytes().all(|b| b.is_ascii_digit())) {
+        return None;
+    }
+    let next_at = host_end + url[host_end..].find('@')?;
+    let end = url[next_at..]
+        .find(ends_host)
+        .map_or(url.len(), |len| next_at + len);
+    url[..end].rfind('@')
 }
 
 fn redact_userinfo(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(at) = rest.find("://") {
-        let authority_start = at + 3;
-        out.push_str(&rest[..authority_start]);
-        let after = &rest[authority_start..];
-        let authority_len = after.find(ends_authority).unwrap_or(after.len());
-        let authority = &after[..authority_len];
-        match authority.rfind('@') {
-            Some(user_end) => {
+        let url_start = at + 3;
+        out.push_str(&rest[..url_start]);
+        let after = &rest[url_start..];
+        let url = &after[..after.find(ends_url).unwrap_or(after.len())];
+        rest = match userinfo_end(url) {
+            Some(end) => {
                 out.push_str(REDACTED);
-                out.push_str(&authority[user_end..]);
+                &after[end..]
             }
-            None => out.push_str(authority),
-        }
-        rest = &after[authority_len..];
+            None => after,
+        };
     }
     out.push_str(rest);
     out

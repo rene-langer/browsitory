@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { clickInPage, waitUntilInPage } from "../support/dom";
 import { gitIn } from "../support/git";
+import { ALLOWED_SIGNERS } from "../support/signingHome";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const FILE = "signing-e2e.txt";
@@ -26,16 +27,16 @@ describe("Browsitory commit signing", () => {
     execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", "e2e@example.com", "-f", key]);
     const pub = fs.readFileSync(`${key}.pub`, "utf8").trim();
     const email = git("config", "user.email");
-    fs.writeFileSync(path.join(keyDir, "allowed_signers"), `${email} ${pub}\n`);
+    // The session's own HOME names this file in its git config (`wdio.conf.ts`, #1121).
+    fs.writeFileSync(ALLOWED_SIGNERS, `${email} ${pub}\n`);
     git("config", "commit.gpgSign", "true");
     git("config", "gpg.format", "ssh");
     git("config", "user.signingKey", key);
-    git("config", "gpg.ssh.allowedSignersFile", path.join(keyDir, "allowed_signers"));
     fs.writeFileSync(path.join(E2E_REPO_PATH, FILE), "signed\n");
   });
 
   after(() => {
-    for (const key of ["commit.gpgSign", "gpg.format", "user.signingKey", "gpg.ssh.allowedSignersFile"]) {
+    for (const key of ["commit.gpgSign", "gpg.format", "user.signingKey"]) {
       try {
         git("config", "--unset", key);
       } catch {

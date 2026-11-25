@@ -9,13 +9,11 @@ fn failed_signing_replies_err_and_records_no_undo_entry() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "a.txt", "a");
     commit_all(&repo, "base");
-    {
-        let mut config = repo.config().unwrap();
-        config.set_bool("commit.gpgSign", true).unwrap();
-        config
-            .set_str("gpg.program", "browsitory-no-such-gpg")
-            .unwrap();
-    }
+    repo.config()
+        .unwrap()
+        .set_bool("commit.gpgSign", true)
+        .unwrap();
+    super::set_user_config(&repo, "gpg.program", "browsitory-no-such-gpg");
     write_file(dir.path(), "b.txt", "b");
 
     let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();

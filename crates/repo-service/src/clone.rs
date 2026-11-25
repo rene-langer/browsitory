@@ -76,9 +76,29 @@ impl Default for DefaultCloneService {
 /// gets a missing-credential error instead, which the dialog turns into a re-prompt. The token
 /// reaches the keychain only after the clone succeeds and the token was actually offered
 /// (`offered`; a public repo never asks, so a mistyped token is never saved).
+///
+/// The token goes only to the clone URL's scheme, host and port (#1126): libgit2 follows a
+/// redirect of the first request to another host and then asks for that host's credential.
 struct OneShotHttps<'a> {
     input: &'a HttpsCredentialInput,
+    clone_origin: Option<url::Origin>,
     offered: bool,
+}
+
+/// `url`'s scheme, host and port, when its scheme is https.
+fn https_origin(url: &str) -> Option<url::Origin> {
+    let parsed = url::Url::parse(url).ok()?;
+    (parsed.scheme() == "https").then(|| parsed.origin())
+}
+
+impl<'a> OneShotHttps<'a> {
+    fn new(input: &'a HttpsCredentialInput, clone_url: &str) -> Self {
+        Self {
+            input,
+            clone_origin: https_origin(clone_url),
+            offered: false,
+        }
+    }
 }
 
 impl CredentialProvider for OneShotHttps<'_> {
@@ -88,10 +108,13 @@ impl CredentialProvider for OneShotHttps<'_> {
         _username: Option<&str>,
         allowed: git2::CredentialType,
     ) -> Result<git2::Cred, git2::Error> {
-        let is_https = url
-            .get(..8)
-            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://"));
-        if !self.offered && is_https && allowed.contains(git2::CredentialType::USER_PASS_PLAINTEXT)
+        let clone_host = matches!(
+            (&self.clone_origin, https_origin(url)),
+            (Some(clone), Some(asked)) if *clone == asked
+        );
+        if !self.offered
+            && clone_host
+            && allowed.contains(git2::CredentialType::USER_PASS_PLAINTEXT)
         {
             self.offered = true;
             git2::Cred::userpass_plaintext(&self.input.username, &self.input.token)
@@ -206,10 +229,7 @@ impl<S: CredentialStore> CloneService<S> {
         let mut token_offered = false;
         let result = match &https {
             Some(input) => {
-                let mut provider = OneShotHttps {
-                    input,
-                    offered: false,
-                };
+                let mut provider = OneShotHttps::new(input, opts.url.trim());
                 let result = clone_repo(&opts, &mut provider, &mut reporter, &cancel);
                 token_offered = provider.offered;
                 result
@@ -574,10 +594,7 @@ mod tests {
     fn one_shot_offers_the_token_once_over_https_then_reports_missing() {
         use git_core::remote::{CredentialProvider, MISSING_CREDENTIAL_ERROR};
         let input = provider_input();
-        let mut provider = super::OneShotHttps {
-            input: &input,
-            offered: false,
-        };
+        let mut provider = super::OneShotHttps::new(&input, "https://example.test/r.git");
         let allowed = git2::CredentialType::USER_PASS_PLAINTEXT;
 
         assert!(provider
@@ -591,10 +608,7 @@ mod tests {
     fn one_shot_refusal_does_not_consume_the_offer() {
         use git_core::remote::{CredentialProvider, MISSING_CREDENTIAL_ERROR};
         let input = provider_input();
-        let mut provider = super::OneShotHttps {
-            input: &input,
-            offered: false,
-        };
+        let mut provider = super::OneShotHttps::new(&input, "https://example.test/r.git");
         let url = "https://example.test/r.git";
 
         let refused = provider.credential(url, None, git2::CredentialType::SSH_KEY);
@@ -613,10 +627,7 @@ mod tests {
     fn one_shot_refuses_cleartext_http() {
         use git_core::remote::{CredentialProvider, MISSING_CREDENTIAL_ERROR};
         let input = provider_input();
-        let mut provider = super::OneShotHttps {
-            input: &input,
-            offered: false,
-        };
+        let mut provider = super::OneShotHttps::new(&input, "https://example.test/r.git");
 
         let result = provider.credential(
             "http://example.test/r.git",
@@ -631,10 +642,7 @@ mod tests {
     fn one_shot_refuses_when_plaintext_credentials_are_not_allowed() {
         use git_core::remote::{CredentialProvider, MISSING_CREDENTIAL_ERROR};
         let input = provider_input();
-        let mut provider = super::OneShotHttps {
-            input: &input,
-            offered: false,
-        };
+        let mut provider = super::OneShotHttps::new(&input, "https://example.test/r.git");
 
         let result = provider.credential(
             "https://example.test/r.git",
@@ -643,5 +651,56 @@ mod tests {
         );
 
         assert_eq!(result.err().unwrap().message(), MISSING_CREDENTIAL_ERROR);
+    }
+
+    /// #1126: libgit2 follows a redirect of the first request to another host and then asks
+    /// for that host's credential; the token typed for the clone URL's host never goes there.
+    #[test]
+    fn one_shot_offers_the_token_only_to_the_clone_urls_host() {
+        use git_core::remote::{CredentialProvider, MISSING_CREDENTIAL_ERROR};
+        let input = provider_input();
+        let mut provider =
+            super::OneShotHttps::new(&input, "https://forge.example.test/team/r.git");
+        let allowed = git2::CredentialType::USER_PASS_PLAINTEXT;
+
+        for other in [
+            "https://other.example.test/team/r.git/info/refs?service=git-upload-pack",
+            "https://forge.example.test.other.example/team/r.git",
+            "https://forge.example.test:8443/team/r.git",
+            "not a url",
+        ] {
+            let refused = provider.credential(other, None, allowed);
+            assert_eq!(
+                refused.err().unwrap().message(),
+                MISSING_CREDENTIAL_ERROR,
+                "{other}"
+            );
+            assert!(!provider.offered, "{other}");
+        }
+
+        assert!(provider
+            .credential(
+                "https://FORGE.example.test:443/team/r.git/info/refs?service=git-upload-pack",
+                None,
+                allowed,
+            )
+            .is_ok());
+        assert!(provider.offered);
+    }
+
+    #[test]
+    fn one_shot_never_offers_the_token_for_a_clone_url_it_cannot_read() {
+        use git_core::remote::{CredentialProvider, MISSING_CREDENTIAL_ERROR};
+        let input = provider_input();
+        let mut provider = super::OneShotHttps::new(&input, "forge.example.test/r.git");
+
+        let result = provider.credential(
+            "https://forge.example.test/r.git",
+            None,
+            git2::CredentialType::USER_PASS_PLAINTEXT,
+        );
+
+        assert_eq!(result.err().unwrap().message(), MISSING_CREDENTIAL_ERROR);
+        assert!(!provider.offered);
     }
 }

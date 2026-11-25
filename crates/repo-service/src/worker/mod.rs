@@ -1033,6 +1033,8 @@ impl Worker {
     {
         let repo_path = path;
         let repo = git_core::repo::open(&repo_path).map_err(|error| error.to_string())?;
+        #[cfg(test)]
+        tests::add_user_config(&repo);
         let workdir = repo.workdir().map(std::path::Path::to_path_buf);
         let journal = crate::oplog::journal(&registry::key_of(&repo));
         let worker_journal = Arc::clone(&journal);

@@ -683,7 +683,9 @@ fn a_failed_rebase_start_rolls_back_to_an_original_tree_holding_a_collision() {
     let (e, rm) = rebase_fixture(&fx);
     let mut config = fx.repo.config().unwrap();
     config.set_bool("commit.gpgSign", true).unwrap();
-    config.set_str("gpg.program", "/bin/false").unwrap();
+    common::user_config(&fx.repo)
+        .set_str("gpg.program", "/bin/false")
+        .unwrap();
     let Err(error) =
         rebase::start_rebase(&fx.repo, &rm.to_string(), plan_of(e, RebaseAction::Pick))
     else {

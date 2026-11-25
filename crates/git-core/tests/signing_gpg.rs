@@ -252,8 +252,7 @@ fn missing_verifier_reports_error_status_not_err() {
     require_gpg!();
     let (dir, mut repo) = signing_repo();
     let id = commit_file(dir.path(), &mut repo, "a.txt");
-    repo.config()
-        .unwrap()
+    common::user_config(&repo)
         .set_str("gpg.program", "browsitory-no-such-gpg")
         .unwrap();
 

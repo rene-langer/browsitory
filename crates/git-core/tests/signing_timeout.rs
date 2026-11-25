@@ -26,7 +26,9 @@ fn signing_repo(program: &str) -> (tempfile::TempDir, git2::Repository) {
     common::commit_all(&repo, "base");
     let mut config = repo.config().unwrap();
     config.set_bool("commit.gpgSign", true).unwrap();
-    config.set_str("gpg.program", program).unwrap();
+    common::user_config(&repo)
+        .set_str("gpg.program", program)
+        .unwrap();
     (dir, repo)
 }
 
@@ -155,8 +157,7 @@ fn a_hung_verifier_reports_an_error_status() {
     let bin = tempfile::TempDir::new().unwrap();
     let (_dir, repo) = signing_repo(&script(bin.path(), "gpg", FAKE_SIGNATURE));
     let oid = try_commit(&repo, &SignOptions::default()).unwrap();
-    repo.config()
-        .unwrap()
+    common::user_config(&repo)
         .set_str("gpg.program", &script(bin.path(), "gpg-hung", "sleep 30"))
         .unwrap();
     let started = Instant::now();
@@ -282,8 +283,7 @@ fn cancelling_the_signer_of_a_continued_rebase_step_keeps_the_step_paused() {
     let (mut state, step) =
         git_core::rebase::start_rebase(&repo, &base.to_string(), vec![edit]).unwrap();
     assert_eq!(step, git_core::rebase::RebaseStepResult::PausedForEdit);
-    repo.config()
-        .unwrap()
+    common::user_config(&repo)
         .set_str("gpg.program", &script(bin.path(), "gpg-hung", "sleep 30"))
         .unwrap();
     let started = Instant::now();
@@ -312,8 +312,7 @@ fn cancelling_the_signer_of_a_continued_rebase_step_keeps_the_step_paused() {
     assert_eq!(state.stop, git_core::rebase::RebaseStop::Edit);
     assert_eq!(repo.head().unwrap().target(), Some(state.expected_head));
     // With a signer that answers, Continue lands the step.
-    repo.config()
-        .unwrap()
+    common::user_config(&repo)
         .set_str("gpg.program", &script(bin.path(), "gpg-ok", FAKE_SIGNATURE))
         .unwrap();
     assert_eq!(
