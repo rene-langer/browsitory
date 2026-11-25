@@ -1068,6 +1068,64 @@ mod tests {
         );
     }
 
+    /// A repository with one commit on `main`, for the branch settings tests (#1151).
+    fn committed_repo() -> (tempfile::TempDir, Repository) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        {
+            let mut index = repo.index().unwrap();
+            let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+            let sig = git2::Signature::now("Test User", "test@example.com").unwrap();
+            repo.commit(Some("refs/heads/main"), &sig, &sig, "initial", &tree, &[])
+                .unwrap();
+        }
+        repo.set_head("refs/heads/main").unwrap();
+        (dir, repo)
+    }
+
+    fn set_config(repo: &Repository, name: &str, value: &str) {
+        repo.config()
+            .unwrap()
+            .open_level(git2::ConfigLevel::Local)
+            .unwrap()
+            .set_str(name, value)
+            .unwrap();
+    }
+
+    /// #1151: an entry keeps the settings of the branches it creates or deletes, and no others.
+    #[test]
+    fn entries_keep_the_settings_of_branches_they_create_or_delete_only() {
+        let (_dir, repo) = committed_repo();
+        set_config(&repo, "branch.main.remote", "origin");
+        let mut recorder = UndoRecorder::open(&repo);
+        recorder.begin(&repo, plan("Create branch x"), None);
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("x", &head, false).unwrap();
+        set_config(&repo, "branch.x.remote", "origin");
+        set_config(&repo, "branch.main.remote", "upstream");
+        recorder.finish(&repo, None, || None, false);
+
+        let entry = recorder.stacks.undo.last().unwrap();
+        assert!(entry.before.branch_config.is_empty());
+        assert_eq!(
+            entry.after.branch_config.keys().collect::<Vec<_>>(),
+            vec!["x"]
+        );
+    }
+
+    /// #1151: settings changed during a command on a branch it doesn't create or delete are not
+    /// part of its entry, and alone make none.
+    #[test]
+    fn settings_changed_alone_make_no_entry() {
+        let (_dir, repo) = committed_repo();
+        let mut recorder = UndoRecorder::open(&repo);
+        recorder.begin(&repo, plan("Stage nothing"), None);
+        set_config(&repo, "branch.main.remote", "origin");
+        recorder.finish(&repo, None, || None, false);
+
+        assert_eq!(recorder.state().undo, None);
+    }
+
     #[test]
     fn entries_store_only_the_refs_they_change() {
         let dir = tempfile::TempDir::new().unwrap();

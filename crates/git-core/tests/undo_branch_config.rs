@@ -165,6 +165,47 @@ fn undo_leaves_the_settings_of_branches_it_does_not_create_or_delete() {
     assert!(repo.find_reference("refs/tags/v1").is_err());
 }
 
+/// Appends a setting written without a value (`flag` alone, boolean true) for `branch`.
+fn add_valueless_flag(repo: &git2::Repository, branch: &str) {
+    let config = repo.path().join("config");
+    let mut text = std::fs::read_to_string(&config).unwrap();
+    text.push_str(&format!("[branch \"{branch}\"]\n\tflag\n"));
+    std::fs::write(&config, text).unwrap();
+}
+
+/// A setting written without a value comes back true. (Deleted with the git CLI: libgit2's own
+/// branch delete crashes on such a setting.) Redo would have to remove one again, which libgit2
+/// can't do safely either, so it refuses and changes nothing.
+#[test]
+fn a_setting_without_a_value_comes_back_true_and_is_never_removed() {
+    let (dir, repo) = init_repo();
+    let d = dir.path();
+    write_file(d, "a.txt", "a\n");
+    commit_all(&repo, "base");
+    git_ok(d, &["branch", "flagged"]);
+    add_valueless_flag(&repo, "flagged");
+    let before = capture(&repo, SnapshotScope::RefsAndIndex).unwrap();
+    git_ok(d, &["branch", "-D", "flagged"]);
+    let after = capture(&repo, SnapshotScope::RefsAndIndex).unwrap();
+
+    restore(&repo, &after, &before, "browsitory: undo test").unwrap();
+    assert_eq!(
+        git_out(d, &["config", "--type=bool", "branch.flagged.flag"]),
+        "true\n"
+    );
+
+    git_ok(d, &["config", "--unset", "branch.flagged.flag"]);
+    add_valueless_flag(&repo, "flagged");
+    let config = branch_config(d);
+    let result = restore(&repo, &before, &after, "browsitory: redo test");
+    assert!(
+        matches!(result, Err(UndoError::RepositoryChanged)),
+        "{result:?}"
+    );
+    assert_eq!(branch_config(d), config);
+    assert!(repo.find_branch("flagged", git2::BranchType::Local).is_ok());
+}
+
 /// A branch name with a dot and settings with several values of one key round-trip in order.
 #[test]
 fn undo_of_a_delete_keeps_multi_valued_settings_of_a_dotted_branch() {

@@ -905,6 +905,40 @@ fn applying_and_staging_a_patch_during_a_paused_merge_is_refused() {
     assert!(!dir.path().join("c.txt").exists());
 }
 
+/// #1147: a discard whose files can't be saved for Undo (here an untracked file nobody may
+/// read) isn't made; the reply names the file.
+#[test]
+#[cfg(unix)]
+fn a_discard_whose_files_cannot_be_saved_is_refused() {
+    use std::os::unix::fs::PermissionsExt;
+    let (dir, repo) = init_repo();
+    let d = dir.path();
+    write_file(d, "a.txt", "one\n");
+    commit_all(&repo, "initial");
+    write_file(d, "a.txt", "precious\n");
+    let secret = d.join("secret.txt");
+    write_file(d, "secret.txt", "s\n");
+    std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read(&secret).is_ok() {
+        return; // root reads it anyway: no failure to provoke
+    }
+    let worker = Worker::spawn(d.to_path_buf()).unwrap();
+    let handle = worker.handle();
+
+    let error = handle.discard_file("a.txt".into()).unwrap_err();
+
+    std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(
+        error
+            .message
+            .starts_with("Couldn't save the files for undo, so nothing was changed: "),
+        "{error:?}"
+    );
+    assert!(error.message.contains("secret.txt"), "{error:?}");
+    assert_eq!(read(d, "a.txt"), "precious\n");
+    assert_eq!(handle.get_undo_state().unwrap().undo, None);
+}
+
 /// `git status --porcelain` in `dir` (the git CLI is the reference).
 fn porcelain(dir: &Path) -> String {
     let output = test_support::git(dir, &["status", "--porcelain"]);
