@@ -90,9 +90,14 @@ fn set_user_config(repo: &Repository, key: &str, value: &str) {
 pub(super) fn add_user_config(repo: &Repository) {
     let path = repo.path().join(USER_CONFIG);
     if path.exists() {
-        repo.config()
-            .unwrap()
+        let mut config = repo.config().unwrap();
+        config
             .add_file(&path, git2::ConfigLevel::Global, true)
+            .unwrap();
+        // libgit2 writes to the newest file added after it opened the repository's config;
+        // adding the local one again keeps the worker's own writes there.
+        config
+            .add_file(&repo.path().join("config"), git2::ConfigLevel::Local, true)
             .unwrap();
     }
 }

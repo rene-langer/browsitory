@@ -42,6 +42,11 @@ pub fn user_config(repo: &Repository) -> git2::Config {
     config
         .add_file(&path, git2::ConfigLevel::Global, true)
         .expect("add user config");
+    // libgit2 writes to the newest file added after it opened the repository's config; adding
+    // the local one again keeps `repo.config().set_*` writing there.
+    config
+        .add_file(&repo.path().join("config"), git2::ConfigLevel::Local, true)
+        .expect("re-add local config");
     config
         .open_level(git2::ConfigLevel::Global)
         .expect("open user config")
