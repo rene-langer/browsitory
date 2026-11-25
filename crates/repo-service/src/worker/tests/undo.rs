@@ -605,3 +605,58 @@ fn a_failed_multi_path_stage_records_nothing() {
     assert!(staged_paths(dir.path()).is_empty());
     assert_eq!(handle.get_undo_state().unwrap().undo, None);
 }
+
+/// `git status --porcelain` in `dir` (the git CLI is the reference).
+fn porcelain(dir: &Path) -> String {
+    let output = test_support::git(dir, &["status", "--porcelain"]);
+    assert!(output.status.success(), "{output:?}");
+    String::from_utf8(output.stdout).unwrap()
+}
+
+/// #1154: a branch created from another commit and switched to rewrites the work tree; Undo
+/// takes the work tree back too, not only HEAD, the ref and the index.
+#[test]
+fn undo_of_create_and_switch_from_another_commit_restores_the_work_tree() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "base");
+    let base = repo.head().unwrap().shorthand().unwrap().to_string();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("other", &head, false).unwrap();
+    repo.set_head("refs/heads/other").unwrap();
+    write_file(dir.path(), "a.txt", "other\n");
+    write_file(dir.path(), "only-other.txt", "o\n");
+    commit_all(&repo, "other");
+    repo.set_head(&format!("refs/heads/{base}")).unwrap();
+    repo.checkout_head(Some(
+        git2::build::CheckoutBuilder::new()
+            .force()
+            .remove_untracked(true),
+    ))
+    .unwrap();
+    assert_eq!(porcelain(dir.path()), "");
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+
+    handle
+        .create_branch("feature".into(), "other".into(), true)
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        "other\n"
+    );
+    assert_eq!(
+        handle.undo().unwrap(),
+        UndoOutcome::Done {
+            label: "Create branch feature".into()
+        }
+    );
+
+    assert_eq!(repo.head().unwrap().shorthand().unwrap(), base);
+    assert_eq!(porcelain(dir.path()), "");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        "a\n"
+    );
+    assert!(!dir.path().join("only-other.txt").exists());
+}
