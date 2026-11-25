@@ -174,6 +174,20 @@ fn undo_refuses_to_bring_back_a_skipped_file_the_command_deleted() {
 }
 
 #[test]
+fn undo_refuses_when_only_a_skipped_file_changed() {
+    // Same worktree tree on both sides: only `skipped` tells them apart.
+    let (_dir, repo) = seeded();
+    write(&repo, "big.bin", &xs(1500));
+    let before = capture_limited(&repo, LIMIT).unwrap();
+    write(&repo, "big.bin", &xs(1600));
+    let after = capture_limited(&repo, LIMIT).unwrap();
+    assert_eq!(before.worktree_tree, after.worktree_tree);
+
+    assert_not_saved(restore(&repo, &after, &before, "undo"), "big.bin");
+    assert_eq!(read(&repo, "big.bin"), Some(xs(1600)));
+}
+
+#[test]
 fn ignoring_a_skipped_file_undoes_and_redoes() {
     let (_dir, repo) = seeded();
     write(&repo, "big.bin", &xs(1500));

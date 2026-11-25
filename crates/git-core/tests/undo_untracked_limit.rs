@@ -221,6 +221,36 @@ fn undo_refuses_to_bring_back_an_unsaved_file_the_command_deleted() {
 }
 
 #[test]
+fn undo_refuses_when_only_an_unsaved_file_changed() {
+    // Same worktree tree and no big files on either side: only the lists tell them apart.
+    let (_dir, repo) = seeded();
+    untracked(&repo, 5);
+    let before = capture_counted(&repo, LIMIT).unwrap();
+    fs::remove_file(repo.workdir().unwrap().join("u/2.txt")).unwrap();
+    let after = capture_counted(&repo, LIMIT).unwrap();
+    assert_eq!(before.worktree_tree, after.worktree_tree);
+    assert_ne!(before.unsaved_untracked, after.unsaved_untracked);
+
+    assert_not_saved(restore(&repo, &after, &before, "undo"), "u/2.txt");
+}
+
+#[test]
+fn an_untracked_nested_repository_does_not_count_toward_the_limit() {
+    let (dir, repo) = seeded();
+    untracked(&repo, 3);
+    Repository::init(dir.path().join("nested")).unwrap();
+    fs::write(dir.path().join("nested/inner.txt"), "inner\n").unwrap();
+
+    let snapshot = capture_counted(&repo, LIMIT).unwrap();
+
+    assert_eq!(snapshot.unsaved_untracked, None);
+    assert_eq!(
+        tree_paths(&repo, &snapshot),
+        vec!["a.txt", "u/0.txt", "u/1.txt", "u/2.txt"]
+    );
+}
+
+#[test]
 fn undo_refuses_to_bring_back_an_unsaved_file_changed_since() {
     let (_dir, repo) = seeded();
     untracked(&repo, 4);

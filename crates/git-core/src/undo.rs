@@ -1146,3 +1146,16 @@ fn write_worktree_file(
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::grouped;
+
+    #[test]
+    fn grouped_puts_a_comma_between_groups_of_three_digits() {
+        assert_eq!(grouped(999), "999");
+        assert_eq!(grouped(10_000), "10,000");
+        assert_eq!(grouped(100_000), "100,000");
+        assert_eq!(grouped(1_234_567), "1,234,567");
+    }
+}
