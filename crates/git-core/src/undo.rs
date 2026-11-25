@@ -725,20 +725,82 @@ fn holds_blob(
     config: &WorktreeConfig,
     (id, mode): (Oid, u32),
 ) -> Result<bool, UndoError> {
-    let Some(current) = identify_worktree_file(workdir, rel, config, Some(mode))? else {
-        return Ok(false);
-    };
-    if current.size != repo.odb()?.read_header(id)?.0 as u64 {
-        return Ok(false);
-    }
-    Ok(
-        match read_worktree_file(workdir, rel, config, Some(mode))? {
-            Some((bytes, disk_mode)) => {
-                disk_mode == mode && Oid::hash_object(ObjectType::Blob, &bytes)? == id
+    worktree_holds(repo, workdir, rel, config, id, Some(mode))
+}
+
+/// Whether the work-tree path `rel` holds the blob `id` (raw bytes, as [`read_worktree_file`]
+/// reads them) and, when `mode` is given, has that git mode (as `read_worktree_file` with it as
+/// the previous mode gives it). A file of another size isn't read; one of the same size is
+/// compared with the blob in pieces, so neither is held in memory whole (#1089).
+fn worktree_holds(
+    repo: &Repository,
+    workdir: &Path,
+    rel: &str,
+    config: &WorktreeConfig,
+    id: Oid,
+    mode: Option<u32>,
+) -> Result<bool, UndoError> {
+    use crate::worktree_guard::Opened;
+    match crate::worktree_guard::open_leaf_beneath(workdir, rel)? {
+        None => Ok(false),
+        Some(Opened::Link { target, .. }) => Ok(mode.is_none_or(|mode| mode == MODE_LINK)
+            && Oid::hash_object(ObjectType::Blob, &target)? == id),
+        Some(Opened::File {
+            mut file,
+            executable,
+            stat,
+        }) => {
+            if mode.is_some_and(|mode| file_mode(config, executable, Some(mode)) != mode) {
+                return Ok(false);
             }
-            None => false,
-        },
-    )
+            if stat.size != repo.odb()?.read_header(id)?.0 as u64 {
+                return Ok(false);
+            }
+            blob_equals(repo, id, &mut file)
+        }
+    }
+}
+
+/// Whether `reader` yields exactly the blob `id`'s bytes. The blob is read as a stream where the
+/// object database can stream it (a loose object), else loaded (a packed one).
+fn blob_equals(repo: &Repository, id: Oid, reader: &mut dyn io::Read) -> Result<bool, UndoError> {
+    let odb = repo.odb()?;
+    if let Ok((mut stream, _, _)) = odb.reader(id) {
+        return Ok(same_bytes(&mut stream, reader)?);
+    }
+    let blob = repo.find_blob(id)?;
+    Ok(same_bytes(&mut blob.content(), reader)?)
+}
+
+/// Whether two readers yield the same bytes, compared in pieces.
+fn same_bytes(a: &mut dyn io::Read, b: &mut dyn io::Read) -> io::Result<bool> {
+    const PIECE: usize = 64 * 1024;
+    let mut left = vec![0; PIECE];
+    let mut right = vec![0; PIECE];
+    loop {
+        let n = read_up_to(a, &mut left)?;
+        let m = read_up_to(b, &mut right)?;
+        if left[..n] != right[..m] {
+            return Ok(false);
+        }
+        if n == 0 {
+            return Ok(true);
+        }
+    }
+}
+
+/// Reads until `buffer` is full or the reader ends; how many bytes it got.
+fn read_up_to(reader: &mut dyn io::Read, buffer: &mut [u8]) -> io::Result<usize> {
+    let mut filled = 0;
+    while filled < buffer.len() {
+        match reader.read(&mut buffer[filled..]) {
+            Ok(0) => break,
+            Ok(n) => filled += n,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(filled)
 }
 
 impl WorktreeChange {
@@ -861,42 +923,35 @@ impl WorktreeChange {
                 // Its contents were never stored: as the snapshot saw it, judged by its stat
                 // data, without reading it.
                 if identify_worktree_file(workdir, path, &config, Some(file.mode))? != Some(*file)
-                    && !self.already_restored(workdir, path, &config)?
+                    && !self.already_restored(repo, workdir, path, &config)?
                 {
                     return Err(UndoError::RepositoryChanged);
                 }
                 continue;
             }
             let expected = self.from.get(path).copied();
-            let previous_mode = expected.map(|(_, mode)| mode);
-            let disk = read_worktree_file(workdir, path, &config, previous_mode)?;
-            let current = disk
-                .as_ref()
-                .map(|(bytes, mode)| {
-                    Ok::<_, git2::Error>((Oid::hash_object(ObjectType::Blob, bytes)?, *mode))
-                })
-                .transpose()?;
+            let as_expected = match expected {
+                None => crate::worktree_guard::open_leaf_beneath(workdir, path)?.is_none(),
+                Some((id, mode)) => worktree_holds(repo, workdir, path, &config, id, Some(mode))?,
+            };
             // A path checked out from the index already, by a checkout that stopped part-way
             // (#268): filters (`core.autocrlf`) mean its bytes needn't be the target's raw ones.
             let checked_out = || {
                 self.from_index.contains(path)
                     && clean_against_index(repo, &index, path, self.to.get(path).copied())
             };
-            if current != expected
+            if !as_expected
                 && !clean_against_index(repo, &index, path, expected)
-                && !self.already_restored(workdir, path, &config)?
+                && !self.already_restored(repo, workdir, path, &config)?
                 && !checked_out()
             {
                 // Ignored files are not snapshotted: absent from the tree but present on disk
                 // is fine as long as the file is ignored and the target would not change it.
                 let ignored_untouched = expected.is_none()
-                    && disk.is_some()
                     && repo.is_path_ignored(path)?
-                    && match (self.to.get(path), &disk) {
-                        (Some((id, _)), Some((bytes, _))) => {
-                            Oid::hash_object(ObjectType::Blob, bytes)? == *id
-                        }
-                        _ => true,
+                    && match self.to.get(path) {
+                        Some(&(id, _)) => worktree_holds(repo, workdir, path, &config, id, None)?,
+                        None => true,
                     };
                 if !ignored_untouched {
                     return Err(UndoError::RepositoryChanged);
@@ -916,6 +971,7 @@ impl WorktreeChange {
     /// since the operation (#251). Writing it again changes nothing.
     fn already_restored(
         &self,
+        repo: &Repository,
         workdir: &Path,
         path: &str,
         config: &WorktreeConfig,
@@ -927,14 +983,7 @@ impl WorktreeChange {
                 Ok(meta) => meta.is_dir() && self.has_target_files_below(path),
             });
         };
-        Ok(
-            match read_worktree_file(workdir, path, config, Some(mode))? {
-                Some((bytes, disk_mode)) => {
-                    disk_mode == mode && Oid::hash_object(ObjectType::Blob, &bytes)? == id
-                }
-                None => false,
-            },
-        )
+        worktree_holds(repo, workdir, path, config, id, Some(mode))
     }
 
     /// Whether the target has files below `path` (which then is, or becomes, their folder).
@@ -1129,16 +1178,30 @@ fn write_worktree_file(
     mode: u32,
     config: &WorktreeConfig,
 ) -> Result<(), UndoError> {
-    let blob = repo.find_blob(id)?;
-    let content = if mode == MODE_LINK && config.symlinks {
-        Content::Link(blob.content())
+    let written = if mode == MODE_LINK && config.symlinks {
+        let blob = repo.find_blob(id)?;
+        crate::worktree_guard::replace_beneath(workdir, rel, Content::Link(blob.content()))
     } else {
-        Content::File {
-            bytes: blob.content(),
-            executable: mode == MODE_EXEC,
+        let executable = mode == MODE_EXEC;
+        // A loose object streams into the new file in pieces (#1089); a packed one is loaded.
+        match repo.odb()?.reader(id) {
+            Ok((mut stream, _, _)) => crate::worktree_guard::replace_beneath_from(
+                workdir,
+                rel,
+                executable,
+                &mut stream,
+            ),
+            Err(_) => {
+                let blob = repo.find_blob(id)?;
+                let content = Content::File {
+                    bytes: blob.content(),
+                    executable,
+                };
+                crate::worktree_guard::replace_beneath(workdir, rel, content)
+            }
         }
     };
-    crate::worktree_guard::replace_beneath(workdir, rel, content).map_err(|error| {
+    written.map_err(|error| {
         if crate::worktree_guard::is_in_use(&error) {
             UndoError::FileInUse(rel.to_string())
         } else {

@@ -789,6 +789,29 @@ pub(super) fn replace(
     )
 }
 
+/// See `worktree_guard::replace_beneath_from`: `replace` of a file whose bytes come from
+/// `reader`, in pieces.
+pub(super) fn replace_from(
+    workdir: &Path,
+    rel: &Path,
+    executable: bool,
+    reader: &mut dyn io::Read,
+    step: StepFn<'_>,
+) -> io::Result<()> {
+    let content = Content::File {
+        bytes: &[],
+        executable,
+    };
+    replace_with(
+        workdir,
+        rel,
+        content,
+        step,
+        &mut |file, _| io::copy(reader, file).map(|_| ()),
+        &mut || Ok(()),
+    )
+}
+
 /// `replace` with `fill` writing a file's bytes into the opened file and `before_rename` called
 /// once the new file or link is complete under its temporary name (test seams).
 fn replace_with(

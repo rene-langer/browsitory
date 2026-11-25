@@ -2777,6 +2777,23 @@ pub(crate) fn replace_beneath(workdir: &Path, rel: &str, content: Content<'_>) -
     beneath::replace(workdir, Path::new(rel), content, &mut no_step)
 }
 
+/// [`replace_beneath`] of a regular file whose bytes are copied from `reader` in pieces, so a
+/// big file is never held in memory (#1089).
+pub(crate) fn replace_beneath_from(
+    workdir: &Path,
+    rel: &str,
+    executable: bool,
+    reader: &mut dyn io::Read,
+) -> io::Result<()> {
+    if !plain_relative(Path::new(rel)) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "path must be relative to the repository",
+        ));
+    }
+    beneath::replace_from(workdir, Path::new(rel), executable, reader, &mut no_step)
+}
+
 /// How many names the regular file at `full` has; 1 for anything else and for a missing path
 /// (see [`separate_hard_link`]).
 pub(crate) fn link_count(full: &Path) -> io::Result<u64> {
