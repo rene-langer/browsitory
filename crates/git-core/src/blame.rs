@@ -28,10 +28,26 @@ use thiserror::Error;
 use crate::history::{parent_path_entries, path_entries, rename_source, PathEntries};
 use crate::line_history::line_count;
 
+/// The largest file blame reads (#1158), the diff's limit: a bigger one is
+/// [`BlameError::TooLarge`], judged from the object header, so nothing of it is read.
+pub const BLAME_SIZE_LIMIT: u64 = crate::diff::DIFF_SIZE_LIMIT;
+
+const MIB: u64 = 1024 * 1024;
+
 #[derive(Debug, Error)]
 pub enum BlameError {
     #[error("git operation failed: {0}")]
     Git(#[from] git2::Error),
+    /// The file is over the size limit (#1158); `size` is its size in bytes.
+    #[error(
+        "This file is {:.1} MB, over the {} MB blame limit, so it isn't blamed.",
+        *size as f64 / MIB as f64,
+        limit / MIB
+    )]
+    TooLarge { size: u64, limit: u64 },
+    /// The file is binary (#1158): it has no lines to blame.
+    #[error("This file is binary, so it has no line-by-line blame.")]
+    Binary,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,22 +68,39 @@ fn resolve_commit_id(repo: &Repository, commit_id: &str) -> Result<Oid, BlameErr
     }
 }
 
+/// Each line of `path` as it is at `commit_id`, with the commit that last changed it. A file over
+/// [`BLAME_SIZE_LIMIT`] or a binary file is refused.
 pub fn blame_file(
     repo: &Repository,
     commit_id: &str,
     path: &str,
 ) -> Result<Vec<BlameLine>, BlameError> {
+    blame_file_limited(repo, commit_id, path, BLAME_SIZE_LIMIT)
+}
+
+/// [`blame_file`] with a size limit other than [`BLAME_SIZE_LIMIT`]: a test seam, so tests need
+/// no 20 MB files.
+#[doc(hidden)]
+pub fn blame_file_limited(
+    repo: &Repository,
+    commit_id: &str,
+    path: &str,
+    limit: u64,
+) -> Result<Vec<BlameLine>, BlameError> {
     let oid = resolve_commit_id(repo, commit_id)?;
     let commit = repo.find_commit(oid)?;
 
-    let blob_content = commit
-        .tree()?
-        .get_path(Path::new(path))?
-        .to_object(repo)?
-        .peel_to_blob()?
-        .content()
-        .to_vec();
-    let content = String::from_utf8_lossy(&blob_content).into_owned();
+    let entry = commit.tree()?.get_path(Path::new(path))?;
+    let (size, _) = repo.odb()?.read_header(entry.id())?;
+    let size = size as u64;
+    if size > limit {
+        return Err(BlameError::TooLarge { size, limit });
+    }
+    let blob = entry.to_object(repo)?.peel_to_blob()?;
+    if blob.is_binary() {
+        return Err(BlameError::Binary);
+    }
+    let content = String::from_utf8_lossy(blob.content()).into_owned();
     let owners = line_owners(repo, oid, path)?;
 
     let mut commits: HashMap<Oid, (String, String, i64)> = HashMap::new();

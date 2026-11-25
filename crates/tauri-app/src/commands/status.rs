@@ -5,9 +5,9 @@ use repo_service::wire::CommitStatsEntryDto;
 use repo_service::wire::ErrorDto;
 use repo_service::wire::StatusWithStampDto;
 use repo_service::wire::{
-    to_trailers, BlameLineDto, CommitLocationDto, CommitOutcomeDto, CommitSignatureDto,
-    DiffHunkDto, DiffOptionsDto, FileHistoryPageDto, GraphPageDto, GraphSelectionDto,
-    LineHistoryDto, LoadedGraphDto, StatusEntryDto, TrailerDto,
+    to_trailers, BlameDto, CommitLocationDto, CommitOutcomeDto, CommitSignatureDto, DiffHunkDto,
+    DiffOptionsDto, FileHistoryPageDto, GraphPageDto, GraphSelectionDto, LineHistoryDto,
+    LoadedGraphDto, StatusEntryDto, TrailerDto,
 };
 use std::path::Path;
 use tauri::{AppHandle, State};
@@ -242,13 +242,12 @@ pub async fn get_blame(
     commit_id: String,
     path: String,
     state: State<'_, AppState>,
-) -> Result<Vec<BlameLineDto>, ErrorDto> {
-    Ok(repo_worker(&state, &repo_path)?
-        .read(move |w| w.get_blame(commit_id, path))
-        .await?
-        .into_iter()
-        .map(BlameLineDto::from)
-        .collect())
+) -> Result<BlameDto, ErrorDto> {
+    Ok(BlameDto::from(
+        repo_worker(&state, &repo_path)?
+            .read(move |w| w.get_blame(commit_id, path))
+            .await?,
+    ))
 }
 
 #[tauri::command]

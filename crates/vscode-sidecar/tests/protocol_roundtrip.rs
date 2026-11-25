@@ -2339,9 +2339,15 @@ fn get_blame_round_trips_through_the_sidecar() {
         "get_blame",
         serde_json::json!({"repoPath": repo_path, "commitId": "HEAD", "path": "file.txt"}),
     );
-    let lines = blame["result"].as_array().expect("blame lines");
+    let lines = blame["result"]["lines"].as_array().expect("blame lines");
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0]["content"], "hello");
+    assert_eq!(lines[0]["commit"], 0);
+    let commits = blame["result"]["commits"]
+        .as_array()
+        .expect("blame commits");
+    assert_eq!(commits.len(), 1);
+    assert_eq!(commits[0]["authorName"], "Test User");
 }
 
 /// #840: the sidecar turns off libgit2's per-read object hash check at startup, as git does on
@@ -2371,7 +2377,7 @@ fn the_sidecar_reads_objects_without_rehashing_them() {
         "get_blame",
         serde_json::json!({"repoPath": repo_path, "commitId": "HEAD", "path": "file.txt"}),
     );
-    let lines = blame["result"].as_array().expect("blame lines");
+    let lines = blame["result"]["lines"].as_array().expect("blame lines");
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0]["content"], "stand-in");
 }

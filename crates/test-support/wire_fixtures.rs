@@ -193,6 +193,17 @@ pub fn errors() -> Cases<repo_service::wire::ErrorDto> {
                 limit: git_core::diff::DIFF_SIZE_LIMIT,
             }),
         ),
+        case(
+            "BlameUnavailable",
+            ErrorDto::from_error(git_core::blame::BlameError::TooLarge {
+                size: 25 * 1024 * 1024 + 300 * 1024,
+                limit: git_core::blame::BLAME_SIZE_LIMIT,
+            }),
+        ),
+        case(
+            "BlameUnavailableBinary",
+            ErrorDto::from_error(git_core::blame::BlameError::Binary),
+        ),
     ];
     assert_every_variant!(
         cases
@@ -213,6 +224,7 @@ pub fn errors() -> Cases<repo_service::wire::ErrorDto> {
         ErrorKind::MissingIdentity,
         ErrorKind::RestLeft,
         ErrorKind::DiffTooLarge,
+        ErrorKind::BlameUnavailable,
     );
     cases
 }
@@ -2154,18 +2166,29 @@ pub fn stash_files() -> Cases<git_core::stash::StashFiles> {
     ]
 }
 
-pub fn blame_lines() -> Cases<git_core::blame::BlameLine> {
-    vec![case(
-        "plain",
+/// #1158: a file's blame, each commit once; the second commit's line sits between the first's.
+pub fn blames() -> Cases<Vec<git_core::blame::BlameLine>> {
+    let line = |line_number: usize, content: &str, commit: &str, author: &str, timestamp: i64| {
         git_core::blame::BlameLine {
-            line_number: 1,
-            content: "fn main() {}\n".to_string(),
-            commit_id: "1717171717171717171717171717171717171717".to_string(),
-            short_id: "1717171".to_string(),
-            author_name: "Ada Lovelace".to_string(),
-            timestamp: 1_700_000_300,
-        },
-    )]
+            line_number,
+            content: content.to_string(),
+            commit_id: commit.repeat(40),
+            short_id: commit.repeat(7),
+            author_name: author.to_string(),
+            timestamp,
+        }
+    };
+    vec![
+        case("empty", Vec::new()),
+        case(
+            "twoCommits",
+            vec![
+                line(1, "fn main() {", "1", "Ada Lovelace", 1_700_000_300),
+                line(2, "    run();", "2", "Grace Hopper", 1_700_000_400),
+                line(3, "}", "1", "Ada Lovelace", 1_700_000_300),
+            ],
+        ),
+    ]
 }
 
 pub fn merge_outcomes() -> Cases<git_core::merge::MergeOutcome> {

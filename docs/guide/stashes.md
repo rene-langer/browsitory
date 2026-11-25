@@ -22,7 +22,9 @@ ago, and how many files it holds ("On main · 2 days ago · 3 files"). The name 
 it was made on. Hover over a stash to read its full message and the date.
 
 Click a stash to see what it holds: **Changes** (diffed against the commit it was made on) and,
-if it took any, **Untracked** files. Each file's "…" menu opens it in your editor or
+if it took any, **Untracked** files. A stash with more than 50 files starts with every file
+collapsed, and each list shows its first 200 files with **Show 200 more** under it, as a
+commit's does. Each file's "…" menu opens it in your editor or
 [diff tool](external-tools.md) or reveals it in the file manager. From there or from the panel
 you can **Apply** it (keep the
 stash), **Pop** it (apply, then drop it) or drop it (**Drop…**). In the panel these are menu
