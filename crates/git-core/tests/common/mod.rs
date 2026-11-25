@@ -27,6 +27,26 @@ pub fn init_repo() -> (TempDir, Repository) {
     (dir, repo)
 }
 
+/// The user's own git config as `repo` sees it: a global-level file in the repository's git dir,
+/// added to the config libgit2 keeps for this `Repository`, so every later `repo.config()` reads
+/// it. Signing programs and the allowed signers file count only from such a level (#1121); the
+/// hermetic setup leaves the real global level empty.
+#[allow(dead_code)]
+pub fn user_config(repo: &Repository) -> git2::Config {
+    let mut config = repo.config().expect("repo config");
+    if let Ok(level) = config.open_level(git2::ConfigLevel::Global) {
+        return level;
+    }
+    let path = repo.path().join("user.gitconfig");
+    std::fs::write(&path, "").expect("write user config");
+    config
+        .add_file(&path, git2::ConfigLevel::Global, false)
+        .expect("add user config");
+    config
+        .open_level(git2::ConfigLevel::Global)
+        .expect("open user config")
+}
+
 /// Writes an executable `#!/bin/sh` hook `name` into `dir` (created if missing).
 #[cfg(unix)]
 #[allow(dead_code)]
