@@ -63,14 +63,17 @@ pub fn reset_to(repo: &Repository, commit_id: &str, mode: ResetMode) -> Result<(
         let mut index = repo.index()?;
         index.read(false)?;
         // Read before the checkout, which rewrites the entries it writes without the mark.
-        let skip_worktree = crate::index_marks::skip_worktree_paths(&index);
+        let marks = crate::index_marks::marks_after(repo, &index, &tree)?;
         if mode == ResetMode::Hard {
-            let left_alone = left_alone(repo, &index, &tree)?;
-            let paths = if left_alone.is_empty() {
+            let left = crate::index_marks::left_alone::<ResetError>(repo, &index, &tree, &marks)?;
+            if let Some(name) = left.edited {
+                return Err(ResetError::SkipWorktreeEdited(name));
+            }
+            let paths = if left.paths.is_empty() {
                 None
             } else {
                 Some(crate::index_marks::paths_except(repo, &tree, |path| {
-                    left_alone.contains(path)
+                    left.paths.contains(path)
                 })?)
             };
             // No paths would mean the whole tree.
@@ -81,7 +84,7 @@ pub fn reset_to(repo: &Repository, commit_id: &str, mode: ResetMode) -> Result<(
         // git's order: the index first, the ref last (#796). Moving HEAD first left a window in
         // which HEAD named the target while the index still held the old tree, and a reset whose
         // index write failed (another command's `index.lock`) moved HEAD anyway.
-        crate::index_marks::reset_index_to_tree(&mut index, &tree, &skip_worktree)?;
+        crate::index_marks::reset_index_to_tree(&mut index, &tree, &marks.skip_worktree)?;
         move_head(repo, target.id())?;
         crate::commit::clear_operation_files(repo)?;
     }
@@ -120,56 +123,6 @@ fn check_out(
         ))?;
     filters.check()?;
     Ok(())
-}
-
-/// The paths a hard reset to `tree` leaves alone, as `git reset --hard` does (#1145): a
-/// skip-worktree file the target keeps (same blob and mode), and in a sparse checkout one that
-/// is missing; an intent-to-add file the target doesn't have, which stays as an untracked file.
-/// A skip-worktree file with local changes that the target changes is refused.
-fn left_alone(
-    repo: &Repository,
-    index: &git2::Index,
-    tree: &git2::Tree<'_>,
-) -> Result<std::collections::HashSet<Vec<u8>>, ResetError> {
-    use crate::index_marks::{INTENT_TO_ADD, SKIP_WORKTREE};
-    let mut kept = std::collections::HashSet::new();
-    let marked: Vec<git2::IndexEntry> = index
-        .iter()
-        .filter(|entry| entry.flags_extended & (SKIP_WORKTREE | INTENT_TO_ADD) != 0)
-        .collect();
-    if marked.is_empty() {
-        return Ok(kept);
-    }
-    let (_, edited) = crate::index_marks::edited_skip_worktree::<ResetError>(repo)?;
-    let sparse = repo
-        .config()?
-        .get_bool("core.sparseCheckout")
-        .unwrap_or(false);
-    let workdir = repo.workdir();
-    for entry in marked {
-        let path = crate::worktree_guard::path_from_bytes(&entry.path);
-        let target = tree.get_path(&path).ok();
-        if entry.flags_extended & SKIP_WORKTREE == 0 {
-            if target.is_none() {
-                kept.insert(entry.path);
-            }
-            continue;
-        }
-        let unchanged = target.is_some_and(|target| {
-            target.id() == entry.id && u32::try_from(target.filemode()) == Ok(entry.mode)
-        });
-        let name = String::from_utf8_lossy(&entry.path).into_owned();
-        if unchanged {
-            kept.insert(entry.path);
-        } else if edited.contains(&name) {
-            return Err(ResetError::SkipWorktreeEdited(name));
-        } else if sparse
-            && workdir.is_some_and(|workdir| workdir.join(&path).symlink_metadata().is_err())
-        {
-            kept.insert(entry.path);
-        }
-    }
-    Ok(kept)
 }
 
 /// Points the ref HEAD ends at (a branch, or HEAD itself when detached) at `target`, with git's

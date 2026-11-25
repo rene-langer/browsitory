@@ -1450,18 +1450,19 @@ pub(crate) fn plan_operation_reset(repo: &Repository) -> Result<OperationReset, 
 /// it stays in the index for the next abort.
 fn apply_operation_reset(repo: &Repository, reset: OperationReset) -> Result<(), MergeError> {
     let OperationReset { touched, pairs } = reset;
+    let head_tree = repo.head()?.peel_to_commit()?.tree()?;
     // Before the checkout below, which rewrites the entries it writes without the mark.
-    let skip_worktree = {
+    let marks = {
         let mut index = repo.index()?;
         index.read(false)?;
-        crate::index_marks::skip_worktree_paths(&index)
+        crate::index_marks::marks_after(repo, &index, &head_tree)?
     };
-    // A case pair's names are put back directly, never by the forced checkout (#511).
+    // A case pair's names are put back directly, never by the forced checkout (#511). A path
+    // back in the index outside the sparse checkout isn't written (#1172).
     let touched: Vec<Vec<u8>> = touched
         .into_iter()
-        .filter(|path| !pairs.covers(path))
+        .filter(|path| !pairs.covers(path) && !marks.added.contains(path))
         .collect();
-    let head_tree = repo.head()?.peel_to_commit()?.tree()?;
     let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
     // HEAD's files are written back unfiltered (#1063): refused before anything is removed.
     crate::external_filter::refuse_paths::<MergeError, _>(
@@ -1546,7 +1547,7 @@ fn apply_operation_reset(repo: &Repository, reset: OperationReset) -> Result<(),
     }
     let mut index = repo.index()?;
     index.read(true)?;
-    crate::index_marks::reset_index_to_tree(&mut index, &head_tree, &skip_worktree)?;
+    crate::index_marks::reset_index_to_tree(&mut index, &head_tree, &marks.skip_worktree)?;
     Ok(())
 }
 

@@ -827,15 +827,21 @@ pub fn restore(
     if let Some(index_tree) = index_target {
         let mut index = repo.index()?;
         let tree = repo.find_tree(Oid::from_str(index_tree)?)?;
-        // The skip-worktree marks stay as they are now, as git's reset keeps them (#1145); the
-        // intent-to-add ones are the target's (#1174).
-        let skip_worktree = crate::index_marks::skip_worktree_paths(&index);
+        // The skip-worktree marks stay as they are now, as git's reset keeps them (#1145), and
+        // a path added back outside the sparse checkout gets one (#1172); the intent-to-add
+        // ones are the target's (#1174).
+        let marks = crate::index_marks::marks_after(repo, &index, &tree)?;
         let intent_to_add: Vec<Vec<u8>> = target
             .intent_to_add
             .iter()
             .map(|path| path.as_bytes().to_vec())
             .collect();
-        crate::index_marks::reset_index_marking(&mut index, &tree, &skip_worktree, &intent_to_add)?;
+        crate::index_marks::reset_index_marking(
+            &mut index,
+            &tree,
+            &marks.skip_worktree,
+            &intent_to_add,
+        )?;
     }
     if let Some(change) = &worktree {
         change.checkout_from_index(repo)?;

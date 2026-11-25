@@ -445,16 +445,33 @@ menu's choice runs back through the session: the pick, the parent picker or a se
     checkout's cone). Its status reports a *missing* skip-worktree file as deleted (#1146), so
     `status::entries` drops that deletion, and `stage_file` refuses such a path as `git add`
     does. Its `Index::read_tree` clears the mark on every entry (#1145): Reset, Abort
-    (merge, cherry-pick, revert, the terminal sequence, a rebase's case-pair path) go through
-    `reset_index_to_tree`, which puts it back on each path that keeps an entry, as git's reset
-    does; Undo's restore does the same, and also puts back the intent-to-add marks its
-    snapshot recorded (#1174). Reset hard checks out every path except a skip-worktree file the target keeps (same
-    blob and mode), one that is missing in a sparse checkout (`core.sparseCheckout`), and an
-    intent-to-add file the target lacks (a forced checkout deleted it); it refuses, before
-    writing anything, when the target changes a skip-worktree file with local edits (git:
-    "Entry '…' not uptodate"), since the status hides that edit and Undo couldn't bring it back.
-    A path new in the target that lies outside the sparse cone is written and not marked:
-    Browsitory doesn't read the sparse patterns.
+    (merge, cherry-pick, revert, the terminal sequence, rebase) and Undo's restore take the
+    marks from `index_marks::marks_after`, computed before anything is written, and write the
+    index with `reset_index_to_tree`/`reset_index_marking`. As git's reset (`builtin/reset.c`):
+    a path with an index entry keeps its stage-0 mark (a conflicted one ends unmarked); a path
+    without any entry is marked when the sparse patterns leave it out (#1172), and
+    `Marks::added` lists those so no checkout writes them. Undo also puts back the
+    intent-to-add marks its snapshot recorded (#1174). Reset hard, and Abort rebase the same
+    way (`index_marks::left_alone`), check out every path except a skip-worktree file the
+    target keeps (same blob and mode), one that is missing in a sparse checkout with readable
+    patterns, `Marks::added`, and an intent-to-add file the target lacks (a forced checkout
+    deleted it); Reset hard refuses, before writing anything, when the target changes a
+    skip-worktree file with local edits (git: "Entry '…' not uptodate"), since the status hides
+    that edit and Undo couldn't bring it back; Abort rebase leaves such a file as it is.
+    Entries already in the index keep their mark: git's `reset --hard` and `rebase --abort`
+    also re-apply the patterns to them, which matters only when the marks and patterns
+    disagree.
+  - **Sparse patterns** (`git_core::sparse`, #1172), read as git reads them (`dir.c`):
+    `core.sparseCheckout`, `core.sparseCheckoutCone` and the work tree's own
+    `info/sparse-checkout` (`repo.path()`, so `.git/worktrees/<name>/` for a linked worktree;
+    libgit2 reads its `config.worktree`). No file: no sparse checkout, as git. Cone mode is
+    matched exactly: a file is in when it is at the top level, its folder is a parent
+    (`/a/` then `!/a/*/`) or a folder above it is recursive (`/a/b/`); `/*` alone takes
+    everything; escapes are removed; folders compare ignoring ASCII case under
+    `core.ignorecase`. A line that doesn't fit the cone format turns cone matching off, as in
+    git. Non-cone patterns (gitignore-style) aren't matched: a path new to the index is taken
+    as outside when its file is missing, so nothing outside the patterns is written or listed
+    as deleted (inside them git would write it, or list it as deleted).
   - **intent-to-add** (`git add -N`): an entry with the empty blob. libgit2's status reports it
     as a staged new file and `write_tree` commits the empty blob (#1164). The status lists it as
     one unstaged new file (deleted when its file is gone), and every commit made from the
@@ -968,7 +985,8 @@ certificate.
   current index's tree *and* intent-to-add paths against one side, and writes the index with
   `index_marks::reset_index_marking`: the skip-worktree marks stay as they are now (as git's
   reset keeps them), the target's intent-to-add paths get their mark back. So Undo works in a
-  sparse checkout; paths it adds back to the index aren't marked skip-worktree (as Reset, #1172).
+  sparse checkout; a path it adds back to the index outside the sparse patterns is marked
+  skip-worktree (`index_marks::marks_after`, as Reset, #1172).
 - **Branch settings** (#1151): the snapshot records every `branch.<name>.<variable>` of the
   repository's own config file (`ConfigLevel::Local`) by branch name, split at the last dot, in
   file order (`RepoSnapshot::branch_config`). `restore` writes a branch's settings only when it
