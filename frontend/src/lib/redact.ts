@@ -4,22 +4,49 @@
 const REDACTED = "***";
 const AUTHORIZATION = "authorization:";
 
-/** Characters that end a URL's authority (`user:pass@host:port`), as in `oplog::ends_authority`. */
-const AUTHORITY_END = /[/?#"'<>()[\]`,\s]/;
+/**
+ * Characters that end a URL in running text, as in `oplog::ends_url`. `'`, `(`, `)`, `,`, `[`
+ * and `]` don't: a password may hold them unencoded (#1125).
+ */
+const URL_END = /["<>`\s]/;
+const HOST_END = /[/?#]/;
+
+/** `text.search(pattern)`, or `text.length` when nothing matches. */
+function indexOrLength(text: string, pattern: RegExp): number {
+  const index = text.search(pattern);
+  return index === -1 ? text.length : index;
+}
+
+/** As `oplog::userinfo_end`: where the user information of `url` (the text after `://`) ends. */
+function userinfoEnd(url: string): number | undefined {
+  const hostEnd = indexOrLength(url, HOST_END);
+  const before = url.slice(0, hostEnd);
+  const at = before.lastIndexOf("@");
+  if (at !== -1) return at;
+  const colon = before.lastIndexOf(":");
+  if (colon === -1) return undefined;
+  const port = before.slice(colon + 1);
+  if (before.startsWith("[") || /^\d+$/.test(port)) return undefined;
+  const nextAt = url.indexOf("@", hostEnd);
+  if (nextAt === -1) return undefined;
+  const end = nextAt + indexOrLength(url.slice(nextAt), HOST_END);
+  return url.lastIndexOf("@", end - 1);
+}
 
 function redactUserinfo(text: string): string {
   let out = "";
   let rest = text;
   for (let at = rest.indexOf("://"); at !== -1; at = rest.indexOf("://")) {
-    const authorityStart = at + 3;
-    out += rest.slice(0, authorityStart);
-    const after = rest.slice(authorityStart);
-    const end = after.search(AUTHORITY_END);
-    const authorityLength = end === -1 ? after.length : end;
-    const authority = after.slice(0, authorityLength);
-    const userEnd = authority.lastIndexOf("@");
-    out += userEnd === -1 ? authority : `${REDACTED}${authority.slice(userEnd)}`;
-    rest = after.slice(authorityLength);
+    const urlStart = at + 3;
+    out += rest.slice(0, urlStart);
+    const after = rest.slice(urlStart);
+    const end = userinfoEnd(after.slice(0, indexOrLength(after, URL_END)));
+    if (end === undefined) {
+      rest = after;
+    } else {
+      out += REDACTED;
+      rest = after.slice(end);
+    }
   }
   return out + rest;
 }

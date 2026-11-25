@@ -2812,7 +2812,9 @@ undo bookkeeping:
   where `pre-push` runs.
 
 Nothing secret is kept (`oplog::redact`): every target, parameter, message, program argument and
-output loses the user information of each URL (`https://***@host/...`) and the value of each
+output loses the user information of each URL (`https://***@host/...`: everything after `://`
+up to the last `@` before the host ends, as git reads it, so a password holding `'`, `(`, `,`,
+`[` or even a raw `/` goes too, #1125) and the value of each
 `Authorization:` header line, and commands that carry a token (saving an HTTPS credential or a
 forge token) log no token at all. Each entry keeps at most `MAX_RUNS` (32) program runs and the
 last `MAX_RUN_OUTPUT` (16 KiB) of each run's output. The frontend applies the same rule
