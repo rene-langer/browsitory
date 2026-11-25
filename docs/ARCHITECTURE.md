@@ -3042,16 +3042,19 @@ only `error`.
   the setting. (Not Playwright:
   Playwright drives browser engines it manages itself and can't attach to a native
   Tauri/webkit2gtk window; `tauri-driver` is Tauri's own WebDriver bridge, the
-  actually-supported E2E path.) All four pnpm projects (`frontend/`, `extension/`, `e2e/`,
-  `extension/e2e/`) pin the same `packageManager: "pnpm@12.18.0"` (#361), and the workflows'
+  actually-supported E2E path.) All five pnpm projects (`frontend/`, `extension/`, `e2e/`,
+  `extension/e2e/`, and `extension/publish/`, the locked `ovsx` that `release.yml` publishes to
+  Open VSX with, #1110) pin the same exact pnpm 12 version in `packageManager` (#361), and the workflows'
   `pnpm/action-setup` steps name only the major (`version: 12`); pnpm switches to the pinned
   version itself, and each lockfile's first YAML document (the "env lockfile") records it with
   its integrity. A CI-vs-local pnpm major mismatch once broke `e2e/`'s frozen-lockfile
-  install, so bump all four pins, the env lockfiles and the workflow majors together. pnpm 12
+  install, so bump all five pins, the env lockfiles and the workflow majors together. pnpm 12
   runs no dependency build script unless the project's `pnpm-workspace.yaml` allows it
   (`allowBuilds`; an unlisted one fails the install): `extension/` allows `@vscode/vsce-sign`,
   `e2e/` allows `esbuild` and denies `edgedriver`/`geckodriver` (their postinstall only
-  downloads a driver when `*_AUTO_INSTALL` is set); `frontend/` and `extension/e2e/` need none.
+  downloads a driver when `*_AUTO_INSTALL` is set), `extension/publish/` denies
+  `@vscode/vsce-sign` (publishing a packaged `.vsix` doesn't need it); `frontend/` and
+  `extension/e2e/` need none.
   pnpm's `minimumReleaseAge` default (1 day) applies to installs too: a lockfile entry
   published less than a day ago fails `--frozen-lockfile`.
   - Elements that unmount: waiting for a row, menu or dialog to disappear, or clicking one that

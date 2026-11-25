@@ -1,0 +1,9 @@
+# Makes extension/publish its own pnpm workspace root instead of an unlisted directory under
+# extension/pnpm-workspace.yaml, as extension/e2e does: ovsx (EPL-2.0) must stay out of
+# extension/'s tree, and Renovate's lockfile update must not walk up to extension/.
+packages:
+  - '.'
+# ovsx publishes prepackaged .vsix files, which needs no build script; release.yml installs
+# with --ignore-scripts anyway.
+allowBuilds:
+  '@vscode/vsce-sign': false

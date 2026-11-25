@@ -153,8 +153,9 @@ have put at the top of `## [Unreleased]`: a `### Heading` line, an optional intr
 
 Renovate (`renovate.json`) opens dependency PRs before 6am on Mondays (Europe/Berlin), at most
 three open at a time, labelled `maintainability`, and never automerges — merge by hand once CI
-is green. Covered: the Cargo workspace, all four pnpm projects (`frontend/`, `extension/`,
-`e2e/`, `extension/e2e/`, each with its own lockfile), GitHub Actions,
+is green. Covered: the Cargo workspace, all five pnpm projects (`frontend/`, `extension/`,
+`e2e/`, `extension/e2e/`, `extension/publish/`, each with its own lockfile), GitHub Actions
+(`release.yml` and `renovate-notices.yml` pin them by commit SHA with a version comment, #1109),
 `rust-toolchain.toml`, the VSCode release the extension E2E jobs run in (`ci.yml`'s
 `BROWSITORY_E2E_VSCODE_VERSION`, #918), the Tauri E2E job's tauri-driver (`TAURI_DRIVER_VERSION`,
 #1058), and the user guide site's Python tools
@@ -166,7 +167,7 @@ their own PRs. Majors and
 `git2`/`libgit2-sys` wait for approval on the Dependency Dashboard issue (libgit2 bumps change
 behaviour the tests and `docs/ARCHITECTURE.md` characterize). Security fixes skip the
 schedule; lockfiles get a monthly maintenance PR. npm versions wait a day before Renovate proposes
-them: pnpm 12 (pinned in all four `packageManager` fields) refuses to install, even with
+them: pnpm 12 (pinned in all five `packageManager` fields) refuses to install, even with
 `--frozen-lockfile`, anything published less than a day ago (`minimumReleaseAge`). It also
 runs no dependency build script that the project's `pnpm-workspace.yaml` `allowBuilds` doesn't
 list, and an unlisted one fails the install: a new dependency with a postinstall needs an
@@ -182,7 +183,7 @@ toolchain" group; fix the new lints in that PR.
 The license policy and the CI `audit` and `licenses` jobs still apply to these PRs. The
 `licenses` job checks every licence in the full Rust and npm trees, transitive and dev
 included (`cargo deny check licenses` with `deny.toml`; `scripts/check-dependency-licenses.py`
-for all four pnpm projects). If an update pulls in a licence outside the policy, it fails:
+for all five pnpm projects). If an update pulls in a licence outside the policy, it fails:
 replace the dependency or ask the owner, then record the decision as an exception in
 `deny.toml` or the script and in `docs/LICENSE_COMPLIANCE.md`, in the same PR. A stale
 exception fails too; remove it. `scripts/check-license-compliance.py` (`audit` job) still

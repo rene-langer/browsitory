@@ -20,8 +20,16 @@ on:
         required: true
         default: true
 
+# Read-only by default (#1109). Only build-release (tauri-action) and publish-vsix-release write
+# to the draft release, so only they get `contents: write`. No job pushes, so every checkout sets
+# persist-credentials: false: the token is not left in .git/config for later steps (dependency
+# install and build scripts, actions).
+#
+# Every action is pinned to a full commit SHA with its version in a comment, so a moved tag
+# can't change what runs next to the release's credentials. Renovate's github-actions manager
+# updates the SHA and the comment together (renovate.json's "GitHub Actions" group).
 permissions:
-  contents: write
+  contents: read
 
 env:
   # The VSCode extension's release channel. "false" (since 0.3.1) packages and publishes every
@@ -37,8 +45,8 @@ env:
 
 jobs:
   # Fast sanity gate before spending 3 platforms' worth of build time. Full cross-platform
-  # test/clippy coverage already ran in ci.yml when this commit landed on main; this just
-  # guards against tagging a commit that was never actually pushed through CI.
+  # test/clippy coverage already ran in ci.yml when this commit landed on main; the first step
+  # makes sure it did, and re-runs the Linux tests.
   verify:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -46,20 +54,31 @@ jobs:
     # past a slow mirror (#353, #459). Usually cached now (#1061), but a cache miss still
     # compiles everything.
     timeout-minutes: 45
+    permissions:
+      contents: read
+      # check-release-tag.py reads ci.yml's runs of the tagged commit.
+      actions: read
     env:
       # Same pin as ci.yml's `licenses` job (`CARGO_ABOUT_VERSION` there); keep both in sync
       # (Renovate updates both). No `CARGO_` prefix here, so the rust-cache key below matches.
       # renovate: datasource=crate depName=cargo-about
       ABOUT_VERSION: 0.9.3
     steps:
-      - uses: actions/checkout@v7
-      - name: Validate tag is strict semver (release/MAJOR.MINOR.PATCH)
-        run: |
-          version="${GITHUB_REF_NAME#release/}"
-          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "error: tag '$GITHUB_REF_NAME' is not release/MAJOR.MINOR.PATCH" >&2
-            exit 1
-          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The whole history and origin/main, for the "is the commit on main" check.
+          fetch-depth: 0
+          persist-credentials: false
+      # Fails, listing every problem, unless the tag is release/MAJOR.MINOR.PATCH, CHANGELOG.md
+      # has `## [X.Y.Z] - YYYY-MM-DD` right under an empty `## [Unreleased]`, the commit is on
+      # main and a ci.yml run on main passed for it (#1111). See docs/RELEASING.md, "Preparing
+      # the changelog". A CI run still in progress fails it too: re-run this job once it passed.
+      - name: Tag, changelog section, on main, CI passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/check-release-tag.py --tag "$GITHUB_REF_NAME" --commit HEAD
+          --repo "$GITHUB_REPOSITORY"
       - name: No unfolded changelog fragments
         # Every VSIX ships CHANGELOG.md, so all changelog.d/ fragments must be folded
         # into it before tagging (scripts/fold-changelog.py; see docs/RELEASING.md).
@@ -81,17 +100,17 @@ jobs:
       # OS, arch and a hash of the rustc version and every CARGO*/RUST*/CC*/CFLAGS*/CXX*/CMAKE*
       # env var, so it matches only while this job sets no env var with those prefixes beyond
       # the workflow-level ones ci.yml sets too. Never saves: a tag's cache would serve no one.
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: rust
           save-if: false
       - run: cargo test --workspace
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           # pnpm runs each project with the exact version its package.json pins (see ci.yml's
           # `licenses` job).
           version: 12
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
@@ -104,7 +123,7 @@ jobs:
           pnpm test -- --run
       # A tag on a commit that never went through main's CI must not ship stale notices
       # (THIRD_PARTY_NOTICES.md, #301). Same check as ci.yml's `licenses` job.
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
         with:
           tool: cargo-about@${{ env.ABOUT_VERSION }}
       - run: pnpm --dir extension install --frozen-lockfile --ignore-scripts
@@ -134,8 +153,13 @@ jobs:
     # Observed up to 16 min (macOS universal build, no cache), plus up to 15 min for the apt
     # step's retries past a slow mirror on Linux (#353, #459).
     timeout-minutes: 60
+    # tauri-action creates the draft release and uploads the bundles and latest.json.
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Set package version from tag
         shell: bash
         run: |
@@ -165,10 +189,10 @@ jobs:
         run: |
           rustup toolchain install
           for target in ${TARGETS//,/ }; do rustup target add "$target"; done
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: 12
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
@@ -191,7 +215,7 @@ jobs:
         if: runner.os != 'macOS'
         shell: bash
         run: ${{ runner.os == 'Windows' && 'python' || 'python3' }} scripts/prefetch-bundler-tools.py --github-output --no-download
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: runner.os != 'macOS'
         with:
           path: ${{ steps.bundler-tools.outputs.tools-dir }}
@@ -313,7 +337,9 @@ jobs:
     # Observed up to 6 min (#353).
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - id: release-version
         name: Set extension package version from tag
         shell: bash
@@ -335,10 +361,10 @@ jobs:
         run: |
           rustup toolchain install
           for target in ${TARGETS//,/ }; do rustup target add "$target"; done
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: 12
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
@@ -364,7 +390,7 @@ jobs:
           --version ${{ steps.release-version.outputs.version }}
           ${{ env.VSIX_PRE_RELEASE == 'true' && '--pre-release' || '' }}
           artifacts/browsitory-${{ steps.release-version.outputs.version }}-${{ matrix.vsix_target }}.vsix
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: browsitory-vsix-${{ matrix.vsix_target }}
           path: extension/artifacts/browsitory-${{ steps.release-version.outputs.version }}-${{ matrix.vsix_target }}.vsix
@@ -375,18 +401,22 @@ jobs:
     runs-on: ubuntu-latest
     # Observed under 1 min: downloads the packages, uploads them to the draft release (#353).
     timeout-minutes: 15
+    # Reads the draft release (drafts need write access) and uploads the packages to it.
+    permissions:
+      contents: write
     steps:
       # For THIRD_PARTY_NOTICES.md: every installer and .vsix already carries it; the release
       # page gets a copy too, so the licences can be read without installing anything. The public
       # key that verifies the .rpm (#1077), so `rpm --import` can take it from the release. And for
       # the manifest check below.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: |
             THIRD_PARTY_NOTICES.md
             packaging/browsitory-rpm-signing-key.asc
             scripts/check-updater-manifest.py
           sparse-checkout-cone-mode: false
+          persist-credentials: false
       # All build-release jobs are done, so latest.json is final. Each of them rewrites it, and
       # two finishing at the same moment can lose a platform (#398). Fails before the
       # marketplace jobs run, while the release is still a draft; see docs/RELEASING.md's
@@ -402,12 +432,12 @@ jobs:
             > "$dir/assets.json"
           python3 -I scripts/check-updater-manifest.py --version "${GITHUB_REF_NAME#release/}" \
             --repo "$GITHUB_REPOSITORY" --assets "$dir/assets.json" "$dir"
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: browsitory-vsix-*
           merge-multiple: true
           path: release-vsix
-      - uses: softprops/action-gh-release@v3
+      - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           tag_name: ${{ github.ref_name }}
           draft: true
@@ -446,24 +476,26 @@ jobs:
       - name: Skip notice
         if: env.HAS_AZURE != 'true'
         run: echo "::notice::AZURE_CLIENT_ID is not set in the marketplace environment; skipping the Visual Studio Marketplace."
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.HAS_AZURE == 'true'
-      - uses: pnpm/action-setup@v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         if: env.HAS_AZURE == 'true'
         with:
           version: 12
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: env.HAS_AZURE == 'true'
         with:
           node-version: 24
-          cache: pnpm
-          cache-dependency-path: extension/pnpm-lock.yaml
       # vsce is extension/'s pinned dev dependency (exact version, lockfile), the same one that
       # packaged the .vsix files; --azure-credential needs vsce 2.26.1 or newer. Installed with
       # --ignore-scripts and before signing in, so no install script runs with the Azure session.
+      # No pnpm cache (#1170): every package comes from the registry, checked against the
+      # lockfile's integrity hashes, so nothing restored from a cache runs with the session.
       - run: pnpm --dir extension install --frozen-lockfile --ignore-scripts
         if: env.HAS_AZURE == 'true'
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: env.HAS_AZURE == 'true'
         with:
           pattern: browsitory-vsix-*
@@ -479,7 +511,7 @@ jobs:
             echo "::error::expected 4 .vsix packages, found ${#packages[@]}: ${packages[*]}"
             exit 1
           fi
-      - uses: azure/login@v3
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         if: env.HAS_AZURE == 'true'
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -553,18 +585,33 @@ jobs:
       - name: Skip notice
         if: env.HAS_OVSX != 'true'
         run: echo "::notice::OVSX_PAT is not set in the marketplace environment; skipping Open VSX."
-      # Only the listing check below; nothing from the repository runs with OVSX_PAT.
-      - uses: actions/checkout@v7
+      # Only the listing check below and extension/publish/, the locked ovsx; nothing else from
+      # the repository runs with OVSX_PAT.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.HAS_OVSX == 'true'
         with:
-          sparse-checkout: scripts/verify-marketplace-listing.py
+          sparse-checkout: |
+            scripts/verify-marketplace-listing.py
+            extension/publish/package.json
+            extension/publish/pnpm-lock.yaml
+            extension/publish/pnpm-workspace.yaml
           sparse-checkout-cone-mode: false
           persist-credentials: false
-      - uses: actions/setup-node@v7
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        if: env.HAS_OVSX == 'true'
+        with:
+          version: 12
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: env.HAS_OVSX == 'true'
         with:
           node-version: 24
-      - uses: actions/download-artifact@v8
+      # ovsx (EPL-2.0, a build-only tool, docs/LICENSE_COMPLIANCE.md) and its whole dependency
+      # tree exactly as extension/publish/pnpm-lock.yaml locks them, with integrity hashes (#1110).
+      # Installed with --ignore-scripts and before the step that gets OVSX_PAT, so no install
+      # script runs with the token. No pnpm cache, so nothing restored from a cache runs with it.
+      - run: pnpm --dir extension/publish install --frozen-lockfile --ignore-scripts
+        if: env.HAS_OVSX == 'true'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: env.HAS_OVSX == 'true'
         with:
           pattern: browsitory-vsix-*
@@ -577,17 +624,16 @@ jobs:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
         run: |
           shopt -s nullglob
-          packages=(release-vsix/*.vsix)
+          packages=("$GITHUB_WORKSPACE"/release-vsix/*.vsix)
           if [ "${#packages[@]}" -ne 4 ]; then
             echo "::error::expected 4 .vsix packages, found ${#packages[@]}: ${packages[*]}"
             exit 1
           fi
-          # ovsx (EPL-2.0) runs here only as a build-time CI tool, pinned to an exact version;
-          # it is not a dependency and is not shipped (docs/LICENSE_COMPLIANCE.md). No
-          # --pre-release: ovsx ignores it for a prepackaged .vsix, which already carries the
-          # pre-release flag from packaging.
+          # No --pre-release: ovsx ignores it for a prepackaged .vsix, which already carries the
+          # pre-release flag from packaging. Absolute paths: pnpm --dir runs ovsx in
+          # extension/publish.
           for vsix in "${packages[@]}"; do
-            npx --yes ovsx@1.3.0 publish --skip-duplicate --packagePath "$vsix"
+            pnpm --dir extension/publish exec ovsx publish --skip-duplicate --packagePath "$vsix"
           done
       # Same check as the Marketplace job (#344). Open VSX lists a package after its scan.
       - name: Check every platform package is on Open VSX
@@ -648,18 +694,19 @@ jobs:
         run: |
           echo "::error::AZURE_CLIENT_ID or AZURE_TENANT_ID is not set in the marketplace environment."
           exit 1
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: 12
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-          cache: pnpm
-          cache-dependency-path: extension/pnpm-lock.yaml
-      # Same pinned vsce as publishing, installed before signing in (see publish-vsix-marketplace).
+      # Same pinned vsce as publishing, installed the same way before signing in, without a pnpm
+      # cache (see publish-vsix-marketplace, #1170).
       - run: pnpm --dir extension install --frozen-lockfile --ignore-scripts
-      - uses: azure/login@v3
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -685,11 +732,23 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            extension/publish/package.json
+            extension/publish/pnpm-lock.yaml
+            extension/publish/pnpm-workspace.yaml
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 12
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-      # ovsx reads the token from OVSX_PAT and never prints it. Same pinned version as
-      # publish-vsix-open-vsx.
+      # The same locked ovsx as publish-vsix-open-vsx, installed the same way (#1110).
+      - run: pnpm --dir extension/publish install --frozen-lockfile --ignore-scripts
+      # ovsx reads the token from OVSX_PAT and never prints it.
       - name: Check the Open VSX token can publish to namespace browsitory
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
@@ -698,4 +757,4 @@ jobs:
             echo "::error::OVSX_PAT is not set in the marketplace environment."
             exit 1
           fi
-          npx --yes ovsx@1.3.0 verify-pat browsitory
+          pnpm --dir extension/publish exec ovsx verify-pat browsitory
