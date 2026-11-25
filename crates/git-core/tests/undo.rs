@@ -738,8 +738,10 @@ fn undoes_a_commit_inside_a_linked_worktree() {
     });
 }
 
+/// #1174: rewriting the index keeps the skip-worktree mark, as git's reset does (#1145), so an
+/// index with such entries no longer refuses.
 #[test]
-fn refuses_to_rewrite_an_index_with_skip_worktree_entries() {
+fn rewrites_an_index_with_skip_worktree_entries_keeping_the_mark() {
     let (_dir, repo) = seeded();
     write(&repo, "b.txt", "b\n");
     stage(&repo, "b.txt");
@@ -766,11 +768,14 @@ fn refuses_to_rewrite_an_index_with_skip_worktree_entries() {
     index.write().unwrap();
     assert!(flagged(&repo), "test setup: flag not set");
     let result = restore(&repo, &after, &before, "browsitory: undo test");
-    assert!(
-        matches!(result, Err(UndoError::RepositoryChanged)),
-        "{result:?}"
-    );
+    assert!(result.is_ok(), "{result:?}");
     assert!(flagged(&repo));
+    assert_eq!(
+        capture(&repo, SnapshotScope::RefsAndIndex)
+            .unwrap()
+            .index_tree,
+        before.index_tree
+    );
 }
 
 /// `core.autocrlf=true` (the Git for Windows default): blobs hold LF, the worktree CRLF.

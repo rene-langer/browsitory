@@ -531,15 +531,15 @@ mod tests {
         stacks.undo.push(with_a_skipped_file(&repo));
         store.save(&repo, &stacks).unwrap();
 
-        assert_eq!(undo_json(&repo)["version"], 2);
+        assert_eq!(undo_json(&repo)["version"], 3);
         let (_, reloaded) = UndoStore::open(&repo);
         assert_eq!(reloaded.undo, stacks.undo);
     }
 
     /// #1093: the history an older build (or a build with #1088 alone) wrote stays usable, and
-    /// the next save writes it as version 2.
+    /// the next save writes it as the current version.
     #[test]
-    fn a_version_1_file_still_loads_and_is_saved_as_version_2() {
+    fn a_version_1_file_still_loads_and_is_saved_as_the_current_version() {
         let (_dir, repo) = repo_with_commit();
         let (mut store, mut stacks) = UndoStore::open(&repo);
         stacks.undo.push(with_a_skipped_file(&repo));
@@ -557,7 +557,7 @@ mod tests {
         assert!(!store.is_blocked());
         assert_eq!(reloaded.undo, stacks.undo);
         store.save(&repo, &reloaded).unwrap();
-        assert_eq!(undo_json(&repo)["version"], 2);
+        assert_eq!(undo_json(&repo)["version"], 3);
     }
 
     #[test]
@@ -831,7 +831,7 @@ mod tests {
         let (_, reloaded) = UndoStore::open(&repo);
         assert_eq!(reloaded.undo, stacks.undo);
         let json = undo_json(&repo);
-        assert_eq!(json["version"], 2);
+        assert_eq!(json["version"], 3);
         assert_eq!(
             json["undo"][0]["before"]["unsavedUntracked"],
             list.to_string()
@@ -875,7 +875,7 @@ mod tests {
             &std::fs::read(repo.path().join("browsitory/undo.json")).unwrap(),
         )
         .unwrap();
-        assert_eq!(json["version"], 2);
+        assert_eq!(json["version"], 3);
         assert_eq!(json["pending"]["label"], "Merge feature");
         assert_eq!(json["pending"]["operation"], "merge abc def");
     }
@@ -917,7 +917,7 @@ mod tests {
         store.save(&repo, &stacks).unwrap();
         let bytes = std::fs::read(repo.path().join("browsitory/undo.json")).unwrap();
         let old: OldStoredFile = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(old.version, 2);
+        assert_eq!(old.version, 3);
         assert_eq!(old.undo.len(), 1);
     }
 
