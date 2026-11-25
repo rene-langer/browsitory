@@ -514,6 +514,8 @@ fn every_line_git_rejects_in_cone_mode_turns_cone_matching_off() {
         "/a?/",
         "/x*y/",
         "/[ab]/",
+        "/a\\b/",
+        "/a/?/",
         "a/",
         "/",
         "!/*",
