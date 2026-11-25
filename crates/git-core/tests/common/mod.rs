@@ -28,19 +28,19 @@ pub fn init_repo() -> (TempDir, Repository) {
 }
 
 /// The user's own git config as `repo` sees it: a global-level file in the repository's git dir,
-/// added to the config libgit2 keeps for this `Repository`, so every later `repo.config()` reads
-/// it. Signing programs and the allowed signers file count only from such a level (#1121); the
-/// hermetic setup leaves the real global level empty.
+/// put in place of the global level of the config libgit2 keeps for this `Repository`, so every
+/// later `repo.config()` reads it. Signing programs and the allowed signers file count only from
+/// such a level (#1121). The hermetic global file is shared by every test of the binary, so it is
+/// replaced here, never written.
 #[allow(dead_code)]
 pub fn user_config(repo: &Repository) -> git2::Config {
     let mut config = repo.config().expect("repo config");
-    if let Ok(level) = config.open_level(git2::ConfigLevel::Global) {
-        return level;
-    }
     let path = repo.path().join("user.gitconfig");
-    std::fs::write(&path, "").expect("write user config");
+    if !path.exists() {
+        std::fs::write(&path, "").expect("write user config");
+    }
     config
-        .add_file(&path, git2::ConfigLevel::Global, false)
+        .add_file(&path, git2::ConfigLevel::Global, true)
         .expect("add user config");
     config
         .open_level(git2::ConfigLevel::Global)
