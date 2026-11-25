@@ -4316,6 +4316,44 @@ mod update_settings_conversion {
     }
 }
 
+/// #1158: a blame's lines point at their commit by its place in `commits`, each commit once.
+#[cfg(test)]
+mod blame_conversion {
+    use super::BlameDto;
+
+    fn line(content: &str, commit: &str) -> git_core::blame::BlameLine {
+        git_core::blame::BlameLine {
+            line_number: 0,
+            content: content.to_string(),
+            commit_id: commit.repeat(40),
+            short_id: commit.repeat(7),
+            author_name: format!("author {commit}"),
+            timestamp: 1,
+        }
+    }
+
+    #[test]
+    fn each_line_points_at_its_commit_listed_once_in_order_of_first_use() {
+        let blame = BlameDto::from(vec![
+            line("a", "1"),
+            line("b", "2"),
+            line("c", "1"),
+            line("d", "3"),
+            line("e", "2"),
+        ]);
+
+        let ids: Vec<&str> = blame.commits.iter().map(|c| &c.commit_id[..1]).collect();
+        assert_eq!(ids, ["1", "2", "3"]);
+        let lines: Vec<(&str, usize)> = blame
+            .lines
+            .iter()
+            .map(|l| (l.content.as_str(), l.commit))
+            .collect();
+        assert_eq!(lines, [("a", 0), ("b", 1), ("c", 0), ("d", 2), ("e", 1)]);
+        assert_eq!(blame.commits[1].author_name, "author 2");
+    }
+}
+
 /// #898: the keyboard shortcuts a client saves reach `config` as sent, both ways.
 #[cfg(test)]
 mod keybinding_settings_conversion {
