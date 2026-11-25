@@ -205,7 +205,7 @@ jobs:
         with:
           # Every `version:` input here and in the other workflows names the pnpm major only; pnpm
           # then switches to the exact version each project's package.json `packageManager` pins
-          # (the same 12.x in all four projects, see docs/ARCHITECTURE.md's testing strategy).
+          # (the same 12.x in all five projects, see docs/ARCHITECTURE.md's testing strategy).
           version: 12
       - uses: actions/setup-node@v7
         with:
@@ -216,16 +216,18 @@ jobs:
             extension/pnpm-lock.yaml
             e2e/pnpm-lock.yaml
             extension/e2e/pnpm-lock.yaml
+            extension/publish/pnpm-lock.yaml
       - name: Install npm trees (no install scripts)
         run: |
           pnpm --dir frontend install --frozen-lockfile --ignore-scripts
           pnpm --dir extension install --frozen-lockfile --ignore-scripts
           pnpm --dir e2e install --frozen-lockfile --ignore-scripts
+          pnpm --dir extension/publish install --frozen-lockfile --ignore-scripts
           cd extension/e2e && pnpm install --frozen-lockfile --ignore-scripts --ignore-workspace
       # After the installs: one test reads frontend/node_modules/tm-grammars.
       - name: generate-third-party-notices.py unit tests
         run: python3 scripts/test_generate_third_party_notices.py
-      - name: npm licences (all four projects, production and dev, all platforms)
+      - name: npm licences (all five projects, production and dev, all platforms)
         run: python3 scripts/check-dependency-licenses.py --summary
       # Fails when a dependency update changed the Rust or bundled npm trees, or a vendored C
       # library's -sys crate version no longer matches scripts/notices/native-libraries.md. The
@@ -251,6 +253,9 @@ jobs:
       # Release tooling too (release.yml's publish-vsix-release, #398); files only, no network.
       - name: check-updater-manifest.py unit tests
         run: python3 scripts/test_check_updater_manifest.py
+      # Release tooling too (release.yml's verify, #1111); temporary git repositories, `gh` faked.
+      - name: check-release-tag.py unit tests
+        run: python3 scripts/test_check_release_tag.py
       # Build tooling (build-dist and release.yml's build-release, #454); no network.
       - name: prefetch-bundler-tools.py unit tests
         run: python3 scripts/test_prefetch_bundler_tools.py
@@ -383,6 +388,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          # The job's token can write pull request comments; keep it out of .git/config while
+          # pull request code runs (#1109).
+          persist-credentials: false
       - name: Diff against the pull request's base
         id: diff
         env:
@@ -505,6 +513,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          # The job's token can write pull request comments; keep it out of .git/config while
+          # pull request code runs (#1109).
+          persist-credentials: false
       - name: Report
         id: report
         continue-on-error: true

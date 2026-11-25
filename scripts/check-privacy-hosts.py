@@ -62,7 +62,6 @@ NON_NETWORK_HOSTS = {
 DYNAMIC_URLS = {
     "crates/repo-service/src/clone.rs": {
         "over `https://` with": "comment naming the scheme",
-        'eq_ignore_ascii_case("https://")': "compares a remote URL's scheme",
     },
     "crates/repo-service/src/credentials.rs": {
         'format!("https://{host}{port}/{username}")': "credential key for the user's remote host",

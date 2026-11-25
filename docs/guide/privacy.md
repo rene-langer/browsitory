@@ -59,7 +59,9 @@ We see only how often each release file was downloaded, not by whom.
 ### Your Git remotes
 
 Fetch, pull, push and clone connect to the remotes you added, over HTTPS or SSH, and send what
-Git sends: the commits you push, and your token or SSH key to sign in. Cloning with
+Git sends: the commits you push, and your token or SSH key to sign in. A token goes only to
+the host it is for: one typed in the clone dialog isn't sent to another host when the server
+redirects the clone there. Cloning with
 submodules, or initializing or updating a submodule, also connects to the submodule's address
 that the repository names in its `.gitmodules` file. With **Fetch
 automatically** turned on (off by default), Browsitory fetches the open repository's remotes

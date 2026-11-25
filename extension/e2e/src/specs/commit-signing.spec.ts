@@ -20,7 +20,7 @@ describe("Browsitory VSCode extension commit signing", () => {
     const git = gitIn(cwd);
     const file = "vscode-signing.txt";
     const summary = "vscode-e2e: signed commit";
-    const configKeys = ["commit.gpgSign", "gpg.format", "user.signingKey", "gpg.ssh.allowedSignersFile"];
+    const configKeys = ["commit.gpgSign", "gpg.format", "user.signingKey"];
 
     const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), "browsitory-vscode-ssh-"));
     const key = path.join(keyDir, "id_e2e");
@@ -30,7 +30,18 @@ describe("Browsitory VSCode extension commit signing", () => {
     git("config", "commit.gpgSign", "true");
     git("config", "gpg.format", "ssh");
     git("config", "user.signingKey", key);
-    git("config", "gpg.ssh.allowedSignersFile", path.join(keyDir, "allowed_signers"));
+    // The allowed signers file counts only from the user's own git config, never the
+    // repository's (#1121). The sidecar that the panel below spawns inherits this process's
+    // environment, so an XDG config of its own names the file; the developer's git config is
+    // left alone. The panel closed here takes the previous sidecar with it.
+    const previousXdgConfigHome = process.env["XDG_CONFIG_HOME"];
+    const xdgConfigHome = path.join(keyDir, "xdg");
+    fs.mkdirSync(path.join(xdgConfigHome, "git"), { recursive: true });
+    fs.writeFileSync(
+      path.join(xdgConfigHome, "git", "config"),
+      `[gpg "ssh"]\n\tallowedSignersFile = ${path.join(keyDir, "allowed_signers").replace(/\\/g, "/")}\n`,
+    );
+    process.env["XDG_CONFIG_HOME"] = xdgConfigHome;
 
     await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(workspaceFolder.uri, file), Buffer.from("signed\n"));
     await vscode.commands.executeCommand("workbench.action.closeAllEditors");
@@ -57,6 +68,8 @@ describe("Browsitory VSCode extension commit signing", () => {
     } finally {
       await webview.close();
       await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+      if (previousXdgConfigHome === undefined) delete process.env["XDG_CONFIG_HOME"];
+      else process.env["XDG_CONFIG_HOME"] = previousXdgConfigHome;
       for (const configKey of configKeys) {
         try {
           git("config", "--unset", configKey);

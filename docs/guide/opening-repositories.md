@@ -61,6 +61,9 @@ folder and offers to open the result. The rest of this section is about the desk
   like an access token (`ghp_…`, `github_pat_…`, `glpat-…`, `ATBB…`, or a long random string) is
   taken out of the URL but not shown: the clone doesn't start, and the dialog asks for your
   username and the token in the **Token** field.
+  The token goes only to the host in the URL (and its port): when that server sends the clone
+  on to another host, the other host gets no token, and the dialog asks for it again. Clone
+  from the address the repository moved to instead.
   If the keychain write fails, the clone still succeeds and a toast says "Cloned *name*, but the
   token couldn't be saved." — enter the token again later from the remote's **Manage
   credentials** action (right-click the remote in the Branches sidebar).

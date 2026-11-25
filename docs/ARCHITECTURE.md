@@ -1141,6 +1141,20 @@ certificate.
     desktop launch; pinentry (gpg-agent) is a separate process and unaffected. Signers are not
     put in a Windows job object (a job kill on a timeout would also end a `gpg-agent` that gpg
     auto-started).
+- The programs (`gpg.openpgp.program` over `gpg.program`, `gpg.ssh.program`) and
+  `gpg.ssh.allowedSignersFile` come from the user's own config levels only (system, XDG,
+  global; `tools::trusted_string`, the filter diff and merge tools use), for signing and
+  verifying alike (#1121): a repository's `.git/config` arrives with an archive or a shared
+  drive, and the verifier runs as soon as a signed commit is selected. A program set only in
+  the repository's config never runs: `signing_config` fails with
+  `SignError::RepositoryProgramIgnored` (so commit, cherry-pick and rebase refuse before they
+  touch anything), and `verify_commit` returns the `Error` status with that message as
+  `detail`. An allowed signers file set only there is ignored, and a valid SSH signature shows
+  `GoodUntrusted` with a `detail` that says why. `commit.gpgSign`, `gpg.format` and
+  `user.signingKey` still count from every level: they only choose between gpg and ssh-keygen
+  and the user's key. Tests put such settings in a global-level file of the test repository
+  (`tests/common::user_config`; the worker tests' `set_user_config`, which `Worker::spawn`
+  adds under `#[cfg(test)]`).
 - `verify_commit` picks the format from the signature armor, not from config:
   - gpg: `--status-fd` lines map to `SignatureStatus`.
   - ssh: `find-principals` + `verify` against `gpg.ssh.allowedSignersFile`, falling back to
@@ -2842,7 +2856,9 @@ undo bookkeeping:
   where `pre-push` runs.
 
 Nothing secret is kept (`oplog::redact`): every target, parameter, message, program argument and
-output loses the user information of each URL (`https://***@host/...`) and the value of each
+output loses the user information of each URL (`https://***@host/...`: everything after `://`
+up to the last `@` before the host ends, as git reads it, so a password holding `'`, `(`, `,`,
+`[` or even a raw `/` goes too, #1125) and the value of each
 `Authorization:` header line, and commands that carry a token (saving an HTTPS credential or a
 forge token) log no token at all. Each entry keeps at most `MAX_RUNS` (32) program runs and the
 last `MAX_RUN_OUTPUT` (16 KiB) of each run's output. The frontend applies the same rule
@@ -3055,16 +3071,19 @@ only `error`.
   the setting. (Not Playwright:
   Playwright drives browser engines it manages itself and can't attach to a native
   Tauri/webkit2gtk window; `tauri-driver` is Tauri's own WebDriver bridge, the
-  actually-supported E2E path.) All four pnpm projects (`frontend/`, `extension/`, `e2e/`,
-  `extension/e2e/`) pin the same `packageManager: "pnpm@12.18.0"` (#361), and the workflows'
+  actually-supported E2E path.) All five pnpm projects (`frontend/`, `extension/`, `e2e/`,
+  `extension/e2e/`, and `extension/publish/`, the locked `ovsx` that `release.yml` publishes to
+  Open VSX with, #1110) pin the same exact pnpm 12 version in `packageManager` (#361), and the workflows'
   `pnpm/action-setup` steps name only the major (`version: 12`); pnpm switches to the pinned
   version itself, and each lockfile's first YAML document (the "env lockfile") records it with
   its integrity. A CI-vs-local pnpm major mismatch once broke `e2e/`'s frozen-lockfile
-  install, so bump all four pins, the env lockfiles and the workflow majors together. pnpm 12
+  install, so bump all five pins, the env lockfiles and the workflow majors together. pnpm 12
   runs no dependency build script unless the project's `pnpm-workspace.yaml` allows it
   (`allowBuilds`; an unlisted one fails the install): `extension/` allows `@vscode/vsce-sign`,
   `e2e/` allows `esbuild` and denies `edgedriver`/`geckodriver` (their postinstall only
-  downloads a driver when `*_AUTO_INSTALL` is set); `frontend/` and `extension/e2e/` need none.
+  downloads a driver when `*_AUTO_INSTALL` is set), `extension/publish/` denies
+  `@vscode/vsce-sign` (publishing a packaged `.vsix` doesn't need it); `frontend/` and
+  `extension/e2e/` need none.
   pnpm's `minimumReleaseAge` default (1 day) applies to installs too: a lockfile entry
   published less than a day ago fails `--frozen-lockfile`.
   - Elements that unmount: waiting for a row, menu or dialog to disappear, or clicking one that

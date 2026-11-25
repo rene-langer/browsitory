@@ -29,7 +29,7 @@ describe("MergeDialog", () => {
 
     resolve({ fastForward: "Only", squash: false });
 
-    expect(await screen.findByRole("radio", { name: "Fast-forward only" })).toBeChecked();
+    await vi.waitFor(() => expect(screen.getByRole("radio", { name: "Fast-forward only" })).toBeChecked());
     expect(screen.getByRole("button", { name: "Merge" })).toBeEnabled();
   });
 
