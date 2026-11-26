@@ -609,6 +609,48 @@ fn popping_a_staged_change_outside_the_cone_as_unstaged_matches_git() {
     assert_same_as_git(ours.path(), twin.path());
 }
 
+/// [`cone`] before the sparse checkout: `docs/guide.md` changed and staged, then its file put
+/// back to the committed version, and `app/main.rs` edited; stashed, then the sparse checkout.
+/// The stash changes `docs/guide.md` only in its index tree.
+fn staged_change_reverted_before_the_sparse_checkout(d: &Path) {
+    cone(d);
+    git_ok(d, &["sparse-checkout", "disable"]);
+    write_file(d, "docs/guide.md", "guide staged\n");
+    git_ok(d, &["add", "docs/guide.md"]);
+    write_file(d, "docs/guide.md", "guide\n");
+    write_file(d, "app/main.rs", "main edited\n");
+    git_ok(d, &["stash", "push", "-q", "-u"]);
+    git_ok(d, &["sparse-checkout", "set", "app", "lib/core"]);
+}
+
+#[test]
+fn popping_a_staged_change_its_work_tree_reverted_outside_the_cone_matches_git() {
+    let (ours, twin) = twins(staged_change_reverted_before_the_sparse_checkout);
+
+    let outcome = pop_both(ours.path(), twin.path(), true);
+
+    assert_eq!(outcome, StashApplyOutcome::Applied);
+    assert_same_as_git(ours.path(), twin.path());
+}
+
+/// A staged new file inside the cone comes back staged and on disk: only paths outside the
+/// sparse patterns stay outside.
+#[test]
+fn popping_a_staged_new_file_inside_the_cone_matches_git() {
+    let (ours, twin) = twins(|d| {
+        cone_with_changes(d);
+        write_file(d, "app/new.rs", "new app\n");
+        git_ok(d, &["add", "app/new.rs"]);
+        git_ok(d, &["stash", "push", "-q", "-u"]);
+    });
+
+    let outcome = pop_both(ours.path(), twin.path(), true);
+
+    assert_eq!(outcome, StashApplyOutcome::Applied);
+    assert_same_as_git(ours.path(), twin.path());
+    assert!(ours.path().join("app/new.rs").exists());
+}
+
 /// [`cone`] before the sparse checkout: `docs/guide.md` and `app/main.rs` edited and stashed;
 /// then `docs/guide.md` changed and committed; then the sparse checkout. Popping conflicts on
 /// `docs/guide.md`, which git writes with conflict markers.
