@@ -136,6 +136,10 @@ pub enum UndoError {
     /// A file to restore uses an external filter driver (#1063); nothing changed.
     #[error(transparent)]
     ExternalFilter(#[from] crate::ExternalFilter),
+    /// A setting written without a value that libgit2 would crash on (#1182); nothing
+    /// changed.
+    #[error(transparent)]
+    ValuelessSetting(#[from] crate::ValuelessSetting),
 }
 
 pub fn capture(repo: &Repository, scope: SnapshotScope) -> Result<RepoSnapshot, UndoError> {
@@ -725,6 +729,10 @@ fn verify_worktree(
     change: &WorktreeChange,
     target: &RepoSnapshot,
 ) -> Result<(), UndoError> {
+    // The files restored from the index go through libgit2's checkout (#1182).
+    if !change.from_index.is_empty() {
+        crate::valueless_setting::refuse_for_checkout::<UndoError>(repo)?;
+    }
     change.verify(repo)?;
     // The raw writes come before the forced checkout's own guard, so a target that brings in a
     // case-colliding link and folder (#156) is refused here, writing nothing.

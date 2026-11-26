@@ -132,6 +132,10 @@ pub enum StashError {
     /// A file to stash or write uses an external filter driver (#1063); nothing changed.
     #[error(transparent)]
     ExternalFilter(#[from] crate::ExternalFilter),
+    /// A setting written without a value that libgit2 would crash on (#1182); nothing
+    /// changed.
+    #[error(transparent)]
+    ValuelessSetting(#[from] crate::ValuelessSetting),
 }
 
 /// Refuses when `stash@{index}` is not the stash `expected` names: the caller's list is stale
@@ -240,6 +244,7 @@ fn stash_branch(message: &str) -> Option<String> {
 /// pathspec) resets the *whole* index and worktree to HEAD afterwards, silently discarding
 /// changes to files outside the paths, and git2 0.21's `StashSaveOptions` cannot pass a message.
 pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), StashError> {
+    crate::valueless_setting::refuse_for_checkout::<StashError>(repo)?;
     let message = opts
         .message
         .as_deref()
@@ -1791,6 +1796,7 @@ pub fn apply_stash(
     expected: Option<&str>,
     restore_index: bool,
 ) -> Result<StashApplyOutcome, StashError> {
+    crate::valueless_setting::refuse_for_merge::<StashError>(repo)?;
     ensure_stash_at(repo, index, expected)?;
     // Strictly, on every OS, before the checks below and libgit2's checkout (#369), as
     // `prepare_forced_checkout` does: `try_folds_case` doesn't read it on macOS and Windows.

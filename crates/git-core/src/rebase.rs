@@ -103,6 +103,10 @@ pub enum RebaseError {
     /// Committing or discarding an edit stop's rest failed (#884).
     #[error(transparent)]
     Stage(#[from] crate::stage::StageError),
+    /// A setting written without a value that libgit2 would crash on (#1182); nothing
+    /// changed.
+    #[error(transparent)]
+    ValuelessSetting(#[from] crate::ValuelessSetting),
 }
 
 /// The refusal copy for [`RebaseError::RestLeft`]: the first path, and how many others there are.
@@ -412,6 +416,7 @@ pub fn start_rebase_with(
     plan: Vec<RebasePlanEntry>,
     mut hooks: HookOptions<'_>,
 ) -> Result<(RebaseState, RebaseStepResult), RebaseError> {
+    crate::valueless_setting::refuse_for_merge::<RebaseError>(repo)?;
     // Any operation in progress first, named (#265): a terminal rebase or `git am` (#263), a
     // paused merge, cherry-pick or revert, then a terminal cherry-pick or revert list, which
     // goes on after the rebase, on top of whatever it left (#258, D5-A). A terminal bisect is
@@ -668,6 +673,7 @@ pub fn rebase_continue_with_rest(
     rest: Option<EditRest>,
     mut hooks: HookOptions<'_>,
 ) -> Result<RebaseStepResult, RebaseError> {
+    crate::valueless_setting::refuse_for_merge::<RebaseError>(repo)?;
     if message.is_some_and(|message| message.trim().is_empty()) {
         return Err(RebaseError::EmptyMessage);
     }
@@ -1331,6 +1337,7 @@ pub struct RebaseAbort {
 ///   HEAD moved, only git's paused-pick state is forgotten, so work staged elsewhere survives.
 ///   `restored: false`.
 pub fn abort_rebase(repo: &Repository, state: &RebaseState) -> Result<RebaseAbort, RebaseError> {
+    crate::valueless_setting::refuse_for_checkout::<RebaseError>(repo)?;
     let own_pick = is_own_paused_step(repo, state);
     let other_operation = !crate::repo::no_operation(repo) && !own_pick;
     let at_expected = head_at_expected(repo, state)?;

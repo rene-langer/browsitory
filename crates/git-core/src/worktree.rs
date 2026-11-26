@@ -83,6 +83,10 @@ pub enum WorktreeError {
     /// paused cherry-pick or revert there (#291, #293).
     #[error(transparent)]
     Held(#[from] crate::repo::BranchHeld),
+    /// A setting written without a value that libgit2 would crash on (#1182); nothing
+    /// changed.
+    #[error(transparent)]
+    ValuelessSetting(#[from] crate::ValuelessSetting),
 }
 
 impl From<git2::Error> for WorktreeError {
@@ -297,6 +301,7 @@ pub fn create_worktree_with(
     start_point: Option<&str>,
     probe: impl FnOnce(&Path) -> std::io::Result<bool>,
 ) -> Result<(), WorktreeError> {
+    crate::valueless_setting::refuse_for_checkout::<WorktreeError>(repo)?;
     if cfg!(windows) {
         refuse_unusable_windows_names(name, path)?;
     }

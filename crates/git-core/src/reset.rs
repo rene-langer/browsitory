@@ -38,6 +38,10 @@ pub enum ResetError {
     /// hides and Undo can't bring back; git refuses too ("not uptodate"). Nothing changed (#1145).
     #[error("'{0}' has local changes git doesn't show (it is marked skip-worktree), and the reset would overwrite them. Nothing was changed.")]
     SkipWorktreeEdited(String),
+    /// A setting written without a value that libgit2 would crash on (#1182); nothing
+    /// changed.
+    #[error(transparent)]
+    ValuelessSetting(#[from] crate::ValuelessSetting),
 }
 
 /// Moves the current branch (or detached HEAD) to `commit_id`. Soft keeps index + working tree,
@@ -50,6 +54,9 @@ pub enum ResetError {
 /// does them, with `commit::clear_operation_files` instead (#249). Unlike libgit2, which moves
 /// HEAD before it writes the index, the index is written first, as `git reset` does (#796).
 pub fn reset_to(repo: &Repository, commit_id: &str, mode: ResetMode) -> Result<(), ResetError> {
+    if mode == ResetMode::Hard {
+        crate::valueless_setting::refuse_for_checkout::<ResetError>(repo)?;
+    }
     crate::repo::check_no_terminal_rebase(repo)?;
     if !crate::repo::no_operation(repo) {
         return Err(ResetError::OperationInProgress);

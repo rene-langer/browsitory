@@ -1352,6 +1352,7 @@ pub fn pull_after_fetch(
     remote_name: &str,
     remote_branch: &str,
 ) -> Result<PullOutcome, RemoteError> {
+    crate::valueless_setting::refuse_for_checkout::<RemoteError>(repo)?;
     if !worktree_is_clean(repo)? {
         return Err(RemoteError::DirtyWorktree);
     }

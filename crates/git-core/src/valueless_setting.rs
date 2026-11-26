@@ -2,8 +2,9 @@
 //! crashes the process on one, a null dereference rather than an error (#1180), when it matches a
 //! value pattern against it (removing one of several values, adding a value next to it:
 //! `git_remote_create`'s `fetch`) or compares its value (`branch.*.remote`, which git requires to
-//! name a remote). The checks here run before such calls. Branch and remote sections are removed
-//! and moved by `config_section`, which never needs a pattern for a single value.
+//! name a remote), and when it reads the merge driver or the conflict style (#1182). The checks
+//! here run before such calls. Branch and remote sections are removed and moved by
+//! `config_section`, which never needs a pattern for a single value.
 
 use git2::Repository;
 
@@ -37,6 +38,54 @@ where
     let config = repo.config()?;
     let mut entries = config.entries(Some(BRANCH_REMOTES))?;
     refuse_missing(&mut entries)
+}
+
+/// The merge driver, which libgit2 reads (and copies) at the start of every merge, in memory or
+/// not, unless the caller names one; git2 can't.
+const MERGE_DRIVER: &str = "merge.default";
+/// The conflict style, which libgit2 reads (and compares) at the start of every checkout whose
+/// options name none: its own (stash save, applying a patch to the work tree, adding a worktree)
+/// and Browsitory's.
+const CONFLICT_STYLE: &str = "merge.conflictstyle";
+
+/// Before a command that merges and checks out the result (merge, cherry-pick, revert, rebase,
+/// stash apply): refuses a merge driver or a conflict style written without a value, which git
+/// refuses too ("missing value").
+pub(crate) fn refuse_for_merge<E>(repo: &Repository) -> Result<(), E>
+where
+    E: From<git2::Error> + From<ValuelessSetting>,
+{
+    refuse_valueless::<E>(repo, MERGE_DRIVER)?;
+    refuse_for_checkout(repo)
+}
+
+/// Before a command that checks out: refuses a conflict style written without a value.
+pub(crate) fn refuse_for_checkout<E>(repo: &Repository) -> Result<(), E>
+where
+    E: From<git2::Error> + From<ValuelessSetting>,
+{
+    refuse_valueless(repo, CONFLICT_STYLE)
+}
+
+/// Whether a merge in memory can run: false when the merge driver is written without a value
+/// (or the config can't be read).
+pub(crate) fn can_merge_in_memory(repo: &Repository) -> bool {
+    refuse_valueless::<Unreadable>(repo, MERGE_DRIVER).is_ok()
+}
+
+/// Any reason [`can_merge_in_memory`] says no.
+struct Unreadable;
+
+impl From<git2::Error> for Unreadable {
+    fn from(_: git2::Error) -> Self {
+        Unreadable
+    }
+}
+
+impl From<ValuelessSetting> for Unreadable {
+    fn from(_: ValuelessSetting) -> Self {
+        Unreadable
+    }
 }
 
 /// Refuses when setting `name` has a value written without one, in any config file.

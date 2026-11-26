@@ -124,6 +124,8 @@ pub fn create_branch_only(
 
 /// Creates `name` at `start_point` and switches to it, like `git switch -c <name> <start>`.
 pub fn create_branch(repo: &Repository, name: &str, start_point: &str) -> Result<(), BranchError> {
+    // Before the branch is created: the switch below checks out (#1182).
+    crate::valueless_setting::refuse_for_checkout::<BranchError>(repo)?;
     let commit = resolve_start_point(repo, start_point)?;
     // Before the branch is created: a start point whose tree brings in a case pair would only
     // leave a branch the switch below refuses (#532).
@@ -153,6 +155,7 @@ fn refuse_case_pair_brought_in(
 }
 
 pub fn switch_branch(repo: &Repository, name: &str) -> Result<(), BranchError> {
+    crate::valueless_setting::refuse_for_checkout::<BranchError>(repo)?;
     // HEAD is detached during a rebase, so the check below doesn't see a branch another
     // worktree is rebasing; git refuses it ("already used by worktree"), since a commit made on
     // it here is lost when that rebase is aborted or finished (#263).
@@ -260,6 +263,12 @@ pub fn stash_and_switch(
     name: &str,
     reapply: bool,
 ) -> Result<StashSwitchOutcome, BranchError> {
+    // The stash, the switch and the pop check out; the pop merges too (#1182).
+    if reapply {
+        crate::valueless_setting::refuse_for_merge::<BranchError>(repo)?;
+    } else {
+        crate::valueless_setting::refuse_for_checkout::<BranchError>(repo)?;
+    }
     // The refusals that don't depend on the work tree, before anything is stashed.
     crate::repo::check_branch_not_rebased_elsewhere(repo, name)?;
     if let Some(held) = crate::repo::branch_held(
@@ -318,6 +327,7 @@ pub fn stash_and_switch(
 /// `switch_branch`: the tree checkout (safe strategy) runs first, so a refused checkout leaves
 /// HEAD and the working tree untouched.
 pub fn checkout_commit(repo: &Repository, commit_id: &str) -> Result<(), BranchError> {
+    crate::valueless_setting::refuse_for_checkout::<BranchError>(repo)?;
     let target = repo.find_commit(git2::Oid::from_str(commit_id)?)?;
     // Safe checkouts create files through a symlinked folder (#114).
     let tree = target.tree()?;

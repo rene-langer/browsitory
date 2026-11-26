@@ -87,6 +87,10 @@ pub enum StageError {
         "'{0}' is marked skip-worktree (outside the sparse checkout), so git doesn't stage it."
     )]
     SkipWorktree(String),
+    /// A setting written without a value that libgit2 would crash on (#1182); nothing
+    /// changed.
+    #[error(transparent)]
+    ValuelessSetting(#[from] crate::ValuelessSetting),
 }
 
 impl From<LinePatchError> for StageError {
@@ -316,6 +320,7 @@ pub fn discard_file(repo: &git2::Repository, path: &str) -> Result<(), StageErro
     if path.ends_with('/') {
         return delete_untracked_folder(repo, path);
     }
+    crate::valueless_setting::refuse_for_checkout::<StageError>(repo)?;
     let rel = checked_relative(path)?;
     let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
     refuse_beyond_symlink(workdir, path)?;
@@ -379,6 +384,7 @@ pub fn restore_file_version(
     path: &str,
 ) -> Result<(), StageError> {
     const GITLINK: i32 = 0o160000;
+    crate::valueless_setting::refuse_for_checkout::<StageError>(repo)?;
     let rel = checked_relative(path)?;
     let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
     let tree = repo.find_commit(git2::Oid::from_str(commit_id)?)?.tree()?;
@@ -473,6 +479,7 @@ const MAX_NAMED_FAILURES: usize = 3;
 /// error) doesn't stop the rest; they are all reported together afterwards as
 /// `DiscardIncomplete`.
 pub fn discard_all_unstaged(repo: &git2::Repository, paths: &[String]) -> Result<(), StageError> {
+    crate::valueless_setting::refuse_for_checkout::<StageError>(repo)?;
     let conflicted: std::collections::HashSet<String> = crate::status::status(repo)
         .map_err(|e| StageError::Status(e.to_string()))?
         .into_iter()
@@ -946,6 +953,9 @@ fn apply_selection(
     selection: Selection,
     target: Target,
 ) -> Result<(), StageError> {
+    if matches!(target, Target::Discard) {
+        crate::valueless_setting::refuse_for_checkout::<StageError>(repo)?;
+    }
     if matches!(target, Target::Stage) {
         let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
         checked_relative(path)?;
