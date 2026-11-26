@@ -207,6 +207,34 @@ fn a_setting_without_a_value_comes_back_true_and_is_never_removed() {
     assert!(repo.find_branch("flagged", git2::BranchType::Local).is_ok());
 }
 
+/// Deleting `release` leaves branch `release.1`'s settings alone, and Undo brings back
+/// `release`'s (#1181): together, nothing is lost.
+#[test]
+fn undo_of_a_delete_brings_back_everything_next_to_a_dotted_namesake() {
+    let (dir, repo) = init_repo();
+    let d = dir.path();
+    write_file(d, "a.txt", "a\n");
+    commit_all(&repo, "base");
+    git_ok(d, &["branch", "release"]);
+    git_ok(d, &["branch", "release.1"]);
+    git_ok(d, &["config", "branch.release.description", "own"]);
+    git_ok(d, &["config", "branch.release.1.description", "dotted"]);
+    let sorted = |text: String| {
+        let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+        lines.sort();
+        lines
+    };
+    let config = sorted(branch_config(d));
+    let before = capture(&repo, SnapshotScope::RefsAndIndex).unwrap();
+    git_core::branch::delete_branch(&repo, "release", true).unwrap();
+    let after = capture(&repo, SnapshotScope::RefsAndIndex).unwrap();
+    assert_eq!(branch_config(d), "branch.release.1.description dotted\n");
+
+    restore(&repo, &after, &before, "browsitory: undo test").unwrap();
+
+    assert_eq!(sorted(branch_config(d)), config);
+}
+
 /// A branch name with a dot and settings with several values of one key round-trip in order.
 #[test]
 fn undo_of_a_delete_keeps_multi_valued_settings_of_a_dotted_branch() {
