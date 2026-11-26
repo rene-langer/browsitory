@@ -124,6 +124,8 @@ pub fn create_branch_only(
 
 /// Creates `name` at `start_point` and switches to it, like `git switch -c <name> <start>`.
 pub fn create_branch(repo: &Repository, name: &str, start_point: &str) -> Result<(), BranchError> {
+    // Before the branch is created: the switch below checks out (#1182).
+    crate::valueless_setting::refuse_for_checkout::<BranchError>(repo)?;
     let commit = resolve_start_point(repo, start_point)?;
     // Before the branch is created: a start point whose tree brings in a case pair would only
     // leave a branch the switch below refuses (#532).
@@ -153,6 +155,7 @@ fn refuse_case_pair_brought_in(
 }
 
 pub fn switch_branch(repo: &Repository, name: &str) -> Result<(), BranchError> {
+    crate::valueless_setting::refuse_for_checkout::<BranchError>(repo)?;
     // HEAD is detached during a rebase, so the check below doesn't see a branch another
     // worktree is rebasing; git refuses it ("already used by worktree"), since a commit made on
     // it here is lost when that rebase is aborted or finished (#263).
@@ -260,6 +263,12 @@ pub fn stash_and_switch(
     name: &str,
     reapply: bool,
 ) -> Result<StashSwitchOutcome, BranchError> {
+    // The stash, the switch and the pop check out; the pop merges too (#1182).
+    if reapply {
+        crate::valueless_setting::refuse_for_merge::<BranchError>(repo)?;
+    } else {
+        crate::valueless_setting::refuse_for_checkout::<BranchError>(repo)?;
+    }
     // The refusals that don't depend on the work tree, before anything is stashed.
     crate::repo::check_branch_not_rebased_elsewhere(repo, name)?;
     if let Some(held) = crate::repo::branch_held(
@@ -318,6 +327,7 @@ pub fn stash_and_switch(
 /// `switch_branch`: the tree checkout (safe strategy) runs first, so a refused checkout leaves
 /// HEAD and the working tree untouched.
 pub fn checkout_commit(repo: &Repository, commit_id: &str) -> Result<(), BranchError> {
+    crate::valueless_setting::refuse_for_checkout::<BranchError>(repo)?;
     let target = repo.find_commit(git2::Oid::from_str(commit_id)?)?;
     // Safe checkouts create files through a symlinked folder (#114).
     let tree = target.tree()?;
@@ -347,13 +357,20 @@ pub fn rename_branch(repo: &Repository, old_name: &str, new_name: &str) -> Resul
     if let Some(held) = crate::repo::branch_held(repo, old_name, crate::repo::HoldRule::Rename)? {
         return Err(held.into());
     }
-    let mut branch = repo.find_branch(old_name, BranchType::Local)?;
-    crate::valueless_setting::spell_out_sections::<BranchError>(
+    let branch = repo.find_branch(old_name, BranchType::Local)?;
+    // The ref moves first, then the settings, so a failure never loses them (as with git). Not
+    // libgit2's branch move: it moves other branches' settings too (#1181).
+    let settings = crate::config_section::SectionMove::plan::<BranchError>(
         repo,
-        &[format!("branch.{old_name}"), format!("branch.{new_name}")],
+        &format!("branch.{old_name}"),
+        &format!("branch.{new_name}"),
     )?;
-    branch.rename(new_name, false)?;
-    Ok(())
+    branch.into_reference().rename(
+        &format!("refs/heads/{new_name}"),
+        false,
+        &format!("branch: renamed refs/heads/{old_name} to refs/heads/{new_name}"),
+    )?;
+    settings.apply::<BranchError>()
 }
 
 /// How many commits of local branch `name` no other local or remote-tracking branch and no tag
@@ -385,7 +402,7 @@ pub fn delete_branch(repo: &Repository, name: &str, force: bool) -> Result<(), B
     if let Some(held) = crate::repo::branch_held(repo, name, crate::repo::HoldRule::MoveOrDelete)? {
         return Err(held.into());
     }
-    let mut branch = repo.find_branch(name, BranchType::Local)?;
+    let branch = repo.find_branch(name, BranchType::Local)?;
     if !force {
         let branch_oid = branch.get().peel_to_commit()?.id();
         let head_oid = repo.head()?.peel_to_commit()?.id();
@@ -397,7 +414,22 @@ pub fn delete_branch(repo: &Repository, name: &str, force: bool) -> Result<(), B
             return Err(BranchError::NotMerged(name.to_string()));
         }
     }
-    crate::valueless_setting::spell_out_sections::<BranchError>(repo, &[format!("branch.{name}")])?;
-    branch.delete()?;
-    Ok(())
+    // `branch_held` leaves this worktree's own HEAD to this check (libgit2's branch delete's).
+    if branch.is_head() {
+        return Err(git2::Error::new(
+            git2::ErrorCode::GenericError,
+            git2::ErrorClass::Reference,
+            format!(
+                "cannot delete branch 'refs/heads/{name}' as it is the current HEAD of the \
+                 repository."
+            ),
+        )
+        .into());
+    }
+    // As `git branch -D`: the ref, then exactly the branch's settings. Not libgit2's branch
+    // delete: it removes other branches' settings too (#1181).
+    let settings =
+        crate::config_section::Settings::section::<BranchError>(repo, &format!("branch.{name}"))?;
+    branch.into_reference().delete()?;
+    settings.remove::<BranchError>()
 }

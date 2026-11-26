@@ -836,25 +836,46 @@ menu's choice runs back through the session: the pick, the parent picker or a se
   give way to libgit2's conflict.
 - **Settings written without a value** (`flag` alone in a config file, boolean true to git)
   crash libgit2 (a null dereference, SIGSEGV: the worker process dies, not the command) wherever
-  it rewrites a setting with a value pattern or compares its value (#1180):
-  `git_config_rename_section` (behind `git_branch_delete`, `git_branch_move`,
-  `git_remote_rename`, `git_remote_delete`) on any setting of the section;
-  `git_config_set_multivar` and `git_config_delete_multivar` on a setting with that name
-  (`git_remote_create` adds its `fetch` that way); and `git_remote_rename`/`git_remote_delete`
-  on any `branch.*.remote`. `git_config_set_string` and `git_config_delete_entry` are safe (no
-  pattern). `git_core::valueless_setting` runs before those calls: `spell_out_sections` writes
-  each such setting of the sections libgit2 will rewrite as `true` (what git reads it as) in the
-  repository's own files, with `set_str` (Delete branch and Remove remote then remove it as
-  git does; Rename branch and Rename remote carry it over as `= true`, where git keeps the bare
-  line); it refuses, writing nothing, when that setting has other values too, or a name that
-  isn't UTF-8, since git2 can't write either. libgit2 picks a section's settings with the
-  unanchored pattern `<section>\..+`, so deleting branch `a` rewrites (and removes) branch
-  `a.b`'s settings too; the spell-out matches the same set. A valueless `branch.*.remote` (any
-  file) and a valueless `remote.<new>.fetch` (Add remote) are refused, as git refuses them ("bad
-  config variable"). A failed worktree add whose rollback can't spell out its new branch's
-  settings leaves the branch. Undo's own settings restore never removes such a setting (#1151).
-  The tests (`tests/valueless_config.rs`) run each command in a child process, so a crash fails
-  the test instead of the test binary.
+  it matches a value pattern against one or reads its value unchecked: `git_config_set_multivar`
+  and `git_config_delete_multivar` on a setting with that name (`git_remote_create` adds its
+  `fetch` that way; `git_config_rename_section` rewrites every setting of a section so), any
+  `branch.*.remote` in `git_remote_rename`/`git_remote_delete` (#1180), `merge.default` at the
+  start of every merge, in memory too (`git_merge_trees`, `git_merge_commits`, `git_merge`,
+  cherry-pick, revert, stash apply, unless the caller names a driver, which git2 can't), and
+  `merge.conflictstyle` at the start of every checkout whose options name no conflict style
+  (Browsitory's, and libgit2's own in stash save, `git_apply` to the work tree and
+  `git_worktree_add`) (#1182). `git_config_set_string` and `git_config_delete_entry` are safe
+  (no pattern), and so are the other settings these paths read (`merge.renames`,
+  `merge.renamelimit`, `diff.renames`, `diff.renamelimit`, `merge.ff`, `diff.ignoresubmodules`,
+  the `core.*` checkout settings), each checked in a child process. `git_core::valueless_setting`
+  refuses, naming the setting as git does ("missing value", "bad config variable"), before
+  anything changes: a valueless `branch.*.remote` (Rename/Remove remote), a left-over
+  `remote.<new>.fetch` (Add remote), and a valueless `merge.default` (`refuse_for_merge`) or
+  `merge.conflictstyle` (`refuse_for_checkout`) at the start of every command that merges or
+  checks out. The leftover check that compares HEAD with an in-memory pick or revert
+  (`head_info`, Commit) counts the operation as still paused instead (`can_merge_in_memory`).
+  Clone and Update submodule read only the new or the submodule's repository and the user's
+  config there, and aren't guarded yet (#1189).
+- **Branch and remote sections**: libgit2's `git_config_rename_section` picks a section's
+  settings with the unanchored pattern `<section>\..+`, in every config file: deleting branch
+  `a` removed branch `a.b`'s settings, renaming remote `origin` garbled
+  `browsitory.remote.origin.*`, and a setting of the section in the user's own config made the
+  command fail halfway (#1181). So Delete/Rename branch and Rename/Remove remote don't use
+  libgit2's branch delete and move or remote rename and delete: `git_core::config_section`
+  removes and moves exactly `<section>.<variable>` (a variable never holds a dot) of the
+  repository's own file, as `git branch -D/-m` and `git remote rm/rename` do, without a value
+  pattern for a single value (one written without a value is removed as is; a rename writes it
+  as `true`, what git reads it as, where git keeps the bare line). A setting with several values,
+  one of them without a value, is refused. The ref moves first, then the settings. Rename remote
+  also rewrites each fetch refspec's `:refs/remotes/<old>/`, moves `refs/remotes/<old>/*` when it
+  rewrote one, and renames the remote in `branch.*.remote`, `branch.*.pushRemote` and
+  `remote.pushDefault`; Remove remote deletes only the remote-tracking refs a fetch refspec of
+  the remote (and no other remote's) stores into under `refs/remotes/` (libgit2 deleted local
+  branches its push refspec named) and the settings naming it. Undo's own settings snapshot and
+  restore match a branch's settings the same way (#1151) and never remove a setting without a
+  value. The tests (`tests/valueless_config.rs`, `tests/config_sections.rs`) run each crashing
+  command in a child process, so a crash fails the test instead of the test binary, and compare
+  the branch and remote commands with the git CLI on a copy of the repository.
 
 ## Threading model
 

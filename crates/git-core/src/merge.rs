@@ -92,6 +92,10 @@ pub enum MergeError {
     /// rebase's, which only the terminal ends (#263). Nothing was changed.
     #[error(transparent)]
     TerminalRebase(#[from] crate::repo::TerminalRebaseInProgress),
+    /// A setting written without a value that libgit2 would crash on (#1182); nothing
+    /// changed.
+    #[error(transparent)]
+    ValuelessSetting(#[from] crate::ValuelessSetting),
 }
 
 /// Why Mark resolved didn't stage a folder (`MergeError::FolderNotStaged`, #213).
@@ -292,6 +296,7 @@ pub fn start_merge(
     target: &str,
     opts: MergeOptions,
 ) -> Result<MergeOutcome, MergeError> {
+    crate::valueless_setting::refuse_for_merge::<MergeError>(repo)?;
     // A merge step of a terminal `rebase --rebase-merges` (MERGE_HEAD while libgit2 reports the
     // rebase) is the rebase's: a second merge on top would be committed as part of it (#263).
     if repo.path().join("MERGE_HEAD").exists() {
@@ -750,6 +755,7 @@ pub fn resolve_whole_file(
     path: &str,
     side: ConflictSide,
 ) -> Result<(), MergeError> {
+    crate::valueless_setting::refuse_for_checkout::<MergeError>(repo)?;
     if !crate::launch::is_safe_relative(path) {
         return Err(MergeError::NoConflict(path.to_string()));
     }
@@ -1258,6 +1264,7 @@ fn has_conflict_markers(content: &[u8]) -> bool {
 }
 
 pub fn abort_merge(repo: &Repository) -> Result<(), MergeError> {
+    crate::valueless_setting::refuse_for_checkout::<MergeError>(repo)?;
     let reset = plan_operation_reset(repo)?;
     apply_operation_reset(repo, reset)?;
     // Only the operation's own files, as git's `remove_branch_state` after `git reset --merge`:

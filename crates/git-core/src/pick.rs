@@ -100,6 +100,10 @@ pub enum PickError {
          elsewhere or discard them, then try again."
     )]
     RewindBlocked(String),
+    /// A setting written without a value that libgit2 would crash on (#1182); nothing
+    /// changed.
+    #[error(transparent)]
+    ValuelessSetting(#[from] crate::ValuelessSetting),
 }
 
 fn terminal_sequence_changed(kind: SequenceKind) -> String {
@@ -508,6 +512,7 @@ fn apply(
     mainline: Option<u32>,
     mut hooks: HookOptions<'_>,
 ) -> Result<PickOutcome, PickError> {
+    crate::valueless_setting::refuse_for_merge::<PickError>(repo)?;
     let head = check_ready(repo)?;
     let target = repo.find_commit(Oid::from_str(commit_id)?)?;
     check_mainline(&target, mainline)?;
@@ -845,6 +850,9 @@ fn start(
     kind: SequenceKind,
     mut hooks: HookOptions<'_>,
 ) -> SequenceRun {
+    if let Err(error) = crate::valueless_setting::refuse_for_merge::<PickError>(repo) {
+        return SequenceRun::failed(error);
+    }
     if ids.is_empty() {
         return SequenceRun::failed(PickError::NothingSelected);
     }
@@ -1022,6 +1030,9 @@ pub fn continue_sequence(
     mut state: SequenceState,
     mut hooks: crate::hooks::HookOptions<'_>,
 ) -> SequenceRun {
+    if let Err(error) = crate::valueless_setting::refuse_for_merge::<PickError>(repo) {
+        return SequenceRun::stopped(error, state);
+    }
     if state.next >= state.commits.len() {
         return SequenceRun::stopped(
             git2::Error::from_str("the stored sequence has no step left"),
@@ -1309,6 +1320,10 @@ pub(crate) fn commit_carries_pick(
     picked: &Commit<'_>,
     coverage: Coverage,
 ) -> Result<Option<usize>, git2::Error> {
+    // The pick in memory would crash on a merge driver without a value (#1182): unknown.
+    if !crate::valueless_setting::can_merge_in_memory(repo) {
+        return Ok(None);
+    }
     if head.parent_count() != 1 || head.parent_id(0)? != expected_parent {
         return Ok(None);
     }
@@ -1332,6 +1347,10 @@ pub(crate) fn commit_carries_revert(
     head: &Commit<'_>,
     reverted: &Commit<'_>,
 ) -> Result<Option<usize>, git2::Error> {
+    // As in `commit_carries_pick` (#1182).
+    if !crate::valueless_setting::can_merge_in_memory(repo) {
+        return Ok(None);
+    }
     if head.parent_count() != 1 {
         return Ok(None);
     }
@@ -1417,6 +1436,7 @@ pub fn abort_sequence(
     repo: &Repository,
     state: &SequenceState,
 ) -> Result<SequenceAbort, PickError> {
+    crate::valueless_setting::refuse_for_checkout::<PickError>(repo)?;
     let head_id = repo.head()?.peel_to_commit()?.id().to_string();
     if is_own_paused_step(repo, state) {
         crate::merge::abort_merge(repo)?;

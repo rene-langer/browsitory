@@ -20,6 +20,7 @@ pub fn fold_staged_into(
     target: &str,
     mut hooks: HookOptions<'_>,
 ) -> Result<(Option<RebaseState>, RebaseStepResult), RebaseError> {
+    crate::valueless_setting::refuse_for_merge::<RebaseError>(repo)?;
     crate::repo::check_no_terminal_rebase(repo)?;
     if let Some(kind) = crate::repo::paused_operation(repo) {
         return Err(RebaseError::OperationPaused(kind));

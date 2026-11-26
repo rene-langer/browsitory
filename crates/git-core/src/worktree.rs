@@ -83,6 +83,10 @@ pub enum WorktreeError {
     /// paused cherry-pick or revert there (#291, #293).
     #[error(transparent)]
     Held(#[from] crate::repo::BranchHeld),
+    /// A setting written without a value that libgit2 would crash on (#1182); nothing
+    /// changed.
+    #[error(transparent)]
+    ValuelessSetting(#[from] crate::ValuelessSetting),
 }
 
 impl From<git2::Error> for WorktreeError {
@@ -297,6 +301,7 @@ pub fn create_worktree_with(
     start_point: Option<&str>,
     probe: impl FnOnce(&Path) -> std::io::Result<bool>,
 ) -> Result<(), WorktreeError> {
+    crate::valueless_setting::refuse_for_checkout::<WorktreeError>(repo)?;
     if cfg!(windows) {
         refuse_unusable_windows_names(name, path)?;
     }
@@ -386,17 +391,19 @@ fn roll_back_add(
         }
         let _ = std::fs::remove_dir_all(&admin);
     }
-    // A setting without a value that can't be written out crashes libgit2's branch delete
-    // (#1180): the branch stays then.
-    if made.branch
-        && crate::valueless_setting::spell_out_sections::<crate::branch::BranchError>(
+    // The new branch goes with its settings, as Delete branch removes them; when they can't be
+    // removed safely (#1180), the branch stays.
+    if made.branch {
+        let settings = crate::config_section::Settings::section::<crate::branch::BranchError>(
             repo,
-            &[format!("branch.{branch}")],
-        )
-        .is_ok()
-    {
-        if let Ok(mut new_branch) = repo.find_branch(branch, BranchType::Local) {
-            let _ = new_branch.delete();
+            &format!("branch.{branch}"),
+        );
+        if let (Ok(settings), Ok(new_branch)) =
+            (settings, repo.find_branch(branch, BranchType::Local))
+        {
+            if new_branch.into_reference().delete().is_ok() {
+                let _ = settings.remove::<crate::branch::BranchError>();
+            }
         }
     }
     // libgit2 creates the destination itself; when it isn't known to be ours, it goes only while

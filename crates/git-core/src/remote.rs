@@ -1,4 +1,5 @@
 use std::cell::{Cell, RefCell};
+use std::collections::BTreeSet;
 
 use git2::{
     build::CheckoutBuilder, AutotagOption, BranchType, Cred, CredentialType, Direction, ErrorClass,
@@ -1351,6 +1352,7 @@ pub fn pull_after_fetch(
     remote_name: &str,
     remote_branch: &str,
 ) -> Result<PullOutcome, RemoteError> {
+    crate::valueless_setting::refuse_for_checkout::<RemoteError>(repo)?;
     if !worktree_is_clean(repo)? {
         return Err(RemoteError::DirtyWorktree);
     }
@@ -1511,14 +1513,63 @@ pub fn add_remote(
     Ok(())
 }
 
+/// Renames remote `old_name` as `git remote rename` does (#1181): its section, its fetch
+/// refspecs storing into `refs/remotes/<old_name>/` and then its refs there, and every
+/// `branch.*.remote`, `branch.*.pushRemote` and `remote.pushDefault` naming it. Not libgit2's
+/// remote rename: it moves the settings of a remote `<old_name>.x` too, and fails halfway on a
+/// remote with several fetch refspecs.
 pub fn rename_remote(repo: &Repository, old_name: &str, new_name: &str) -> Result<(), RemoteError> {
     let auth_profile = remote_auth_profile(repo, old_name)?;
     crate::valueless_setting::refuse_valueless_branch_remotes::<RemoteError>(repo)?;
-    crate::valueless_setting::spell_out_sections::<RemoteError>(
+    repo.find_remote(old_name)?;
+    if !git2::Remote::is_valid_name(new_name) {
+        return Err(git2::Error::new(
+            ErrorCode::InvalidSpec,
+            ErrorClass::Config,
+            format!("'{new_name}' is not a valid remote name."),
+        )
+        .into());
+    }
+    match repo.find_remote(new_name) {
+        Ok(_) => {
+            return Err(git2::Error::new(
+                ErrorCode::Exists,
+                ErrorClass::Config,
+                format!("remote '{new_name}' already exists"),
+            )
+            .into())
+        }
+        Err(error) if error.code() == ErrorCode::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    let mut section = crate::config_section::SectionMove::plan::<RemoteError>(
         repo,
-        &[format!("remote.{old_name}"), format!("remote.{new_name}")],
+        &format!("remote.{old_name}"),
+        &format!("remote.{new_name}"),
     )?;
-    repo.remote_rename(old_name, new_name)?;
+    // git rewrites the first `:refs/remotes/<old>/` of each fetch refspec, and moves the refs
+    // only when it rewrote one.
+    let old_store = format!(":refs/remotes/{old_name}/");
+    let new_store = format!(":refs/remotes/{new_name}/");
+    let mut refspec_moved = false;
+    for (variable, value) in section.values_mut() {
+        if variable != "fetch" {
+            continue;
+        }
+        if let Some(at) = value.find(&old_store) {
+            value.replace_range(at..at + old_store.len(), &new_store);
+            refspec_moved = true;
+        }
+    }
+    let naming = settings_naming_remote(repo, old_name)?;
+    section.apply::<RemoteError>()?;
+    let mut config = repo.config()?;
+    for name in naming {
+        config.set_str(&name, new_name)?;
+    }
+    if refspec_moved {
+        rename_remote_refs(repo, old_name, new_name)?;
+    }
     if let Some(profile) = auth_profile {
         set_remote_auth_profile(repo, new_name, profile)?;
         clear_remote_auth_profile(repo, old_name)?;
@@ -1649,8 +1700,7 @@ pub fn remove_remote(repo: &Repository, name: &str) -> Result<(), RemoteError> {
             branches,
         });
     }
-    prepare_remote_delete(repo, name)?;
-    repo.remote_delete(name)?;
+    delete_remote(repo, name)?;
     clear_remote_auth_profile(repo, name)?;
     Ok(())
 }
@@ -1704,20 +1754,138 @@ pub fn remote_upstreams_cached(
     Ok(upstreams)
 }
 
-/// Before libgit2 deletes remote `name` (#1180): refuses a `branch.*.remote` written without a
-/// value, and writes a setting of the remote's own without one as `true`.
-fn prepare_remote_delete(repo: &Repository, name: &str) -> Result<(), RemoteError> {
+/// Removes what `git remote rm` removes (#1181), everything checked before anything changes:
+/// the remote's remote-tracking refs, its section, and the settings of the repository's own file
+/// that track or push to it (a tracking branch loses its `merge` too). Not libgit2's remote
+/// delete: it removes the settings of a remote `<name>.x` too, deletes every ref the remote's
+/// push refspecs name (local branches), and takes a `branch.a.b.remote` naming the remote for
+/// branch `a`'s.
+fn delete_remote(repo: &Repository, name: &str) -> Result<(), RemoteError> {
     crate::valueless_setting::refuse_valueless_branch_remotes::<RemoteError>(repo)?;
-    crate::valueless_setting::spell_out_sections::<RemoteError>(repo, &[format!("remote.{name}")])
+    repo.find_remote(name)?;
+    let section = format!("remote.{name}");
+    let naming = settings_naming_remote(repo, name)?;
+    let merges: BTreeSet<String> = naming
+        .iter()
+        .filter_map(|setting| {
+            let branch = setting.strip_prefix("branch.")?.strip_suffix(".remote")?;
+            Some(format!("branch.{branch}.merge"))
+        })
+        .collect();
+    let settings = crate::config_section::Settings::read::<RemoteError>(repo, |setting| {
+        naming.contains(setting)
+            || merges.contains(setting)
+            || crate::config_section::variable_of(setting, &section).is_some()
+    })?;
+    delete_remote_tracking_refs(repo, name)?;
+    settings.remove::<RemoteError>()
 }
 
-pub fn remove_remote_and_clear_upstreams(repo: &Repository, name: &str) -> Result<(), RemoteError> {
-    prepare_remote_delete(repo, name)?;
-    for upstream in remote_upstreams(repo, name)? {
-        repo.find_branch(&upstream.local_branch, BranchType::Local)?
-            .set_upstream(None)?;
+/// The remote-tracking refs `git remote rm` deletes: those under `refs/remotes/` a fetch refspec
+/// of remote `name` stores into, unless another remote's fetch refspec stores into it too.
+fn delete_remote_tracking_refs(repo: &Repository, name: &str) -> Result<(), RemoteError> {
+    let remote = repo.find_remote(name)?;
+    let mut others = Vec::new();
+    for other in repo.remotes()?.iter() {
+        let Some(other) = other? else { continue };
+        if other != name {
+            others.push(repo.find_remote(other)?);
+        }
     }
-    repo.remote_delete(name)?;
+    let stores_into = |remote: &git2::Remote<'_>, reference: &str| {
+        remote
+            .refspecs()
+            .any(|spec| spec.direction() == Direction::Fetch && spec.dst_matches(reference))
+    };
+    let mut doomed = Vec::new();
+    for reference in repo.references()? {
+        let reference = reference?;
+        let Ok(reference_name) = reference.name() else {
+            continue;
+        };
+        if reference_name.starts_with("refs/remotes/")
+            && stores_into(&remote, reference_name)
+            && !others
+                .iter()
+                .any(|other| stores_into(other, reference_name))
+        {
+            doomed.push(reference_name.to_string());
+        }
+    }
+    for reference_name in doomed {
+        repo.find_reference(&reference_name)?.delete()?;
+    }
+    Ok(())
+}
+
+/// The settings of any config file naming remote `name` as a branch's upstream remote or push
+/// remote, or as the default push remote: `branch.<branch>.remote`, `branch.<branch>.pushRemote`
+/// and `remote.pushDefault`.
+fn settings_naming_remote(repo: &Repository, name: &str) -> Result<BTreeSet<String>, RemoteError> {
+    let config = repo.config()?;
+    let mut naming = BTreeSet::new();
+    let mut entries = config.entries(None)?;
+    while let Some(entry) = entries.next() {
+        let entry = entry?;
+        // One written without a value names no remote (and `value` would panic on it).
+        if !entry.has_value() {
+            continue;
+        }
+        let (Ok(setting), Ok(value)) = (entry.name(), entry.value()) else {
+            continue;
+        };
+        let names_remote = setting == "remote.pushdefault"
+            || setting.strip_prefix("branch.").is_some_and(|rest| {
+                rest.strip_suffix(".remote")
+                    .or_else(|| rest.strip_suffix(".pushremote"))
+                    .is_some_and(|branch| !branch.is_empty())
+            });
+        if names_remote && value == name {
+            naming.insert(setting.to_string());
+        }
+    }
+    Ok(naming)
+}
+
+/// Moves remote `old_name`'s refs (`refs/remotes/<old_name>/…`) to `refs/remotes/<new_name>/`,
+/// a symbolic one (`origin/HEAD`) then pointing at the moved target.
+fn rename_remote_refs(
+    repo: &Repository,
+    old_name: &str,
+    new_name: &str,
+) -> Result<(), RemoteError> {
+    let old_prefix = format!("refs/remotes/{old_name}/");
+    let new_prefix = format!("refs/remotes/{new_name}/");
+    let message = format!("remote: renamed {old_name} to {new_name}");
+    let mut names = Vec::new();
+    for reference in repo.references()? {
+        let reference = reference?;
+        if let Ok(name) = reference.name() {
+            if name.starts_with(&old_prefix) {
+                names.push(name.to_string());
+            }
+        }
+    }
+    for name in names {
+        let renamed_name = format!("{new_prefix}{}", &name[old_prefix.len()..]);
+        let mut renamed = repo
+            .find_reference(&name)?
+            .rename(&renamed_name, true, &message)?;
+        let target = renamed
+            .symbolic_target()?
+            .and_then(|target| target.strip_prefix(&old_prefix))
+            .map(|rest| format!("{new_prefix}{rest}"));
+        if let Some(target) = target {
+            renamed.symbolic_set_target(&target, &message)?;
+        }
+    }
+    Ok(())
+}
+
+/// Removes remote `name` with the upstream settings of the branches tracking it, as
+/// `git remote rm` does.
+pub fn remove_remote_and_clear_upstreams(repo: &Repository, name: &str) -> Result<(), RemoteError> {
+    delete_remote(repo, name)?;
     clear_remote_auth_profile(repo, name)?;
     Ok(())
 }

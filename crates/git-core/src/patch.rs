@@ -103,6 +103,10 @@ pub enum PatchError {
     /// A file the patch writes uses an external filter driver (#1063); nothing changed.
     #[error(transparent)]
     ExternalFilter(#[from] crate::ExternalFilter),
+    /// A setting written without a value that libgit2 would crash on (#1182); nothing
+    /// changed.
+    #[error(transparent)]
+    ValuelessSetting(#[from] crate::ValuelessSetting),
 }
 
 impl From<crate::diff::DiffError> for PatchError {
@@ -252,6 +256,7 @@ pub fn apply_commit_change(
     reverse: bool,
     target: ApplyTarget,
 ) -> Result<(), PatchError> {
+    crate::valueless_setting::refuse_for_checkout::<PatchError>(repo)?;
     let patch = match hunk {
         None => commit_file_diff_bytes(repo, commit_id, path, old_path, reverse)?,
         Some(hunk) => commit_hunk_patch(repo, commit_id, path, old_path, hunk, reverse)?,
@@ -387,6 +392,7 @@ pub fn apply_patch_with(
     how: PatchApply,
     mut hooks: HookOptions<'_>,
 ) -> Result<Vec<String>, PatchError> {
+    crate::valueless_setting::refuse_for_checkout::<PatchError>(repo)?;
     let target = match how {
         PatchApply::WorkTree => ApplyTarget::WorkTree,
         PatchApply::Stage | PatchApply::Commits => ApplyTarget::WorkTreeAndIndex,
