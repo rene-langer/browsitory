@@ -12,14 +12,15 @@
 
 use std::collections::BTreeSet;
 
-use git2::{Config, ConfigLevel, ErrorCode, Repository};
+use git2::{Config, ConfigLevel, Repository};
 
 use crate::valueless_setting::ValuelessSetting;
 
 /// Some settings of the repository's own config file, read before anything changes.
 pub(crate) struct Settings {
-    /// The repository's own config file; `None` when it has none.
-    file: Option<Config>,
+    /// The repository's own config file (libgit2 always has one, empty when the file is
+    /// missing).
+    file: Config,
     /// The chosen settings written in the file itself, in file order: name and value (`None`:
     /// written without one).
     own: Vec<(String, Option<Vec<u8>>)>,
@@ -36,31 +37,26 @@ impl Settings {
     where
         E: From<git2::Error> + From<ValuelessSetting>,
     {
-        let file = match repo.config()?.open_level(ConfigLevel::Local) {
-            Ok(file) => Some(file),
-            Err(error) if error.code() == ErrorCode::NotFound => None,
-            Err(error) => return Err(error.into()),
-        };
+        let file = repo.config()?.open_level(ConfigLevel::Local)?;
         let mut own = Vec::new();
         let mut present = BTreeSet::new();
         let mut shared = BTreeSet::new();
-        if let Some(file) = &file {
-            let mut entries = file.entries(None)?;
-            while let Some(entry) = entries.next() {
-                let entry = entry?;
-                // A name that isn't UTF-8 is never one Browsitory chooses.
-                let Some(name) = entry.name().ok().filter(|name| choose(name)) else {
-                    continue;
-                };
-                if !present.insert(name.to_string()) {
-                    shared.insert(name.to_string());
-                }
-                if entry.include_depth() == 0 {
-                    let value = entry.has_value().then(|| entry.value_bytes().to_vec());
-                    own.push((name.to_string(), value));
-                }
+        let mut entries = file.entries(None)?;
+        while let Some(entry) = entries.next() {
+            let entry = entry?;
+            // A name that isn't UTF-8 is never one Browsitory chooses.
+            let Some(name) = entry.name().ok().filter(|name| choose(name)) else {
+                continue;
+            };
+            if !present.insert(name.to_string()) {
+                shared.insert(name.to_string());
+            }
+            if entry.include_depth() == 0 {
+                let value = entry.has_value().then(|| entry.value_bytes().to_vec());
+                own.push((name.to_string(), value));
             }
         }
+        drop(entries);
         if let Some((name, _)) = own
             .iter()
             .find(|(name, value)| value.is_none() && shared.contains(name))
@@ -89,9 +85,7 @@ impl Settings {
     where
         E: From<git2::Error>,
     {
-        let Some(mut file) = self.file else {
-            return Ok(());
-        };
+        let mut file = self.file;
         let names: BTreeSet<&String> = self.own.iter().map(|(name, _)| name).collect();
         for name in names {
             if self.shared.contains(name) {
@@ -158,13 +152,11 @@ impl SectionMove {
 
     /// Writes the settings under the new section, after any it already has (as git's renamed
     /// section joins a left-over one), then removes the old section's.
-    pub(crate) fn apply<E>(mut self) -> Result<(), E>
+    pub(crate) fn apply<E>(self) -> Result<(), E>
     where
         E: From<git2::Error>,
     {
-        let Some(mut file) = self.to.file.take() else {
-            return Ok(());
-        };
+        let mut file = self.to.file;
         // A value is added next to an existing one with a value pattern, which crashes on a
         // setting written without a value: such a setting gets the value git reads it as.
         for (name, value) in &self.to.own {
