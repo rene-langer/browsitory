@@ -633,6 +633,41 @@ fn popping_a_staged_change_its_work_tree_reverted_outside_the_cone_matches_git()
     assert_same_as_git(ours.path(), twin.path());
 }
 
+/// A marked file outside the cone that is on disk with content of its own (another tool wrote
+/// it) and that the stash changes: Pop refuses, as for any local edit, instead of writing the
+/// stashed version over it, and changes nothing.
+#[test]
+fn a_pop_refuses_to_overwrite_a_marked_file_on_disk_outside_the_cone() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let d = dir.path();
+    stashed_before_the_sparse_checkout(d);
+    write_file(d, "docs/guide.md", "written by another tool\n");
+    // The index file keeps the mark until a git command rewrites it (git takes a file that is
+    // there for unmarked: `ls-files -v` shows `H`, and `status` writes the index without the
+    // mark), so the mark is read from the index file and `status` runs only at the end.
+    let marked = |d: &Path| {
+        let index = git2::Index::open(&d.join(".git/index")).unwrap();
+        let entry = index.get_path(Path::new("docs/guide.md"), 0).unwrap();
+        entry.flags_extended & git2::IndexEntryExtendedFlag::SKIP_WORKTREE.bits() != 0
+    };
+    assert!(marked(d));
+    let index_before = git_out(d, &["ls-files", "-s"]);
+    let files_before = files(d);
+    let stashes = stash_trees(d);
+    let id = stash_id(d);
+
+    let refused = pop_stash(&mut open(d), 0, Some(&id), false);
+
+    assert!(
+        matches!(refused, Err(git_core::stash::StashError::WouldOverwrite)),
+        "{refused:?}"
+    );
+    assert!(marked(d));
+    assert_eq!(git_out(d, &["ls-files", "-s"]), index_before);
+    assert_eq!(files(d), files_before);
+    assert_eq!(stash_trees(d), stashes);
+}
+
 /// A staged new file inside the cone comes back staged and on disk: only paths outside the
 /// sparse patterns stay outside.
 #[test]
