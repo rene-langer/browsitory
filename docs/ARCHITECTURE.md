@@ -812,6 +812,27 @@ menu's choice runs back through the session: the pick, the parent picker or a se
   `libgit2_still_merges_a_file_and_a_folder_without_a_conflict` (`tests/file_folder_conflict.rs`)
   pins the libgit2 behaviour: when a libgit2 update fixes it, that test fails and the guard can
   give way to libgit2's conflict.
+- **Settings written without a value** (`flag` alone in a config file, boolean true to git)
+  crash libgit2 (a null dereference, SIGSEGV: the worker process dies, not the command) wherever
+  it rewrites a setting with a value pattern or compares its value (#1180):
+  `git_config_rename_section` (behind `git_branch_delete`, `git_branch_move`,
+  `git_remote_rename`, `git_remote_delete`) on any setting of the section;
+  `git_config_set_multivar` and `git_config_delete_multivar` on a setting with that name
+  (`git_remote_create` adds its `fetch` that way); and `git_remote_rename`/`git_remote_delete`
+  on any `branch.*.remote`. `git_config_set_string` and `git_config_delete_entry` are safe (no
+  pattern). `git_core::valueless_setting` runs before those calls: `spell_out_sections` writes
+  each such setting of the sections libgit2 will rewrite as `true` (what git reads it as) in the
+  repository's own files, with `set_str` (Delete branch and Remove remote then remove it as
+  git does; Rename branch and Rename remote carry it over as `= true`, where git keeps the bare
+  line); it refuses, writing nothing, when that setting has other values too, or a name that
+  isn't UTF-8, since git2 can't write either. libgit2 picks a section's settings with the
+  unanchored pattern `<section>\..+`, so deleting branch `a` rewrites (and removes) branch
+  `a.b`'s settings too; the spell-out matches the same set. A valueless `branch.*.remote` (any
+  file) and a valueless `remote.<new>.fetch` (Add remote) are refused, as git refuses them ("bad
+  config variable"). A failed worktree add whose rollback can't spell out its new branch's
+  settings leaves the branch. Undo's own settings restore never removes such a setting (#1151).
+  The tests (`tests/valueless_config.rs`) run each command in a child process, so a crash fails
+  the test instead of the test binary.
 
 ## Threading model
 

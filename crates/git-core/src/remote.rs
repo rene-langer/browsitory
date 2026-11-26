@@ -640,6 +640,9 @@ pub enum RemoteError {
     /// A file the pull writes uses an external filter driver (#1063); nothing changed.
     #[error(transparent)]
     ExternalFilter(#[from] crate::ExternalFilter),
+    /// A setting written without a value that libgit2 can't rewrite or read (#1180).
+    #[error(transparent)]
+    ValuelessSetting(#[from] crate::ValuelessSetting),
 }
 
 impl RemoteError {
@@ -1494,6 +1497,13 @@ pub fn add_remote(
     push_url: Option<&str>,
 ) -> Result<(), RemoteError> {
     validate_urls(fetch_url, push_url)?;
+    // An invalid name stays libgit2's to refuse, with its message.
+    if git2::Remote::is_valid_name(name) {
+        crate::valueless_setting::refuse_valueless::<RemoteError>(
+            repo,
+            &format!("remote.{name}.fetch"),
+        )?;
+    }
     repo.remote(name, fetch_url)?;
     if let Some(push_url) = push_url {
         repo.remote_set_pushurl(name, Some(push_url))?;
@@ -1503,6 +1513,11 @@ pub fn add_remote(
 
 pub fn rename_remote(repo: &Repository, old_name: &str, new_name: &str) -> Result<(), RemoteError> {
     let auth_profile = remote_auth_profile(repo, old_name)?;
+    crate::valueless_setting::refuse_valueless_branch_remotes::<RemoteError>(repo)?;
+    crate::valueless_setting::spell_out_sections::<RemoteError>(
+        repo,
+        &[format!("remote.{old_name}"), format!("remote.{new_name}")],
+    )?;
     repo.remote_rename(old_name, new_name)?;
     if let Some(profile) = auth_profile {
         set_remote_auth_profile(repo, new_name, profile)?;
@@ -1634,6 +1649,7 @@ pub fn remove_remote(repo: &Repository, name: &str) -> Result<(), RemoteError> {
             branches,
         });
     }
+    prepare_remote_delete(repo, name)?;
     repo.remote_delete(name)?;
     clear_remote_auth_profile(repo, name)?;
     Ok(())
@@ -1688,7 +1704,15 @@ pub fn remote_upstreams_cached(
     Ok(upstreams)
 }
 
+/// Before libgit2 deletes remote `name` (#1180): refuses a `branch.*.remote` written without a
+/// value, and writes a setting of the remote's own without one as `true`.
+fn prepare_remote_delete(repo: &Repository, name: &str) -> Result<(), RemoteError> {
+    crate::valueless_setting::refuse_valueless_branch_remotes::<RemoteError>(repo)?;
+    crate::valueless_setting::spell_out_sections::<RemoteError>(repo, &[format!("remote.{name}")])
+}
+
 pub fn remove_remote_and_clear_upstreams(repo: &Repository, name: &str) -> Result<(), RemoteError> {
+    prepare_remote_delete(repo, name)?;
     for upstream in remote_upstreams(repo, name)? {
         repo.find_branch(&upstream.local_branch, BranchType::Local)?
             .set_upstream(None)?;

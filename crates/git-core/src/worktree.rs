@@ -386,7 +386,15 @@ fn roll_back_add(
         }
         let _ = std::fs::remove_dir_all(&admin);
     }
-    if made.branch {
+    // A setting without a value that can't be written out crashes libgit2's branch delete
+    // (#1180): the branch stays then.
+    if made.branch
+        && crate::valueless_setting::spell_out_sections::<crate::branch::BranchError>(
+            repo,
+            &[format!("branch.{branch}")],
+        )
+        .is_ok()
+    {
         if let Ok(mut new_branch) = repo.find_branch(branch, BranchType::Local) {
             let _ = new_branch.delete();
         }

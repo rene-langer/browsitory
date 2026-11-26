@@ -49,10 +49,12 @@ pub mod tree;
 pub mod undo;
 mod untracked;
 pub mod user_command;
+mod valueless_setting;
 pub mod worktree;
 pub(crate) mod worktree_guard;
 pub use external_filter::ExternalFilter;
 pub use file_folder::FileFolderConflict;
+pub use valueless_setting::ValuelessSetting;
 pub use worktree_guard::{
     CaseCollision, CaseConfigUnreadable, CasePair, CasePairBroughtIn, HeldDuring, HeldOpen,
     LinkedFolder,

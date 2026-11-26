@@ -42,6 +42,9 @@ pub enum BranchError {
     /// A file to write uses an external filter driver (#1063); nothing changed.
     #[error(transparent)]
     ExternalFilter(#[from] crate::ExternalFilter),
+    /// A branch setting written without a value that libgit2 can't rewrite (#1180).
+    #[error(transparent)]
+    ValuelessSetting(#[from] crate::ValuelessSetting),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -345,6 +348,10 @@ pub fn rename_branch(repo: &Repository, old_name: &str, new_name: &str) -> Resul
         return Err(held.into());
     }
     let mut branch = repo.find_branch(old_name, BranchType::Local)?;
+    crate::valueless_setting::spell_out_sections::<BranchError>(
+        repo,
+        &[format!("branch.{old_name}"), format!("branch.{new_name}")],
+    )?;
     branch.rename(new_name, false)?;
     Ok(())
 }
@@ -390,6 +397,7 @@ pub fn delete_branch(repo: &Repository, name: &str, force: bool) -> Result<(), B
             return Err(BranchError::NotMerged(name.to_string()));
         }
     }
+    crate::valueless_setting::spell_out_sections::<BranchError>(repo, &[format!("branch.{name}")])?;
     branch.delete()?;
     Ok(())
 }
