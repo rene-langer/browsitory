@@ -6,6 +6,271 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-26
+
+0.17.0 fixes data loss and crashes found in an audit of the app: in sparse checkouts and with
+files marked skip-worktree or added with `git add -N`, in branch and remote settings, with
+settings written without a value, and in Undo. It makes large repositories, big commits and
+files under filter drivers (Git LFS, git-crypt) safe and fast to work with, and it hardens the
+release workflow. Changes in behaviour to know about:
+
+- A signing program (`gpg.program`, `gpg.ssh.program`, …) or `gpg.ssh.allowedSignersFile` set
+  only in a repository's `.git/config` is ignored: move it to your global git config.
+- Reset hard refuses when it would overwrite local edits of a file outside a sparse checkout or
+  marked skip-worktree, and while a merge, cherry-pick, revert or rebase is paused.
+- A discard whose files can't be saved for Undo is refused, and so is any action that would
+  store or write a file under a filter driver Browsitory can't run.
+- The undo history file is now version 3: an older Browsitory starts with an empty undo history.
+- A commit or stash with more than 50 files starts with every file collapsed, and a file over
+  20 MB isn't diffed or blamed until you ask.
+
+### Security
+
+- Changed: selecting a signed commit no longer runs a program that the repository's own
+  `.git/config` names. `gpg.program`, `gpg.openpgp.program`, `gpg.ssh.program` and
+  `gpg.ssh.allowedSignersFile` now count only from your own git config (global, XDG or system),
+  for checking signatures and for signing. When only the repository sets a program, the
+  signature shows "Signature could not be checked" and signing fails, both saying which setting
+  to move to your global config; an allowed signers file set only there is ignored (#1121).
+- Fixed: the token typed in the clone dialog was sent to another host when the server redirected
+  the clone there. It now goes only to the host and port of the clone URL (#1126).
+- Fixed: Clone refuses an `https://` or `http://` URL with a user name or token in it, as the
+  remotes list already did. Such a URL landed in the repository's Git config, broke the remotes
+  list and could leave a saved token unusable. The Clone dialog moves a user name without a
+  password (Bitbucket's copy URL, `https://alice@bitbucket.org/…`) into the Username field when
+  you click Clone (#1052).
+- Fixed: the Clone dialog no longer moves an access token pasted as the URL's user name
+  (`https://ghp_…@github.com/…`, `glpat-…`, Bitbucket app passwords, or a long random string)
+  into the plain-text Username field. It takes the token out of the URL, shows it nowhere and
+  asks for your username and the token in the Token field. An ordinary user name still moves
+  (#1092).
+- Fixed: errors written to the log file (desktop) or the output channel (VS Code), and the text
+  Copy details copies, no longer contain the user name, password or token of a URL or the value
+  of an `Authorization` header (#1056). The operation log, the log file, the output channel and
+  Copy details also no longer keep a URL's password when it holds `'`, `(`, `)`, `,`, `[`, `]` or a
+  raw `/` (#1125).
+- Fixed: the desktop app's window no longer holds the file dialog and opener permissions, which
+  the interface never uses; the app opens dialogs, links and folders from its backend only
+  (#1053).
+
+### Sparse checkouts
+
+- Fixed: in a sparse checkout, Reset to a commit that adds files outside the chosen folders no
+  longer lists them as deleted (mixed; Stage all could then commit their deletion) or writes
+  them to disk (hard): they are marked as outside the sparse checkout, as with `git reset`. The
+  same for the files Abort merge, cherry-pick or revert and Undo put back. Abort rebase no
+  longer writes every file outside the sparse checkout and drops their mark. With non-cone
+  patterns (`git sparse-checkout set --no-cone`), such a file is treated as outside whenever it
+  isn't on disk (#1172).
+- Fixed: in a sparse checkout, Stash recorded the files outside the chosen folders as deleted,
+  wrote them to disk and dropped their mark; Pop then deleted them again and the change list
+  showed them as deleted, so Stage all could commit their deletion. Stash now leaves them alone,
+  as `git stash` does, and so it does with files marked with `git update-index --skip-worktree`
+  (#1184).
+- Fixed: applying or popping a stash that changes a file outside the sparse checkout (made
+  before it was narrowed, say) left that change out without a word, and Pop then dropped the
+  stash. The file is now written with the stashed change, as with `git stash apply`. A file
+  whose staged change Apply or Pop brings back outside the chosen folders stays outside, as
+  with git (#1184).
+
+### Index integrity
+
+- Fixed: Reset (mixed and hard) and Abort merge, cherry-pick or revert no longer drop the mark of
+  files outside a sparse checkout or marked with `git update-index --skip-worktree`, which then
+  showed up as modified or deleted. Reset hard leaves such a file alone when the commit has the
+  same version of it, doesn't bring back the files outside a sparse checkout, and refuses
+  (changing nothing) when it would overwrite a marked file's local edits, as `git reset --hard`
+  does; before, it overwrote them and Undo couldn't bring them back. Reset hard also keeps a
+  file added with `git add -N` instead of deleting it (#1145).
+- Fixed: in a sparse checkout the files outside the chosen folders are no longer listed as
+  deleted, and Stage all no longer stages their deletion; such a file can't be staged, as with
+  `git add` (#1146).
+- Fixed: a file added with `git add -N` is listed as an untracked file instead of a staged one,
+  and a commit, amend or the other commands that commit leave it out instead of committing it
+  as an empty file (#1164).
+- Fixed: a stage that failed because another program held the index lock no longer takes effect
+  later with the next command that writes the index (#1166).
+- Fixed: staging, unstaging or resolving in the app while a merge, cherry-pick, revert or rebase
+  is paused no longer undoes what was staged in a terminal or another tool since the app last
+  read the status (#1167).
+
+### Undo
+
+- Fixed: discarding changes (a hunk, lines, a file, Discard all, restoring a file from a commit,
+  applying a commit's change or a patch to the work tree) while a merge, cherry-pick, revert or
+  rebase is paused, or after a stash pop that conflicted, wasn't recorded, so Undo couldn't
+  bring the content back. Such a discard is now an Undo step of its own, which Undo and Redo
+  run during the pause too. Reset hard and applying and staging a patch or a commit's change are
+  refused then, saying why (#1147).
+- Changed: a discard whose files couldn't be saved for Undo is refused instead of run, and the
+  message names the file (#1147).
+- Fixed: Undo of Rename branch or Delete branch brought the branch back without its upstream and
+  other settings, and a rename left them behind under the new name (#1151).
+- Fixed: Undo of a new branch created from another commit and switched to left that commit's
+  files in the work tree (#1154).
+- Fixed: Undo and Redo were refused in a sparse checkout, or with a file marked skip-worktree or
+  added with intent to add (`git add -N`), whenever they changed the index. They now keep those
+  marks (#1174).
+- Changed: with more than 10,000 untracked files (a build folder or dataset that isn't ignored),
+  or for a changed or untracked file over 50 MB, Switch, Pull, Merge, Rebase, Reset (soft or
+  mixed), Checkout, Cherry-pick, Revert and Ignore no longer save a copy for Undo; they note each
+  file's size and time instead, so a big dump or dataset next to your code no longer slows every
+  click. Undo still works and leaves those files as they are; if it would have to bring back the
+  old contents of one that changed since, it says so and changes nothing. Discards, Reset hard,
+  restoring a file and applying a patch or a commit's change still save every file they replace,
+  however many or big (#1065, #1090).
+- Fixed: discarding one hunk next to a big un-ignored folder saved every file of it for Undo;
+  only what a discard can change is saved whole now (#1104).
+- Fixed: Undo and Redo of a discard read a big file into memory whole, twice, and files Undo
+  saves are no longer held in memory whole (#1065, #1089).
+- Changed: the undo history file is now version 3. An older Browsitory starts with an empty undo
+  history in a repository this version used, instead of misreading it, and leaves the newer
+  history untouched (#1093, #1147, #1151, #1174).
+
+### Branch and remote settings
+
+- Fixed: Delete branch removed, and Rename branch moved, the settings of another branch whose name
+  continues after a dot (deleting `release` lost `release.1`'s upstream and description), and
+  both failed halfway on a branch setting in your own git config. They now change exactly the
+  settings `git branch -D` and `git branch -m` change, in the repository's own config (#1181).
+- Fixed: Rename remote and Remove remote did the same to a remote named like `origin.mirror`,
+  Rename remote wrote Browsitory's own sign-in settings of the remote under a stray remote, failed
+  halfway on a remote with several fetch refspecs, and left `pushRemote` and `remote.pushDefault`
+  naming the old name; Remove remote deleted local branches the remote's push refspec named and
+  could take the upstream settings of the wrong branch. Both now do what `git remote rename` and
+  `git remote rm` do (#1181).
+- Fixed: Delete branch and Rename branch crashed the app's backend (or the VS Code extension's
+  helper) when the branch had a setting written without a value (a line such as `flag` alone in
+  `.git/config`), and so did Rename remote and Remove remote for such a setting of the remote, and
+  a failed worktree add removing its new branch. Delete and Remove now remove the setting as git
+  does; Rename carries it over as `true`, which is what git reads it as (#1180).
+- Fixed: Rename remote, Remove remote and Add remote crashed on a `branch.<name>.remote` or a
+  left-over `remote.<name>.fetch` written without a value; they now refuse and name the setting,
+  as git does. A setting with several values, one of them without a value, is refused the same
+  way by the branch and remote commands (#1180).
+- Fixed: A `merge.default` or `merge.conflictstyle` setting written without a value (the name
+  alone in a config file) crashed the app's backend (or the VS Code extension's helper) on every
+  merge, pull, cherry-pick, revert, rebase, stash, switch, reset, discard, patch apply, Undo of a
+  work-tree change and worktree add. These commands now refuse and name the setting, as git does,
+  without changing anything (#1182).
+
+### Git LFS, git-crypt and other filter drivers
+
+- Fixed: Browsitory can't run filter drivers, but staged and checked out their files anyway: with
+  git-crypt unlocked, Stage and Commit committed the secret in plain text, and with Git LFS a
+  switch, reset or checkout wrote the pointer text over the real file. Every action that would
+  store or write a file whose `filter` attribute names a configured driver (staging, discarding,
+  stashing, applying a stash or patch, resolving conflicts, switching, checking out, resetting,
+  merging, pulling, cherry-picking, reverting, rebasing, undo) now refuses before it changes
+  anything, naming the file and the filter (#1063).
+- Added: when the repository's attributes use a filter driver Browsitory can't run (Git LFS,
+  git-crypt), the Changes list says so at the top, until you dismiss it (#1087).
+- Changed: a changed file under such a filter is marked "'crypt' filter" in the Changes list, its
+  Stage button is off, and its diff says the difference may be only the filter's. Stage all and
+  Stage modified leave it out, as they leave out conflicts (#1087).
+- Fixed: a Git LFS file whose content matches the pointer git stores (same size and SHA-256) no
+  longer shows as changed after a `touch` or a checkout by another tool. Files under other filters
+  stay listed: Browsitory can't tell without running the filter (#1087).
+
+### Large repositories, commits and files
+
+- Fixed: selecting a commit or a stash that changes many files (a first commit, a vendor import,
+  a mass reformat) loaded and drew every file's diff at once and could freeze the window. With
+  more than 50 files, every file now starts collapsed and its diff loads when you expand it; the
+  first 200 files are listed, with **Show 200 more** and **Show all** for the rest (also in a
+  comparison) (#1153).
+- Fixed: the Changes list in the Tree layout drew every row and slowed down with each one, so
+  thousands of changed files took seconds to show and to select in. It now draws only the rows on
+  screen, as the Flat layout does (#1157).
+- Fixed: Blame on a long file drew every line at once and could freeze the window; it now draws
+  only the lines on screen and loads less data. Blame of a file over 20 MB says how large it is
+  instead of reading it, and blame of a binary file says it has none (#1158).
+- Changed: a file over 20 MB on either side isn't diffed until you ask: the diff says how large
+  it is and offers **Load diff anyway**, so opening one no longer holds up the app (#1066).
+- Fixed: Delete branch took seconds in a repository with thousands of tags or branches while it
+  counted the commits only that branch has, and a second click started a second count and a
+  delete that failed. The count is now quick, and Delete is unavailable while it runs (#1067).
+- Fixed: every refresh walked each stash's whole untracked folder again; a stash's file count is
+  now worked out once (#1070).
+- Fixed: on Linux, saving a `.gitignore` or switching to a branch that changes many of them made
+  the change watcher walk the whole work tree once per file event, keeping a CPU core busy for
+  minutes in a large monorepo. It now walks once per batch of changes (#1068).
+- Fixed: the Tags section rendered every tag, and "Select all" froze the app for seconds with
+  thousands of tags. Only the tags in view are rendered now, as in the Stashes and Reflog
+  sections, and selecting is fast at any count (#1069).
+
+### Remotes
+
+- Fixed: a repository with a remote whose `https://` URL holds a user name or token (cloned with
+  Git or another program, such as Bitbucket's `https://alice@bitbucket.org/…`) showed no remotes
+  at all. Such a remote is now listed with `***` in place of the user name and password, and
+  fetch, pull and push use the saved URL. Edit remote keeps the saved URL while you leave it as
+  shown, and Manage credentials saves the token for it (#1081).
+- Fixed: Cancel did nothing on a fetch or pull whose connection went silent after connecting
+  (the Wi-Fi changed, a VPN dropped, the laptop slept), and actions that change the repository
+  waited for it until the app restarted. Cancel now stops it within about two seconds, without
+  updating any remote branch (#1064).
+- Fixed: a fetch, pull, push or clone that receives nothing for two minutes now fails instead of
+  waiting forever, also without Cancel (not for HTTPS remotes on Windows) (#1064).
+
+### Updates
+
+- Fixed: the `.rpm` is signed with an OpenPGP key, so Fedora 45 and newer (rpm 6, which refuses
+  unsigned packages) can update it from inside the app. Import the key once with
+  `sudo rpm --import` (see the install guide) (#1077).
+- Fixed: when installing an update fails, the update notice says so with the reason instead of
+  doing nothing, and the error goes to the log file; **Restart to update** tries again (#1077).
+
+### Privacy and stored data
+
+- Changed: a repository that leaves Recent repositories, removed or dropped off the end of the
+  list, loses its recent searches, recent commit messages, recent branches and Fetch
+  automatically / Prune choices; one still open in a tab keeps them (#1096).
+- Fixed: the privacy notice says that a pull request connection applies to every repository on
+  that forge, and that an expanded card lists a repository's pull requests as soon as it opens,
+  without a click (#1054).
+- Fixed: the privacy notice lists everything the app keeps in its web storage, including the
+  last 5 branches you switched to in each repository and the view choices, and says these stay
+  after a repository leaves Recent repositories (#1055).
+- Changed: the commit file browser shows sizes like the image diff and transfer progress do,
+  "512 B" and "1.0 KB" instead of "512 bytes" and "1 KB" (#1060).
+
+### Internal
+
+- Changed: the release workflow pins every action by commit SHA (Renovate updates them), gives
+  `contents: write` only to the two jobs that upload to the draft release, and leaves no token in
+  `.git/config` after a checkout; CI's `mutants` and `removed-assertions` jobs don't either
+  (#1109).
+- Changed: the Open VSX publish and dry-run jobs run `ovsx` from `extension/publish/`, a locked
+  pnpm project installed without install scripts before the token is used, instead of an
+  unlocked `npx ovsx@1.3.0`; Renovate and the licence check now cover it (#1110).
+- Added: the release workflow's `verify` job fails unless `CHANGELOG.md` has a section for the
+  tag's version right under an empty `## [Unreleased]`, the tagged commit is on `main`, and CI
+  passed for it (`scripts/check-release-tag.py`) (#1111).
+- Changed: the Marketplace publish and dry-run jobs install `vsce` without restoring a pnpm store
+  cache, so nothing from an Actions cache runs with the Azure session (#1170).
+- Changed: the release workflow's `verify` job restores main's Rust cache instead of compiling
+  from scratch (#1061).
+- Changed: the changelog check (pre-push hook and CI) also requires an entry for changes to
+  `extension/`, the VS Code extension that ships in every VSIX, its E2E tests included (#1057),
+  and for a `package.json` under `extension/` or `e2e/` that changes outside its dependency
+  fields, such as the extension's `contributes` block; Renovate's dependency-only changes stay
+  exempt (#1094).
+- Changed: CI's Tauri E2E job installs a pinned tauri-driver that Renovate updates, instead of
+  the newest release on every run (#1058), in its own pull request instead of the Tauri group
+  (#1095).
+- Added: an extension test fails when its copies of `HostRequest` and `DiffSource` drift from the
+  frontend's `RepoClient.ts` (#1059).
+- Changed: the frontend keeps one copy each of the byte-size formatter used by the image diff and
+  transfer progress, `isUntracked` and the syntax-highlighting error logger, and drops the unused
+  `HISTORY_EDIT_KINDS` (#1060).
+
+### Internal: test flakes
+
+- Fixed: the frontend tests for the merge dialog's preselected option and the repository
+  picker's first focus no longer check before the loaded state applies, which failed them now
+  and then on a loaded machine (#1100, #1108).
+
 ## [0.16.0] - 2026-11-24
 
 0.16.0 is a maintenance release: security fixes in the bundled zlib (RUSTSEC-2026-0544) and
