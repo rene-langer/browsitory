@@ -6,6 +6,7 @@ pub mod clone;
 pub mod commit;
 pub mod commit_details;
 pub mod commit_stats;
+mod config_section;
 pub mod diff;
 mod external_filter;
 mod file_folder;

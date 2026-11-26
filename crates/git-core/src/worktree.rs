@@ -386,17 +386,19 @@ fn roll_back_add(
         }
         let _ = std::fs::remove_dir_all(&admin);
     }
-    // A setting without a value that can't be written out crashes libgit2's branch delete
-    // (#1180): the branch stays then.
-    if made.branch
-        && crate::valueless_setting::spell_out_sections::<crate::branch::BranchError>(
+    // The new branch goes with its settings, as Delete branch removes them; when they can't be
+    // removed safely (#1180), the branch stays.
+    if made.branch {
+        let settings = crate::config_section::Settings::section::<crate::branch::BranchError>(
             repo,
-            &[format!("branch.{branch}")],
-        )
-        .is_ok()
-    {
-        if let Ok(mut new_branch) = repo.find_branch(branch, BranchType::Local) {
-            let _ = new_branch.delete();
+            &format!("branch.{branch}"),
+        );
+        if let (Ok(settings), Ok(new_branch)) =
+            (settings, repo.find_branch(branch, BranchType::Local))
+        {
+            if new_branch.into_reference().delete().is_ok() {
+                let _ = settings.remove::<crate::branch::BranchError>();
+            }
         }
     }
     // libgit2 creates the destination itself; when it isn't known to be ours, it goes only while

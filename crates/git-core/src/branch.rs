@@ -347,13 +347,20 @@ pub fn rename_branch(repo: &Repository, old_name: &str, new_name: &str) -> Resul
     if let Some(held) = crate::repo::branch_held(repo, old_name, crate::repo::HoldRule::Rename)? {
         return Err(held.into());
     }
-    let mut branch = repo.find_branch(old_name, BranchType::Local)?;
-    crate::valueless_setting::spell_out_sections::<BranchError>(
+    let branch = repo.find_branch(old_name, BranchType::Local)?;
+    // The ref moves first, then the settings, so a failure never loses them (as with git). Not
+    // libgit2's branch move: it moves other branches' settings too (#1181).
+    let settings = crate::config_section::SectionMove::plan::<BranchError>(
         repo,
-        &[format!("branch.{old_name}"), format!("branch.{new_name}")],
+        &format!("branch.{old_name}"),
+        &format!("branch.{new_name}"),
     )?;
-    branch.rename(new_name, false)?;
-    Ok(())
+    branch.into_reference().rename(
+        &format!("refs/heads/{new_name}"),
+        false,
+        &format!("branch: renamed refs/heads/{old_name} to refs/heads/{new_name}"),
+    )?;
+    settings.apply::<BranchError>()
 }
 
 /// How many commits of local branch `name` no other local or remote-tracking branch and no tag
@@ -385,7 +392,7 @@ pub fn delete_branch(repo: &Repository, name: &str, force: bool) -> Result<(), B
     if let Some(held) = crate::repo::branch_held(repo, name, crate::repo::HoldRule::MoveOrDelete)? {
         return Err(held.into());
     }
-    let mut branch = repo.find_branch(name, BranchType::Local)?;
+    let branch = repo.find_branch(name, BranchType::Local)?;
     if !force {
         let branch_oid = branch.get().peel_to_commit()?.id();
         let head_oid = repo.head()?.peel_to_commit()?.id();
@@ -397,7 +404,22 @@ pub fn delete_branch(repo: &Repository, name: &str, force: bool) -> Result<(), B
             return Err(BranchError::NotMerged(name.to_string()));
         }
     }
-    crate::valueless_setting::spell_out_sections::<BranchError>(repo, &[format!("branch.{name}")])?;
-    branch.delete()?;
-    Ok(())
+    // `branch_held` leaves this worktree's own HEAD to this check (libgit2's branch delete's).
+    if branch.is_head() {
+        return Err(git2::Error::new(
+            git2::ErrorCode::GenericError,
+            git2::ErrorClass::Reference,
+            format!(
+                "cannot delete branch 'refs/heads/{name}' as it is the current HEAD of the \
+                 repository."
+            ),
+        )
+        .into());
+    }
+    // As `git branch -D`: the ref, then exactly the branch's settings. Not libgit2's branch
+    // delete: it removes other branches' settings too (#1181).
+    let settings =
+        crate::config_section::Settings::section::<BranchError>(repo, &format!("branch.{name}"))?;
+    branch.into_reference().delete()?;
+    settings.remove::<BranchError>()
 }
