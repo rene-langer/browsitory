@@ -411,6 +411,38 @@ fn stash_all_and_pop_of_a_staged_change_outside_the_cone_match_git() {
     assert_same_as_git(ours.path(), twin.path());
 }
 
+/// [`cone_with_changes`], and `docs/new.md`, outside the cone, is a staged new file, marked,
+/// its file missing.
+fn staged_new_file_outside(d: &Path) {
+    cone_with_changes(d);
+    write_file(d, "blob.tmp", "new guide\n");
+    let blob = git_out(d, &["hash-object", "-w", "blob.tmp"]);
+    std::fs::remove_file(d.join("blob.tmp")).unwrap();
+    let info = format!("100644,{},docs/new.md", blob.trim());
+    git_ok(d, &["update-index", "--add", "--cacheinfo", &info]);
+    git_ok(d, &["update-index", "--skip-worktree", "docs/new.md"]);
+    assert!(ls_files_v(d).contains("S docs/new.md\n"));
+    assert!(!d.join("docs/new.md").exists());
+}
+
+#[test]
+fn stash_all_and_pop_of_a_staged_new_file_outside_the_cone_match_git() {
+    let (ours, twin) = twins(staged_new_file_outside);
+    git_ok(twin.path(), &["stash", "push", "-q", "-u"]);
+    let mut repo = open(ours.path());
+
+    save_stash(&mut repo, &StashOptions::default()).unwrap();
+
+    assert_same_as_git(ours.path(), twin.path());
+    git_ok(twin.path(), &["stash", "pop", "-q", "--index"]);
+    let id = stash_id(ours.path());
+    assert_eq!(
+        pop_stash(&mut repo, 0, Some(&id), true).unwrap(),
+        StashApplyOutcome::Applied
+    );
+    assert_same_as_git(ours.path(), twin.path());
+}
+
 /// No sparse checkout: `top.txt` marked with `git update-index --skip-worktree`, then edited,
 /// beside an edit to `app/main.rs`. git's stash takes the marked file for unchanged.
 fn marked_by_hand(d: &Path) {
