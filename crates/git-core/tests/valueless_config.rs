@@ -2,8 +2,10 @@
 //! never crashes the process. libgit2 dereferences the missing value when it removes or renames
 //! the setting's section (Delete branch, Rename branch, Rename remote, Remove remote), compares
 //! `branch.*.remote` with a remote's name (Rename remote, Remove remote) or adds a value next to
-//! it (Add remote's `fetch`). Each command runs in a child process (this test binary, running
-//! only that test), so a crash fails the test instead of killing the test binary.
+//! it (Add remote's `fetch`). #1182: nor does a merge driver (`merge.default`) or conflict style
+//! (`merge.conflictstyle`) written without a value, which libgit2 reads at the start of every
+//! merge and checkout. Each command runs in a child process (this test binary, running only that
+//! test), so a crash fails the test instead of killing the test binary.
 
 mod common;
 
@@ -487,4 +489,617 @@ fn delete_branch_leaves_a_dotted_namesakes_setting_whose_name_is_not_utf8_alone(
     assert!(!has_branch(&repo, "release"));
     let config = std::fs::read(repo.path().join("config")).unwrap();
     assert!(config.ends_with(SECTION));
+}
+
+// #1182: libgit2 reads `merge.default` (the merge driver) at the start of every merge, and
+// `merge.conflictstyle` at the start of every checkout that names no conflict style, without
+// checking for a value; one written without a value crashes it. git refuses both ("missing value
+// for 'merge.default'", "bad config variable"). So does every command that merges or checks out,
+// before it changes anything; reads that merge in memory only to compare go on without it.
+
+const DRIVER: &str = "merge.default";
+const STYLE: &str = "merge.conflictstyle";
+
+/// The refusal naming `setting`.
+fn missing(setting: &str) -> String {
+    format!(
+        "The setting '{setting}' is written without a value; git rejects it as a bad config \
+         variable. Give it a value or remove it (git config --edit), then try again."
+    )
+}
+
+/// `setting` (`section.variable`) written without a value.
+fn valueless(setting: &str) -> String {
+    let (section, variable) = setting.split_once('.').unwrap();
+    format!("[{section}]\n\t{variable}\n")
+}
+
+fn id(repo: &Repository, revision: &str) -> String {
+    repo.revparse_single(revision)
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string()
+}
+
+/// What a refused command must leave as it was: HEAD, the index and the work tree (with file
+/// contents), every ref, the stash list and the git dir's files (operation state).
+fn snapshot(dir: &Path) -> String {
+    let mut text = String::new();
+    for args in [
+        &[
+            "status",
+            "--porcelain=v2",
+            "--branch",
+            "--untracked-files=all",
+        ][..],
+        &["diff"],
+        &["diff", "--cached"],
+        &["for-each-ref"],
+        &["stash", "list"],
+    ] {
+        text.push_str(&git_out(dir, args));
+    }
+    let mut names: Vec<String> = std::fs::read_dir(dir.join(".git"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    text.push_str(&names.join("\n"));
+    text
+}
+
+/// `main`: `base` (a.txt), `main` (a.txt's first line) and `main2` (m.txt); `side` from `base`
+/// (a.txt's last line, s.txt) and `conflict` from `base` (a.txt's first line otherwise); a stash
+/// on `main` changing a.txt's second line; `origin/main` one commit ahead of `main`.
+fn merge_repo() -> (TempDir, Repository) {
+    let (dir, repo) = init_repo();
+    let d = dir.path();
+    write_file(d, "a.txt", "a\nb\nc\n");
+    commit_all(&repo, "base");
+    git_ok(d, &["branch", "-M", "main"]);
+    git_ok(d, &["checkout", "-q", "-b", "side"]);
+    write_file(d, "a.txt", "a\nb\nside\n");
+    write_file(d, "s.txt", "s\n");
+    commit_all(&repo, "side");
+    git_ok(d, &["checkout", "-q", "-b", "conflict", "main"]);
+    write_file(d, "a.txt", "conflict\nb\nc\n");
+    commit_all(&repo, "conflict");
+    git_ok(d, &["checkout", "-q", "main"]);
+    write_file(d, "a.txt", "main\nb\nc\n");
+    commit_all(&repo, "main");
+    write_file(d, "m.txt", "m\n");
+    commit_all(&repo, "main2");
+    git_ok(d, &["checkout", "-q", "-b", "ahead"]);
+    write_file(d, "u.txt", "u\n");
+    commit_all(&repo, "upstream");
+    git_ok(d, &["checkout", "-q", "main"]);
+    git_ok(
+        d,
+        &["remote", "add", "origin", "https://example.invalid/r.git"],
+    );
+    git_ok(d, &["update-ref", "refs/remotes/origin/main", "ahead"]);
+    git_ok(d, &["branch", "-D", "ahead"]);
+    write_file(d, "a.txt", "main\nB\nc\n");
+    git_ok(d, &["stash"]);
+    (dir, repo)
+}
+
+/// In the child: `prepare` (before the setting is written), then `setting` written without a
+/// value, then `command` on a newly opened repository. Asserts the command is refused with the
+/// message naming `setting` and that it changed nothing.
+fn assert_refused<T>(
+    test: &str,
+    setting: &'static str,
+    prepare: impl FnOnce(&Repository) -> T,
+    command: impl FnOnce(&mut Repository, T) -> Result<(), String>,
+) {
+    let (_dir, _repo, result) = run_isolated(test, merge_repo, move |repo| {
+        let prepared = prepare(repo);
+        append_config(repo, &valueless(setting));
+        let mut repo = Repository::open(repo.path()).unwrap();
+        let workdir = repo.workdir().unwrap().to_path_buf();
+        let before = snapshot(&workdir);
+        let result = command(&mut repo, prepared);
+        let after = snapshot(&workdir);
+        if after != before {
+            return Err(format!("the command changed the repository: {result:?}"));
+        }
+        result
+    });
+    assert_eq!(result, missing(setting));
+}
+
+fn nothing(_repo: &Repository) {}
+
+fn hooks() -> git_core::hooks::HookOptions<'static> {
+    git_core::hooks::HookOptions::default()
+}
+
+fn text<T, E: std::fmt::Display>(result: Result<T, E>) -> Result<(), String> {
+    result.map(|_| ()).map_err(|error| error.to_string())
+}
+
+fn sequence_text(run: git_core::pick::SequenceRun) -> Result<(), String> {
+    text(run.outcome)
+}
+
+fn pick_entry(repo: &Repository, revision: &str) -> git_core::rebase::RebasePlanEntry {
+    git_core::rebase::RebasePlanEntry {
+        commit_id: id(repo, revision),
+        action: git_core::rebase::RebaseAction::Pick,
+        combined_message: None,
+    }
+}
+
+/// `main` and `main2` replayed onto `side`, `main` stopped to edit.
+fn rebase_stopped_to_edit(repo: &Repository) -> git_core::rebase::RebaseState {
+    let mut edit = pick_entry(repo, "main~1");
+    edit.action = git_core::rebase::RebaseAction::Edit;
+    let plan = vec![edit, pick_entry(repo, "main")];
+    let (state, result) = git_core::rebase::start_rebase(repo, &id(repo, "side"), plan).unwrap();
+    assert_eq!(result, git_core::rebase::RebaseStepResult::PausedForEdit);
+    state
+}
+
+/// A cherry-pick sequence of `conflict` and `side`, stopped on `conflict`'s conflict; resolved
+/// and staged when `resolve`.
+fn sequence_stopped_on_conflict(repo: &Repository, resolve: bool) -> git_core::pick::SequenceState {
+    let ids = [id(repo, "conflict"), id(repo, "side")];
+    let run = git_core::pick::cherry_pick_many(repo, &ids, hooks());
+    let state = run.state.expect("the sequence stops on the conflict");
+    if resolve {
+        let workdir = repo.workdir().unwrap();
+        write_file(workdir, "a.txt", "resolved\nb\nc\n");
+        git_ok(workdir, &["add", "a.txt"]);
+    }
+    state
+}
+
+macro_rules! refused {
+    ($test:ident, $setting:expr, $prepare:expr, $command:expr) => {
+        #[test]
+        fn $test() {
+            assert_refused(stringify!($test), $setting, $prepare, $command);
+        }
+    };
+}
+
+refused!(
+    start_merge_refuses_a_merge_driver_without_a_value,
+    DRIVER,
+    nothing,
+    |repo, ()| text(git_core::merge::start_merge(
+        repo,
+        "side",
+        git_core::merge::MergeOptions::default()
+    ))
+);
+
+refused!(
+    start_merge_refuses_a_conflict_style_without_a_value,
+    STYLE,
+    nothing,
+    |repo, ()| text(git_core::merge::start_merge(
+        repo,
+        "side",
+        git_core::merge::MergeOptions::default()
+    ))
+);
+
+refused!(
+    abort_merge_refuses_a_conflict_style_without_a_value,
+    STYLE,
+    |repo: &Repository| git_ok(repo.workdir().unwrap(), &["merge", "--no-commit", "side"]),
+    |repo, ()| text(git_core::merge::abort_merge(repo))
+);
+
+refused!(
+    resolve_whole_file_refuses_a_conflict_style_without_a_value,
+    STYLE,
+    |repo: &Repository| {
+        let output = test_support::git(repo.workdir().unwrap(), &["merge", "conflict"]);
+        assert!(!output.status.success(), "the merge conflicts: {output:?}");
+    },
+    |repo, ()| text(git_core::merge::resolve_whole_file(
+        repo,
+        "a.txt",
+        git_core::merge::ConflictSide::Ours
+    ))
+);
+
+refused!(
+    cherry_pick_refuses_a_merge_driver_without_a_value,
+    DRIVER,
+    nothing,
+    |repo, ()| {
+        let side = id(repo, "side");
+        text(git_core::pick::cherry_pick(repo, &side, None, hooks()))
+    }
+);
+
+refused!(
+    cherry_pick_refuses_a_conflict_style_without_a_value,
+    STYLE,
+    nothing,
+    |repo, ()| {
+        let side = id(repo, "side");
+        text(git_core::pick::cherry_pick(repo, &side, None, hooks()))
+    }
+);
+
+refused!(
+    revert_refuses_a_merge_driver_without_a_value,
+    DRIVER,
+    nothing,
+    |repo, ()| {
+        let main = id(repo, "main~1");
+        text(git_core::pick::revert(repo, &main, None, hooks()))
+    }
+);
+
+refused!(
+    revert_refuses_a_conflict_style_without_a_value,
+    STYLE,
+    nothing,
+    |repo, ()| {
+        let main = id(repo, "main~1");
+        text(git_core::pick::revert(repo, &main, None, hooks()))
+    }
+);
+
+refused!(
+    cherry_pick_many_refuses_a_merge_driver_without_a_value,
+    DRIVER,
+    nothing,
+    |repo, ()| {
+        let ids = [id(repo, "side")];
+        sequence_text(git_core::pick::cherry_pick_many(repo, &ids, hooks()))
+    }
+);
+
+refused!(
+    revert_many_refuses_a_conflict_style_without_a_value,
+    STYLE,
+    nothing,
+    |repo, ()| {
+        let ids = [id(repo, "main"), id(repo, "main~1")];
+        sequence_text(git_core::pick::revert_many(repo, &ids, hooks()))
+    }
+);
+
+refused!(
+    continue_sequence_refuses_a_merge_driver_without_a_value,
+    DRIVER,
+    |repo: &Repository| sequence_stopped_on_conflict(repo, true),
+    |repo, state| sequence_text(git_core::pick::continue_sequence(repo, state, hooks()))
+);
+
+refused!(
+    continue_sequence_refuses_a_conflict_style_without_a_value,
+    STYLE,
+    |repo: &Repository| sequence_stopped_on_conflict(repo, true),
+    |repo, state| sequence_text(git_core::pick::continue_sequence(repo, state, hooks()))
+);
+
+refused!(
+    abort_sequence_refuses_a_conflict_style_without_a_value,
+    STYLE,
+    |repo: &Repository| sequence_stopped_on_conflict(repo, false),
+    |repo, state| text(git_core::pick::abort_sequence(repo, &state))
+);
+
+refused!(
+    start_rebase_refuses_a_merge_driver_without_a_value,
+    DRIVER,
+    nothing,
+    |repo, ()| {
+        let plan = vec![pick_entry(repo, "main~1"), pick_entry(repo, "main")];
+        let onto = id(repo, "side");
+        text(git_core::rebase::start_rebase(repo, &onto, plan))
+    }
+);
+
+refused!(
+    start_rebase_refuses_a_conflict_style_without_a_value,
+    STYLE,
+    nothing,
+    |repo, ()| {
+        let plan = vec![pick_entry(repo, "main~1"), pick_entry(repo, "main")];
+        let onto = id(repo, "side");
+        text(git_core::rebase::start_rebase(repo, &onto, plan))
+    }
+);
+
+refused!(
+    rebase_continue_refuses_a_merge_driver_without_a_value,
+    DRIVER,
+    rebase_stopped_to_edit,
+    |repo, mut state| text(git_core::rebase::rebase_continue(repo, &mut state))
+);
+
+refused!(
+    rebase_continue_refuses_a_conflict_style_without_a_value,
+    STYLE,
+    rebase_stopped_to_edit,
+    |repo, mut state| text(git_core::rebase::rebase_continue(repo, &mut state))
+);
+
+refused!(
+    abort_rebase_refuses_a_conflict_style_without_a_value,
+    STYLE,
+    rebase_stopped_to_edit,
+    |repo, state| text(git_core::rebase::abort_rebase(repo, &state))
+);
+
+refused!(
+    fold_staged_refuses_a_merge_driver_without_a_value,
+    DRIVER,
+    |repo: &Repository| {
+        let workdir = repo.workdir().unwrap();
+        write_file(workdir, "f.txt", "folded\n");
+        git_ok(workdir, &["add", "f.txt"]);
+    },
+    |repo, ()| {
+        let target = id(repo, "main~1");
+        text(git_core::fold::fold_staged_into(repo, &target, hooks()))
+    }
+);
+
+refused!(
+    apply_stash_refuses_a_merge_driver_without_a_value,
+    DRIVER,
+    nothing,
+    |repo, ()| text(git_core::stash::apply_stash(repo, 0, None, false))
+);
+
+refused!(
+    apply_stash_refuses_a_conflict_style_without_a_value,
+    STYLE,
+    nothing,
+    |repo, ()| text(git_core::stash::apply_stash(repo, 0, None, false))
+);
+
+refused!(
+    pop_stash_refuses_a_merge_driver_without_a_value,
+    DRIVER,
+    nothing,
+    |repo, ()| text(git_core::stash::pop_stash(repo, 0, None, false))
+);
+
+refused!(
+    stash_and_switch_refuses_a_merge_driver_without_a_value_before_stashing,
+    DRIVER,
+    |repo: &Repository| write_file(repo.workdir().unwrap(), "a.txt", "dirty\nb\nc\n"),
+    |repo, ()| text(git_core::branch::stash_and_switch(repo, "side", true))
+);
+
+refused!(
+    stash_and_switch_refuses_a_conflict_style_without_a_value_before_stashing,
+    STYLE,
+    |repo: &Repository| write_file(repo.workdir().unwrap(), "a.txt", "dirty\nb\nc\n"),
+    |repo, ()| text(git_core::branch::stash_and_switch(repo, "side", false))
+);
+
+refused!(
+    save_stash_refuses_a_conflict_style_without_a_value,
+    STYLE,
+    |repo: &Repository| write_file(repo.workdir().unwrap(), "a.txt", "dirty\nb\nc\n"),
+    |repo, ()| text(git_core::stash::save_stash(
+        repo,
+        &git_core::stash::StashOptions {
+            message: None,
+            keep_index: false,
+            include_untracked: false,
+            paths: Vec::new(),
+        }
+    ))
+);
+
+refused!(
+    pull_refuses_a_conflict_style_without_a_value,
+    STYLE,
+    nothing,
+    |repo, ()| text(git_core::remote::pull_after_fetch(repo, "origin", "main"))
+);
+
+refused!(
+    switch_branch_refuses_a_conflict_style_without_a_value,
+    STYLE,
+    nothing,
+    |repo, ()| text(git_core::branch::switch_branch(repo, "side"))
+);
+
+// The branch isn't created either: the switch would refuse after it.
+refused!(
+    create_branch_refuses_a_conflict_style_without_a_value_before_creating_it,
+    STYLE,
+    nothing,
+    |repo, ()| text(git_core::branch::create_branch(repo, "new", "side"))
+);
+
+refused!(
+    checkout_commit_refuses_a_conflict_style_without_a_value,
+    STYLE,
+    nothing,
+    |repo, ()| {
+        let side = id(repo, "side");
+        text(git_core::branch::checkout_commit(repo, &side))
+    }
+);
+
+refused!(
+    hard_reset_refuses_a_conflict_style_without_a_value,
+    STYLE,
+    nothing,
+    |repo, ()| {
+        let base = id(repo, "main~2");
+        text(git_core::reset::reset_to(
+            repo,
+            &base,
+            git_core::reset::ResetMode::Hard,
+        ))
+    }
+);
+
+refused!(
+    discard_file_refuses_a_conflict_style_without_a_value,
+    STYLE,
+    |repo: &Repository| write_file(repo.workdir().unwrap(), "a.txt", "dirty\nb\nc\n"),
+    |repo, ()| text(git_core::stage::discard_file(repo, "a.txt"))
+);
+
+refused!(
+    discard_all_unstaged_refuses_a_conflict_style_without_a_value,
+    STYLE,
+    |repo: &Repository| write_file(repo.workdir().unwrap(), "a.txt", "dirty\nb\nc\n"),
+    |repo, ()| text(git_core::stage::discard_all_unstaged(
+        repo,
+        &["a.txt".to_string()]
+    ))
+);
+
+refused!(
+    discard_hunk_refuses_a_conflict_style_without_a_value,
+    STYLE,
+    |repo: &Repository| write_file(repo.workdir().unwrap(), "a.txt", "main\ndirty\nc\n"),
+    |repo, ()| text(git_core::stage::discard_hunk(
+        repo,
+        "a.txt",
+        1,
+        1,
+        common::hunk_ctx(3)
+    ))
+);
+
+refused!(
+    restore_file_version_refuses_a_conflict_style_without_a_value,
+    STYLE,
+    nothing,
+    |repo, ()| {
+        let base = id(repo, "main~2");
+        text(git_core::stage::restore_file_version(repo, &base, "a.txt"))
+    }
+);
+
+refused!(
+    apply_commit_change_refuses_a_conflict_style_without_a_value,
+    STYLE,
+    nothing,
+    |repo, ()| {
+        let side = id(repo, "side");
+        text(git_core::patch::apply_commit_change(
+            repo,
+            &side,
+            "s.txt",
+            None,
+            None,
+            false,
+            git_core::patch::ApplyTarget::WorkTree,
+        ))
+    }
+);
+
+refused!(
+    apply_patch_refuses_a_conflict_style_without_a_value,
+    STYLE,
+    |repo: &Repository| {
+        let workdir = repo.workdir().unwrap();
+        write_file(workdir, "a.txt", "main\nb\npatched\n");
+        let patch = test_support::git(workdir, &["diff"]).stdout;
+        git_ok(workdir, &["checkout", "--", "a.txt"]);
+        patch
+    },
+    |repo, patch| text(git_core::patch::apply_patch_with(
+        repo,
+        &patch,
+        git_core::patch::PatchApply::WorkTree,
+        hooks()
+    ))
+);
+
+refused!(
+    undo_of_a_work_tree_change_refuses_a_conflict_style_without_a_value,
+    STYLE,
+    |repo: &Repository| {
+        let scope = git_core::undo::SnapshotScope::Full;
+        let before = git_core::undo::capture(repo, scope).unwrap();
+        git_ok(
+            repo.workdir().unwrap(),
+            &["reset", "-q", "--hard", "HEAD~1"],
+        );
+        let after = git_core::undo::capture(repo, scope).unwrap();
+        (before, after)
+    },
+    |repo, (before, after)| text(git_core::undo::restore(repo, &after, &before, "undo"))
+);
+
+refused!(
+    create_worktree_refuses_a_conflict_style_without_a_value,
+    STYLE,
+    |_repo: &Repository| TempDir::new().unwrap(),
+    |repo, outside| {
+        let path = outside.path().join("linked");
+        let result =
+            git_core::worktree::create_worktree(repo, "linked", &path, "linked", Some("HEAD"));
+        if path.exists() {
+            return Err("the worktree folder was made".to_string());
+        }
+        text(result)
+    }
+);
+
+/// A duplicate pick stopped as empty is a leftover when HEAD carries the pick, which an
+/// in-memory pick shows; without the merge driver that can't be known, so the pick counts as
+/// still paused, and nothing crashes.
+#[test]
+fn head_info_counts_a_pick_as_paused_when_the_merge_driver_has_no_value() {
+    let (_dir, _repo, result) = run_isolated(
+        "head_info_counts_a_pick_as_paused_when_the_merge_driver_has_no_value",
+        || {
+            let (dir, repo) = merge_repo();
+            let d = dir.path();
+            git_ok(d, &["cherry-pick", "side"]);
+            let again = test_support::git(d, &["cherry-pick", "side"]);
+            assert!(!again.status.success(), "stops as empty: {again:?}");
+            append_config(&repo, &valueless(DRIVER));
+            (dir, repo)
+        },
+        |repo| {
+            let info = git_core::repo::head_info(repo).map_err(|e| e.to_string())?;
+            match (info.operation, info.operation_leftover) {
+                (Some(_), false) => Ok(()),
+                other => Err(format!("{other:?}")),
+            }
+        },
+    );
+
+    assert_eq!(result, "ok");
+}
+
+/// Likewise for a revert whose commit is HEAD and whose state was left behind.
+#[test]
+fn head_info_counts_a_revert_as_paused_when_the_merge_driver_has_no_value() {
+    let (_dir, _repo, result) = run_isolated(
+        "head_info_counts_a_revert_as_paused_when_the_merge_driver_has_no_value",
+        || {
+            let (dir, repo) = merge_repo();
+            let d = dir.path();
+            let reverted = id(&repo, "main");
+            git_ok(d, &["revert", "--no-edit", "main"]);
+            std::fs::write(repo.path().join("REVERT_HEAD"), format!("{reverted}\n")).unwrap();
+            append_config(&repo, &valueless(DRIVER));
+            (dir, repo)
+        },
+        |repo| {
+            let info = git_core::repo::head_info(repo).map_err(|e| e.to_string())?;
+            match (info.operation, info.operation_leftover) {
+                (Some(_), false) => Ok(()),
+                other => Err(format!("{other:?}")),
+            }
+        },
+    );
+
+    assert_eq!(result, "ok");
 }
