@@ -463,13 +463,13 @@ fn add_remote_refuses_a_left_over_fetch_written_without_a_value() {
     assert!(!config.contains("new.git"), "{config}");
 }
 
-/// A setting whose name isn't UTF-8 can't be written back through git2: Delete branch refuses
-/// instead, changing nothing.
+/// A setting without a value whose name isn't UTF-8 (git2 can't write it back) belongs to branch
+/// `release.\xff`: Delete branch `release` leaves it as it is, as `git branch -D` does (#1181).
 #[test]
-fn delete_branch_refuses_a_setting_without_a_value_whose_name_is_not_utf8() {
+fn delete_branch_leaves_a_dotted_namesakes_setting_whose_name_is_not_utf8_alone() {
     const SECTION: &[u8] = b"[branch \"release.\xff\"]\n\tflag\n";
     let (_dir, repo, result) = run_isolated(
-        "delete_branch_refuses_a_setting_without_a_value_whose_name_is_not_utf8",
+        "delete_branch_leaves_a_dotted_namesakes_setting_whose_name_is_not_utf8_alone",
         || {
             let (dir, repo) = repo_with_flagged();
             git_ok(dir.path(), &["branch", "release"]);
@@ -483,13 +483,8 @@ fn delete_branch_refuses_a_setting_without_a_value_whose_name_is_not_utf8() {
         delete("release"),
     );
 
-    assert_eq!(
-        result,
-        "The setting 'branch.release.\u{fffd}.flag' is written without a value; git rejects it \
-         as a bad config variable. Give it a value or remove it (git config --edit), then try \
-         again."
-    );
-    assert!(has_branch(&repo, "release"));
+    assert_eq!(result, "ok");
+    assert!(!has_branch(&repo, "release"));
     let config = std::fs::read(repo.path().join("config")).unwrap();
     assert!(config.ends_with(SECTION));
 }
