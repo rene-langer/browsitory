@@ -7,6 +7,7 @@
 //! - **intent-to-add** (`git add -N`): an entry with the empty blob that git treats as not
 //!   staged. libgit2's status reports it as a staged new file and `write_tree` commits it.
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use git2::IndexEntryExtendedFlag;
@@ -57,6 +58,109 @@ pub(crate) fn skip_worktree_paths(index: &git2::Index) -> Vec<Vec<u8>> {
         .filter(|entry| entry.flags_extended & SKIP_WORKTREE != 0)
         .map(|entry| entry.path)
         .collect()
+}
+
+/// The skip-worktree marks of the index once it is reset to a tree, as git's reset sets them.
+pub(crate) struct Marks {
+    /// Each path to mark: every stage-0 path marked now (#1145), and each path of the tree
+    /// without any index entry that lies outside the sparse checkout (#1172).
+    pub(crate) skip_worktree: Vec<Vec<u8>>,
+    /// The paths among them new to the index: the reset doesn't write their files.
+    pub(crate) added: HashSet<Vec<u8>>,
+    /// A sparse checkout with readable patterns applies (git applies none without them).
+    pub(crate) sparse: bool,
+}
+
+/// [`Marks`] for resetting `index` (as it is now, before anything is written) to `tree`. A
+/// path with an index entry keeps its stage-0 mark (a conflicted path ends unmarked); one
+/// without gets the mark when the sparse patterns leave it out (`builtin/reset.c`,
+/// `path_in_sparse_checkout`).
+pub(crate) fn marks_after(
+    repo: &git2::Repository,
+    index: &git2::Index,
+    tree: &git2::Tree<'_>,
+) -> Result<Marks, git2::Error> {
+    let mut marks = Marks {
+        skip_worktree: skip_worktree_paths(index),
+        added: HashSet::new(),
+        sparse: false,
+    };
+    let sparse = crate::sparse::Sparse::read(repo)?;
+    if sparse == crate::sparse::Sparse::Off {
+        return Ok(marks);
+    }
+    marks.sparse = true;
+    let present: HashSet<Vec<u8>> = index.iter().map(|entry| entry.path).collect();
+    let mut flat = git2::Index::new()?;
+    flat.read_tree(tree)?;
+    for entry in flat.iter() {
+        if !present.contains(&entry.path) && sparse.excludes(repo.workdir(), &entry.path) {
+            marks.skip_worktree.push(entry.path.clone());
+            marks.added.insert(entry.path);
+        }
+    }
+    Ok(marks)
+}
+
+/// The paths a hard reset of `index` to `tree` leaves alone, as `git reset --hard` does
+/// (#1145): a skip-worktree file the target keeps (same blob and mode), and in a sparse
+/// checkout one that is missing; an intent-to-add file the target doesn't have, which stays as
+/// an untracked file; the paths [`Marks::added`] (#1172).
+pub(crate) struct LeftAlone {
+    pub(crate) paths: HashSet<Vec<u8>>,
+    /// The first skip-worktree file with local edits that the target changes (git refuses the
+    /// reset: "not uptodate"); it is in `paths` too.
+    pub(crate) edited: Option<String>,
+}
+
+/// [`LeftAlone`] for a hard reset of `index` to `tree`.
+pub(crate) fn left_alone<E>(
+    repo: &git2::Repository,
+    index: &git2::Index,
+    tree: &git2::Tree<'_>,
+    marks: &Marks,
+) -> Result<LeftAlone, E>
+where
+    E: From<git2::Error> + From<std::io::Error>,
+{
+    let mut left = LeftAlone {
+        paths: marks.added.clone(),
+        edited: None,
+    };
+    let marked: Vec<git2::IndexEntry> = index
+        .iter()
+        .filter(|entry| entry.flags_extended & (SKIP_WORKTREE | INTENT_TO_ADD) != 0)
+        .collect();
+    if marked.is_empty() {
+        return Ok(left);
+    }
+    let (_, edited) = edited_skip_worktree::<E>(repo)?;
+    let workdir = repo.workdir();
+    for entry in marked {
+        let path = crate::worktree_guard::path_from_bytes(&entry.path);
+        let target = tree.get_path(&path).ok();
+        if entry.flags_extended & SKIP_WORKTREE == 0 {
+            if target.is_none() {
+                left.paths.insert(entry.path);
+            }
+            continue;
+        }
+        let unchanged = target.is_some_and(|target| {
+            target.id() == entry.id && u32::try_from(target.filemode()) == Ok(entry.mode)
+        });
+        let name = String::from_utf8_lossy(&entry.path).into_owned();
+        if unchanged {
+            left.paths.insert(entry.path);
+        } else if edited.contains(&name) {
+            left.edited.get_or_insert(name);
+            left.paths.insert(entry.path);
+        } else if marks.sparse
+            && workdir.is_some_and(|workdir| workdir.join(&path).symlink_metadata().is_err())
+        {
+            left.paths.insert(entry.path);
+        }
+    }
+    Ok(left)
 }
 
 /// `index.read_tree(tree)`, then the skip-worktree mark back on each of `skip_worktree` that is
