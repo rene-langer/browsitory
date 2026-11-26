@@ -470,3 +470,196 @@ fn stash_all_and_pop_with_a_file_marked_skip_worktree_by_hand_match_git() {
     );
     assert_same_as_git(ours.path(), twin.path());
 }
+
+/// Pops `stash@{0}` in `ours` (restoring its staged changes or not) and with `git stash pop`
+/// in `twin`.
+fn pop_both(ours: &Path, twin: &Path, restore_index: bool) -> StashApplyOutcome {
+    let mut args = vec!["stash", "pop", "-q"];
+    if restore_index {
+        args.push("--index");
+    }
+    git_ok(twin, &args);
+    let id = stash_id(ours);
+    pop_stash(&mut open(ours), 0, Some(&id), restore_index).unwrap()
+}
+
+/// [`cone`] before the sparse checkout: `docs/guide.md` and `app/main.rs` edited and
+/// `docs/untracked.md` added, stashed with `git stash push -u`; then `git sparse-checkout set app
+/// lib/core`. The stash changes a file outside the cone.
+fn stashed_before_the_sparse_checkout(d: &Path) {
+    cone(d);
+    git_ok(d, &["sparse-checkout", "disable"]);
+    write_file(d, "docs/guide.md", "guide edited\n");
+    write_file(d, "app/main.rs", "main edited\n");
+    write_file(d, "docs/untracked.md", "untracked\n");
+    git_ok(d, &["stash", "push", "-q", "-u"]);
+    git_ok(d, &["sparse-checkout", "set", "app", "lib/core"]);
+    assert_eq!(ls_files_v(d), CONE_MARKS);
+}
+
+/// git writes the stashed edit of the file outside the cone and drops its mark; libgit2's apply
+/// left it out, and Pop then dropped the stash with it.
+#[test]
+fn popping_a_stash_made_before_the_sparse_checkout_matches_git() {
+    for restore_index in [false, true] {
+        let (ours, twin) = twins(stashed_before_the_sparse_checkout);
+
+        let outcome = pop_both(ours.path(), twin.path(), restore_index);
+
+        assert_eq!(outcome, StashApplyOutcome::Applied);
+        assert_same_as_git(ours.path(), twin.path());
+        assert_eq!(
+            std::fs::read_to_string(ours.path().join("docs/guide.md")).unwrap(),
+            "guide edited\n"
+        );
+    }
+}
+
+/// [`cone`] before the sparse checkout: `docs/guide.md` deleted and `app/main.rs` edited,
+/// stashed; then the sparse checkout.
+fn deletion_stashed_before_the_sparse_checkout(d: &Path) {
+    cone(d);
+    git_ok(d, &["sparse-checkout", "disable"]);
+    std::fs::remove_file(d.join("docs/guide.md")).unwrap();
+    write_file(d, "app/main.rs", "main edited\n");
+    git_ok(d, &["stash", "push", "-q", "-u"]);
+    git_ok(d, &["sparse-checkout", "set", "app", "lib/core"]);
+}
+
+#[test]
+fn popping_a_stashed_deletion_of_a_file_outside_the_cone_matches_git() {
+    for restore_index in [false, true] {
+        let (ours, twin) = twins(deletion_stashed_before_the_sparse_checkout);
+
+        let outcome = pop_both(ours.path(), twin.path(), restore_index);
+
+        assert_eq!(outcome, StashApplyOutcome::Applied);
+        assert_same_as_git(ours.path(), twin.path());
+    }
+}
+
+/// [`cone`] before the sparse checkout: `docs/guide.md` changed and staged, then deleted;
+/// `docs/new.md` added and staged; with `edit_other`, `lib/other/o.rs` edited (not staged).
+/// Stashed, then the sparse checkout.
+fn staged_changes_stashed_before_the_sparse_checkout(d: &Path, edit_other: bool) {
+    cone(d);
+    git_ok(d, &["sparse-checkout", "disable"]);
+    write_file(d, "docs/guide.md", "guide staged\n");
+    write_file(d, "docs/new.md", "new staged\n");
+    git_ok(d, &["add", "docs"]);
+    std::fs::remove_file(d.join("docs/guide.md")).unwrap();
+    if edit_other {
+        write_file(d, "lib/other/o.rs", "other edited\n");
+    }
+    git_ok(d, &["stash", "push", "-q", "-u"]);
+    git_ok(d, &["sparse-checkout", "set", "app", "lib/core"]);
+}
+
+#[test]
+fn popping_staged_changes_outside_the_cone_matches_git() {
+    for restore_index in [false, true] {
+        let (ours, twin) = twins(|d| staged_changes_stashed_before_the_sparse_checkout(d, false));
+
+        let outcome = pop_both(ours.path(), twin.path(), restore_index);
+
+        assert_eq!(outcome, StashApplyOutcome::Applied);
+        assert_same_as_git(ours.path(), twin.path());
+    }
+}
+
+/// Without restoring the staged changes, git writes the unstaged edit of `lib/other/o.rs`.
+/// With them, git leaves it out (the file stays marked and missing, the edit is gone);
+/// Browsitory writes it and drops the mark, as without them, and otherwise matches git.
+#[test]
+fn popping_staged_changes_keeps_an_unstaged_edit_outside_the_cone() {
+    for restore_index in [false, true] {
+        let (ours, twin) = twins(|d| staged_changes_stashed_before_the_sparse_checkout(d, true));
+
+        let outcome = pop_both(ours.path(), twin.path(), restore_index);
+
+        assert_eq!(outcome, StashApplyOutcome::Applied);
+        if restore_index {
+            assert!(ls_files_v(twin.path()).contains("S lib/other/o.rs\n"));
+            write_file(twin.path(), "lib/other/o.rs", "other edited\n");
+            git_ok(
+                twin.path(),
+                &["update-index", "--no-skip-worktree", "lib/other/o.rs"],
+            );
+        }
+        assert_same_as_git(ours.path(), twin.path());
+        assert_eq!(
+            std::fs::read_to_string(ours.path().join("lib/other/o.rs")).unwrap(),
+            "other edited\n"
+        );
+    }
+}
+
+/// A staged change to `docs/guide.md` outside the cone, stashed in the sparse checkout and
+/// popped without its staged changes: git writes the file with the staged content, unmarked.
+#[test]
+fn popping_a_staged_change_outside_the_cone_as_unstaged_matches_git() {
+    let (ours, twin) = twins(|d| {
+        staged_change_outside(d);
+        git_ok(d, &["stash", "push", "-q", "-u"]);
+    });
+
+    let outcome = pop_both(ours.path(), twin.path(), false);
+
+    assert_eq!(outcome, StashApplyOutcome::Applied);
+    assert_same_as_git(ours.path(), twin.path());
+}
+
+/// [`cone`] before the sparse checkout: `docs/guide.md` and `app/main.rs` edited and stashed;
+/// then `docs/guide.md` changed and committed; then the sparse checkout. Popping conflicts on
+/// `docs/guide.md`, which git writes with conflict markers.
+fn conflicting_stash_outside_the_cone(d: &Path) {
+    cone(d);
+    git_ok(d, &["sparse-checkout", "disable"]);
+    write_file(d, "docs/guide.md", "guide stashed\n");
+    write_file(d, "app/main.rs", "main stashed\n");
+    git_ok(d, &["stash", "push", "-q", "-u"]);
+    write_file(d, "docs/guide.md", "guide committed\n");
+    commit(d, "guide");
+    git_ok(d, &["sparse-checkout", "set", "app", "lib/core"]);
+}
+
+#[test]
+fn a_stash_conflicting_outside_the_cone_conflicts_as_with_git() {
+    let (ours, twin) = twins(conflicting_stash_outside_the_cone);
+    let output = test_support::git(twin.path(), &["stash", "pop", "-q"]);
+    assert!(!output.status.success(), "{output:?}");
+    let id = stash_id(ours.path());
+
+    let outcome = pop_stash(&mut open(ours.path()), 0, Some(&id), false).unwrap();
+
+    assert_eq!(
+        outcome,
+        StashApplyOutcome::Conflicted {
+            files: vec!["docs/guide.md".to_string()]
+        }
+    );
+    assert_same_as_git(ours.path(), twin.path());
+}
+
+/// A refused Pop (a local edit to `app/main.rs`, which the stash changes too) changes nothing:
+/// the file outside the cone the stash changes stays marked and missing, and the stash is kept.
+#[test]
+fn a_refused_pop_leaves_the_files_outside_the_cone_alone() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let d = dir.path();
+    stashed_before_the_sparse_checkout(d);
+    write_file(d, "app/main.rs", "local edit\n");
+    let before = state(d);
+    let stashes = stash_trees(d);
+    let id = stash_id(d);
+
+    let refused = pop_stash(&mut open(d), 0, Some(&id), false);
+
+    assert!(
+        matches!(refused, Err(git_core::stash::StashError::WouldOverwrite)),
+        "{refused:?}"
+    );
+    assert_eq!(state(d), before);
+    assert_eq!(stash_trees(d), stashes);
+    assert_outside_left_alone(d);
+}
