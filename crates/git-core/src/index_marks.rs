@@ -175,6 +175,14 @@ pub(crate) fn read_tree_marking(
     mark(index, skip_worktree, SKIP_WORKTREE)
 }
 
+/// Marks skip-worktree the stage-0 entry of each of `paths` that is in `index`.
+pub(crate) fn mark_skip_worktree(
+    index: &mut git2::Index,
+    paths: &[Vec<u8>],
+) -> Result<(), git2::Error> {
+    mark(index, paths, SKIP_WORKTREE)
+}
+
 /// Sets `flag` on the stage-0 entry of each of `paths` that is in `index`.
 fn mark(index: &mut git2::Index, paths: &[Vec<u8>], flag: u16) -> Result<(), git2::Error> {
     for path in paths {

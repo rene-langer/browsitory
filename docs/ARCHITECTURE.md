@@ -460,7 +460,25 @@ menu's choice runs back through the session: the pick, the parent picker or a se
     that edit and Undo couldn't bring it back; Abort rebase leaves such a file as it is.
     Entries already in the index keep their mark: git's `reset --hard` and `rebase --abort`
     also re-apply the patterns to them, which matters only when the marks and patterns
-    disagree.
+    disagree. Stash (#1184): libgit2's `stash_save2` recorded a missing marked file as deleted
+    and its reset wrote the file and dropped the mark, so with any skip-worktree entry Stash
+    all takes the path-limited route. Its status passes (`Marked::as_git_sees`) drop a marked
+    file's deletion (libgit2's diff already reports a marked file that is there as
+    unmodified), as git's stash takes the file for unchanged
+    (`update-index --ignore-skip-worktree-entries`): such a file is neither stashed nor
+    written, and keeps its mark. A marked path with a staged change goes into the work-tree
+    tree with its index entry, and only that entry goes back to HEAD's (removed when HEAD
+    lacks the path). Apply (`OutsideCone`, all of its routes): libgit2 left out a stashed
+    change to a missing marked file (Pop then dropped the stash) and wrote a file the restored
+    staged changes add, unmarked. A marked path the stash's work-tree tree changes against its
+    base is unmarked and written from the index first, so the apply merges it as any file, as
+    git writes it (conflicts included); a refused apply puts that back. A path only its index
+    tree changes stays marked, its staged change restored into the index only, as with git. With staged changes restored, a path outside the patterns (of those, or
+    new to the index) whose staged version is its work-tree version then ends marked, its file
+    removed, as git leaves it; every other marked path keeps its mark. Deliberate difference:
+    restoring staged changes, git drops an unstaged edit of a marked path (the file stays
+    marked and missing); here it is written and unmarked, as git does without `--index`. This
+    is the stash part of the merge-family gap in sparse checkouts (#1185).
   - **Sparse patterns** (`git_core::sparse`, #1172), read as git reads them (`dir.c`):
     `core.sparseCheckout`, `core.sparseCheckoutCone` and the work tree's own
     `info/sparse-checkout` (`repo.path()`, so `.git/worktrees/<name>/` for a linked worktree;
@@ -482,7 +500,11 @@ menu's choice runs back through the session: the pick, the parent picker or a se
   removing untracked files), discarding every change outside the paths, and its untracked commit
   holds all untracked files. git2 0.21's `StashSaveOptions` also has no message setter.
   `stash::save_stash` therefore builds a path-limited stash itself and pushes it on `refs/stash`
-  before reverting only the stashed paths; stashing everything still uses `stash_save2`.
+  before reverting only the stashed paths; stashing everything still uses `stash_save2`,
+  except where a route check in `save_stash` sends it through the path-limited stash (a hazard,
+  a kept entry in an untracked folder, an edit removed from the index, a skip-worktree entry).
+  On that route Stash all with untracked files writes the untracked commit also when it is
+  empty, as `stash_save2` and `git stash -u` do (#1184).
 - **Path-limited stash shape (deliberate, differs from git).** The worktree commit is HEAD's tree
   plus the selected files' worktree contents, the index commit is HEAD's tree plus the selected
   files' index entries, and the untracked commit holds only the selected untracked files. git

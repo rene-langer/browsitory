@@ -53,6 +53,22 @@ are not part of **Undo**.
     unstaged** and **Pop stash as unstaged** for a stash with staged changes) follow the same
     rules.
 
+??? note "Details: sparse checkouts"
+    In a sparse checkout (`git sparse-checkout`), stashing leaves the files outside the chosen
+    folders alone, as git does: they aren't stashed as deleted, aren't written to disk and stay
+    outside the sparse checkout, so **Pop** doesn't delete them and the change list doesn't show
+    them. The same goes for a file marked with `git update-index --skip-worktree`: an edit to it
+    isn't stashed. A staged change to such a file is stashed, and the file stays as it is. In a
+    sparse checkout **Stash all changes** works like **Stash file…** on every change, so it also
+    refuses what that refuses.
+
+    A stash that changes a file outside the sparse checkout (one made before you narrowed it,
+    say) writes that file with the stashed change when you apply it, and the file is then part
+    of the checkout, as with `git stash apply`; a conflict there is written with conflict
+    markers. **Apply** and **Pop** keep a file whose staged change they bring back outside the
+    sparse checkout, as git does, unless the stash also holds an unstaged change to it: git then
+    drops that change, Browsitory writes the file with it.
+
 ## When stashing refuses
 
 Stashing refuses, and changes nothing, when it would commit the wrong result or lose work. The
