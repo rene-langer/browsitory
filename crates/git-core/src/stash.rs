@@ -1907,8 +1907,8 @@ pub fn apply_stash(
 /// out a stashed change to a missing marked file (and Pop then dropped the stash), and it writes
 /// a file the restored staged changes add, unmarked.
 ///
-/// - A marked path the stash changes (its work-tree tree, or the index tree when its staged
-///   changes are restored, differs from its base there) leaves the sparse checkout before the
+/// - A marked path the stash changes (its work-tree tree differs from its base there) leaves
+///   the sparse checkout before the
 ///   apply: its mark goes and a missing file is written from the index, so the apply merges it
 ///   as any file. git writes it and drops the mark too (with conflict markers on a conflict).
 /// - With the staged changes restored, such a path or a path the index didn't have that lies
@@ -1966,14 +1966,11 @@ impl OutsideCone {
                 .ok()
                 .map(|entry| (entry.id(), entry.filemode() as u32))
         };
-        let changes = |path: &[u8]| {
-            let before = version(&base, path);
-            version(&worktree, path) != before
-                || staged
-                    .as_ref()
-                    .is_some_and(|staged| version(staged, path) != before)
-        };
-        let (changed, kept): (Vec<_>, Vec<_>) = marked.into_iter().partition(|path| changes(path));
+        // Only the work-tree tree counts: a path whose staged change alone differs from the base
+        // stays marked, as git restores it into the index only.
+        let (changed, kept): (Vec<_>, Vec<_>) = marked
+            .into_iter()
+            .partition(|path| version(&worktree, path) != version(&base, path));
         let mut outside = OutsideCone {
             written: Vec::new(),
             kept,
@@ -2035,7 +2032,6 @@ impl OutsideCone {
         let workdir = repo
             .workdir()
             .ok_or_else(|| git2::Error::from_str("cannot apply a stash in a bare repository"))?;
-        let config = crate::undo::worktree_config(repo).map_err(undo_error)?;
         let mut mark = self.kept.clone();
         let mut remove = Vec::new();
         for (path, in_worktree) in &self.restaged {
@@ -2046,11 +2042,10 @@ impl OutsideCone {
             if *in_worktree != Some((entry.id, entry.mode)) {
                 continue;
             }
-            let name = String::from_utf8_lossy(path).into_owned();
-            match worktree_blob(repo, workdir, &name, &config, Some(entry.mode))? {
-                Some(file) if file != (entry.id, entry.mode) => continue,
-                Some(_) => remove.push(rel),
-                None => {}
+            // The apply wrote the file from that blob: a file already there with other content
+            // made it refuse (the path was unmarked, or new to the index).
+            if workdir.join(&rel).symlink_metadata().is_ok() {
+                remove.push(rel);
             }
             mark.push(path.clone());
         }

@@ -470,10 +470,10 @@ menu's choice runs back through the session: the pick, the parent picker or a se
     tree with its index entry, and only that entry goes back to HEAD's (removed when HEAD
     lacks the path). Apply (`OutsideCone`, all of its routes): libgit2 left out a stashed
     change to a missing marked file (Pop then dropped the stash) and wrote a file the restored
-    staged changes add, unmarked. A marked path the stash changes (work-tree tree, or the
-    restored index tree, against the base) is unmarked and written from the index first, so
-    the apply merges it as any file, as git writes it (conflicts included); a refused apply
-    puts that back. With staged changes restored, a path outside the patterns (of those, or
+    staged changes add, unmarked. A marked path the stash's work-tree tree changes against its
+    base is unmarked and written from the index first, so the apply merges it as any file, as
+    git writes it (conflicts included); a refused apply puts that back. A path only its index
+    tree changes stays marked, its staged change restored into the index only, as with git. With staged changes restored, a path outside the patterns (of those, or
     new to the index) whose staged version is its work-tree version then ends marked, its file
     removed, as git leaves it; every other marked path keeps its mark. Deliberate difference:
     restoring staged changes, git drops an unstaged edit of a marked path (the file stays
