@@ -278,6 +278,41 @@ fn remove_remote_removes_what_git_removes() {
     assert!(local_config(d).contains(&"branch.gone.remote=other".to_string()));
 }
 
+/// A fetch refspec storing elsewhere than `refs/remotes/<name>/` stays as it is, and so do the
+/// refs under `refs/remotes/<name>/`: git moves them only along with a refspec it rewrote.
+#[test]
+fn rename_remote_with_a_fetch_refspec_of_its_own_moves_no_refs_as_git_does() {
+    let (dir, repo) = init_repo();
+    let d = dir.path();
+    write_file(d, "a.txt", "a\n");
+    commit_all(&repo, "base");
+    git_ok(
+        d,
+        &["remote", "add", "origin", "https://example.invalid/r.git"],
+    );
+    git_ok(
+        d,
+        &[
+            "config",
+            "remote.origin.fetch",
+            "+refs/heads/*:refs/remotes/mirror/*",
+        ],
+    );
+    git_ok(d, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    git_ok(d, &["update-ref", "refs/remotes/mirror/main", "HEAD"]);
+    let reference = twin(d);
+    git_ok(
+        reference.path(),
+        &["remote", "rename", "origin", "upstream"],
+    );
+
+    git_core::remote::rename_remote(&repo, "origin", "upstream").unwrap();
+
+    assert_eq!(local_config(d), local_config(reference.path()));
+    assert_eq!(refs(d), refs(reference.path()));
+    assert!(repo.find_reference("refs/remotes/origin/main").is_ok());
+}
+
 /// The upstreams of existing branches are cleared as `git remote rm` clears them; the rest as
 /// Remove remote.
 #[test]
@@ -330,6 +365,54 @@ fn rename_remote_moves_its_sign_in_settings_and_writes_nothing_else() {
             "remote.upstream.url=https://example.invalid/r.git",
         ]
     );
+}
+
+/// A repository whose own config file is gone (libgit2 opens it all the same): there are no
+/// settings to remove or move, and the branch commands still work.
+#[test]
+fn branch_commands_work_without_a_config_file_of_the_repository() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "base");
+    git_ok(dir.path(), &["branch", "release"]);
+    git_ok(dir.path(), &["branch", "kept"]);
+    std::fs::remove_file(repo.path().join("config")).unwrap();
+    let repo = Repository::open(dir.path()).unwrap();
+
+    git_core::branch::delete_branch(&repo, "release", true).unwrap();
+    git_core::branch::rename_branch(&repo, "kept", "renamed").unwrap();
+
+    assert!(!has_branch(&repo, "release"));
+    assert!(has_branch(&repo, "renamed"));
+    assert!(!repo.path().join("config").exists());
+}
+
+/// A remote under the new name that can't even be read (its fetch refspec is invalid) still
+/// stands in the way: Rename remote refuses with libgit2's error and changes nothing.
+#[test]
+fn rename_remote_refuses_a_new_name_whose_remote_cannot_be_read() {
+    let (dir, repo) = init_repo();
+    let d = dir.path();
+    git_ok(
+        d,
+        &["remote", "add", "origin", "https://example.invalid/r.git"],
+    );
+    git_ok(
+        d,
+        &[
+            "config",
+            "remote.upstream.url",
+            "https://example.invalid/u.git",
+        ],
+    );
+    git_ok(d, &["config", "remote.upstream.fetch", "a:b:c"]);
+    assert!(repo.find_remote("upstream").is_err());
+    let config = local_config(d);
+
+    let result = git_core::remote::rename_remote(&repo, "origin", "upstream");
+
+    assert!(result.is_err(), "{result:?}");
+    assert_eq!(local_config(d), config);
 }
 
 /// A remote with a setting in the user's own config too (`remote.origin.prune`).
