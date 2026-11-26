@@ -59,7 +59,8 @@ can change that way; other big files are noted as above.
 
 Undo and Redo of renaming or deleting a branch bring back its settings too: its upstream, its
 pull and push settings and its description. In a sparse checkout, and with files marked
-skip-worktree or added with intent to add (`git add -N`), Undo and Redo keep those marks.
+skip-worktree or added with intent to add (`git add -N`), Undo and Redo keep those marks; a
+file they put back outside the sparse checkout is marked as such, as with Reset.
 
 If the files a discard would replace can't be saved for Undo (a file that can't be read, for
 example), the discard isn't made, and the message names the file.

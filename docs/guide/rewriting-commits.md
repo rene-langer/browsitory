@@ -47,6 +47,13 @@ cherry-pick** and **Abort cherry-pick** (or revert) in the status strip.
     uptodate"), because Undo couldn't bring those edits back; nothing is changed. A file added
     with `git add -N` stays on disk as an untracked file.
 
+    Files that the commit you reset to adds outside a sparse checkout's folders are marked too,
+    as `git reset` marks them: they aren't written to disk and aren't listed as deleted. The
+    same for the files **Abort** of a merge, cherry-pick, revert or rebase, and **Undo**, put
+    back. With patterns set by `git sparse-checkout set --no-cone`, which Browsitory doesn't
+    match, each such file that isn't on disk counts as outside; `git sparse-checkout reapply`
+    brings in the ones your patterns hold.
+
     Cherry-pick, revert, check out, reset and **Create tag at…** also work for a commit selected
     in the search results or a file history that is older than the history loaded in the graph;
     the history edits need the commit in the graph, so load more history (or use **Go to

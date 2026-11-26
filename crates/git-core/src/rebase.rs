@@ -1397,25 +1397,32 @@ fn restore_original_branch(
     let target = crate::worktree_guard::GuardSource::Tree(&tree);
     let pairs =
         crate::worktree_guard::case_pairs_for_abort::<RebaseError, &str>(repo, &target, None)?;
-    if pairs.is_empty() {
+    // As Reset hard (#1145, #1172): a forced checkout of the whole tree would write every file
+    // outside a sparse checkout and drop the skip-worktree marks. An edited skip-worktree file
+    // is left as it is rather than refused: Abort must always work.
+    let (marks, left) = {
+        let mut index = repo.index()?;
+        index.read(false)?;
+        let marks = crate::index_marks::marks_after(repo, &index, &tree)?;
+        let left = crate::index_marks::left_alone::<RebaseError>(repo, &index, &tree, &marks)?;
+        (marks, left.paths)
+    };
+    if pairs.is_empty() && left.is_empty() {
         check_out_original(repo, &tree, &original_tree, None)?;
     } else {
-        let skip_worktree = {
-            let mut index = repo.index()?;
-            index.read(false)?;
-            crate::index_marks::skip_worktree_paths(&index)
-        };
-        let others = crate::index_marks::paths_except(repo, &tree, |path| pairs.contains(path))?;
+        let others = crate::index_marks::paths_except(repo, &tree, |path| {
+            pairs.contains(path) || left.contains(path)
+        })?;
         // No paths would mean the whole tree.
         if !others.is_empty() {
             check_out_original(repo, &tree, &original_tree, Some(&others))?;
         }
         crate::worktree_guard::restore_case_pairs::<RebaseError>(repo, &tree, &pairs)?;
-        // The limited checkout updated only the other paths' entries; the pair's (and any
-        // conflict on them) go too.
+        // The limited checkout updated only the other paths' entries; the pair's, the ones left
+        // alone (and any conflict on them) go too.
         let mut index = repo.index()?;
         index.read(true)?;
-        crate::index_marks::reset_index_to_tree(&mut index, &tree, &skip_worktree)?;
+        crate::index_marks::reset_index_to_tree(&mut index, &tree, &marks.skip_worktree)?;
     }
     repo.set_head(branch_ref)?;
     crate::commit::clear_operation_files(repo)?;
