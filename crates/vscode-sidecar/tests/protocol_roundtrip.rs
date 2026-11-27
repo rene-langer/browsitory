@@ -2215,8 +2215,10 @@ fn pull_current_upstream_streams_notifications_and_returns_an_outcome() {
 #[test]
 fn a_dirty_pull_answers_the_dirty_worktree_kind() {
     let fixture = local_and_bare_remote();
+    fixture.remote_commit("remote change");
     let repo_path = fixture.local_path();
-    write_file(std::path::Path::new(&repo_path), "untracked.txt", "x");
+    // In the way of the file the pull writes (#1152).
+    write_file(std::path::Path::new(&repo_path), "remote.txt", "x");
     let mut sidecar = Sidecar::spawn();
     sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
     sidecar.call(
@@ -2236,8 +2238,11 @@ fn a_dirty_pull_answers_the_dirty_worktree_kind() {
         response["error"],
         serde_json::json!({
             "code": -32000,
-            "message": "cannot pull with a dirty worktree",
-            "data": {"kind": "DirtyWorktree", "message": "cannot pull with a dirty worktree"},
+            "message": "the pull would overwrite your local changes to remote.txt",
+            "data": {
+                "kind": "DirtyWorktree",
+                "message": "the pull would overwrite your local changes to remote.txt"
+            },
         })
     );
 }

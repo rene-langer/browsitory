@@ -486,19 +486,24 @@ fn pull_fast_forwards_a_clean_branch_after_fetch() {
     );
 }
 
+/// #1152: an untracked file the pull doesn't write doesn't stop it, as with `git pull`.
 #[test]
-fn pull_rejects_a_dirty_worktree_before_changing_head() {
+fn pull_fast_forwards_past_an_untracked_file_it_does_not_touch() {
     let fixture = local_and_bare_remote();
     fixture.remote_commit("remote change");
     fixture.write_local("dirty.txt", "dirty");
-    let local_head = fixture.local.head().unwrap().target();
 
-    assert!(matches!(
-        pull_after_fetch(&fixture.local, "origin", "main"),
-        Err(RemoteError::DirtyWorktree)
-    ));
-    assert_eq!(fixture.local.head().unwrap().target(), local_head);
-    assert_ne!(local_head, Some(fixture.remote_tip()));
+    let outcome = pull_after_fetch(&fixture.local, "origin", "main").unwrap();
+
+    assert!(matches!(outcome, PullOutcome::FastForwarded { .. }));
+    assert_eq!(
+        fixture.local.head().unwrap().target(),
+        Some(fixture.remote_tip())
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.local_dir.path().join("dirty.txt")).unwrap(),
+        "dirty"
+    );
 }
 
 #[test]
@@ -3376,8 +3381,10 @@ fn no_ff_leaves_up_to_date_and_diverged_pulls_as_they_were() {
     ));
 }
 
+/// #1152: an untracked file doesn't stop a pull that asks for its merge commit; the merge
+/// itself refuses what it would overwrite.
 #[test]
-fn no_ff_still_refuses_a_dirty_worktree_first() {
+fn no_ff_with_an_untracked_file_asks_for_the_merge_commit() {
     let fixture = local_and_bare_remote();
     fixture.remote_commit("remote change");
     fixture
@@ -3389,7 +3396,7 @@ fn no_ff_still_refuses_a_dirty_worktree_first() {
     fixture.write_local("dirty.txt", "dirty");
     assert!(matches!(
         pull_after_fetch(&fixture.local, "origin", "main"),
-        Err(RemoteError::DirtyWorktree)
+        Ok(PullOutcome::NoFastForward { .. })
     ));
 }
 
