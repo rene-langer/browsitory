@@ -39,7 +39,7 @@ pub(super) fn write_repo_watch<W: Write>(out: &Mutex<W>, repo_path: &str, event:
         return;
     };
     let mut out = out.lock().unwrap_or_else(|error| error.into_inner());
-    // A failed write means the extension host is gone; the main loop exits on its next answer.
+    // A failed write means the extension host is gone; the sidecar exits once stdin ends too.
     let _ = writeln!(out, "{line}").and_then(|()| out.flush());
 }
 
