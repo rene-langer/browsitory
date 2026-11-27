@@ -966,7 +966,7 @@ describe("CommitGraph", () => {
     fireEvent.click(row("C"));
     fireEvent.click(row("B"), { shiftKey: true });
 
-    for (const name of ["Interactive rebase…", "Squash 2 commits", "Fixup 2 commits", "Drop 2 commits"]) {
+    for (const name of ["Interactive rebase…", "Squash 2 commits…", "Fixup 2 commits…", "Drop 2 commits…"]) {
       const button = screen.getByRole("button", { name });
       expect(button).toBeDisabled();
       expect(button).toHaveAttribute("title", "Check out a branch first.");
