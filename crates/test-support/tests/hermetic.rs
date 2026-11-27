@@ -149,7 +149,7 @@ fn libgit2_sees_no_global_xdg_or_system_config() {
 
 #[test]
 fn spawned_git_sees_no_global_or_system_config() {
-    if Command::new("git").arg("--version").output().is_err() {
+    if !test_support::require_tool("git") {
         return;
     }
     let output = Command::new("git")
@@ -222,7 +222,7 @@ fn git_command_runs_git_isolated_from_the_users_config_and_gpg() {
     }
     assert_eq!(std::fs::read_to_string(&paths.global_config).unwrap(), "");
 
-    if Command::new("git").arg("--version").output().is_err() {
+    if !test_support::require_tool("git") {
         return;
     }
     let output = test_support::git(&dir, &["config", "--global", "--list"]);

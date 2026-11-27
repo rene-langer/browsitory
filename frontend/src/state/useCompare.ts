@@ -47,7 +47,8 @@ interface Resolved {
 export function useCompare(
   client: RepoClient,
   repoPath: string,
-  refreshGeneration: number,
+  /** `AppState.historyGeneration` (#1118): a branch's range changes only with the refs. */
+  historyGeneration: number,
   selectedRow: SelectedRow,
 ): UseCompareResult {
   const [opened, setOpened] = useState<Opened | null>(null);
@@ -90,7 +91,7 @@ export function useCompare(
     return () => {
       ignore = true;
     };
-  }, [client, repoPath, branchRef, openId, refreshGeneration, retryToken]);
+  }, [client, repoPath, branchRef, openId, historyGeneration, retryToken]);
 
   const open = useCallback((target: CompareTarget) => {
     nextOpenId.current += 1;

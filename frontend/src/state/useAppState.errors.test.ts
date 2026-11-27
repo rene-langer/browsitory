@@ -14,9 +14,9 @@ describe("useAppState error lifecycle", () => {
     });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     await act(() => result.current.stageFile("a.txt"));
-    expect(result.current.state.error).toBe("boom");
+    expect(result.current.state.error).toBe("Couldn't stage a.txt: boom");
     await act(() => result.current.refresh());
-    expect(result.current.state.error).toBe("boom");
+    expect(result.current.state.error).toBe("Couldn't stage a.txt: boom");
   });
 
   it("a successful refresh clears the error a failed refresh set", async () => {
@@ -53,7 +53,7 @@ describe("useAppState error lifecycle", () => {
     });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     await act(() => result.current.stageFile("a.txt"));
-    expect(result.current.state.error).toBe("boom");
+    expect(result.current.state.error).toBe("Couldn't stage a.txt: boom");
     failStatus = true;
     await act(() => result.current.refresh());
     expect(result.current.state.error).toBe("worker stopped");
@@ -69,10 +69,11 @@ describe("useAppState error lifecycle", () => {
     let failStatus = true;
     let stageCalls = 0;
     const client = transferClient({
+      // The same text the failed stage below shows, operation included (#1122).
       getStatus: async () => {
         if (failStatus) {
           failStatus = false;
-          throw new Error("worker stopped");
+          throw new Error("Couldn't stage a.txt: worker stopped");
         }
         return [];
       },
@@ -83,16 +84,16 @@ describe("useAppState error lifecycle", () => {
     });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     await act(() => result.current.refresh());
-    expect(result.current.state.error).toBe("worker stopped");
+    expect(result.current.state.error).toBe("Couldn't stage a.txt: worker stopped");
     if (how === "dismiss") act(() => result.current.dismissError());
     // The mutation clears the error when it starts, then fails with the same text.
     await act(() => result.current.stageFile("a.txt"));
     expect(stageCalls).toBe(1);
-    expect(result.current.state.error).toBe("worker stopped");
+    expect(result.current.state.error).toBe("Couldn't stage a.txt: worker stopped");
 
     await act(() => result.current.refresh());
 
-    expect(result.current.state.error).toBe("worker stopped");
+    expect(result.current.state.error).toBe("Couldn't stage a.txt: worker stopped");
   });
 
   it("selecting a reflog reference keeps another action's error", async () => {
@@ -105,7 +106,7 @@ describe("useAppState error lifecycle", () => {
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     await act(() => result.current.stageFile("a.txt"));
     await act(() => result.current.selectReflogReference("HEAD"));
-    expect(result.current.state.error).toBe("boom");
+    expect(result.current.state.error).toBe("Couldn't stage a.txt: boom");
   });
 
   it("a reflog read that failed and then succeeds clears its own error", async () => {
@@ -136,7 +137,7 @@ describe("useAppState error lifecycle", () => {
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     await act(() => result.current.stageFile("a.txt"));
     await act(() => result.current.listPullRequests("origin", "me"));
-    expect(result.current.state.error).toBe("boom");
+    expect(result.current.state.error).toBe("Couldn't stage a.txt: boom");
   });
 
   it("a pull request list that failed and then succeeds clears its own error", async () => {
@@ -179,11 +180,11 @@ describe("useAppState error lifecycle", () => {
     });
     holdStatus = false;
     await act(() => result.current.stageFile("a.txt"));
-    expect(result.current.state.error).toBe("The pre-commit hook was cancelled.");
+    expect(result.current.state.error).toBe("Couldn't stage a.txt: The pre-commit hook was cancelled.");
     await act(async () => {
       releaseStatus();
       await refreshing;
     });
-    expect(result.current.state.error).toBe("The pre-commit hook was cancelled.");
+    expect(result.current.state.error).toBe("Couldn't stage a.txt: The pre-commit hook was cancelled.");
   });
 });

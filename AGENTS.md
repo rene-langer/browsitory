@@ -81,6 +81,17 @@ pnpm test                                          # spawns the extension under 
                                                     # -s "-screen 0 1280x1024x24" pnpm test)
 ```
 
+Both suites (and the VSIX smoke test and `sidecarBridge.real.test.ts`) run with a throwaway
+HOME, XDG dirs, git global config and GnuPG home and without your SSH agent
+(`extension/e2e/src/support/isolatedHome.ts`, #1112): your own git config, keys and agents
+never take part. Their fixtures live at fixed paths under `os.tmpdir()`, so each run first takes
+a lock there (`browsitory-e2e.lock`, `browsitory-vscode-e2e.lock`, #1144) and a second run of
+the same suite stops at once, naming the first. To run two VSCode suites at once, give each its
+own `TMPDIR` and build its frontend with `VITE_E2E_REPO_PATH="$TMPDIR/browsitory-vscode-e2e-repo"`
+(the Tauri suite likewise needs `VITE_E2E_REPO_PATH="$TMPDIR/browsitory-e2e-repo"` wherever
+`TMPDIR` isn't `/tmp`); the Tauri suite's fixed driver ports (4444, 4445) allow one Tauri run
+per machine, which it checks before it touches a fixture.
+
 Give `xvfb-run` that screen size, as CI does: its default differs by distribution (Fedora's is
 640x480, too small for the merge editor spec, #1046; Ubuntu's is 1280x1024 at 8 bits).
 
@@ -246,6 +257,11 @@ tree it pulls in (`deny.toml`, `scripts/check-dependency-licenses.py`); keep the
 
 - `git-core`/`repo-service`: real temp-dir repos via `git2::Repository::init`/`TempDir`, never a
   mocked `Repository`.
+- A Rust test that needs an external tool (the `git` CLI, `gpg`, `ssh-keygen`, Git for Windows'
+  `sh.exe`) starts with `if !test_support::require_tool("git") { return; }` (or
+  `test_support::require(what, found)`), never its own availability check: locally a missing
+  tool skips with a note, under CI it fails (#1113). A new tool must be on every CI runner the
+  test runs on.
 - `frontend`: Vitest + Testing Library, mocking `RepoClient` (a real interface seam) — never
   `@tauri-apps/api` or `postMessage` directly.
 - `tauri-app`: inline tests cover only its own DTO serialization; pass-through commands rely on

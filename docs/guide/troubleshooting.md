@@ -33,7 +33,7 @@ repository's name and the error instead of going blank. The other tabs and the r
 keep working. **Reload tab** reads the repository again (your commit message draft stays),
 **Close tab** closes it, and **Copy details** copies the version and the error for a bug report.
 If the window itself can't be drawn, it shows "Browsitory couldn't show this window" with
-**Reload**, which opens your repositories again. Either way the error also goes to the log.
+**Reload**, which opens your repositories again (your commit message drafts stay too). Either way the error also goes to the log.
 
 ## An invalid `core.ignorecase`
 

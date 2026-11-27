@@ -83,7 +83,10 @@ keep their width when you resize the window; only the diff pane grows or shrinks
 sidebar, the commit graph, the diff pane) and **Shift+F6** back, returning to where the focus
 last was in each. The toolbar's **Refresh**, **Fetch**, **Pull** and **Push** have shortcuts
 too (F5, Shift+F5, Ctrl+Shift+L, Ctrl+Shift+K; see
-[Keyboard shortcuts](command-palette.md#keyboard-shortcuts)), which their tooltips show.
+[Keyboard shortcuts](command-palette.md#keyboard-shortcuts)), which their tooltips show. When
+you delete a branch, tag, worktree or stash from its menu, the focus moves to the row now in
+its place (or the section's header once the list is empty), and a notification's own button
+(**Undo**, **Dismiss**) returns the focus to where it was before.
 
 **Narrow windows.** When the window (or, in VSCode, the editor group) is narrower than 900
 pixels, or too narrow for all three columns, the sidebar hides by itself and comes back once
@@ -188,6 +191,8 @@ download server is down), it tries again after 10 minutes, then waits twice as l
 to 3 hours, until a check succeeds. When it is ready, a notice with the notifications says
 "Update v… ready" and stays until you restart.
 Click **Restart to update** to install it, or keep working: nothing changes until you restart.
+A change that is still running in a repository (a checkout, a commit, a fetch) finishes first,
+for up to 5 seconds, so it leaves no Git lock file behind.
 If installing fails (for example when you cancel the password prompt on Linux), the notice turns
 red and says "Couldn't install update v…" with the reason, which also goes to the
 [log file](troubleshooting.md); click **Restart to update** to try again.
@@ -208,6 +213,10 @@ icon. It closes by itself after 5 to 15 seconds, depending on its length; one wi
 (such as **Undo**) stays at least 10 seconds, and an error stays until you close it. While the
 pointer is over a notification or focus is on one of its buttons, none of them close. They never
 take focus: reach their buttons with Tab. Screen readers announce them without interrupting.
+A notification from a tab that isn't shown starts with that tab's name ("widget: Fetched from
+origin."), and its buttons first show that tab, then act there. A fetch, pull or push that fails
+in a tab that isn't shown says so in a notification too; its banner waits in its tab. Closing a
+tab closes its notifications that have buttons.
 
 ![The main window: sidebar, commit graph and diff pane](assets/overview.png)
 

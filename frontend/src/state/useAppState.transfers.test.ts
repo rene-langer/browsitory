@@ -192,7 +192,7 @@ describe("useAppState", () => {
     await act(() => result.current.clearCurrentUpstream());
 
     expect(result.current.state.upstream).toEqual(upstream);
-    expect(result.current.state.error).toBe("clear failed");
+    expect(result.current.state.error).toBe("Couldn't clear the upstream: clear failed");
   });
 
   it("records a divergent pull without beginning reconciliation", async () => {

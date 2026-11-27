@@ -41,6 +41,11 @@ cd frontend && pnpm install && cd ../crates/tauri-app
 node ../../frontend/node_modules/@tauri-apps/cli/tauri.js dev
 ```
 
+The app runs once per user (#1136): while an installed Browsitory runs, a dev build only brings
+that window to the front and exits. Set `BROWSITORY_CONFIG_DIR` to an empty folder to run it
+beside the installed app with its own `config.toml` (on Linux the GTK application id still
+allows one copy per D-Bus session).
+
 ## Build a distributable
 
 ```bash
@@ -60,6 +65,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 cd frontend && pnpm test -- --run && pnpm lint
 ```
+
+Some Rust tests run the `git` CLI, `gpg` (Linux and macOS) or `ssh-keygen`, `ssh-agent` and
+`ssh-add`. Without one of them those tests are skipped with a `note: skipping …` line in the
+output; on CI they fail instead.
 
 Code under `#[cfg(windows)]` (in `crates/git-core`) only compiles for a Windows target. On Linux
 or macOS, `scripts/check-windows.sh` runs clippy on it for `x86_64-pc-windows-gnu`; it needs

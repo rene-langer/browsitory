@@ -39,6 +39,7 @@ carry their own verification date in the Notes column. CI checks the full transi
 | toml | MIT OR Apache-2.0 | `config` |
 | tauri-plugin-updater 2 | Apache-2.0 OR MIT | `tauri-app` — checks/downloads app updates for `UpdateBanner`. Source: [crates.io](https://crates.io/crates/tauri-plugin-updater); verified with `cargo info tauri-plugin-updater` on 2026-08-26. |
 | tauri-plugin-process 2 | Apache-2.0 OR MIT | `tauri-app` — restarts the app to apply a downloaded update. Source: [crates.io](https://crates.io/crates/tauri-plugin-process); verified with `cargo info tauri-plugin-process` on 2026-08-26. |
+| tauri-plugin-single-instance 2 | Apache-2.0 OR MIT | `tauri-app` — a second launch shows the running app's window instead of starting a second process (#1136); pulls in no crate the tree didn't have (zbus on Linux already came with it). Source: [crates.io](https://crates.io/crates/tauri-plugin-single-instance/2.5.5); verified with `cargo info tauri-plugin-single-instance@2` on 2026-11-27. |
 | log 0.4 | MIT OR Apache-2.0 | `tauri-app` — logging facade used for the panic hook and any future backend log calls. Source: [crates.io](https://crates.io/crates/log); verified with `cargo info log` on 2026-08-28. |
 | tauri-plugin-log 2 | Apache-2.0 OR MIT | `tauri-app` — rotated file logging (OS log dir) for failure diagnosis, backing `frontend`'s `@tauri-apps/plugin-log`. Source: [crates.io](https://crates.io/crates/tauri-plugin-log); verified with `cargo info tauri-plugin-log` on 2026-08-28. |
 

@@ -175,3 +175,25 @@ describe("SubmodulePanel", () => {
     expect(screen.getByRole("menu")).toBeInTheDocument();
   });
 });
+
+// #1141: a row that leaves the list while its menu is open keeps the focus in the list.
+it("moves the focus to the submodule now in that place when the one whose menu is open goes (#1141)", () => {
+  const third: SubmoduleInfo = { ...uninitializedSubmodule, path: "deps/third" };
+  const { rerender } = renderPanel({ submodules: [uninitializedSubmodule, initializedSubmodule, third] });
+  const actions = screen.getByRole("button", { name: "Actions for deps/ready-child" });
+  actions.focus();
+  fireEvent.click(actions);
+  expect(screen.getByRole("menu")).toBeInTheDocument();
+  rerender(
+    <SubmodulePanel
+      submodules={[uninitializedSubmodule, third]}
+      onInit={vi.fn().mockResolvedValue(undefined)}
+      onUpdate={vi.fn().mockResolvedValue(undefined)}
+      onOpenInNewTab={vi.fn()}
+      operationDisabled={false}
+      operationDisabledReason={null}
+    />,
+  );
+  expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Actions for deps/third" })).toHaveFocus();
+});

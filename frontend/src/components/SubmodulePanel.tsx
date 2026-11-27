@@ -7,6 +7,7 @@ import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { ListRow } from "./primitives/ListRow";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./SubmodulePanel.module.css";
+import { useRefocusRemovedRow } from "./useRefocusRemovedRow";
 
 // `returnFocusTo`: the row's "…" for a pointer (WebKit focuses neither the row nor the button);
 // `undefined` for a key, so `ContextMenu` returns focus to what had it (as TagPanel).
@@ -50,6 +51,9 @@ export function SubmodulePanel({
   const [recursive, setRecursive] = useState(false);
   const [pendingPath, setPendingPath] = useState<string | null>(null);
   const [menu, setMenu] = useState<SubmoduleMenu | null>(null);
+  const [listElement, setListElement] = useState<HTMLUListElement | null>(null);
+  // A submodule a refresh removed while its menu was open (#1141).
+  useRefocusRemovedRow({ list: listElement, watching: [menu?.path] });
 
   // The menu acts on the submodule it was opened for; a refresh that removed it closes the menu.
   const menuSubmodule = menu === null ? undefined : submodules.find((submodule) => submodule.path === menu.path);
@@ -129,7 +133,7 @@ export function SubmodulePanel({
           />
           Update recursively
         </label>
-        <ul className={styles.list} aria-label="Submodules">
+        <ul ref={setListElement} className={styles.list} aria-label="Submodules">
           {submodules.map((submodule) => {
             const rowDisabled = operationDisabled || pendingPath === submodule.path;
 

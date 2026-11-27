@@ -42,7 +42,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Once, OnceLock};
 
+mod required_tool;
 mod stalled_server;
+pub use required_tool::{program_available, require, require_tool};
 pub use stalled_server::{StalledServer, STALLED_BRANCH_TIP};
 
 #[doc(hidden)]

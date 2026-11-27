@@ -39,8 +39,8 @@ describe("Browsitory blame", () => {
     // useAppState refetch, which is what makes the two git-CLI commits above show up below.
     // The per-row stage control is icon-only (aria-label only, no visible text) since the
     // file-list migration to `ListRow` — target the throwaway prime file written above.
-    // `opacity: 0` until the row is hovered/focused, so it is clicked inside the page (see
-    // `first-flow.spec.ts`'s note), looked up and clicked in one step.
+    // Clicked inside the page, looked up and clicked in one step (`clickInPage`, see
+    // `first-flow.spec.ts`'s note).
     await clickInPage(`button[aria-label="Stage ${PRIME_FILE}"]`);
     // Wait for the row to move under Staged before committing (#697).
     await waitUntilInPage(`button[aria-label="Unstage ${PRIME_FILE}"]`);

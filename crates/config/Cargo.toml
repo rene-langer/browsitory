@@ -8,6 +8,6 @@ license = "MIT"
 git-core = { path = "../git-core" }
 directories = "6"
 serde = { version = "1", features = ["derive"] }
-toml = "1"
+toml = { version = "1", features = ["preserve_order"] }
 thiserror = "2.0"
 tempfile = "3"

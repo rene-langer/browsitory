@@ -28,10 +28,11 @@ import { chordFromVscodeKey } from "./vscodeKeybindings";
  * editor rebinds them (#900, owner decision).
  *
  * The reserved keys (owner decision) can't be given to any shortcut: copy, paste, cut, select
- * all, undo and redo (Ctrl/Cmd+C/V/X/A/Z/Y), Esc, Tab, Shift+Tab, Enter, Space, the arrow keys
- * without modifiers, F6 / Shift+F6, and the OS's quit and close keys (Cmd+Q, Cmd+W, Alt+F4). A
- * shortcut whose built-in keys are reserved (Undo's Ctrl+Z, F6) keeps them. Ctrl/Cmd+1 … 9 is a
- * range of keys and stays fixed.
+ * all, undo and redo (Ctrl/Cmd+C/V/X/A/Z/Y), Esc, Tab, Shift+Tab, Enter, Space, and without
+ * modifiers the arrow keys, Backspace, Delete, Home, End, Page Up and Page Down (#1142), F6 /
+ * Shift+F6, and the OS's quit and close keys (Cmd+Q, Cmd+W, Alt+F4). A shortcut whose built-in
+ * keys are reserved (Undo's Ctrl+Z, F6) keeps them. Ctrl/Cmd+1 … 9 is a range of keys and stays
+ * fixed.
  */
 
 export type { BindableId };
@@ -102,7 +103,9 @@ export function sameChord(a: KeyChord, b: KeyChord, apple: boolean = isApplePlat
   return Boolean(a.mod || a.ctrl) === Boolean(b.mod || b.ctrl);
 }
 
-const PLAIN_RESERVED = new Set(["Escape", "Tab", "Enter", " ", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "F6"]);
+/** Keys a text field edits or moves with (#1142), which no shortcut takes from it. */
+export const TEXT_FIELD_KEYS: ReadonlySet<string> = new Set(["Backspace", "Delete", "Home", "End", "PageUp", "PageDown"]);
+const PLAIN_RESERVED = new Set(["Escape", "Tab", "Enter", " ", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "F6", ...TEXT_FIELD_KEYS]);
 const EDITING_LETTERS = new Set(["c", "v", "x", "a", "z", "y"]);
 
 /** Whether a chord is one of the reserved keys (owner decision, #898). */
