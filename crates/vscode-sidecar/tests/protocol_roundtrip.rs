@@ -1690,7 +1690,7 @@ fn reflog_lists_and_restores_through_the_sidecar() {
     let entries = sidecar.call(
         3,
         "get_reflog",
-        serde_json::json!({"repoPath": repo_path, "reference": "HEAD"}),
+        serde_json::json!({"repoPath": repo_path, "reference": "HEAD", "limit": 10}),
     );
     let entries_list = entries["result"].as_array().expect("reflog entries");
     assert_eq!(entries_list[0]["summary"], "second commit");
