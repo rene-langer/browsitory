@@ -1,5 +1,5 @@
 import { execFileSync, spawn as spawnProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -41,22 +41,58 @@ if (sidecarMissing) {
   process.stderr.write(`Skipping the real-sidecar tests: ${sidecarMissingMessage}.\n`);
 }
 
+/**
+ * This process's environment with a throwaway HOME, XDG config dir, git global config and GnuPG
+ * home under `root`, `GIT_CONFIG_NOSYSTEM=1`, and without the SSH agent or any inherited `GIT_*`
+ * variable (#1112): the sidecar's libgit2 reads `$HOME/.gitconfig`, so it and the `git init`
+ * below never see the developer's config. The E2E runs use `extension/e2e`'s `isolatedHome.ts`
+ * for the same, which this package can't import (`rootDir: "src"`).
+ */
+function isolatedEnv(root: string): NodeJS.ProcessEnv {
+  const home = path.join(root, "home");
+  mkdirSync(path.join(home, ".config"), { recursive: true });
+  mkdirSync(path.join(home, ".gnupg"), { mode: 0o700 });
+  writeFileSync(path.join(home, ".gitconfig"), "");
+  const env: NodeJS.ProcessEnv = {};
+  for (const [name, value] of Object.entries(process.env)) {
+    if (name.toUpperCase().startsWith("GIT_") || name === "SSH_AUTH_SOCK" || name === "SSH_AGENT_PID") continue;
+    env[name] = value;
+  }
+  return {
+    ...env,
+    HOME: home,
+    XDG_CONFIG_HOME: path.join(home, ".config"),
+    GIT_CONFIG_GLOBAL: path.join(home, ".gitconfig"),
+    GIT_CONFIG_NOSYSTEM: "1",
+    GNUPGHOME: path.join(home, ".gnupg"),
+  };
+}
+
 describe.skipIf(sidecarMissing)("SidecarBridge with the real vscode-sidecar", () => {
   it("reopens persisted repositories before serving a retry after a crash", async () => {
     const testRoot = mkdtempSync(path.join(tmpdir(), "browsitory-sidecar-bridge-"));
     const repoPath = path.join(testRoot, "repo");
     const configDir = path.join(testRoot, "config");
     mkdirSync(configDir);
-    execFileSync("git", ["init", "--quiet", repoPath]);
+    const env = isolatedEnv(testRoot);
+    execFileSync("git", ["init", "--quiet", repoPath], { env });
 
     const children: ChildProcessWithoutNullStreams[] = [];
     const messages: JsonRpcMessage[] = [];
     const diagnostics: string[] = [];
+    // The window's state, where `persist_open_repos` keeps the open tabs (#1128).
+    const windowState = new Map<string, unknown>();
     const context = {
       extension: { packageJSON: { version: "1.2.3" } },
       globalState: {
         get: () => undefined,
         update: async () => undefined,
+      },
+      workspaceState: {
+        get: (key: string) => windowState.get(key),
+        update: async (key: string, value: unknown) => {
+          windowState.set(key, value);
+        },
       },
     } as unknown as ExtensionContext;
     const bridge = new SidecarBridge({
@@ -64,7 +100,7 @@ describe.skipIf(sidecarMissing)("SidecarBridge with the real vscode-sidecar", ()
         const child = spawnProcess(sidecarPath, [], {
           stdio: ["pipe", "pipe", "pipe"],
           env: {
-            ...process.env,
+            ...env,
             BROWSITORY_CONFIG_DIR: configDir,
           },
         });

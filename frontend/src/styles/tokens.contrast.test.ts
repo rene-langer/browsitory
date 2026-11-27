@@ -27,6 +27,8 @@ const CODE_SURFACES = ["surface", "bg", "bg-subtle", "diff-add-bg", "diff-remove
 const PAIRS: Pair[] = [
   ...each("text", [...TEXT_SURFACES, "input-bg"], TEXT),
   ...each("text-muted", TEXT_SURFACES, TEXT),
+  // A diff's line numbers and whitespace markers on added and removed lines (#1140).
+  ...each("text-muted", ["diff-add-bg", "diff-remove-bg"], TEXT),
   ...each("control-text", ["control", "control-hover"], TEXT),
   ...each("input-text", ["input-bg"], TEXT),
   ...each("placeholder", ["input-bg"], TEXT),

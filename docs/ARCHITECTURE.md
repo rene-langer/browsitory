@@ -47,8 +47,10 @@ stay in the transport crates:
   `CloneOutcomeDto`, `CloneErrorDto`; the VSCode extension has no clone), `MergeToolOutcomeDto`
   (VSCode uses its own merge editor), the Tauri event names, and `list_open_repos`'s
   `(entries, activePath)` tuple.
-- `vscode-sidecar`: `OpenReposDto` (`list_open_repos`'s object), `FileVersionDto` and
-  `read_file_version`'s `{ text }` (extension host only), and every method's params struct.
+- `vscode-sidecar`: `FileVersionDto` and `read_file_version`'s `{ text }` (extension host
+  only), and every method's params struct. In VSCode, `list_open_repos` and
+  `persist_open_repos` never reach the sidecar: the extension host answers them (#1128, see
+  "VSCode host and sidecar lifecycle").
 
 A wire field that holds one of a fixed set of names carries the enum itself, never a string:
 the `git-core` enums (`StatusKind`, `DiffLineOrigin`, `TransferOperation`, `TransferErrorKind`,
@@ -79,14 +81,32 @@ later user retry rather than scheduling background restarts. Panel closure and e
 deactivation dispose the webview listener and bridge and drain pending ids. A live child's stdin
 is ended rather than the child killed (#961): the sidecar then lets its running request threads
 finish before it exits, since one cut off in a libgit2 write leaves `.git/index.lock` behind. The
-bridge kills it only if it is still running after `SIDECAR_EXIT_GRACE_MS` (5 s).
+bridge kills it only if it is still running after `SIDECAR_EXIT_GRACE_MS` (5 s). When the
+extension host itself goes away (a window reload or close, quitting VSCode), stdin ends and
+nothing reads stdout any more (#1129): a failed answer write only marks the reader gone (later
+answers are skipped), so the other requests still finish, and the sidecar bounds its own wait
+after stdin ends to the same 5 s (`EXIT_GRACE` in `main.rs`) and then exits, because the host's
+kill timer died with the host.
+
+**Open tabs per window (#1128, owner decision).** The desktop app keeps its open tabs in
+`config.toml` (`open_repos`, `active_repo`). In VSCode each window keeps its own, in the
+extension's `workspaceState` under `openRepos` (`extension/src/openRepos.ts`): the host answers
+`list_open_repos` and `persist_open_repos` itself (both in `NATIVE_METHODS`, the sidecar has no
+such methods), so neither another VSCode window nor the desktop app sees or overwrites them.
+After a sidecar restart the bridge sends `open_repo` for each repository of that state before
+the request that started it. A window with no saved state (a new one, or the first start after
+0.18.0; nothing is migrated from `config.toml`, whose list is the desktop app's) restores no
+tabs; **Browsitory: Open** then opens the workspace's repositories. Recent and pinned
+repositories, workspaces and every setting stay shared in `config.toml`. The webview's
+watchers live in the sidecar, so after a transport loss `useRepoWatch` starts its watcher again
+on each `transportStatus` notification (#1130); until it answers, the checks poll.
 
 **Host requests and notifications (#677, #678, #679, #759).** The extension host asks the
 webview to open repositories, show a file's or lines' history, select a commit (from the Timeline
 view, through `useGoTo` like Go to), or run a global shortcut with an id-less
 `hostRequest` notification (`extension/src/hostRequests.ts`; `RepoClient.subscribeHostRequests`
 on the frontend). The extension never imports from `frontend/`, so it keeps its own copies of
-`HostRequest` and `DiffSource`; `extension/src/frontendTypes.contract.test.ts` compares them with
+`HostRequest`, `DiffSource` and `OpenRepos`; `extension/src/frontendTypes.contract.test.ts` compares them with
 `RepoClient.ts`'s and fails when they drift (#1059). It holds them until the webview sends `hostReady`, which `useHostRequests`
 causes once the restored tabs are open, so a request's tab isn't replaced by the restore. The
 webview also sends `webviewFocus`, which sets the `browsitory.webviewFocused` context key. Both
@@ -113,8 +133,12 @@ answers the same commands, but the VSCode webview never connects, and the genera
 keybindings stay the built-in ones. `keybindings.ts` reads the effective keys wherever it
 reads a shortcut's (`chordsFor`, the labels, `matchShortcut`), and components that show keys
 re-render through `useKeymap`. Reserved keys (copy, paste, Esc, Tab, Enter, Space, plain arrows,
-F6, the OS quit/close keys) can't be taken; a shortcut keeps its own reserved built-in keys, and
-Ctrl/Cmd+1 … 9 stays fixed. A key that types a character never runs a shortcut from a text field.
+plain Backspace/Delete/Home/End/PageUp/PageDown, F6, the OS quit/close keys) can't be taken; a
+shortcut keeps its own reserved built-in keys, and Ctrl/Cmd+1 … 9 stays fixed. A key that types
+a character, and Backspace, Delete, Home, End, PageUp or PageDown with any modifier
+(`TEXT_FIELD_KEYS`, #1142), never runs a shortcut from a text field.
+No window shortcut runs while the focus is in a dialog, a menu or the palette
+(`useWorkspaceShortcuts`, #1117), except the palette's own key, which closes it.
 
 **VSCode's keys (#900).** In VSCode the keys are rebound in VSCode's own Keyboard Shortcuts
 (owner decision); Preferences → Keyboard links there (`open_vscode_keybindings` runs
@@ -126,7 +150,13 @@ does: added keys, `-command` removals, and another command's key without a `when
 The host sends the result as a `keybindings` host request when a panel starts and whenever the
 file changes; `applyHostKeybindings` shows and matches those keys for the VSCode-bound shortcuts
 (not saved, not user overrides). A two-step key or a `when` clause it can't evaluate is the
-limit: such a key still works in VSCode but isn't shown.
+limit: such a key still works in VSCode but isn't shown. In a remote window (WSL, SSH, Dev
+Containers) the extension runs in the remote extension host, where the global storage folder is
+on the remote machine and the user's `keybindings.json` on the local one; VSCode has no API for
+that file, so the webview shows the built-in keys there (#1134, documented in the guide).
+The menu entries' `when` clauses are evaluated in the window, where a remote file has the
+scheme `vscode-remote` (the remote extension host gets it as `file:`), so they match
+`resourceScheme =~ /^(file|vscode-remote)$/` (`manifest.test.ts`).
 
 ## Why Tauri + a web frontend, not egui again
 
@@ -255,7 +285,9 @@ leave the page inert.
 (`frontend/src/state/useMountedTabs.ts`, #642); an inactive one is hidden with `display: none`.
 Everything in a workspace that listens globally (shortcuts, palette and drop requests, the focus
 checks below, automatic fetch) is gated by its `active` prop, so a hidden workspace never reacts.
-A hidden element has no width, so `useNarrowLayout` and `SplitView` ignore a zero width instead of
+Element ids in a workspace come from `useId()`, never a fixed string: an id reference resolves to
+the first match in the document, and `aria-describedby` reads a hidden target, so a fixed id would
+borrow a hidden tab's label or reason (`MountedTabIds.test.tsx`, #1135). A hidden element has no width, so `useNarrowLayout` and `SplitView` ignore a zero width instead of
 collapsing the sidebar, and `useScrollMemory` puts the lists' scroll positions back when the tab is
 shown again. An older tab unmounts (PERF-001's reason: one visible view shouldn't cost N tabs' DOM
 and IPC) and reads the repository again when it mounts. The tab strip activates manually: arrow
@@ -291,7 +323,12 @@ expanded merges, branches with ahead/behind, tags, the current and every remote'
 their key, the `refs` part plus the graph selection, "Collapse merges" and the limit, equals the
 one they were read with, so staging, unstaging, discarding or editing a file re-reads only the
 status, the stashes, the worktree, submodule and remote lists, HEAD and undo state. The Refresh
-command (`refresh({ full: true })`), a failed refresh and a missing stamp read everything. When the
+command (`refresh({ full: true })`), a failed refresh and a missing stamp read everything.
+`AppState.historyGeneration` advances only for a refresh that read the history again or failed
+(#1118), while `refreshGeneration` advances for every one: the open working-tree diffs follow the
+second, and what only the history changes follows the first (an open commit search, which keeps
+the matches on screen until its re-run's first round is in, a file or line history, the open
+remote folders' branch lists and a branch compare's range). When the
 history reads do run, the worker keeps each branch's ahead/behind count by its pair of tips
 (`git_core::ahead_behind::AheadBehindCache`, #112): only a branch or upstream that moved is
 counted again, the upstream reads after the branch list count nothing, the branch list drops the
@@ -955,11 +992,17 @@ configuration. A pull's merge and `post-merge` hook, commit hooks and signing ru
 so reads still wait for them. A long read delays the wait's next poll (progress, and giving up on
 a connecting or stalled transfer) by its own run time.
 
-**Stopping at exit (#965).** When the desktop app's last window closes or it quits (also before
-an update's restart), the process would end every worker thread wherever it is; one cut off in a
-libgit2 write leaves `.git/index.lock` (or a ref lock) behind, and every later git command in the
-repository fails on it. So `main.rs` handles `RunEvent::Exit` with `WorkerRegistry::stop_all`
-and `EXIT_GRACE` (5 s, like the extension's `SIDECAR_EXIT_GRACE_MS`, #961): each worker finishes
+**Stopping at exit (#965, #1131).** When the desktop app's last window closes, it quits or it
+restarts for an update, the process would end every worker thread wherever it is; one cut off in
+a libgit2 write leaves `.git/index.lock` (or a ref lock) behind, and every later git command in
+the repository fails on it. So `exit.rs` calls `WorkerRegistry::stop_all` with `EXIT_GRACE` (5 s,
+like the extension's `SIDECAR_EXIT_GRACE_MS`, #961) before every exit: from the `RunEvent::Exit`
+handler, and from the drop of a resource it keeps in the app's resource table, which
+`AppHandle::cleanup_before_exit` empties on every exit path. That second hook is the one that
+counts for "Restart to update" on Windows: `tauri-plugin-updater`'s install there runs only
+`cleanup_before_exit` and then `std::process::exit`, without a `RunEvent::Exit` (on macOS and
+Linux `relaunch` goes through `request_restart`, which delivers it). The wait runs once
+(`OnceLock`), whichever asks first. Each worker finishes
 the command it is running (a transfer included, with the reads its wait serves) and starts no
 other (`worker/lifecycle.rs`; the commands still queued are answered `WorkerStopped`), the
 registry opens no repository any more, and the exit waits until the workers are idle or the
@@ -1311,7 +1354,9 @@ certificate.
   - ssh: `find-principals` + `verify` against `gpg.ssh.allowedSignersFile`, falling back to
     `check-novalidate` (→ `GoodUntrusted`).
   - Unsigned commits never spawn a process; there is no cache.
-- Tests use real `gpg`/`ssh-keygen` with throwaway keys and skip when they are missing.
+- Tests use real `gpg`/`ssh-keygen` with throwaway keys. Without them they skip locally and
+  fail on CI (`test_support::require_tool`, see "Testing strategy"); the gpg tests run on Unix
+  only.
   `tests/signing_gpg.rs` is its own binary because it sets `GNUPGHOME` once per process.
 
 ## Commit search
@@ -2696,7 +2741,12 @@ work to a `HighlightTransport` (`highlightWorkerProtocol.ts`):
   touching the directory while the tool runs, because tools are detached and outlive the app,
   which would stop touching. A reused PID only keeps a directory longer.
 - VSCode reads historical file contents through the `browsitory-file:` content provider, which
-  calls the sidecar's internal `read_file_version`. No temp files are needed there. Before
+  calls the sidecar's internal `read_file_version`. No temp files are needed there. VSCode keeps
+  an open virtual document until the provider's `onDidChange` names its URI, and the URI of a
+  `Head`, `Index` or `Stage` version stays the same when the repository changes (#1132): the host
+  fires it for each such open document on a `repoWatch` `Changed`, an `operationLog`
+  notification (sent once the webview showed the operation log) and every
+  `open_diff_tool`/`open_merge_tool`. A commit's versions never change. Before
   opening VSCode's merge editor the host calls the internal `check_merge_target`, the same
   guards `prepare_merge_tool` applies (text conflict, no symlink/submodule, work tree file
   inside the tree).
@@ -2958,6 +3008,35 @@ User-defined commands (epic #897) are programs the user adds to menus and the pa
   same target's tracking ref, and the UI only offers "Force push (with lease)" after a rejected
   push whose target equals that resolution.
 
+## The settings file (`config.toml`)
+
+The `config` crate keeps the settings in one `config.toml` (`directories::ProjectDirs`, or
+`$BROWSITORY_CONFIG_DIR/config.toml`), which the desktop app and every VS Code window's sidecar
+share, and which two Browsitory versions regularly read and write: the extension updates through
+its marketplace, the desktop app through its own updater.
+
+- **One writer at a time (#1127).** Every setter goes through `update_config`, which reads the
+  file, changes it and writes it back under a process-wide `Mutex` and an OS lock on
+  `config.toml.lock` beside it (`write_lock.rs`; `File::try_lock`, with an explicit unlock like
+  the undo state's `state.lock`). A tab restore opens all tabs at once, each `open_repo` moving its
+  repository to the front of the recent list, and the sidecar runs each request on its own
+  thread; without the lock the later write undid the earlier one. Where the lock file can't be
+  created or locked, or another process holds it for 5 s, the write goes ahead with only the
+  in-process exclusion. Getters read without the lock: the write replaces the file atomically (a
+  temp file, synced, then renamed). A symlinked `config.toml` is resolved first, so the link
+  stays and the file it points to is replaced.
+- **What this version doesn't know stays (#1137).** `update_config` also reads the file as a
+  plain TOML table, and `compat::merge` writes that table back with only the change from the
+  struct as read to the struct after the setter: a key the setter dropped is removed, a changed
+  value replaced, a new one added; keys, tables and values this version doesn't know stay, and an
+  unchanged setting keeps the text it was read from. A changed list keeps each entry's unknown
+  keys wherever the entry moved (an entry matches the original one it is part of). `toml`'s
+  `preserve_order` keeps the file's key order.
+- **An unknown value costs one setting (#1137).** A closed setting (`word_wrap`, `algorithm`,
+  `ui_size`, `date_format`) reads an unknown value as its default (`compat::or_default`); a
+  remembered merge or pull choice or a user command target this version can't read is left out
+  (`compat::readable_entries`). A new enum-valued setting needs the same treatment.
+
 ## Desktop app folders and the bundle identifier
 
 The bundle identifier in `crates/tauri-app/tauri.conf.json` is `com.browsitory.desktop` (up to
@@ -2981,6 +3060,16 @@ resolves identifier folders under (data, local data, config, cache, and on macOS
 only when the new folder doesn't exist yet. A rename is atomic and deletes nothing; a failure is
 logged once the log plugin is up, and the app starts with fresh folders. Don't change the
 identifier again without extending this migration.
+
+**One process (#1136).** `single_instance.rs` registers `tauri-plugin-single-instance` before
+the migration and every other plugin: a second launch hands over to the running app by the
+identifier (a D-Bus name `<id>.SingleInstance` on Linux, a named mutex on Windows, a Unix socket
+in `/tmp` on macOS) and exits before any other plugin runs, and the running app unminimizes,
+shows and focuses its `main` window. Without a D-Bus session bus the launch goes ahead. A launch
+with `BROWSITORY_CONFIG_DIR` set skips the guard, as it shares no `config.toml` with the running
+app (the E2E suites, a dev build beside the installed app on Windows or macOS). On Linux the GTK
+application id (`enableGTKAppId`) also ends a second launch's event loop at once, after its
+plugins started; the plugin ends it before that.
 
 ## Operation log
 
@@ -3107,6 +3196,13 @@ only `error`.
   isolation to the command itself (it removes inherited `GIT_*` variables and sets the hermetic
   `HOME`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM=1`, `GNUPGHOME` and `LC_ALL=C`), so it holds
   even where a test changed the environment.
+- External tools (#1113): a test that needs a tool the workspace doesn't build (the `git` CLI,
+  `gpg`, `ssh-keygen`/`ssh-agent`/`ssh-add`, Git for Windows' `sh.exe`) starts with
+  `if !test_support::require_tool("git") { return; }` (`test_support::require(what, found)` for
+  something that isn't a program on PATH). Locally a missing tool skips the test with a note on
+  stderr, written past the test harness's capture so it shows for a passing test; under CI (`CI`
+  set) it fails the test, so a runner image that drops a tool can't turn its tests into passes.
+  The only deliberate skips left are the gpg tests on Windows and the read-only checks as root.
 - Lock-wait races: a test that changes the repository while a worker waits for the state lock
   uses `Worker::spawn_with_pause_on_lock_wait` (test-only) and `PauseControl`, not a fixed
   sleep: the worker stops when it first finds the lock busy, and its wait starts after `go`
@@ -3166,7 +3262,9 @@ only `error`.
     `get_commit_message` or `list_recent_repos`); the JSON-RPC notification envelopes (their
     `params` are the checked `TransferProgress`/`HookProgress`); and `read_file_version`'s
     `{ text }`, which only the extension host reads. The desktop app's `list_open_repos` returns
-    a tuple, which `tauriRepoClient.ts` reshapes, so only its entries are compared.
+    a tuple, which `tauriRepoClient.ts` reshapes, so only its entries are compared; in VSCode the
+    extension host answers it (#1128), and `frontendTypes.contract.test.ts` compares its
+    `OpenRepos` with `RepoClient.ts`'s.
 - Wire snapshots (#306): `wire_snapshots_are_current` in
   `crates/tauri-app/src/commands/wire_snapshots.rs` and
   `crates/vscode-sidecar/src/dispatch/wire_snapshots.rs` builds every output DTO from the same
@@ -3267,7 +3365,26 @@ only `error`.
     use the same runner (#524): it lives in `extension/e2e/src/support/git.ts` (Node built-ins
     only, for the same `rootDir` reason as `fixtureRepo.ts` below), and `e2e/support/git.ts`
     re-exports it next to its WebDriver waits. The child inherits
-    the runner's environment, so the screenshot run's isolated HOME and git config reach it.
+    the runner's environment, so the run's isolated HOME and git config reach it.
+  - Isolated home (#1112): `extension/e2e/src/support/isolatedHome.ts`'s `isolateHome(root)`
+    empties `root` and points `HOME`, the XDG dirs, `GIT_CONFIG_GLOBAL` (an empty file) and
+    `GNUPGHOME` (mode 0700) into it, sets `GIT_CONFIG_NOSYSTEM=1`, and drops `SSH_AUTH_SOCK`,
+    `SSH_AGENT_PID` and every inherited `GIT_*` variable, for the process and all it starts.
+    `wdio.conf.ts`'s `onPrepare` (also the screenshot runs'), `runTests.ts` and
+    `runVsixSmoke.ts` call it before their first git command; `sidecarBridge.real.test.ts`
+    builds the same environment for its sidecar. It is the E2E counterpart of
+    `hermetic_git!`, except that the app's libgit2 still reads the system config. `wdio.conf.ts`
+    resolves `~/.cargo/bin/tauri-driver` into `TAURI_DRIVER_PATH` first.
+  - Fixture lock (#1144): both suites keep their fixtures at fixed paths under `os.tmpdir()`
+    (the Tauri suite's repository path is built into the frontend). Before anything is deleted,
+    `onPrepare` and `runTests.ts` take `extension/e2e/src/support/fixtureLock.ts`'s lock, a
+    folder in the temp dir that appears whole by `rename` and records the run's pid, folder and
+    start time; a live holder stops the new run with those, a dead one is taken over. The Tauri
+    suite also reaps this worktree's leftovers and checks ports 4444/4445 in `onPrepare`, so a
+    run with another `TMPDIR` stops there too, and `beforeSession` checks the ports before it
+    resets anything. WebdriverIO logs an error thrown by `onPrepare` and starts the specs
+    anyway unless it is a `SevereServiceError`, so `onPrepare` turns every error into one
+    (`stopRunOnError`); an error in `beforeSession` doesn't stop the session request either.
     `wdio.conf.ts` sets `waitforTimeout` to `UI_TIMEOUT` (`e2e/support/timeouts.ts`, 10 s), so
     a wait passes `timeout` only when it needs longer, as a named constant (`SLOW_UI_TIMEOUT`,
     `RESTART_TIMEOUT`, or a spec's own). `e2e/support/app.ts` holds `waitForAppReady` and the

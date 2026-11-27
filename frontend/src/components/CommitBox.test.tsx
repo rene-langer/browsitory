@@ -416,6 +416,27 @@ describe("CommitBox", () => {
     render(<CommitBox onCommit={vi.fn(async () => true)} disabled disabledReason="Stage changes to commit" />);
     expect(screen.getByRole("button", { name: "Commit" })).toHaveAccessibleDescription("Stage changes to commit");
   });
+
+  // #1135: every mounted tab has a commit box; each button reads its own box's reason.
+  it("ties each box's Commit button to its own reason when two boxes are mounted", () => {
+    render(
+      <>
+        <div data-testid="first">
+          <CommitBox onCommit={vi.fn(async () => true)} disabled disabledReason="Nothing to commit." />
+        </div>
+        <div data-testid="second">
+          <CommitBox onCommit={vi.fn(async () => true)} disabled disabledReason="Stage changes to commit." />
+        </div>
+        <div data-testid="third">
+          <CommitBox onCommit={vi.fn(async () => true)} disabled={false} />
+        </div>
+      </>,
+    );
+    const commitIn = (id: string) => within(screen.getByTestId(id)).getByRole("button", { name: "Commit" });
+    expect(commitIn("first")).toHaveAccessibleDescription("Nothing to commit.");
+    expect(commitIn("second")).toHaveAccessibleDescription("Stage changes to commit.");
+    expect(commitIn("third")).toHaveAccessibleDescription("Write a commit message to commit.");
+  });
 });
 
 describe("amend", () => {

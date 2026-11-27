@@ -409,6 +409,56 @@ describe("App", () => {
     expect(listRemoteBranches).toHaveBeenCalledWith("/repos/a", "origin");
   });
 
+  // #1118: an open remote folder lists its branches again when the refs changed, not when only
+  // the work tree did.
+  it("lists an open remote folder's branches again only when the refs changed", async () => {
+    const stamp = { refs: "r1", workTree: "w1" };
+    const getStatus = vi.fn(async () => []);
+    const listRemoteBranches = vi.fn().mockResolvedValue(["develop"]);
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus,
+      getChangeStamp: async () => ({ ...stamp }),
+      getCommitGraph: async () => graphPage([]),
+      listBranches: async () => [],
+      listStashes: async () => [],
+      listRemotes: async () => [{ name: "origin", fetchUrl: "https://example.com/r.git", pushUrl: null, authMode: null, authUsername: null }],
+      listRemoteBranches,
+    });
+    const { container } = render(<App client={client} />);
+    await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+    const sidebar = screen.getByRole("complementary", { name: "Repository sections" });
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), {
+      target: { value: "Browse branches on origin" },
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "Browse branches on origin" }));
+    expect(await within(sidebar).findByText("develop")).toBeInTheDocument();
+    const lists = listRemoteBranches.mock.calls.length;
+    const settle = () => act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    let reads = getStatus.mock.calls.length;
+    stamp.workTree = "w2";
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await waitFor(() => expect(getStatus.mock.calls.length).toBeGreaterThan(reads));
+    await settle();
+    expect(listRemoteBranches).toHaveBeenCalledTimes(lists);
+
+    reads = getStatus.mock.calls.length;
+    stamp.refs = "r2";
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await waitFor(() => expect(getStatus.mock.calls.length).toBeGreaterThan(reads));
+    await waitFor(() => expect(listRemoteBranches).toHaveBeenCalledTimes(lists + 1));
+  });
+
   function guideClient(openExternalUrl: RepoClient["openExternalUrl"]) {
     return fakeClient({
       listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
@@ -811,6 +861,30 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("tab", { name: "a" }));
     await waitFor(() => expect(screen.getByRole("tab", { name: "a" })).toHaveAttribute("aria-selected", "true"));
     expect(screen.getByRole("textbox", { name: "Commit message" })).toHaveValue("wip: half-typed");
+  });
+
+  // #1143: the draft outlives the app (a quit, a closed VSCode panel, the window's Reload).
+  it("brings back a half-typed commit message after the app is closed and opened again", async () => {
+    localStorage.clear();
+    const client = () =>
+      fakeClient({
+        listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+        openRepo: async () => {},
+        persistOpenRepos: async () => {},
+        getStatus: async () => [],
+        getCommitGraph: async () => graphPage([]),
+        listBranches: async () => [],
+        listStashes: async () => [],
+      });
+    const first = render(<App client={client()} />);
+    fireEvent.change(await screen.findByRole("textbox", { name: "Commit message" }), {
+      target: { value: "feat: half-typed\n\nWith a body" },
+    });
+    first.unmount();
+
+    render(<App client={client()} />);
+    expect(await screen.findByRole("textbox", { name: "Commit message" })).toHaveValue("feat: half-typed\n\nWith a body");
+    localStorage.clear();
   });
 
   it("keeps a background tab's close button disabled while its action runs, until it unloads (#642)", async () => {
@@ -1956,6 +2030,39 @@ describe("App", () => {
       expect(screen.queryByRole("listbox", { name: "Commit history" })).toBeNull();
       return results;
     }
+
+    // #1118: the search walks the history, so a refresh that kept the history (only the work tree
+    // changed) leaves the results alone.
+    it("keeps the search results when only the work tree changed", async () => {
+      const original = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = () => {};
+      try {
+        const stamp = { refs: "r1", workTree: "w1" };
+        const getStatus = vi.fn(async () => []);
+        const searchCommits = vi.fn(async () => ({ commits: [graph[1]], nextCursor: null, scanned: 2 }));
+        render(
+          <App
+            client={pickClient({ getStatus, searchCommits, cancelSearch: async () => {}, getChangeStamp: async () => ({ ...stamp }) })}
+          />,
+        );
+        await showSearchResults();
+        await waitFor(() => expect(searchCommits).toHaveBeenCalledTimes(1));
+        const reads = getStatus.mock.calls.length;
+
+        stamp.workTree = "w2";
+        act(() => {
+          window.dispatchEvent(new Event("focus"));
+        });
+        await waitFor(() => expect(getStatus.mock.calls.length).toBeGreaterThan(reads));
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        });
+        expect(searchCommits).toHaveBeenCalledTimes(1);
+        expect(screen.getByRole("listbox", { name: "Search results" })).toBeInTheDocument();
+      } finally {
+        Element.prototype.scrollIntoView = original;
+      }
+    });
 
     // #146: the dialog the palette opens returns focus to the commit list on Cancel (not to
     // whatever was focused before the palette). Since #507 the palette opens it directly.
@@ -3429,7 +3536,8 @@ describe("App", () => {
       expect(undo).not.toHaveBeenCalled();
     });
 
-    it("a toast's Redo does nothing once its repo tab was switched away", async () => {
+    // #1116: the Redo of a toast whose tab isn't shown shows that tab first, then redoes there.
+    it("a toast's Redo shows its repo tab again and redoes there once that tab was switched away", async () => {
       const undo = vi.fn(async () => ({ kind: "Done" as const, label: "Stage a.txt" }));
       const redo = vi.fn(async () => ({ kind: "Done" as const, label: "Stage a.txt" }));
       render(
@@ -3450,12 +3558,13 @@ describe("App", () => {
       );
       await screen.findByRole("button", { name: "Undo Stage a.txt" });
       fireEvent.keyDown(window, { key: "z", ctrlKey: true });
-      const toastRedo = await screen.findByRole("button", { name: "Redo" });
+      await screen.findByRole("button", { name: "Redo" });
       fireEvent.click(screen.getByRole("tab", { name: "b" }));
       await waitFor(() => expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true"));
-      fireEvent.click(toastRedo);
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(redo).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Redo" }));
+      await waitFor(() => expect(screen.getByRole("tab", { name: "a" })).toHaveAttribute("aria-selected", "true"));
+      await waitFor(() => expect(redo).toHaveBeenCalledTimes(1));
+      expect(redo).toHaveBeenCalledWith("/repos/a");
     });
 
     function committingClient(overrides: Partial<RepoClient> = {}) {
@@ -3718,10 +3827,12 @@ describe("App external tools", () => {
       expect(alert).not.toHaveTextContent("keyring locked");
     });
 
-    it("shows a plain error's message alone", async () => {
+    it("shows a plain error's message after the operation, then the operation's next step (#1122)", async () => {
       const alert = await stageAndFail(vi.fn().mockRejectedValue(new Error("boom")));
-      // The message with no hint; then the banner's own buttons (#663): Details opens the log (#984).
-      expect(alert.querySelector("span")?.textContent).toBe("boom");
+      // The message and its next step; then the banner's own buttons (#663): Details opens the log (#984).
+      expect(alert.querySelector("span")?.textContent).toBe(
+        "Couldn't stage a.txt: boomCheck that no other Git program is using the repository, then stage again.",
+      );
       expect(within(alert).getByRole("button", { name: "Details" })).toBeInTheDocument();
     });
 
@@ -3737,7 +3848,7 @@ describe("App external tools", () => {
       expect(screen.getByRole("alert")).not.toHaveTextContent(PERMISSION_HINT);
       // The replaced error is kept under the new one until the banner is dismissed (#663).
       expect(within(screen.getByRole("alert")).getByText("1 earlier error")).toBeInTheDocument();
-      expect(within(screen.getByRole("alert")).getByText("Permission denied")).toBeInTheDocument();
+      expect(within(screen.getByRole("alert")).getByText("Couldn't stage a.txt: Permission denied")).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "Dismiss error" }));
       expect(screen.queryByRole("alert")).toBeNull();
     });

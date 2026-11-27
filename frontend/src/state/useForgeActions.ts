@@ -3,6 +3,7 @@ import type { CreatePullRequest, ForgeProvider, PullRequestList, RepoClient } fr
 import type { AppState } from "./useAppState";
 import { errorAfterOwnSuccess, type OwnError } from "./ownError";
 import { failureError, type RunMutationWithMessage } from "./useMutationRunner";
+import { failedOperation } from "../lib/operationErrors";
 
 export interface ForgeActions {
   listPullRequests(remoteName: string, account: string): Promise<void>;
@@ -55,14 +56,19 @@ export function useForgeActions(
   const saveForgeToken = useCallback(
     (provider: ForgeProvider, account: string, token: string) =>
       // Connect's dialog shows the failure (#996).
-      runMutationWithMessage(() => client.saveForgeToken(repoPath, provider, account, token), undefined, {
-        inDialog: true,
-      }),
+      runMutationWithMessage(
+        () => client.saveForgeToken(repoPath, provider, account, token),
+        failedOperation.connectForge(provider, account),
+        { inDialog: true },
+      ),
     [client, runMutationWithMessage, repoPath],
   );
   const forgetForgeToken = useCallback(
     (provider: ForgeProvider, account: string) =>
-      runMutationWithMessage(() => client.forgetForgeToken(repoPath, provider, account)),
+      runMutationWithMessage(
+        () => client.forgetForgeToken(repoPath, provider, account),
+        failedOperation.disconnectForge(provider, account),
+      ),
     [client, runMutationWithMessage, repoPath],
   );
   const createPullRequest = useCallback(
@@ -81,7 +87,7 @@ export function useForgeActions(
           };
         });
         // New pull request's dialog shows the failure (#996).
-      }, undefined, { inDialog: true }),
+      }, failedOperation.createPullRequest(pullRequest.sourceBranch, pullRequest.targetBranch), { inDialog: true }),
     [client, runMutationWithMessage, repoPath, setState],
   );
   const openExternalUrl = useCallback(

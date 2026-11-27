@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { BranchInfo, WorktreeInfo } from "../ipc/RepoClient";
 import { WorktreePanel } from "./WorktreePanel";
@@ -281,5 +281,37 @@ describe("WorktreePanel", () => {
     expect(describedByText(confirm)).toBe("A merge is in progress.");
     fireEvent.click(confirm);
     expect(onRemoveWorktree).not.toHaveBeenCalled();
+  });
+});
+
+// #1141: removing a row from its menu keeps the focus in the list, as the Stashes section does.
+describe("WorktreePanel — focus after removing a worktree (#1141)", () => {
+  const other: WorktreeInfo = { ...linkedWorktree, name: "other", path: "/repos/project-other", head: "other" };
+
+  it("moves the focus to the row now in that place", async () => {
+    let finish = () => {};
+    const onRemoveWorktree = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
+    const { rerender } = renderPanel({ worktrees: [mainWorktree, linkedWorktree, other], onRemoveWorktree });
+    const actions = screen.getByRole("button", { name: "Actions for /repos/project-feature" });
+    actions.focus();
+    fireEvent.click(actions);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove…" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Remove worktree" }));
+    expect(onRemoveWorktree).toHaveBeenCalledWith("feature");
+    rerender(
+      <WorktreePanel
+        worktrees={[mainWorktree, other]}
+        branches={branches}
+        onOpenWorktree={vi.fn()}
+        onCreateWorktree={vi.fn().mockResolvedValue(null)}
+        onRemoveWorktree={onRemoveWorktree}
+        onPruneWorktrees={vi.fn().mockResolvedValue(undefined)}
+        operationDisabled={false}
+        operationDisabledReason={null}
+      />,
+    );
+    await act(async () => finish());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Actions for /repos/project-other" })).toHaveFocus();
   });
 });

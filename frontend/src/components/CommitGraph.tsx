@@ -24,9 +24,11 @@ import {
   presetForAction,
   presetPickAll,
   type PresetAction,
+  type RebaseSelectionResult,
 } from "../lib/rebaseSelection";
 import { foldStagedCheck, historyEditChecks, type HistoryEditCheck, type HistoryEditRequest } from "../lib/historyEdits";
 import { commitActions } from "../lib/actions/commitActions";
+import { NO_BRANCH } from "../lib/actions/action";
 import type { VisitKind } from "../lib/navigationHistory";
 import type { SelectedRow } from "../state/useAppState";
 import { useCopyToClipboard } from "../state/useCopyToClipboard";
@@ -42,6 +44,7 @@ import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { LineStatsBadge } from "./LineStatsBadge";
 import { expansionHasMore, MERGE_PAGE_SIZE, type MergeExpansion } from "../lib/mergeExpansion";
 import { RefBadges } from "./RefBadges";
+import { useActiveRow } from "./useActiveRow";
 import { useVirtualRows } from "./useVirtualRows";
 import { tagMenuItems } from "./tagMenuItems";
 import type { UserCommand } from "../ipc/RepoClient";
@@ -306,6 +309,16 @@ function CommitGraphContent({
 
   // Only the rows in view render (#685); row 0 is "Uncommitted changes".
   const virtual = useVirtualRows(listElement, rowCount);
+  const { rowId, activeDescendant, announcement } = useActiveRow({
+    index: selectedIndex,
+    start: virtual.start,
+    end: virtual.end,
+    label: (index) => {
+      const commit = commits[index - 1];
+      const row = commit === undefined ? "Uncommitted changes" : `${commit.shortId} ${commit.summary}`;
+      return `${row}, ${index + 1} of ${rowCount}`;
+    },
+  });
   const rowElement = (list: HTMLElement, index: number) =>
     list.querySelector<HTMLElement>(`:scope > li[data-row-index="${index}"]`) ?? undefined;
 
@@ -768,9 +781,12 @@ function CommitGraphContent({
         : [commit];
     commitDrag.startDrag(event, { commits: dragged, headId: headInfo.headId });
   };
-  const rebasePlan = multiSelected
-    ? planRebaseSelection(commits, effectiveSelection.ids)
-    : null;
+  // Every one of them rewrites the current branch: none on a detached HEAD (#1119).
+  const rebasePlan: RebaseSelectionResult | null = !multiSelected
+    ? null
+    : currentBranch === null
+      ? { ok: false, reason: NO_BRANCH }
+      : planRebaseSelection(commits, effectiveSelection.ids);
 
   // The same actions back the context menu and the toolbar under the list.
   const rebaseItems: ContextMenuItem[] = (() => {
@@ -786,9 +802,9 @@ function CommitGraphContent({
       });
       return [
         blocked("Interactive rebase…"),
-        blocked(`Squash ${count} commits`),
-        blocked(`Fixup ${count} commits`),
-        { ...blocked(`Drop ${count} commits`), group: "drop" },
+        blocked(`Squash ${count} commits…`),
+        blocked(`Fixup ${count} commits…`),
+        { ...blocked(`Drop ${count} commits…`), group: "drop" },
       ];
     }
     const { selection: plan } = rebasePlan;
@@ -803,21 +819,21 @@ function CommitGraphContent({
         group: "rebase",
       },
       {
-        label: `Squash ${count} commits`,
+        label: `Squash ${count} commits…`,
         onSelect: act("Squash"),
         disabled: operationsBlocked || !plan.contiguous,
         title: plan.contiguous ? undefined : needsRun,
         group: "rebase",
       },
       {
-        label: `Fixup ${count} commits`,
+        label: `Fixup ${count} commits…`,
         onSelect: act("Fixup"),
         disabled: operationsBlocked || !plan.contiguous,
         title: plan.contiguous ? undefined : needsRun,
         group: "rebase",
       },
       {
-        label: `Drop ${count} commits`,
+        label: `Drop ${count} commits…`,
         onSelect: act("Drop"),
         disabled: operationsBlocked,
         destructive: true,
@@ -906,6 +922,9 @@ function CommitGraphContent({
 
   return (
     <>
+    <span aria-live="polite" className={styles.srOnly}>
+      {announcement}
+    </span>
     <ul
       ref={attachList}
       className={styles.list}
@@ -914,11 +933,13 @@ function CommitGraphContent({
       role="listbox"
       aria-multiselectable="true"
       aria-label="Commit history"
+      aria-activedescendant={activeDescendant}
       aria-keyshortcuts={`ArrowUp ArrowDown ArrowLeft ArrowRight Home End PageUp PageDown Shift+ArrowUp Shift+ArrowDown Enter ContextMenu Shift+F10 Escape Control+F Meta+F [ ] Shift+[${searchMatches === null ? "" : " F3 Shift+F3"}`}
       style={virtual.windowed ? { paddingTop: virtual.padTop, paddingBottom: virtual.padBottom } : undefined}
     >
       {virtual.start === 0 && (
       <ListRow
+        id={rowId(0)}
         className={searchMatches === null ? styles.uncommittedRow : `${styles.uncommittedRow} ${styles.searchDimmed}`}
         rowIndex={0}
         setSize={rowCount}
@@ -950,6 +971,7 @@ function CommitGraphContent({
         return (
         <ListRow
           key={commit.id}
+          id={rowId(index + 1)}
           rowIndex={index + 1}
           setSize={rowCount}
           className={[

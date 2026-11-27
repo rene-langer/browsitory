@@ -117,8 +117,7 @@ fn assert_matches_git(
     path: &str,
     lines: &[git_core::blame::BlameLine],
 ) {
-    if !common::program_available("git") {
-        eprintln!("git CLI not found; skipping the git blame comparison");
+    if !test_support::require_tool("git") {
         return;
     }
     let output = test_support::git_command(repo.workdir().unwrap())

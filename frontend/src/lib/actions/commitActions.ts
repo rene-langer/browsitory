@@ -1,7 +1,7 @@
 import type { BranchInfo, GraphCommit } from "../../ipc/RepoClient";
 import type { OperationBlockers } from "../operationStatus";
 import type { RebaseTarget } from "./branchActions";
-import { gate, UNAVAILABLE_REASON, type PaletteAction } from "./action";
+import { gate, NO_BRANCH, UNAVAILABLE_REASON, type PaletteAction } from "./action";
 
 /**
  * One action on a commit, as both the commit menu ("Cherry-pick onto main") and the command
@@ -38,7 +38,6 @@ export interface CommitActionContext {
 }
 
 const HEAD_PICK = "HEAD already contains this commit.";
-const NO_BRANCH = "Check out a branch first.";
 /** The rule `planRebaseSelection` applies to a multi-selection, for one commit (#991). */
 const NO_REBASE_BASE = "Merge and root commits can't be rebased.";
 
@@ -61,6 +60,8 @@ export function commitActions(context: CommitActionContext, commit: GraphCommit)
     ...gate(blockers, refusal),
   });
   const onto = commit.parentIds.length === 1 ? commit.parentIds[0] : null;
+  // Both rebase entries open the planner, which rewrites the current branch (#1119).
+  const noBranch = context.currentBranch === null ? NO_BRANCH : undefined;
   return {
     // Only opens the dialog, whose Create button carries the busy rule and its reason.
     createTag: { label: "Create tag…", paletteLabel: `Create tag at ${short}…`, enabled: true, reason: undefined },
@@ -80,14 +81,14 @@ export function commitActions(context: CommitActionContext, commit: GraphCommit)
     reset: action(
       `Reset ${target} to here…`,
       `Reset ${target} to ${short}…`,
-      context.currentBranch === null ? NO_BRANCH : undefined,
+      noBranch,
     ),
-    rebaseOnto: action("Rebase current branch onto here…", `Rebase current branch onto ${short}…`),
+    rebaseOnto: action("Rebase current branch onto here…", `Rebase current branch onto ${short}…`, noBranch),
     interactiveRebase: {
       ...action(
         "Interactive rebase from here…",
         `Interactive rebase from ${short}…`,
-        onto === null ? NO_REBASE_BASE : undefined,
+        noBranch ?? (onto === null ? NO_REBASE_BASE : undefined),
       ),
       onto,
     },

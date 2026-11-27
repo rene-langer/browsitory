@@ -7,7 +7,7 @@ positions, open panels, search and file history, and reads the repository again
 only if it changed meanwhile. A tab you haven't looked at for longer starts
 fresh and reloads its history and changes; its half-typed commit message is
 still kept. Open another via
-**+** at the end of the tab bar, or (desktop app) drop its folder on the window. Close a tab with its **×** button (dimmed on the other tabs), **Delete**
+**+** at the end of the tab bar, or (desktop app) drop its folder on the window. Close a tab with its **×** button, **Delete**
 on the focused tab, or **Close tab** in the command palette. While a push,
 fetch, or similar operation is running in the active tab, that tab can't be
 closed until it finishes.
@@ -49,6 +49,20 @@ most one a minute). It then also checks when the window gets the focus back.
 The **Refresh** command still reloads at once.
 Reopening Browsitory restores every tab you had open, workspace groupings
 included.
+
+In VSCode, each window keeps its own tabs: reloading or reopening a window
+brings back the tabs that window had open, and the desktop app and your other
+VSCode windows keep theirs. Recent and pinned repositories, workspaces and
+settings are shared by all of them. A window that had no Browsitory tabs yet
+opens none; **Browsitory: Open** then opens its workspace's repositories (see
+[Install](install.md#vscode-extension)).
+
+??? note "Details"
+    Up to version 0.17, the desktop app and every VSCode window shared one list of open tabs,
+    so each of them showed and overwrote the tabs of the others. Since 0.18 the tabs of a VSCode
+    window are kept by VSCode for that window. The first time you open Browsitory in a window
+    after the update, it has no tabs of its own yet, so none are restored there; the desktop
+    app keeps its tabs.
 
 ## Naming a tab
 

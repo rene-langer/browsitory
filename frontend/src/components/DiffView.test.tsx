@@ -782,6 +782,33 @@ describe("DiffView for screen readers (#668)", () => {
     expect(group).toHaveAttribute("aria-activedescendant", screen.getByRole("option", { name: /^Added line 2:\s*B$/ }).id);
   });
 
+  // #1138: `s` and `d` act on the cursor's lines, so they must be on screen.
+  it.each([
+    ["unified", false],
+    ["split", true],
+  ])("scrolls the keyboard cursor's line into view as it moves (%s)", (_view, split) => {
+    const scrolled: Element[] = [];
+    const scrollIntoView = vi.fn(function (this: Element) {
+      scrolled.push(this);
+    });
+    Element.prototype.scrollIntoView = scrollIntoView as unknown as Element["scrollIntoView"];
+    try {
+      if (split) localStorage.setItem("diff.split", "true");
+      render(<DiffView hunks={[addedHunk(120)]} onStageHunk={vi.fn()} onStageLines={vi.fn()} />);
+      const group = screen.getByRole("group", { name: "Diff hunks" });
+      for (let n = 0; n < 50; n++) fireEvent.keyDown(group, { key: "ArrowDown" });
+      const cursor = document.getElementById(group.getAttribute("aria-activedescendant")!)!;
+      expect(cursor).toHaveAccessibleName(/^Added line 50:/);
+      expect(scrolled.at(-1)).toBe(cursor);
+      expect(scrollIntoView).toHaveBeenLastCalledWith({ block: "nearest" });
+      fireEvent.keyDown(group, { key: "ArrowUp", shiftKey: true });
+      expect(scrolled.at(-1)).toBe(document.getElementById(group.getAttribute("aria-activedescendant")!));
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+      localStorage.clear();
+    }
+  });
+
   it("keeps a read-only diff's lines free of selection roles", () => {
     render(<DiffView hunks={[lineHunk]} />);
     expect(screen.queryByRole("listbox")).toBeNull();

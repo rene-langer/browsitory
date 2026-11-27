@@ -38,8 +38,30 @@ export function loadedLanguages(): Promise<string[]> {
   return transport.loadedLanguages();
 }
 
-const cache = new Map<string, Token[][]>();
-const CACHE_LIMIT = 500;
+/**
+ * The cache's budget (#1163), in characters of the cached texts: a cached block's tokens take
+ * about 12 bytes of heap per character of its text (measured: 439 KB for a 35,000-character
+ * block), so the budget keeps the cache to roughly 25 MB, however many blocks that is.
+ */
+export const HIGHLIGHT_CACHE_TEXT_LIMIT = 2_000_000;
+/** What an entry costs beyond its text (the map entry, the line arrays), in the same units. */
+const CACHE_ENTRY_COST = 100;
+
+const cache = new Map<string, { tokens: Token[][]; cost: number }>();
+let cachedCost = 0;
+
+/** Caches `tokens` for `key`, dropping the oldest entries until the cache fits its budget. */
+function remember(key: string, tokens: Token[][]): void {
+  const cost = key.length + CACHE_ENTRY_COST;
+  if (cost > HIGHLIGHT_CACHE_TEXT_LIMIT) return;
+  cache.set(key, { tokens, cost });
+  cachedCost += cost;
+  for (const [oldest, entry] of cache) {
+    if (cachedCost <= HIGHLIGHT_CACHE_TEXT_LIMIT) break;
+    cache.delete(oldest);
+    cachedCost -= entry.cost;
+  }
+}
 
 /** A request in flight, shared by every caller asking for the same text until all of them abort. */
 interface Job {
@@ -56,7 +78,7 @@ const inflight = new Map<string, Job>();
 export function highlightLines(lang: HighlightLanguage, code: string, signal?: AbortSignal): Promise<Token[][]> {
   const key = `${lang}\u0000${code}`;
   const hit = cache.get(key);
-  if (hit !== undefined) return Promise.resolve(hit);
+  if (hit !== undefined) return Promise.resolve(hit.tokens);
   if (signal?.aborted) return Promise.reject(abortError());
   let job = inflight.get(key);
   if (job === undefined) {
@@ -65,8 +87,7 @@ export function highlightLines(lang: HighlightLanguage, code: string, signal?: A
       controller,
       waiters: 0,
       promise: transport.tokenize(lang, code, controller.signal).then((tokens) => {
-        cache.set(key, tokens);
-        if (cache.size > CACHE_LIMIT) cache.delete(cache.keys().next().value!);
+        if (!cache.has(key)) remember(key, tokens);
         return tokens;
       }),
     };

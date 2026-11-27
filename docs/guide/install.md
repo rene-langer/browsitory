@@ -25,6 +25,11 @@ warn you the first time:
   Security** and choose **Open Anyway** next to the message about Browsitory.
 - **Windows:** if SmartScreen stops the installer, choose **More info**, then **Run anyway**.
 
+**One window.** The desktop app runs once per user: starting it again (from the Start menu, a
+desktop entry or the Dock) brings the window that is already open to the front, also when it is
+minimized or on another desktop, instead of starting a second copy on the same tabs and
+settings.
+
 **Updates.** The desktop app checks for new versions by itself and offers to restart when one
 is ready (see [The main window](main-window.md)). To check only when you ask, clear **Check for
 updates automatically** in **Preferences → Updates**. This works for every installer, including
@@ -50,6 +55,8 @@ sudo rpm --import https://github.com/rene-langer/browsitory/releases/latest/down
 
 The extension needs VSCode 1.134 or newer on Linux x64 (with glibc 2.39 or newer, as the app),
 macOS (Intel or Apple silicon) or Windows x64. It doesn't run in vscode.dev or in Codespaces in the browser.
+It also works in remote windows (WSL, Remote - SSH, Dev Containers), where it runs on the remote
+machine, which then has to be Linux x64 with glibc 2.39 or newer.
 
 - **Visual Studio Marketplace** (VSCode): open the Extensions view and search for
   "Browsitory" and choose **Install**, or run
@@ -65,10 +72,11 @@ macOS (Intel or Apple silicon) or Windows x64. It doesn't run in vscode.dev or i
 Then run **Browsitory: Open** from VSCode's Command Palette, press Ctrl+K Ctrl+G (Cmd+K Cmd+G
 on macOS), or click **Browsitory** in the status bar. It opens the repository of the file in the
 active editor. Without one, the first time, it opens your workspace's repositories, each in a
-tab, next to the tabs you had open last time: the workspace folders' repositories and those
+tab, next to the tabs you had open in this window last time: the workspace folders' repositories and those
 directly inside a workspace folder (one folder down, also inside another repository). When there
 are several, a list asks which ones to open, all ticked. With none of those, pick a repository
-folder. Browsitory opens in the active editor group and comes back after you reload the window.
+folder. Browsitory opens in the active editor group and comes back after you reload the window,
+with that window's tabs (each window keeps its own, see [Tabs](tabs.md)).
 
 On macOS, Cmd+K clears the terminal while the terminal has the focus, so Cmd+K Cmd+G doesn't
 work there. To change the key, open VSCode's **Keyboard Shortcuts** and search for
@@ -97,6 +105,10 @@ those keys in Browsitory instead: the command palette, Refresh, Fetch, F6 betwee
 sidebar, the tab keys and Back/Forward (see [Keyboard shortcuts](command-palette.md#keyboard-shortcuts)).
 Everywhere else they keep doing what VSCode does. To change them, open VSCode's **Keyboard
 Shortcuts** and search for "Browsitory".
+
+In a remote window (WSL, Remote - SSH, Dev Containers), the keys you change there still work,
+but Browsitory's shortcut sheet, command palette and tooltips show the built-in keys: your
+`keybindings.json` is on your own computer, where the extension can't read it.
 
 In VSCode, a few things work the VSCode way: files open in VSCode's editor, diffs in its diff
 view, conflicts in its merge editor and terminals in its integrated terminal (see

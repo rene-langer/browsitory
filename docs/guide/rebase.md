@@ -23,7 +23,8 @@ onto here…** (in the command palette **Rebase current branch onto ⟨commit⟩
 from here…** (in the command palette **Interactive rebase from ⟨commit⟩…**): the planner opens
 based on the commit's parent, so it lists that commit and every later one, to reword, reorder,
 squash or drop them. A merge commit or the first commit of the history can't be the start; the
-item is disabled and says why.
+item is disabled and says why. On a detached HEAD both commit items, and the rebase items of a
+selection of several commits, are disabled with "Check out a branch first."
 
 **The planner.** Its title names the branch and the target ("Rebase main onto 4c5beaf"), and a
 line under it says how many commits it rewrites. It lists the commits oldest first, in the order
@@ -51,8 +52,8 @@ on with the next row. Changes left unstaged make Continue ask whether to commit 
 
 **Selecting several commits.** Ctrl/Cmd+click (mouse) toggles individual commits, which is how you
 select non-adjacent ones; Shift+click or Shift+Arrow selects a range. With two or more selected, a
-toolbar under the graph (and the right-click menu) offers **Interactive rebase…**, **Squash N commits**,
-**Fixup N commits** and **Drop N commits**. Each opens the rebase planner, based on the parent of the oldest selected
+toolbar under the graph (and the right-click menu) offers **Interactive rebase…**, **Squash N commits…**,
+**Fixup N commits…** and **Drop N commits…**. Each opens the rebase planner, based on the parent of the oldest selected
 commit and listing every commit from there to the current HEAD. The selected commits are pre-marked
 with the chosen action; for Interactive rebase… they are listed as **Pick**, but are still checked
 against the branch history. With Squash or Fixup the oldest selected commit stays **Pick** and the

@@ -27,7 +27,8 @@ plain text to select and copy. The graph loads the latest 300 commits and the ne
 scroll towards the end (or press End, or ↓ past the last row); "Loading older commits…" under
 the list shows while they come. Only the rows on screen are drawn, so a long history scrolls as
 smoothly as a short one. Use ↑/↓ or j/k to move through the commits, and PageUp/PageDown to move
-a page at a time. To jump to a commit, branch, tag or stash,
+a page at a time; a screen reader reads the commit you move to (the file history and the search
+results do the same). To jump to a commit, branch, tag or stash,
 use **Go to commit…** and the other Go to commands in the [command
 palette](command-palette.md#go-to-a-commit-branch-tag-or-stash), or click a branch or tag in the
 sidebar. To revert or apply only one file or hunk of a commit, or to save commits as a patch,

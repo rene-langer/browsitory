@@ -2,7 +2,9 @@ import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { runTests } from "@vscode/test-electron";
+import { acquireFixtureLock } from "./support/fixtureLock";
 import { initFixtureRepo } from "./support/fixtureRepo";
+import { isolateHome } from "./support/isolatedHome";
 import {
   getFreePort,
   killStaleDconfWatchers,
@@ -26,6 +28,15 @@ function setupFixtureRepo() {
 }
 
 async function main() {
+  // Before anything is deleted (#1144): a second run stops here instead of wiping the fixtures
+  // and the config dir of a run going on in another worktree.
+  const releaseLock = acquireFixtureLock(
+    path.join(os.tmpdir(), "browsitory-vscode-e2e.lock"),
+    "Wait for it to finish, or give this run a TMPDIR of its own (see AGENTS.md).",
+  );
+  process.on("exit", releaseLock);
+  // VSCode, the sidecar and the fixture git commands get a throwaway HOME (#1112).
+  isolateHome(path.join(os.tmpdir(), "browsitory-vscode-e2e-home"));
   setupFixtureRepo();
   killStaleDconfWatchers();
 

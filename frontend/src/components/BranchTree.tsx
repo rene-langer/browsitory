@@ -45,6 +45,7 @@ import { RenameBranchDialog } from "./RenameBranchDialog";
 import { SetUpstreamDialog } from "./SetUpstreamDialog";
 import { useRemoteBranchCache } from "./useRemoteBranchCache";
 import styles from "./BranchTree.module.css";
+import { useRefocusRemovedRow } from "./useRefocusRemovedRow";
 import type { UserCommand } from "../ipc/RepoClient";
 import { NO_SELECTION, userCommandMenuItems, type RunUserCommand } from "../lib/userCommands";
 import { useUserCommandsContext } from "../state/userCommandsContext";
@@ -182,8 +183,8 @@ function BranchTreeContent({
    */
   onGoToBranch?: (kind: "local" | "remote", name: string) => void;
   /**
-   * `AppState.refreshGeneration`. A change means remote branches may have changed (a fetch from
-   * anywhere, a push that published one, a remote branch delete): open remote folders reload
+   * `AppState.historyGeneration` (#1118). A change means remote branches may have changed (a fetch
+   * from anywhere, a push that published one, a remote branch delete): open remote folders reload
    * their list in place and closed ones forget theirs.
    */
   refreshGeneration: number;
@@ -214,6 +215,8 @@ function BranchTreeContent({
   // must stay open to show a failure (#996).
   const [renamingTo, setRenamingTo] = useState<string | null>(null);
   const [rowMenu, setRowMenu] = useState<RowContextMenu | null>(null);
+  // The branch whose delete runs, watched with its menu and confirmation (#1141).
+  const [deleting, setDeleting] = useState<string | null>(null);
   const [upstreamDialogOpen, setUpstreamDialogOpen] = useState(false);
   const [clearUpstreamConfirm, setClearUpstreamConfirm] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
@@ -415,6 +418,28 @@ function BranchTreeContent({
         : null;
   const labelAt = drag ?? commitDragState;
 
+  const deleteBranch = async (name: string) => {
+    setDeleting(name);
+    try {
+      await onDeleteBranch(name, true);
+    } finally {
+      setDeleting((current) => (current === name ? null : current));
+    }
+  };
+  // A deleted branch, or one a refresh removed while its menu was open: the focus goes to the
+  // row now in that place (#1141).
+  const localKey = (name: string | null | undefined) => (name == null ? null : `local-branch:${name}`);
+  useRefocusRemovedRow({
+    list: treeRef,
+    watching: [
+      rowMenu === null ? null : rowMenuKey(rowMenu),
+      localKey(deleteConfirm?.name),
+      localKey(deleting),
+      ...[...counting].map(localKey),
+    ],
+    rows: 'button[data-menu-key]:not([data-menu-key="add"])',
+  });
+
   const handleDeleteClick = async (name: string) => {
     // Counted first (#996): a branch whose commits another branch has loses nothing and goes at
     // once; otherwise one confirm says what would be left on no branch. Either way it is deleted
@@ -433,7 +458,7 @@ function BranchTreeContent({
         return next;
       });
     }
-    if (count === 0) void onDeleteBranch(name, true);
+    if (count === 0) void deleteBranch(name);
     else setDeleteConfirm({ name, count });
   };
 
@@ -554,7 +579,7 @@ function BranchTreeContent({
             confirmReason={busyReason}
             onConfirm={() => {
               if (operationDisabled) return;
-              void onDeleteBranch(deleteConfirm.name, true);
+              void deleteBranch(deleteConfirm.name);
               setDeleteConfirm(null);
             }}
             onCancel={() => setDeleteConfirm(null)}
@@ -657,6 +682,7 @@ function BranchTreeContent({
                   remoteName,
                   fetchUrl: remote.fetchUrl,
                   pushUrl: remote.pushUrl,
+                  branches,
                   blockers,
                   // The cache's `refreshGeneration` reload already refreshes the branch list after
                   // any fetch; this explicit drop-and-reload just makes the update immediate here.

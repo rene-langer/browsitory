@@ -106,8 +106,8 @@ describe("useAppState pull requests", () => {
       saved = await result.current.saveForgeToken("GitHub", "rene", "token");
       created = await result.current.createPullRequest("remote-b", "rene", pullRequest);
     });
-    expect(saved).toBe("the keyring is locked");
-    expect(created).toBe("Validation failed");
+    expect(saved).toBe("Couldn't connect to GitHub as rene: the keyring is locked");
+    expect(created).toBe("Couldn't create the pull request from feature/b into main: Validation failed");
 
     fail = false;
     await act(async () => {

@@ -222,6 +222,9 @@ python3 scripts/check-updater-manifest.py --version "${tag#release/}" --assets "
 4. The second endpoint, once the `Docs` run that the release started has finished
    (`gh run list -w docs.yml -L 2`): `curl -sL https://rene-langer.github.io/browsitory/latest.json`
    shows the same manifest as step 1.
+5. VSCode remote window (#1134): in a WSL or Remote - SSH window on Linux x64, install the
+   published extension and check that the Explorer's context menu on a folder shows **Open in
+   Browsitory** and that it opens the repository. No CI job runs a remote window.
 
 #### Second endpoint: the user guide site
 

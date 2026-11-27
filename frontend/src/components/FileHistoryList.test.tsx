@@ -265,4 +265,33 @@ describe("FileHistoryList — windowed rows", () => {
       restore();
     }
   });
+
+  // #1139: a jump to a row the window doesn't hold yet is announced; once rendered, it is the
+  // list's active descendant.
+  it("announces a selected row that wasn't rendered, then makes it the active descendant", () => {
+    const { rerender, props, restore } = renderInPane();
+    try {
+      rerender(<FileHistoryList {...props} selectedRow={{ commitId: "id700" }} />);
+      const announcement = screen.getByText("id700 commit id700, 701 of 1000");
+      expect(announcement.closest('[aria-live="polite"]')).not.toBeNull();
+      const list = screen.getByRole("listbox", { name: "File history commits" });
+      expect(list).toHaveAttribute("aria-activedescendant", screen.getByText(/commit id700$/).closest("li")!.id);
+    } finally {
+      restore();
+    }
+  });
+});
+
+// #1139: the focus stays on the list, so the selected row is its active descendant.
+it("points the file history's active descendant at the selected row", () => {
+  const history = state({ entries: [entry("c2"), entry("c1")] });
+  const props = baseProps(history, { selectedRow: { commitId: "c2" } });
+  const { rerender } = render(<FileHistoryList {...props} />);
+  const list = screen.getByRole("listbox", { name: "File history commits" });
+  const option = (id: string) => screen.getByText(`${id} commit ${id}`).closest("li")!;
+  expect(option("c2").id).not.toBe("");
+  expect(list).toHaveAttribute("aria-activedescendant", option("c2").id);
+  rerender(<FileHistoryList {...props} selectedRow={{ commitId: "c1" }} />);
+  expect(list).toHaveAttribute("aria-activedescendant", option("c1").id);
+  expect(option("c1").id).not.toBe(option("c2").id);
 });

@@ -1327,6 +1327,9 @@ export interface OpenRepoEntry {
   workspaceId: string | null;
 }
 
+/** The open tabs: the desktop app keeps them in config.toml, each VSCode window in its own state (#1128). */
+export type OpenRepos = { entries: OpenRepoEntry[]; activePath: string | null };
+
 /** A repository's custom tab name (#625), kept by path in the app config. */
 export interface RepoAlias {
   repoPath: string;
@@ -1393,7 +1396,7 @@ export interface RepoClient {
   setLastSeenVersion(version: string): Promise<void>;
   openRepo(path: string): Promise<void>;
   closeRepo(repoPath: string): Promise<void>;
-  listOpenRepos(): Promise<{ entries: OpenRepoEntry[]; activePath: string | null }>;
+  listOpenRepos(): Promise<OpenRepos>;
   persistOpenRepos(entries: OpenRepoEntry[], activePath: string | null): Promise<void>;
   /** Every stored tab name (#625), also of repositories that aren't open. */
   listRepoAliases(): Promise<RepoAlias[]>;

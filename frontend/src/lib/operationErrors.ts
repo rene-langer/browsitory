@@ -49,6 +49,14 @@ const unlocked = (again: string) => `Check that no other Git program is using th
 
 const op = (failed: string, next: string | null): FailedOperation => ({ failed, next });
 
+/** One path by name, several by their number ("3 files"). */
+const paths = (list: readonly string[], noun = "files") => (list.length === 1 ? list[0] : `${list.length} ${noun}`);
+
+// A hunk or line action fails mostly when the diff it was picked from is stale.
+const unchanged = (again: string) => `Check that the file hasn't changed since the diff was shown, then ${again}.`;
+
+const GRAPH_BRANCHES = "Couldn't change which branches the graph shows";
+
 const HISTORY_EDIT: Record<HistoryEditKind, (id: string) => string> = {
   Reword: (id) => `Couldn't reword ${id}`,
   Squash: (id) => `Couldn't squash ${id} into its parent`,
@@ -151,4 +159,50 @@ export const failedOperation = {
     ),
   restoreReflog: (reference: string, newId: string) =>
     op(`Couldn't restore ${shortRefName(reference)} to ${short(newId)}`, unlocked("restore it again")),
+  // Staging and discarding (#1122).
+  stage: (files: readonly string[]) => op(`Couldn't stage ${paths(files)}`, unlocked("stage again")),
+  unstage: (files: readonly string[]) => op(`Couldn't unstage ${paths(files)}`, unlocked("unstage again")),
+  stageHunk: (path: string) => op(`Couldn't stage the hunk in ${path}`, unchanged("stage it again")),
+  unstageHunk: (path: string) => op(`Couldn't unstage the hunk in ${path}`, unchanged("unstage it again")),
+  discardHunk: (path: string) => op(`Couldn't discard the hunk in ${path}`, unchanged("discard it again")),
+  stageLines: (path: string) => op(`Couldn't stage the selected lines in ${path}`, unchanged("stage them again")),
+  unstageLines: (path: string) => op(`Couldn't unstage the selected lines in ${path}`, unchanged("unstage them again")),
+  discardLines: (path: string) => op(`Couldn't discard the selected lines in ${path}`, unchanged("discard them again")),
+  discard: (files: readonly string[]) => op(`Couldn't discard the changes to ${paths(files)}`, unlocked("discard again")),
+  restoreFile: (commitId: string, path: string) =>
+    op(`Couldn't restore ${path} as of ${short(commitId)}`, unlocked("restore it again")),
+  ignore: (patterns: readonly string[]) =>
+    op(
+      `Couldn't ignore ${paths(patterns, "paths")}`,
+      `Check that you can write to .gitignore, then ignore ${patterns.length === 1 ? "it" : "them"} again.`,
+    ),
+  // Conflicts (#1122).
+  resolveConflict: (path: string) => op(`Couldn't resolve ${path}`, unlocked("resolve it again")),
+  markResolved: (path: string) => op(`Couldn't mark ${path} as resolved`, unlocked("mark it again")),
+  // Remotes and the upstream (#1122).
+  addRemote: (name: string) => op(`Couldn't add remote ${name}`, "Check the name and the URL, then add it again."),
+  renameRemote: (oldName: string, newName: string) =>
+    op(`Couldn't rename remote ${oldName} to ${newName}`, "Check the name, then rename it again."),
+  editRemote: (name: string) => op(`Couldn't change the URLs of remote ${name}`, "Check the URLs, then save them again."),
+  removeRemote: (name: string) => op(`Couldn't remove remote ${name}`, unlocked("remove it again")),
+  saveCredential: (remoteName: string) =>
+    op(`Couldn't save the credential for ${remoteName}`, "Check the user name and the token, then save them again."),
+  forgetCredential: (remoteName: string) => op(`Couldn't forget the credential for ${remoteName}`, null),
+  remoteAuthMode: (remoteName: string) => op(`Couldn't save how to sign in to ${remoteName}`, unlocked("save it again")),
+  setUpstream: (remoteName: string, branchName: string) =>
+    op(`Couldn't set ${remoteName}/${branchName} as upstream`, "Check that the remote branch exists, then set it again."),
+  clearUpstream: () => op("Couldn't clear the upstream", unlocked("clear it again")),
+  // The commit graph's settings (#1122).
+  graphBranches: () => op(GRAPH_BRANCHES, unlocked("try again")),
+  isolateBranch: (name: string) => op(`Couldn't isolate ${name}`, unlocked("try again")),
+  collapseMerges: (collapse: boolean) => op(`Couldn't ${collapse ? "collapse" : "expand"} merges`, unlocked("try again")),
+  // The forge account and pull requests (#1122).
+  connectForge: (provider: string, account: string) =>
+    op(`Couldn't connect to ${provider} as ${account}`, "Check the account and the token, then connect again."),
+  disconnectForge: (provider: string, account: string) => op(`Couldn't disconnect ${account} from ${provider}`, null),
+  createPullRequest: (sourceBranch: string, targetBranch: string) =>
+    op(
+      `Couldn't create the pull request from ${sourceBranch} into ${targetBranch}`,
+      "Check the branches and the title, then create it again.",
+    ),
 };

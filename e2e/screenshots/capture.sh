@@ -5,8 +5,8 @@
 #   e2e/screenshots/capture.sh              # build, then capture
 #   e2e/screenshots/capture.sh --no-build   # capture with the existing E2E build
 #
-# The demo repository and the temp HOME live in /tmp/browsitory-screenshots, which is removed
-# when the script exits. Set KEEP=1 to keep it, for example to look at the demo repository.
+# The demo repository lives in /tmp/browsitory-screenshots, which is removed when the script
+# exits. Set KEEP=1 to keep it, for example to look at the demo repository.
 set -euo pipefail
 
 cleanup() {

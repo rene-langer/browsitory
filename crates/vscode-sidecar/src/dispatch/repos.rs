@@ -1,6 +1,6 @@
 use repo_service::wire::ErrorDto;
-use repo_service::wire::{OpenRepoEntryDto, OpenRepoEntryInput, RepoAliasDto, WorkspaceDto};
-use serde::{Deserialize, Serialize};
+use repo_service::wire::{RepoAliasDto, WorkspaceDto};
+use serde::Deserialize;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
@@ -80,53 +80,6 @@ pub(super) fn list_missing_recent_repos() -> Result<Value, ErrorDto> {
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
     serde_json::to_value(paths).map_err(ErrorDto::from_error)
-}
-
-/// `list_open_repos`'s answer. (The desktop app's command returns an `(entries, activePath)`
-/// tuple instead, which `tauriRepoClient.ts` turns into this shape.)
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "OpenRepos"))]
-#[serde(rename_all = "camelCase")]
-pub(super) struct OpenReposDto {
-    entries: Vec<OpenRepoEntryDto>,
-    active_path: Option<String>,
-}
-
-/// `config::list_open_repos`'s `(entries, active path)`.
-impl From<(Vec<config::OpenRepoEntry>, Option<PathBuf>)> for OpenReposDto {
-    fn from((entries, active): (Vec<config::OpenRepoEntry>, Option<PathBuf>)) -> Self {
-        Self {
-            entries: entries.into_iter().map(OpenRepoEntryDto::from).collect(),
-            active_path: active.map(|p| p.to_string_lossy().into_owned()),
-        }
-    }
-}
-
-pub(super) fn list_open_repos_handler() -> Result<Value, ErrorDto> {
-    let open = config::list_open_repos().map_err(ErrorDto::from_error)?;
-    serde_json::to_value(OpenReposDto::from(open)).map_err(ErrorDto::from_error)
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct PersistOpenReposParams {
-    entries: Vec<OpenRepoEntryInput>,
-    active_path: Option<String>,
-}
-
-pub(super) fn persist_open_repos(params: PersistOpenReposParams) -> Result<Value, ErrorDto> {
-    let entries: Vec<config::OpenRepoEntry> = params
-        .entries
-        .into_iter()
-        .map(|entry| config::OpenRepoEntry {
-            path: PathBuf::from(entry.path),
-            workspace_id: entry.workspace_id,
-        })
-        .collect();
-    config::set_open_repos(&entries, params.active_path.as_deref().map(Path::new))
-        .map_err(ErrorDto::from_error)?;
-    Ok(Value::Null)
 }
 
 pub(super) fn list_repo_aliases() -> Result<Value, ErrorDto> {

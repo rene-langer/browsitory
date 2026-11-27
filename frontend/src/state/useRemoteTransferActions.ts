@@ -219,12 +219,17 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
   // in `state.error`); returns the message, or `null` when the name is free. `folders` also
   // refuses a name that is a folder of a listed one or the other way round (`v1` and `v1/rc`),
   // which git refuses for refs; remote names aren't refs, so remotes compare exactly.
+  // `inDialog`: the caller's dialog shows the message, so the banner leaves it out (#1124).
   const refuseTakenName = useCallback(
-    (kind: string, existing: string[], name: string, folders: boolean): string | null => {
+    (kind: string, existing: string[], name: string, folders: boolean, inDialog = false): string | null => {
       const clash = folders ? refNameClash(existing, name) : existing.includes(name) ? name : null;
       if (clash === null) return null;
       const message = takenNameMessage(kind, name, clash);
-      setState((prev) => ({ ...prev, error: message }));
+      setState((prev) => ({
+        ...prev,
+        error: message,
+        ...(inDialog ? { errorSource: { error: message, source: "dialog" as const } } : {}),
+      }));
       return message;
     },
     [setState],
@@ -246,6 +251,7 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
                 remotes: [...prev.remotes, { name, fetchUrl, pushUrl, authMode: null, authUsername: null }],
               },
         () => client.addRemote(repoPath, name, fetchUrl, pushUrl),
+        failedOperation.addRemote(name),
       );
     },
     [client, refuseTakenName, runOptimisticMutationWithMessage, repoPath],
@@ -264,6 +270,7 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
                 remotes: prev.remotes.map((remote) => (remote.name === oldName ? { ...remote, name: newName } : remote)),
               },
         () => client.renameRemote(repoPath, oldName, newName),
+        failedOperation.renameRemote(oldName, newName),
       );
     },
     [client, refuseTakenName, runOptimisticMutationWithOutcome, repoPath],
@@ -276,6 +283,7 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
           remotes: prev.remotes.map((remote) => (remote.name === name ? { ...remote, fetchUrl, pushUrl } : remote)),
         }),
         () => client.updateRemoteUrls(repoPath, name, fetchUrl, pushUrl),
+        failedOperation.editRemote(name),
       ),
     [client, runOptimisticMutation, repoPath],
   );
@@ -284,21 +292,29 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
       runOptimisticMutation(
         (prev) => ({ ...prev, remotes: prev.remotes.filter((remote) => remote.name !== name) }),
         () => client.removeRemote(repoPath, name, clearUpstreams),
+        failedOperation.removeRemote(name),
       ),
     [client, runOptimisticMutation, repoPath],
   );
   const saveHttpsCredential = useCallback(
     (remoteName: string, username: string, token: string) =>
-      runMutation(() => client.saveHttpsCredential(repoPath, remoteName, username, token)),
+      runMutation(
+        () => client.saveHttpsCredential(repoPath, remoteName, username, token),
+        failedOperation.saveCredential(remoteName),
+      ),
     [client, runMutation, repoPath],
   );
   const forgetHttpsCredential = useCallback(
-    (remoteName: string) => runMutation(() => client.forgetHttpsCredential(repoPath, remoteName)),
+    (remoteName: string) =>
+      runMutation(() => client.forgetHttpsCredential(repoPath, remoteName), failedOperation.forgetCredential(remoteName)),
     [client, runMutation, repoPath],
   );
   const setRemoteAuthMode = useCallback(
     (remoteName: string, mode: RemoteAuthMode, username: string | null) =>
-      runMutationWithOutcome(() => client.setRemoteAuthMode(repoPath, remoteName, mode, username)),
+      runMutationWithOutcome(
+        () => client.setRemoteAuthMode(repoPath, remoteName, mode, username),
+        failedOperation.remoteAuthMode(remoteName),
+      ),
     [client, runMutationWithOutcome, repoPath],
   );
   const setCurrentUpstream = useCallback(
@@ -310,6 +326,7 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
           return { ...prev, upstream: { localBranch, remoteName, remoteBranch }, pullOutcome: null };
         },
         () => client.setCurrentUpstream(repoPath, remoteName, remoteBranch),
+        failedOperation.setUpstream(remoteName, remoteBranch),
       ),
     [client, runOptimisticMutation, repoPath],
   );
@@ -318,6 +335,7 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
       runOptimisticMutation(
         (prev) => ({ ...prev, upstream: null, pullOutcome: null }),
         () => client.clearCurrentUpstream(repoPath),
+        failedOperation.clearUpstream(),
       ),
     [client, runOptimisticMutation, repoPath],
   );
@@ -379,7 +397,8 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
   const createTag = useCallback(
     async (name: string, message: string | null, target: string | null) => {
       // A taken tag name would show twice in `TagPanel` (keyed by name) until refused (#413).
-      const refused = refuseTakenName("tag", latest.current.tags.map((tag) => tag.name), name, true);
+      // `CreateTagDialog` shows the failure itself (#1124).
+      const refused = refuseTakenName("tag", latest.current.tags.map((tag) => tag.name), name, true, true);
       if (refused !== null) return refused;
       return runOptimisticMutationWithMessage(
         (prev) =>
@@ -394,6 +413,7 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
               },
         () => client.createTag(repoPath, name, message, target),
         failedOperation.createTag(name),
+        { inDialog: true },
       );
     },
     [client, refuseTakenName, runOptimisticMutationWithMessage, repoPath],

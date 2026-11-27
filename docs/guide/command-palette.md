@@ -98,8 +98,9 @@ shows a command's shortcut at the right of its row, and the toolbar's tooltips s
 (**Refresh (F5)**). They show your own keys once you change them (see
 [Change the shortcuts](#change-the-shortcuts)).
 
-The global shortcuts work anywhere in the window. The list names each as the command palette
-does:
+The global shortcuts work anywhere in the window except in an open dialog or menu, which keeps
+its keys: Ctrl+Z there undoes nothing behind it, and Ctrl+W closes no tab (in the command
+palette, Ctrl+K closes the palette). The list names each as the command palette does:
 
 | Windows and Linux | macOS | What they do |
 |---|---|---|
@@ -199,16 +200,20 @@ are saved with your other preferences, in the `[keybindings]` section of Browsit
 
     Some keys can't be used, so text fields, dialogs and the window keep working: Ctrl+C, Ctrl+V,
     Ctrl+X, Ctrl+A, Ctrl+Z and Ctrl+Y (⌘ on macOS), Esc, Tab, Shift+Tab, Enter, Space, the arrow
-    keys on their own, F6 and Shift+F6, and the keys that quit or close the app (⌘Q and ⌘W on
-    macOS, Alt+F4). A command keeps these keys when they are its own built-in ones: Undo keeps
-    Ctrl+Z, and moving between panes keeps F6. Ctrl+1 … Ctrl+9 (⌘1 … ⌘9) can't be changed.
+    keys, Backspace, Delete, Home, End, Page Up and Page Down on their own, F6 and Shift+F6, and
+    the keys that quit or close the app (⌘Q and ⌘W on macOS, Alt+F4). A command keeps these keys
+    when they are its own built-in ones: Undo keeps Ctrl+Z, and moving between panes keeps F6.
+    Ctrl+1 … Ctrl+9 (⌘1 … ⌘9) can't be changed.
 
     A key without Ctrl, Cmd or Alt, such as a single letter, works only outside text fields, so
-    you can still type it.
+    you can still type it. So does Backspace, Delete, Home, End, Page Up or Page Down with a
+    modifier (Ctrl+Backspace deletes a word there).
 
 **In VSCode** the keys are VSCode keybindings, so you change them in VSCode itself:
 **Preferences → Keyboard** has **Open Keyboard Shortcuts**, which opens VSCode's Keyboard
 Shortcuts on Browsitory's commands (`browsitory.shortcut.…`). There you can give a command
 other keys or remove them. The shortcut sheet, the palette and the tooltips show the keys you
-set there. The keys Browsitory handles itself in VSCode (Ctrl+Shift+L, Ctrl+Shift+K, the merge
-editor's keys and the others VSCode doesn't bind) keep their built-in keys.
+set there (in a remote window, such as WSL or SSH, they show the built-in keys; see
+[Install](install.md#keyboard-shortcuts-in-vscode)). The keys Browsitory handles itself in VSCode
+(Ctrl+Shift+L, Ctrl+Shift+K, the merge editor's keys and the others VSCode doesn't bind) keep
+their built-in keys.
