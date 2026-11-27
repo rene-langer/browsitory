@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __resetHostVisibilityForTests, publishHostVisibility } from "../ipc/hostVisibility";
+import { __resetTransportStatusForTests, publishTransportStatus } from "../ipc/transportStatus";
 import type { RepoClient, RepoWatch } from "../ipc/RepoClient";
 import { fakeRepoClient } from "../test/fakeRepoClient";
 import {
@@ -189,6 +190,7 @@ describe("useExternalChanges with a watcher (#756)", () => {
   afterEach(() => {
     vi.useRealTimers();
     __resetHostVisibilityForTests();
+    __resetTransportStatusForTests();
   });
 
   it("watches the repository while mounted and stops when unmounted", async () => {
@@ -295,6 +297,57 @@ describe("useExternalChanges with a watcher (#756)", () => {
       await vi.advanceTimersByTimeAsync(CHANGE_CHECK_INTERVAL_MS);
     });
     expect(checkForChanges).toHaveBeenCalledTimes(2);
+  });
+
+  // #1130: in VSCode a lost sidecar takes its watchers with it, and its replacement starts none
+  // and reports no `Stopped`.
+  it("watches again after the connection to the backend was lost", async () => {
+    const { client, watchRepo } = watchedClient();
+    setup({ client });
+    await settle();
+    expect(watchRepo).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      publishTransportStatus({ state: "reconnecting", message: "Browsitory sidecar exited with code 1" });
+      await Promise.resolve();
+    });
+    await settle();
+    expect(watchRepo).toHaveBeenCalledTimes(2);
+    expect(watchRepo).toHaveBeenLastCalledWith(REPO);
+  });
+
+  it("polls every few seconds and on focus while the watcher can't start again after a lost connection", async () => {
+    let started = true;
+    const listeners = new Set<(event: RepoWatch) => void>();
+    const client = fakeRepoClient({
+      watchRepo: vi.fn(async () => {
+        if (started) return true;
+        throw new Error("Browsitory sidecar is not running");
+      }),
+      unwatchRepo: async () => {},
+      subscribeRepoWatch: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    });
+    const { checkForChanges } = setup({ client });
+    await settle();
+    await settle();
+    expect(checkForChanges).toHaveBeenCalledTimes(1);
+    started = false;
+    await act(async () => {
+      publishTransportStatus({ state: "failed", message: "Browsitory sidecar failed to start" });
+      await Promise.resolve();
+    });
+    await settle();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CHANGE_CHECK_INTERVAL_MS);
+    });
+    expect(checkForChanges).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    expect(checkForChanges).toHaveBeenCalledTimes(3);
   });
 
   it("checks again after a check that a report came in during", async () => {

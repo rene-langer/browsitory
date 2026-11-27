@@ -240,7 +240,7 @@ pub(super) fn spawn_progress_relay<W: std::io::Write + Send + 'static>(
             let mut out = out.lock().unwrap_or_else(|error| error.into_inner());
             if writeln!(out, "{line}").and_then(|()| out.flush()).is_err() {
                 // The reading end has gone away; stop relaying rather than spinning on a broken
-                // pipe. The main loop notices the same failure and exits the process.
+                // pipe. The sidecar exits once stdin ends too (#1129).
                 return;
             }
         }

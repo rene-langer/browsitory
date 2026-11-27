@@ -23,6 +23,8 @@ describe("message types the extension copies from the frontend (#1059)", () => {
   it.each([
     ["HostRequest", "hostRequests.ts"],
     ["DiffSource", "toolUris.ts"],
+    // The extension host answers `listOpenRepos` itself (#1128).
+    ["OpenRepos", "openRepos.ts"],
   ])("%s in %s matches RepoClient.ts", (name, file) => {
     const copy = typeAliasText(path.join(__dirname, file), name);
     const original = typeAliasText(REPO_CLIENT, name);

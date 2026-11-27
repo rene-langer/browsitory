@@ -21,7 +21,7 @@ import {
   timelineCommitId,
 } from "./hostRequests";
 import { effectiveShortcutKeys, keybindingsFileCandidates, parseKeybindingsJson } from "./keybindingsFile";
-import { FILE_VERSION_SCHEME, parseFileVersionUri } from "./toolUris";
+import { FILE_VERSION_SCHEME, isChangingVersion, parseFileVersionUri } from "./toolUris";
 import { renderWebviewHtml } from "./webviewHtml";
 
 let currentPanel: vscode.WebviewPanel | undefined;
@@ -122,14 +122,47 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Repository file versions for the diff and merge editors (`toolUris.ts`). Read through the
   // open panel's sidecar; without a panel there is no repository to read from.
+  const fileVersionChanges = new vscode.EventEmitter<vscode.Uri>();
   context.subscriptions.push(
+    fileVersionChanges,
     vscode.workspace.registerTextDocumentContentProvider(FILE_VERSION_SCHEME, {
+      onDidChange: fileVersionChanges.event,
       provideTextDocumentContent: async (uri) => {
         if (!currentBridge) throw new Error("Browsitory is not open.");
         return currentBridge.readFileVersion(parseFileVersionUri(uri));
       },
     }),
   );
+
+  /**
+   * VSCode keeps a virtual document while it is open and reads it again only when the provider
+   * names it (#1132): the open index, HEAD and conflict stage versions, whose URIs stay the same
+   * when the repository changes.
+   */
+  function refreshFileVersions(): void {
+    for (const { uri } of vscode.workspace.textDocuments) {
+      if (uri.scheme !== FILE_VERSION_SCHEME) continue;
+      let ref;
+      try {
+        ref = parseFileVersionUri(uri);
+      } catch {
+        continue;
+      }
+      if (isChangingVersion(ref.version)) fileVersionChanges.fire(uri);
+    }
+  }
+
+  /**
+   * A watcher's report, or an operation of the app itself, may have changed the repository. The
+   * sidecar sends `operationLog` once the webview showed the operation log; without either, the
+   * versions are read again when the diff or merge tool opens.
+   */
+  function onSidecarNotification(method: string, params: unknown): void {
+    const changed =
+      method === "operationLog" ||
+      (method === "repoWatch" && (params as { kind?: unknown } | undefined)?.kind === "Changed");
+    if (changed) refreshFileVersions();
+  }
 
   const assetRoot = resolveWebviewAssetRoot(context.extensionUri, context.extensionMode);
   const webviewOptions: vscode.WebviewPanelOptions & vscode.WebviewOptions = {
@@ -179,14 +212,19 @@ export function activate(context: vscode.ExtensionContext): void {
       createTerminal: (cwd, name) => vscode.window.createTerminal({ cwd, name }).show(),
       executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),
       isWorkspaceTrusted: () => vscode.workspace.isTrusted,
-      openDiff: (left, right, title) =>
-        vscode.commands.executeCommand(
+      onSidecarNotification,
+      // A diff or merge editor opened again shows the same URIs: read them afresh.
+      openDiff: (left, right, title) => {
+        refreshFileVersions();
+        return vscode.commands.executeCommand(
           "vscode.diff",
           vscode.Uri.parse(left, true),
           vscode.Uri.parse(right, true),
           title,
-        ),
+        );
+      },
       openMergeEditor: async (sides) => {
+        refreshFileVersions();
         const output = vscode.Uri.parse(sides.output, true);
         try {
           // Internal command (the one VSCode's own Git extension uses); a plain open with
