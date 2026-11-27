@@ -111,6 +111,24 @@ describe("useWorkspaceShortcuts and the user's keys (#898)", () => {
     press({ key: "r", code: "KeyR" });
     expect(props.runCommand).toHaveBeenCalledWith("refresh");
   });
+
+  it.each(["Backspace", "Delete", "Home", "End", "PageUp", "PageDown"])(
+    "leaves %s with a modifier to a text field, which edits or moves with it (#1142)",
+    (key) => {
+      setShortcutChords("fetch", [{ mod: true, key }]);
+      const props = setup();
+      const field = document.createElement("textarea");
+      document.body.append(field);
+      field.focus();
+      const event = new KeyboardEvent("keydown", { key, code: key, ctrlKey: true, bubbles: true, cancelable: true });
+      act(() => void field.dispatchEvent(event));
+      expect(props.runCommand).not.toHaveBeenCalled();
+      expect(event.defaultPrevented).toBe(false);
+      field.blur();
+      press({ key, code: key, ctrlKey: true });
+      expect(props.runCommand).toHaveBeenCalledWith("fetch");
+    },
+  );
 });
 
 describe("useWorkspaceShortcuts behind an open dialog (#1117)", () => {
