@@ -1026,7 +1026,12 @@ handler, and from the drop of a resource it keeps in the app's resource table, w
 counts for "Restart to update" on Windows: `tauri-plugin-updater`'s install there runs only
 `cleanup_before_exit` and then `std::process::exit`, without a `RunEvent::Exit` (on macOS and
 Linux `relaunch` goes through `request_restart`, which delivers it). The wait runs once
-(`OnceLock`), whichever asks first. Each worker finishes
+(`OnceLock`), whichever asks first. When `ShellExecuteW` then fails to start the installer
+(a declined UAC prompt), `install` returns the error and the process keeps running, its window
+hidden, its workers stopped and its resource tables empty, the downloaded update included
+(#1194). The banner then calls `recover_from_failed_update`, which shows the window again when
+that `OnceLock` is set and answers whether it was; if so, the banner offers only "Restart
+Browsitory" (the process plugin's `relaunch`), as retrying the install can't work any more. Each worker finishes
 the command it is running (a transfer included, with the reads its wait serves) and starts no
 other (`worker/lifecycle.rs`; the commands still queued are answered `WorkerStopped`), the
 registry opens no repository any more, and the exit waits until the workers are idle or the

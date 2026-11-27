@@ -281,6 +281,8 @@ export const vscodeRepoClient: RepoClient = {
   // VSCode handles what is dropped on its windows (#649): no drops reach the webview's app.
   subscribeFileDrops: () => () => {},
   readPatchFile: () => Promise.reject(new Error("Not supported in the VSCode extension")),
+  // The extension updates through VSCode (#1194).
+  recoverFromFailedUpdate: () => Promise.reject(new Error("Not supported in the VSCode extension")),
   // Handled natively by the extension host (see `sidecarBridge.ts`'s `NATIVE_METHODS`), which
   // writes into the "Browsitory" output channel rather than forwarding to the sidecar process.
   // Redacted first, like the desktop log file (#1056).

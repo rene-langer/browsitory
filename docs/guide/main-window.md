@@ -196,6 +196,10 @@ for up to 5 seconds, so it leaves no Git lock file behind.
 If installing fails (for example when you cancel the password prompt on Linux), the notice turns
 red and says "Couldn't install update v…" with the reason, which also goes to the
 [log file](troubleshooting.md); click **Restart to update** to try again.
+On Windows, when the installer itself can't start (for example when you answer **No** to the
+Windows permission prompt), the notice says "Couldn't start the installer for update v…"
+instead: Browsitory had already stopped its repositories to make way for the installer. Click
+**Restart Browsitory**, then install the update again once the notice is back.
 
 To stop the automatic checks, clear **Check for updates automatically** under **Updates** in
 **Preferences** (it is `check_automatically = false` under `[updates]` in `config.toml`).

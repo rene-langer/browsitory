@@ -1805,6 +1805,13 @@ export interface RepoClient {
   /** Only the desktop app uses these; the VS Code extension updates through its marketplace. */
   getUpdateSettings(): Promise<UpdateSettings>;
   setUpdateSettings(settings: UpdateSettings): Promise<void>;
+  /**
+   * After a failed "Restart to update" (#1194): shows the window again and answers whether the app
+   * has to be restarted. It does when the updater got the app ready to exit first, as it does on
+   * Windows before it starts the installer: the window hidden, the repositories stopped and the
+   * downloaded update dropped. Desktop only: the VSCode extension rejects without calling anything.
+   */
+  recoverFromFailedUpdate(): Promise<boolean>;
   /** Labels of the next undo/redo step for this repo; `null` when the stack is empty. */
   getUndoState(repoPath: string): Promise<UndoState>;
   /** Refusals (`Nothing`, `RepositoryChanged`, `BranchHeld`, `FileNotSaved`, `OperationInProgress`) resolve; only real failures reject. */

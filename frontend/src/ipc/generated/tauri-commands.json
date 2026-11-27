@@ -145,6 +145,7 @@
   "read_patch_file",
   "rebase_commit_part",
   "rebase_continue",
+  "recover_from_failed_update",
   "redo_last",
   "remove_recent_repo",
   "remove_remote",
