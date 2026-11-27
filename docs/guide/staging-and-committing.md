@@ -199,7 +199,8 @@ hunk when nothing is selected.
 ??? note "Details"
     A selected line has a bar on its right edge (the line cursor's bar is on the left) and keeps
     its added or removed colour. With the keyboard, `↑`/`↓` move a line cursor inside the active
-    hunk and select that line, `Shift+↑`/`Shift+↓` extend the selection, and `[` / `]` jump to
+    hunk and select that line (the diff scrolls to keep it in view), `Shift+↑`/`Shift+↓` extend
+    the selection, and `[` / `]` jump to
     the previous or next hunk (which clears the selection). A screen reader reads the line under
     the cursor, whether it is added or removed, its number and whether it is selected (see
     [Diff options](history.md#diff-options)).
