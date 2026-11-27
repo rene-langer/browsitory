@@ -1785,6 +1785,11 @@ export interface RepoClient {
   /** Refusals (`Nothing`, `RepositoryChanged`, `BranchHeld`, `FileNotSaved`, `OperationInProgress`) resolve; only real failures reject. */
   undo(repoPath: string): Promise<UndoOutcome>;
   redo(repoPath: string): Promise<UndoOutcome>;
+  /**
+   * Forgets the undo and redo history of the repository (its open worktree) and removes the refs
+   * that keep its snapshots of uncommitted, untracked and discarded files (#1123).
+   */
+  clearUndoHistory(repoPath: string): Promise<void>;
   /** `mainline` (1-based parent) is required for a merge commit and refused for any other. */
   cherryPick(repoPath: string, commitId: string, mainline?: number | null): Promise<PickOutcome>;
   revertCommit(repoPath: string, commitId: string, mainline?: number | null): Promise<PickOutcome>;

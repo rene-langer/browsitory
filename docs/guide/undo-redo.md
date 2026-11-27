@@ -96,3 +96,34 @@ buttons or the command palette if Ctrl+Z is taken by VSCode.
 
 Tools that show all refs (`git log --all`, gitk) show a "browsitory undo anchor" commit; it
 keeps undoable objects from being garbage-collected.
+
+## What the undo history keeps, and clearing it
+
+To bring back what an operation replaced, the undo history keeps snapshots inside the
+repository, under the Git references `refs/browsitory/undo/…` and `refs/browsitory/undo-keep/…`:
+for each of the up to 50 steps, the staged changes and the work tree as they were before and
+after it. That includes every modified and every untracked file that isn't ignored (an
+untracked `notes.env` too), the full content of changes you discarded, and the commits of
+deleted branches and of amended or reset history. Browsitory's own fetches and pushes never
+send these references. Anything that copies **every** reference of the repository does:
+`git push --mirror` (or a push of `refs/*`), `git bundle create … --all`, `git clone --mirror`
+of the folder, and backup or migration tools built on them. Whoever can read the copy can read
+those files, although they were never committed.
+
+**Clear undo history…** in the command palette removes the undo history of the open
+repository: after you confirm, Undo and Redo have nothing left to go back to, and the
+references above are deleted, so a mirror push, a bundle or a mirror clone made afterwards no
+longer copies the snapshots. It can't be undone. An operation paused at the time (a merge or
+rebase with conflicts) leaves nothing to undo when it finishes. Git deletes the snapshot
+objects themselves later, when it collects garbage (`git gc`); until then they stay in the
+`.git` folder but no reference reaches them, so a push or bundle doesn't send them.
+
+??? note "Details"
+    Each worktree of a repository has its own undo history (`refs/browsitory/undo/main` for
+    the main one, `refs/browsitory/undo/wt/<name>` for a linked one). **Clear undo history…**
+    clears the one of the worktree open in the tab; run it in each worktree's tab before a
+    mirror push, or delete all of them at once with
+    `git for-each-ref --format="delete %(refname)" refs/browsitory/ | git update-ref --stdin`
+    with Browsitory closed, then delete `.git/browsitory/undo.json` (and
+    `.git/worktrees/*/browsitory/undo.json`) too. While another Browsitory window is changing the undo history, the command says
+    so and changes nothing; try again in a moment.

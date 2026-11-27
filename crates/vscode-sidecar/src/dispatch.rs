@@ -294,6 +294,7 @@ methods!(|params, repos, stdout| {
     "get_undo_state" => get_undo_state(RepoPathParams, repos),
     "undo_last" => undo_last(RepoPathParams, repos),
     "redo_last" => redo_last(RepoPathParams, repos),
+    "clear_undo_history" => clear_undo_history(RepoPathParams, repos),
     "list_operations" => list_operations(ListOperationsParams, repos, stdout),
     "cherry_pick" => cherry_pick(PickParams, repos, stdout),
     "revert_commit" => revert_commit(PickParams, repos, stdout),

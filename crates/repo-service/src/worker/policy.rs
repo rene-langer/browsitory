@@ -516,7 +516,7 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         Command::AbortSequence { .. } => P::aborting(),
 
         // The undo stack itself.
-        Command::Undo { .. } | Command::Redo { .. } => {
+        Command::Undo { .. } | Command::Redo { .. } | Command::ClearUndoHistory { .. } => {
             P::locked().refused_when_busy(BusyReply::Undo)
         }
     }
@@ -726,5 +726,6 @@ pub(super) fn reply_of(command: &mut Command) -> Option<&mut dyn Reply> {
         GetUndoState,
         Undo,
         Redo,
+        ClearUndoHistory,
     )
 }

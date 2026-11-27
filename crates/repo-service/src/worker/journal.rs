@@ -597,6 +597,7 @@ pub(super) fn describe(command: &Command) -> Option<Described> {
         // The undo stack.
         Command::Undo { .. } => entry("Undo").reply(),
         Command::Redo { .. } => entry("Redo").reply(),
+        Command::ClearUndoHistory { .. } => entry("Clear undo history").reply(),
     }
 }
 

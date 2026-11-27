@@ -886,6 +886,9 @@ where
                         .redo(&self.repo, guard, || self.operations.marker(&self.repo)),
                 );
             }
+            Command::ClearUndoHistory { reply } => {
+                let _ = reply.send(self.undo_recorder.clear(&self.repo, guard));
+            }
         }
     }
 }

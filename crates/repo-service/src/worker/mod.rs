@@ -904,6 +904,10 @@ pub(crate) enum Command {
     Redo {
         reply: Sender<Result<UndoOutcome, ErrorDto>>,
     },
+    /// Forgets the undo history and removes its refs (#1123).
+    ClearUndoHistory {
+        reply: Sender<Result<(), ErrorDto>>,
+    },
 }
 
 pub use cancel::CancelRegistry;

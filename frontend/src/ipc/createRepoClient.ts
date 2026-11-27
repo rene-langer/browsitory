@@ -441,6 +441,7 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
     getUndoState: (repoPath: string) => call<UndoState>("get_undo_state", { repoPath }),
     undo: (repoPath: string) => call<UndoOutcome>("undo_last", { repoPath }),
     redo: (repoPath: string) => call<UndoOutcome>("redo_last", { repoPath }),
+    clearUndoHistory: (repoPath: string) => call<void>("clear_undo_history", { repoPath }),
     cherryPick: (repoPath: string, commitId: string, mainline?: number | null) =>
       call<PickOutcome>("cherry_pick", { repoPath, commitId, mainline: mainline ?? null }),
     revertCommit: (repoPath: string, commitId: string, mainline?: number | null) =>

@@ -1236,6 +1236,15 @@ certificate.
   worktree), an anchor commit visible in `git log --all`, plus
   `refs/browsitory/undo-keep/main/<n>` / `refs/browsitory/undo-keep/wt/<name>/<n>` refs for
   non-commit objects such as tag objects.
+- **Clear undo history (#1123)**: the anchor's tree holds the snapshots (uncommitted,
+  untracked and discarded file contents) and its parents deleted and rewritten history, so
+  anything that copies every ref (`git push --mirror`, `git bundle --all`, `git clone
+  --mirror`) carries them; the owner chose documentation and a command over another storage
+  format. `ClearUndoHistory` (palette "Clear undo history…", with a confirmation) runs under the
+  state lock like Undo (`UNDO_BUSY` when another holder keeps it), saves empty stacks (the
+  pending entry of a paused operation too), which deletes the open worktree's anchor and keep
+  refs, and refuses an `undo.json` written by a newer version. Other worktrees keep theirs.
+  Noted in the operation log as "Clear undo history".
 - **Known cost**: commands that touch the working tree hash every dirty/untracked file up to
   the size limit into the object database (before and after the command), so many or large
   untracked files make those commands slower and grow `.git` until gc after the entry ages out.

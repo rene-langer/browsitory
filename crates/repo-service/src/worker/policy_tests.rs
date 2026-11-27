@@ -983,6 +983,7 @@ pub(super) fn table() -> Vec<((&'static str, Command), &'static str)> {
         (cmd!(GetUndoState), "read"),
         (cmd!(Undo), "lock busy=Undo"),
         (cmd!(Redo), "lock busy=Undo"),
+        (cmd!(ClearUndoHistory), "lock busy=Undo"),
     ];
     rows.push((("PanicNow", Command::PanicNow), "-"));
     rows

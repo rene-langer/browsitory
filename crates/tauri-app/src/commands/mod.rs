@@ -96,7 +96,7 @@ pub use tools::{
     set_external_tool_settings,
 };
 pub use tree::{get_commit_tree, get_file_at_commit, restore_file_version, save_file_version};
-pub use undo::{get_undo_state, redo_last, undo_last};
+pub use undo::{clear_undo_history, get_undo_state, redo_last, undo_last};
 pub use user_commands::{
     cancel_user_command, check_user_command, list_user_commands, run_user_command,
     set_user_commands,
