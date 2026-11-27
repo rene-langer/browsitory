@@ -1103,3 +1103,282 @@ fn head_info_counts_a_revert_as_paused_when_the_merge_driver_has_no_value() {
 
     assert_eq!(result, "ok");
 }
+
+/// The refusal naming `setting` written without a value in the user's own config (global or
+/// XDG level).
+fn missing_in_user_config(setting: &str) -> String {
+    format!(
+        "The setting '{setting}' is written without a value in your global Git config; git \
+         rejects it as a bad config variable. Give it a value or remove it (git config --global \
+         --edit), then try again."
+    )
+}
+
+/// The refusal naming `setting` written without a value in the system's config.
+fn missing_in_system_config(setting: &str) -> String {
+    format!(
+        "The setting '{setting}' is written without a value in the system's Git config; git \
+         rejects it as a bad config variable. Give it a value or remove it (git config --system \
+         --edit), then try again."
+    )
+}
+
+/// In the child: makes `dir` libgit2's search path for `level`, so the config file there
+/// (`.gitconfig` for the global level, `config` for XDG, `gitconfig` for the system) is read as
+/// that level by every repository opened after this, a new clone's included.
+fn use_config_level(level: git2::ConfigLevel, dir: &Path) {
+    // SAFETY: the child runs one test on one thread; nothing else uses libgit2 meanwhile.
+    unsafe { git2::opts::set_search_path(level, dir) }.unwrap();
+}
+
+/// `setting` written without a value in `file` of a new folder `user` in `repo`'s git dir.
+fn user_config_dir(repo: &Repository, file: &str, setting: &str) -> std::path::PathBuf {
+    let dir = repo.path().join("user");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(file), valueless(setting)).unwrap();
+    dir
+}
+
+struct NoCredentials;
+
+impl git_core::remote::CredentialProvider for NoCredentials {
+    fn credential(
+        &mut self,
+        _url: &str,
+        _username: Option<&str>,
+        _allowed: git2::CredentialType,
+    ) -> Result<git2::Cred, git2::Error> {
+        Err(git2::Error::from_str("no credentials"))
+    }
+}
+
+struct NoProgress;
+
+impl git_core::remote::TransferReporter for NoProgress {
+    fn report(&mut self, _event: git_core::remote::TransferProgress) {}
+}
+
+/// Clones `repo` into the `clone` folder of its git dir.
+fn clone_into_git_dir(repo: &Repository) -> Result<std::path::PathBuf, String> {
+    let dest = repo.path().join("clone");
+    let options = git_core::clone::CloneOptions {
+        url: repo.workdir().unwrap().to_string_lossy().into_owned(),
+        dest: dest.clone(),
+        branch: None,
+        recurse_submodules: false,
+    };
+    git_core::clone::clone_repo(&options, &mut NoCredentials, &mut NoProgress, &|| false)
+        .map(|_| dest.clone())
+        .map_err(|error| {
+            if dest.exists() {
+                format!("the refused clone made its folder: {error}")
+            } else {
+                error.to_string()
+            }
+        })
+}
+
+/// #1189: a clone checks out in a new repository, whose config is the user's own: a conflict
+/// style written without a value there crashed it (libgit2 compares the value at the start of
+/// the checkout). The clone is refused before anything is made.
+#[test]
+fn clone_refuses_a_conflict_style_without_a_value_in_the_users_global_config() {
+    let (_dir, _repo, result) = run_isolated(
+        "clone_refuses_a_conflict_style_without_a_value_in_the_users_global_config",
+        repo_with_flagged,
+        |repo| {
+            let user = user_config_dir(repo, ".gitconfig", STYLE);
+            use_config_level(git2::ConfigLevel::Global, &user);
+            text(clone_into_git_dir(repo))
+        },
+    );
+
+    assert_eq!(result, missing_in_user_config(STYLE));
+}
+
+#[test]
+fn clone_refuses_a_conflict_style_without_a_value_in_the_users_xdg_config() {
+    let (_dir, _repo, result) = run_isolated(
+        "clone_refuses_a_conflict_style_without_a_value_in_the_users_xdg_config",
+        repo_with_flagged,
+        |repo| {
+            let user = user_config_dir(repo, "config", STYLE);
+            use_config_level(git2::ConfigLevel::XDG, &user);
+            text(clone_into_git_dir(repo))
+        },
+    );
+
+    assert_eq!(result, missing_in_user_config(STYLE));
+}
+
+#[test]
+fn clone_refuses_a_conflict_style_without_a_value_in_the_system_config() {
+    let (_dir, _repo, result) = run_isolated(
+        "clone_refuses_a_conflict_style_without_a_value_in_the_system_config",
+        repo_with_flagged,
+        |repo| {
+            let system = user_config_dir(repo, "gitconfig", STYLE);
+            use_config_level(git2::ConfigLevel::System, &system);
+            text(clone_into_git_dir(repo))
+        },
+    );
+
+    assert_eq!(result, missing_in_system_config(STYLE));
+}
+
+/// A clone's checkout never reads the merge driver: one without a value doesn't stop it.
+#[test]
+fn clone_goes_ahead_with_a_merge_driver_without_a_value_in_the_users_config() {
+    let (_dir, _repo, result) = run_isolated(
+        "clone_goes_ahead_with_a_merge_driver_without_a_value_in_the_users_config",
+        repo_with_flagged,
+        |repo| {
+            let user = user_config_dir(repo, ".gitconfig", DRIVER);
+            use_config_level(git2::ConfigLevel::Global, &user);
+            let dest = clone_into_git_dir(repo)?;
+            match std::fs::read_to_string(dest.join("a.txt")) {
+                Ok(text) if text == "a\n" => Ok(()),
+                other => Err(format!("a.txt: {other:?}")),
+            }
+        },
+    );
+
+    assert_eq!(result, "ok");
+}
+
+/// A command in a repository names the config the setting is in: the user's own, not the
+/// repository's.
+#[test]
+fn a_merge_names_the_users_config_when_the_setting_is_there() {
+    let (_dir, _repo, result) = run_isolated(
+        "a_merge_names_the_users_config_when_the_setting_is_there",
+        merge_repo,
+        |repo| {
+            let user = user_config_dir(repo, ".gitconfig", STYLE);
+            use_config_level(git2::ConfigLevel::Global, &user);
+            let repo = Repository::open(repo.path()).unwrap();
+            text(git_core::merge::start_merge(
+                &repo,
+                "side",
+                git_core::merge::MergeOptions::default(),
+            ))
+        },
+    );
+
+    assert_eq!(result, missing_in_user_config(STYLE));
+}
+
+/// A superproject with submodule `deps/child` (its source in the git dir's `child-source`, with
+/// commits `c1` and `c2`), recorded at `c2` and checked out at `c1`.
+fn superproject_with_submodule_behind() -> (TempDir, Repository) {
+    let (dir, repo) = repo_with_flagged();
+    let source = repo.path().join("child-source");
+    std::fs::create_dir_all(&source).unwrap();
+    git_ok(&source, &["init", "-q", "-b", "main"]);
+    git_ok(&source, &["config", "user.name", "Test User"]);
+    git_ok(&source, &["config", "user.email", "test@example.com"]);
+    write_file(&source, "c.txt", "1\n");
+    git_ok(&source, &["add", "c.txt"]);
+    git_ok(&source, &["commit", "-q", "-m", "c1"]);
+    write_file(&source, "c.txt", "2\n");
+    git_ok(&source, &["commit", "-q", "-am", "c2"]);
+    git_ok(
+        dir.path(),
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            source.to_str().unwrap(),
+            "deps/child",
+        ],
+    );
+    git_ok(dir.path(), &["commit", "-q", "-m", "add child"]);
+    git_ok(
+        &dir.path().join("deps/child"),
+        &["checkout", "-q", "HEAD~1"],
+    );
+    (dir, repo)
+}
+
+/// #1189: Update submodule checks out in the submodule's own repository, whose config the
+/// superproject's refusal doesn't read.
+#[test]
+fn update_submodule_refuses_a_conflict_style_without_a_value_in_the_submodules_config() {
+    let (dir, _repo, result) = run_isolated(
+        "update_submodule_refuses_a_conflict_style_without_a_value_in_the_submodules_config",
+        || {
+            let (dir, repo) = superproject_with_submodule_behind();
+            let mut config = std::fs::OpenOptions::new()
+                .append(true)
+                .open(repo.path().join("modules/deps/child/config"))
+                .unwrap();
+            config.write_all(valueless(STYLE).as_bytes()).unwrap();
+            (dir, repo)
+        },
+        |repo| {
+            let child = repo.workdir().unwrap().join("deps/child");
+            // The submodule's `.git` is a file: its HEAD, index and work tree.
+            let snapshot = |dir: &Path| {
+                [
+                    "rev-parse HEAD",
+                    "status --porcelain=v2",
+                    "diff",
+                    "diff --cached",
+                ]
+                .map(|args| git_out(dir, &args.split(' ').collect::<Vec<_>>()))
+                .concat()
+            };
+            let before = snapshot(&child);
+            let result = git_core::submodule::update_submodule(repo, "deps/child", false);
+            if snapshot(&child) != before {
+                return Err(format!("the update changed the submodule: {result:?}"));
+            }
+            text(result)
+        },
+    );
+
+    assert_eq!(result, missing(STYLE));
+    let c1 = git_out(
+        &dir.path().join(".git/child-source"),
+        &["rev-parse", "HEAD~1"],
+    );
+    assert_eq!(
+        git_out(&dir.path().join("deps/child"), &["rev-parse", "HEAD"]),
+        c1
+    );
+}
+
+/// #1189: a submodule not checked out yet is cloned with the user's own config: refused before
+/// the clone, which leaves its folder empty.
+#[test]
+fn update_submodule_refuses_a_conflict_style_without_a_value_in_the_users_config() {
+    let (dir, _repo, result) = run_isolated(
+        "update_submodule_refuses_a_conflict_style_without_a_value_in_the_users_config",
+        || {
+            let (dir, repo) = superproject_with_submodule_behind();
+            git_ok(
+                dir.path(),
+                &["submodule", "deinit", "-q", "-f", "deps/child"],
+            );
+            std::fs::remove_dir_all(repo.path().join("modules/deps/child")).unwrap();
+            (dir, repo)
+        },
+        |repo| {
+            let user = user_config_dir(repo, ".gitconfig", STYLE);
+            use_config_level(git2::ConfigLevel::Global, &user);
+            git_core::submodule::init_submodule(repo, "deps/child").map_err(|e| e.to_string())?;
+            text(git_core::submodule::update_submodule(
+                repo,
+                "deps/child",
+                false,
+            ))
+        },
+    );
+
+    assert_eq!(result, missing_in_user_config(STYLE));
+    let folder = dir.path().join("deps/child");
+    assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 0);
+    assert!(!dir.path().join(".git/modules/deps/child").exists());
+}
