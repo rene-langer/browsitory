@@ -145,6 +145,26 @@ fn a_commit_empty_from_the_start_is_kept_as_git_rebase_keeps_it() {
 }
 
 #[test]
+fn a_commit_empty_from_the_start_is_kept_next_to_an_empty_one_upstream_as_git_rebase_keeps_it() {
+    let (dir, repo) = topic_a_b();
+    git_ok(
+        dir.path(),
+        &["commit", "-q", "--allow-empty", "-m", "empty on purpose"],
+    );
+    git_ok(dir.path(), &["checkout", "-q", "master"]);
+    git_ok(
+        dir.path(),
+        &["commit", "-q", "--allow-empty", "-m", "empty upstream"],
+    );
+    git_ok(dir.path(), &["checkout", "-q", "topic"]);
+
+    let (ours, gits) = rebase_both(dir.path(), &repo);
+
+    assert_eq!(ours, gits);
+    assert_eq!(ours.lines().count(), 3, "{ours}");
+}
+
+#[test]
 fn a_fixup_that_becomes_empty_leaves_the_leader_as_it_is() {
     let (dir, repo) = topic_a_b();
     let a = repo.revparse_single("topic~1").unwrap().id().to_string();
