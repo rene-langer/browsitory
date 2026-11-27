@@ -706,6 +706,13 @@ mod tests {
             });
 
         assert!(matches!(result, Err(CloneError::Cancelled)), "{result:?}");
+        // A clone still receiving answers the cancel at its next callback and removes what it
+        // made itself: only one that left the cancel unanswered for the grace is given up on.
+        assert!(
+            cancelled.elapsed() >= crate::worker::STALLED_CANCEL_GRACE,
+            "given up after {:?}",
+            cancelled.elapsed()
+        );
         assert!(service.is_idle());
         drop(server);
         let removed = Instant::now();
