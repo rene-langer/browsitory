@@ -305,7 +305,10 @@ fn head_info_names_the_working_tree_encodings_the_attributes_use() {
 
     let info = git_core::repo::head_info(&repo).unwrap();
 
-    assert_eq!(info.working_tree_encodings, ["UTF-16", "UTF-16LE-BOM"]);
+    assert_eq!(
+        info.working_tree_encodings,
+        ["ISO-8859-1", "UTF-16", "UTF-16LE-BOM"]
+    );
 }
 
 #[test]
