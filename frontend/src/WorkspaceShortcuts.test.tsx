@@ -168,6 +168,16 @@ describe("global shortcuts for the core loop (#646)", () => {
     const option = await screen.findByRole("option", { name: "Refresh" });
     expect(option.querySelector("kbd")).toHaveTextContent("F5");
   });
+
+  it("closes the palette with its own key from inside it, while a dialog blocks the other shortcuts (#1117)", async () => {
+    await renderApp(shortcutClient());
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    const field = await screen.findByRole("combobox", { name: "Command palette" });
+    fireEvent.keyDown(field, { key: "w", ctrlKey: true });
+    expect(screen.getByRole("tab", { name: /^a/ })).toBeInTheDocument();
+    fireEvent.keyDown(field, { key: "k", ctrlKey: true });
+    await waitFor(() => expect(screen.queryByRole("combobox", { name: "Command palette" })).not.toBeInTheDocument());
+  });
 });
 
 describe("switching tabs by keyboard (#646)", () => {
