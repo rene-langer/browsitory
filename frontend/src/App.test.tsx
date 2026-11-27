@@ -412,7 +412,7 @@ describe("App", () => {
   // #1123: the undo refs hold snapshots of uncommitted and untracked files.
   it("clears the undo history from the palette after a confirmation that says what goes", async () => {
     const clearUndoHistory = vi.fn(async () => {});
-    let undoState = { undo: "Discard changes to a.txt", redo: null as string | null };
+    let undoState: { undo: string | null; redo: string | null } = { undo: "Discard changes to a.txt", redo: null };
     const client = fakeClient({
       listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
       openRepo: async () => {},

@@ -149,6 +149,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     initSubmodule: vi.fn(),
     updateSubmodule: vi.fn(),
     selectReflogReference: vi.fn(),
+    clearHistory: vi.fn(),
     loadMoreReflog: vi.fn(),
     restoreReflogEntry: vi.fn(),
     addRemote: vi.fn(),
@@ -1891,6 +1892,7 @@ describe("undo commands", () => {
       redoLabel: null,
       onUndo,
       onRedo: vi.fn(),
+      onClearHistory: vi.fn(),
     } });
     const undo = commands.find((c) => c.id === "undo");
     expect(undo?.label).toBe("Undo Stage a.txt");
@@ -1905,6 +1907,7 @@ describe("undo commands", () => {
       redoLabel: "x",
       onUndo: vi.fn(),
       onRedo: vi.fn(),
+      onClearHistory: vi.fn(),
     } });
     expect(commands.find((c) => c.id === "undo")).toBeUndefined();
   });
@@ -2631,7 +2634,7 @@ const allFamilies = (appState: UseAppStateResult) =>
       requestDiscardSelection: noop,
       currentDiff: { path: "b.txt", canShowWholeFile: true, toggleWrap: noop, toggleWholeFile: noop },
     },
-    undo: { undoLabel: "commit", redoLabel: "checkout", onUndo: noop, onRedo: noop },
+    undo: { undoLabel: "commit", redoLabel: "checkout", onUndo: noop, onRedo: noop, onClearHistory: noop },
     search: { onSearchCommits: noop },
     tools: { onOpenTerminal: noop, onRevealRepository: noop, onOpenCurrentFileInEditor: noop, onOpenCurrentFileInDiffTool: noop },
     goTo: { onGoToCommit: noop, onSearchHistory: noop, onGoToBranch: noop, onGoToTag: noop, onGoToStash: noop },
@@ -2651,7 +2654,7 @@ function groupOf(id: string): CommandGroup {
 // by id, so a builder must keep the ids, and each group is now declared by the builder instead of
 // derived from the id. #583 and #592 moved the remote, diff and tag commands that had fallen
 // under "General" into their family's group. #621 added "stage-modified-files" since, #619
-// "rebase-onto-branch:<name>".
+// "rebase-onto-branch:<name>", #1123 "clear-undo-history".
 describe("command ids and groups", () => {
   const EXPECTED: Record<keyof typeof STATES, [string, CommandGroup][]> = {
     normal: [
@@ -2717,6 +2720,7 @@ describe("command ids and groups", () => {
       ["push-branch:origin", "Remotes"],
       ["push-tags:origin", "Tags"],
       ["redo", "General"],
+      ["clear-undo-history", "General"],
       ["refresh", "General"],
       ["toggle-collapse-merges", "General"],
       ["remove-remote:origin", "Remotes"],
@@ -2969,6 +2973,7 @@ describe("command ids and groups", () => {
       ["push-branch:origin", "Remotes"],
       ["push-tags:origin", "Tags"],
       ["redo", "General"],
+      ["clear-undo-history", "General"],
       ["refresh", "General"],
       ["toggle-collapse-merges", "General"],
       ["remove-remote:origin", "Remotes"],
