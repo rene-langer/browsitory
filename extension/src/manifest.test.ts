@@ -37,6 +37,23 @@ describe("extension/package.json's integration points (#759)", () => {
     expect(manifest.contributes.menus["commandPalette"]).toContainEqual({ command: "browsitory.showCommit", when: "false" });
   });
 
+  // #1134: `when` clauses are evaluated in the window, where a file of a remote window (WSL,
+  // SSH, Dev Containers) has the scheme `vscode-remote`; the extension host gets it as `file:`.
+  it("offers its Explorer, editor and command palette entries on files of local and remote windows", () => {
+    const clauses = Object.values(manifest.contributes.menus)
+      .flat()
+      .map((entry) => entry.when ?? "")
+      .filter((when) => when.includes("resourceScheme"));
+    expect(clauses.length).toBeGreaterThanOrEqual(7);
+    for (const when of clauses) {
+      const match = /resourceScheme =~ \/(.+?)\/(?:\s|$)/.exec(when);
+      expect(match, `${when} doesn't match resourceScheme against a pattern`).not.toBeNull();
+      const scheme = new RegExp(match![1]!);
+      expect(["file", "vscode-remote"].filter((name) => scheme.test(name)), when).toEqual(["file", "vscode-remote"]);
+      expect(["untitled", "browsitory-file", "git", "vscode-remote-x", "xfile"].filter((name) => scheme.test(name)), when).toEqual([]);
+    }
+  });
+
   it("starts after VSCode does, for the status bar button, which a setting hides", () => {
     expect(manifest.activationEvents).toContain("onStartupFinished");
     expect(manifest.contributes.configuration.properties["browsitory.statusBar.enabled"]).toMatchObject({

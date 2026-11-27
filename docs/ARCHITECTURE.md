@@ -47,8 +47,10 @@ stay in the transport crates:
   `CloneOutcomeDto`, `CloneErrorDto`; the VSCode extension has no clone), `MergeToolOutcomeDto`
   (VSCode uses its own merge editor), the Tauri event names, and `list_open_repos`'s
   `(entries, activePath)` tuple.
-- `vscode-sidecar`: `OpenReposDto` (`list_open_repos`'s object), `FileVersionDto` and
-  `read_file_version`'s `{ text }` (extension host only), and every method's params struct.
+- `vscode-sidecar`: `FileVersionDto` and `read_file_version`'s `{ text }` (extension host
+  only), and every method's params struct. In VSCode, `list_open_repos` and
+  `persist_open_repos` never reach the sidecar: the extension host answers them (#1128, see
+  "VSCode host and sidecar lifecycle").
 
 A wire field that holds one of a fixed set of names carries the enum itself, never a string:
 the `git-core` enums (`StatusKind`, `DiffLineOrigin`, `TransferOperation`, `TransferErrorKind`,
@@ -79,14 +81,32 @@ later user retry rather than scheduling background restarts. Panel closure and e
 deactivation dispose the webview listener and bridge and drain pending ids. A live child's stdin
 is ended rather than the child killed (#961): the sidecar then lets its running request threads
 finish before it exits, since one cut off in a libgit2 write leaves `.git/index.lock` behind. The
-bridge kills it only if it is still running after `SIDECAR_EXIT_GRACE_MS` (5 s).
+bridge kills it only if it is still running after `SIDECAR_EXIT_GRACE_MS` (5 s). When the
+extension host itself goes away (a window reload or close, quitting VSCode), stdin ends and
+nothing reads stdout any more (#1129): a failed answer write only marks the reader gone (later
+answers are skipped), so the other requests still finish, and the sidecar bounds its own wait
+after stdin ends to the same 5 s (`EXIT_GRACE` in `main.rs`) and then exits, because the host's
+kill timer died with the host.
+
+**Open tabs per window (#1128, owner decision).** The desktop app keeps its open tabs in
+`config.toml` (`open_repos`, `active_repo`). In VSCode each window keeps its own, in the
+extension's `workspaceState` under `openRepos` (`extension/src/openRepos.ts`): the host answers
+`list_open_repos` and `persist_open_repos` itself (both in `NATIVE_METHODS`, the sidecar has no
+such methods), so neither another VSCode window nor the desktop app sees or overwrites them.
+After a sidecar restart the bridge sends `open_repo` for each repository of that state before
+the request that started it. A window with no saved state (a new one, or the first start after
+0.18.0; nothing is migrated from `config.toml`, whose list is the desktop app's) restores no
+tabs; **Browsitory: Open** then opens the workspace's repositories. Recent and pinned
+repositories, workspaces and every setting stay shared in `config.toml`. The webview's
+watchers live in the sidecar, so after a transport loss `useRepoWatch` starts its watcher again
+on each `transportStatus` notification (#1130); until it answers, the checks poll.
 
 **Host requests and notifications (#677, #678, #679, #759).** The extension host asks the
 webview to open repositories, show a file's or lines' history, select a commit (from the Timeline
 view, through `useGoTo` like Go to), or run a global shortcut with an id-less
 `hostRequest` notification (`extension/src/hostRequests.ts`; `RepoClient.subscribeHostRequests`
 on the frontend). The extension never imports from `frontend/`, so it keeps its own copies of
-`HostRequest` and `DiffSource`; `extension/src/frontendTypes.contract.test.ts` compares them with
+`HostRequest`, `DiffSource` and `OpenRepos`; `extension/src/frontendTypes.contract.test.ts` compares them with
 `RepoClient.ts`'s and fails when they drift (#1059). It holds them until the webview sends `hostReady`, which `useHostRequests`
 causes once the restored tabs are open, so a request's tab isn't replaced by the restore. The
 webview also sends `webviewFocus`, which sets the `browsitory.webviewFocused` context key. Both
@@ -126,7 +146,13 @@ does: added keys, `-command` removals, and another command's key without a `when
 The host sends the result as a `keybindings` host request when a panel starts and whenever the
 file changes; `applyHostKeybindings` shows and matches those keys for the VSCode-bound shortcuts
 (not saved, not user overrides). A two-step key or a `when` clause it can't evaluate is the
-limit: such a key still works in VSCode but isn't shown.
+limit: such a key still works in VSCode but isn't shown. In a remote window (WSL, SSH, Dev
+Containers) the extension runs in the remote extension host, where the global storage folder is
+on the remote machine and the user's `keybindings.json` on the local one; VSCode has no API for
+that file, so the webview shows the built-in keys there (#1134, documented in the guide).
+The menu entries' `when` clauses are evaluated in the window, where a remote file has the
+scheme `vscode-remote` (the remote extension host gets it as `file:`), so they match
+`resourceScheme =~ /^(file|vscode-remote)$/` (`manifest.test.ts`).
 
 ## Why Tauri + a web frontend, not egui again
 
@@ -2664,7 +2690,12 @@ work to a `HighlightTransport` (`highlightWorkerProtocol.ts`):
   touching the directory while the tool runs, because tools are detached and outlive the app,
   which would stop touching. A reused PID only keeps a directory longer.
 - VSCode reads historical file contents through the `browsitory-file:` content provider, which
-  calls the sidecar's internal `read_file_version`. No temp files are needed there. Before
+  calls the sidecar's internal `read_file_version`. No temp files are needed there. VSCode keeps
+  an open virtual document until the provider's `onDidChange` names its URI, and the URI of a
+  `Head`, `Index` or `Stage` version stays the same when the repository changes (#1132): the host
+  fires it for each such open document on a `repoWatch` `Changed`, an `operationLog`
+  notification (sent once the webview showed the operation log) and every
+  `open_diff_tool`/`open_merge_tool`. A commit's versions never change. Before
   opening VSCode's merge editor the host calls the internal `check_merge_target`, the same
   guards `prepare_merge_tool` applies (text conflict, no symlink/submodule, work tree file
   inside the tree).
@@ -3173,7 +3204,9 @@ only `error`.
     `get_commit_message` or `list_recent_repos`); the JSON-RPC notification envelopes (their
     `params` are the checked `TransferProgress`/`HookProgress`); and `read_file_version`'s
     `{ text }`, which only the extension host reads. The desktop app's `list_open_repos` returns
-    a tuple, which `tauriRepoClient.ts` reshapes, so only its entries are compared.
+    a tuple, which `tauriRepoClient.ts` reshapes, so only its entries are compared; in VSCode the
+    extension host answers it (#1128), and `frontendTypes.contract.test.ts` compares its
+    `OpenRepos` with `RepoClient.ts`'s.
 - Wire snapshots (#306): `wire_snapshots_are_current` in
   `crates/tauri-app/src/commands/wire_snapshots.rs` and
   `crates/vscode-sidecar/src/dispatch/wire_snapshots.rs` builds every output DTO from the same
