@@ -26,6 +26,7 @@ pub enum ConfigError {
     InvalidUserCommand(String),
 }
 
+mod compat;
 mod user_commands;
 mod write_lock;
 pub use user_commands::*;
@@ -166,7 +167,9 @@ pub struct DiffSettings {
     pub ignore_whitespace: bool,
     pub context_lines: u32,
     pub syntax_highlight: bool,
+    #[serde(deserialize_with = "compat::or_default")]
     pub word_wrap: WordWrap,
+    #[serde(deserialize_with = "compat::or_default")]
     pub algorithm: DiffAlgorithm,
     /// Render spaces, tabs and carriage returns as faint markers in diff lines (#616).
     pub show_whitespace: bool,
@@ -312,8 +315,10 @@ where
 pub struct AppearanceSettings {
     pub code_font: Option<String>,
     pub code_font_size: Option<u32>,
+    #[serde(deserialize_with = "compat::or_default")]
     pub ui_size: UiSize,
     pub tab_size: u32,
+    #[serde(deserialize_with = "compat::or_default")]
     pub date_format: DateFormat,
 }
 
@@ -444,9 +449,18 @@ pub(crate) struct ConfigFile {
     graph_branch_selections: Vec<GraphBranchSelection>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     graph_remote_branch_selections: Vec<GraphRemoteBranchSelection>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    // A remembered choice this version doesn't know is left out (#1137).
+    #[serde(
+        default,
+        deserialize_with = "compat::readable_entries",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     merge_preferences: Vec<MergePreference>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "compat::readable_entries",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pull_preferences: Vec<PullPreference>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     repo_aliases: Vec<RepoAlias>,
@@ -1011,26 +1025,41 @@ fn read_config(path: &Path) -> Result<ConfigFile, ConfigError> {
 }
 
 /// Reads the file, lets `change` edit it and writes it back, as one step against every other
-/// writer of the file, in this process or another (#1127). Every setter goes through here.
+/// writer of the file, in this process or another (#1127). Every setter goes through here. What
+/// this version doesn't know of the file stays in it (`compat::merge`, #1137).
 pub(crate) fn update_config<T>(
     path: &Path,
     change: impl FnOnce(&mut ConfigFile) -> T,
 ) -> Result<T, ConfigError> {
     let _guard = write_lock::lock(path);
-    let mut config = read_config(path)?;
+    let original: toml::Table = if path.exists() {
+        toml::from_str(&fs::read_to_string(path)?)?
+    } else {
+        toml::Table::new()
+    };
+    let mut config: ConfigFile = toml::Value::Table(original.clone()).try_into()?;
+    let known = as_table(&config)?;
     let result = change(&mut config);
-    write_config(path, &config)?;
+    let merged = compat::merge(original, &known, &as_table(&config)?);
+    write_config(path, &toml::to_string_pretty(&merged)?)?;
     Ok(result)
 }
 
-fn write_config(path: &Path, config: &ConfigFile) -> Result<(), ConfigError> {
+fn as_table(config: &ConfigFile) -> Result<toml::Table, ConfigError> {
+    match toml::Value::try_from(config)? {
+        toml::Value::Table(table) => Ok(table),
+        _ => unreachable!("a struct serializes as a table"),
+    }
+}
+
+fn write_config(path: &Path, contents: &str) -> Result<(), ConfigError> {
     // A `config.toml` that links into a dotfiles folder stays a link: the file it points to is
     // replaced, not the link.
     let path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)?;
     let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
-    std::io::Write::write_all(&mut tmp, toml::to_string_pretty(config)?.as_bytes())?;
+    std::io::Write::write_all(&mut tmp, contents.as_bytes())?;
     // On disk before the rename, so a power loss can't leave an empty or cut-off file.
     tmp.as_file().sync_all()?;
     tmp.persist(&path).map_err(|e| e.error)?;

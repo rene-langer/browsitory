@@ -35,7 +35,8 @@ pub struct UserCommand {
     /// `None`: the repository's root.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_directory: Option<String>,
-    #[serde(default)]
+    /// A target this version doesn't know is left out (#1137).
+    #[serde(default, deserialize_with = "crate::compat::readable_entries")]
     pub targets: Vec<UserCommandTarget>,
     #[serde(default)]
     pub confirm: bool,
