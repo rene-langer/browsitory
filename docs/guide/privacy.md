@@ -115,7 +115,7 @@ None of this leaves your computer, and we can't see it.
 
 | What | Where |
 |---|---|
-| Settings: recent, pinned and open repositories, workspaces, branch filters, merge choices, diff, commit message, tool, fetch, update and keyboard shortcut preferences, your own commands, the last version whose release notes you saw | `config.toml` in Browsitory's config folder (see below) |
+| Settings: recent, pinned and open repositories, workspaces, branch filters, merge choices, diff, commit message, tool, fetch, update and keyboard shortcut preferences, your own commands, the last version whose release notes you saw | `config.toml` in Browsitory's config folder (see below), and an empty `config.toml.lock` beside it that keeps two saves from overwriting each other |
 | Display choices: theme, panel sizes, which sidebar sections are shown and which are open, recent commands, the **Preferences** group you saw last, and view choices (**Split view**, **Show whole file**, the merge editor's layout, a flat or tree file list, **Show lines changed**, search results in the graph or as a list, whether a new branch is checked out). Per repository: recent searches, recent commit messages, the commit message you are writing (with its co-authors, until you commit or clear it), the last 5 branches you switched to, and the **Fetch automatically** and **Prune** choices. The account name each pull request provider is connected with (not the token) | The app's web storage (`localStorage`) |
 | HTTPS tokens for Git remotes and pull request tokens | Your system's credential store: Keychain on macOS, Credential Manager on Windows, the Secret Service (for example GNOME Keyring or KWallet) on Linux, under the names `com.browsitory.git` and `com.browsitory.forge` |
 | Undo and redo history, a paused rebase, cherry-pick or revert | Inside each repository: the folder `.git/browsitory/` (in a linked worktree, `browsitory/` in that worktree's own Git folder, `.git/worktrees/<name>/`) and Git references under `refs/browsitory/`, shared by all worktrees |
@@ -179,7 +179,10 @@ The extension works the same way, with these differences:
 - It shares the settings file and the credential store with the desktop app, except for the
   open tabs: each VSCode window keeps its own (the paths of its open repositories, their
   workspaces and the active tab) in VSCode's storage for that window, and never reads or
-  writes the desktop app's.
+  writes the desktop app's. When the two are different versions, the older one keeps the
+  settings it doesn't know when it saves the file, and a setting value it doesn't know counts as
+  that setting's default for it (the file stays as the newer version wrote it until you change
+  that setting).
 - Its web storage, the last version whose release notes you saw, and the messages in its
   "Browsitory" output channel are kept by VSCode, in VSCode's own folders. The extension writes
   no log file of its own.

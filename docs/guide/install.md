@@ -25,6 +25,11 @@ warn you the first time:
   Security** and choose **Open Anyway** next to the message about Browsitory.
 - **Windows:** if SmartScreen stops the installer, choose **More info**, then **Run anyway**.
 
+**One window.** The desktop app runs once per user: starting it again (from the Start menu, a
+desktop entry or the Dock) brings the window that is already open to the front, also when it is
+minimized or on another desktop, instead of starting a second copy on the same tabs and
+settings.
+
 **Updates.** The desktop app checks for new versions by itself and offers to restart when one
 is ready (see [The main window](main-window.md)). To check only when you ask, clear **Check for
 updates automatically** in **Preferences → Updates**. This works for every installer, including
