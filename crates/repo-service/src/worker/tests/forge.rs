@@ -180,6 +180,76 @@ fn saved_forge_token_is_looked_up_inside_rust_and_never_exposed_in_the_result() 
     );
 }
 
+/// A `ForgeApi` whose requests wait until the test lets them go, as a forge that doesn't answer:
+/// each request tells `started`, then waits for one message on `release`.
+struct StalledForgeApi {
+    started: Mutex<mpsc::Sender<()>>,
+    release: Mutex<mpsc::Receiver<()>>,
+}
+
+impl crate::pull_requests::ForgeApi for StalledForgeApi {
+    fn send(&self, _request: ForgeHttpRequest) -> Result<ForgeHttpResponse, ForgeApiError> {
+        let _ = self.started.lock().unwrap().send(());
+        let _ = self.release.lock().unwrap().recv();
+        ok(200, "[]")
+    }
+}
+
+/// #1160: a forge request that doesn't answer never holds the repository's worker: a status
+/// read and a write sent while it waits answer at once, and the request still answers its
+/// caller once the forge does.
+#[test]
+fn a_forge_request_that_waits_never_holds_the_worker() {
+    let (dir, repo) = init_repo();
+    repo.remote("origin", "https://github.com/acme/widget.git")
+        .unwrap();
+    let (started_tx, started) = mpsc::channel();
+    let (release, release_rx) = mpsc::channel();
+    let worker = Worker::spawn_with(
+        dir.path().to_path_buf(),
+        FakeCredentialStore::default(),
+        StalledForgeApi {
+            started: Mutex::new(started_tx),
+            release: Mutex::new(release_rx),
+        },
+    )
+    .unwrap();
+    let handle = worker.handle();
+    handle
+        .save_forge_token(ForgeProvider::GitHub, "rene".to_string(), "t".to_string())
+        .unwrap();
+    let (listed_tx, listed) = mpsc::channel();
+    {
+        let handle = handle.clone();
+        thread::spawn(move || {
+            let _ = listed_tx.send(handle.list_pull_requests("origin".into(), "rene".into()));
+        });
+    }
+    started
+        .recv_timeout(Duration::from_secs(20))
+        .expect("the forge request is sent");
+
+    write_file(dir.path(), "new.txt", "new\n");
+    let (answered_tx, answered) = mpsc::channel();
+    {
+        let handle = handle.clone();
+        thread::spawn(move || {
+            let status = handle.get_status();
+            let _ = answered_tx.send((status, handle.stage_file("new.txt".into())));
+        });
+    }
+    let answer = answered.recv_timeout(Duration::from_secs(10));
+    let _ = release.send(());
+    let (status, staged) = answer.expect("the worker waited for the forge request");
+    status.expect("status");
+    staged.expect("stage");
+    let pull_requests = listed
+        .recv_timeout(Duration::from_secs(20))
+        .expect("the forge request answers once the forge does")
+        .expect("list");
+    assert!(pull_requests.pull_requests.is_empty());
+}
+
 #[test]
 fn create_pull_request_round_trips_through_the_worker_without_exposing_the_token() {
     let (dir, repo) = init_repo();
