@@ -6,7 +6,6 @@ mod common;
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::{Duration, SystemTime};
 
 use common::{commit_all, init_repo, write_file};
 use git_core::status::status_refreshing_index;
@@ -110,6 +109,8 @@ fn a_status_read_keeps_what_isnt_a_scratch_folder() {
 #[cfg(unix)]
 #[test]
 fn a_status_read_removes_an_old_scratch_folder_without_a_process_id() {
+    use std::time::{Duration, SystemTime};
+
     let (_dir, repo) = committed_repo();
     let old = leftover(repo.path(), &format!("{PREFIX}a1B2c3"), &["index"]);
     let recent = leftover(repo.path(), &format!("{PREFIX}d4E5f6"), &["index"]);
