@@ -409,6 +409,56 @@ describe("App", () => {
     expect(listRemoteBranches).toHaveBeenCalledWith("/repos/a", "origin");
   });
 
+  // #1118: an open remote folder lists its branches again when the refs changed, not when only
+  // the work tree did.
+  it("lists an open remote folder's branches again only when the refs changed", async () => {
+    const stamp = { refs: "r1", workTree: "w1" };
+    const getStatus = vi.fn(async () => []);
+    const listRemoteBranches = vi.fn().mockResolvedValue(["develop"]);
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus,
+      getChangeStamp: async () => ({ ...stamp }),
+      getCommitGraph: async () => graphPage([]),
+      listBranches: async () => [],
+      listStashes: async () => [],
+      listRemotes: async () => [{ name: "origin", fetchUrl: "https://example.com/r.git", pushUrl: null, authMode: null, authUsername: null }],
+      listRemoteBranches,
+    });
+    const { container } = render(<App client={client} />);
+    await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+    const sidebar = screen.getByRole("complementary", { name: "Repository sections" });
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), {
+      target: { value: "Browse branches on origin" },
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "Browse branches on origin" }));
+    expect(await within(sidebar).findByText("develop")).toBeInTheDocument();
+    const lists = listRemoteBranches.mock.calls.length;
+    const settle = () => act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    let reads = getStatus.mock.calls.length;
+    stamp.workTree = "w2";
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await waitFor(() => expect(getStatus.mock.calls.length).toBeGreaterThan(reads));
+    await settle();
+    expect(listRemoteBranches).toHaveBeenCalledTimes(lists);
+
+    reads = getStatus.mock.calls.length;
+    stamp.refs = "r2";
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await waitFor(() => expect(getStatus.mock.calls.length).toBeGreaterThan(reads));
+    await waitFor(() => expect(listRemoteBranches).toHaveBeenCalledTimes(lists + 1));
+  });
+
   function guideClient(openExternalUrl: RepoClient["openExternalUrl"]) {
     return fakeClient({
       listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
@@ -1956,6 +2006,39 @@ describe("App", () => {
       expect(screen.queryByRole("listbox", { name: "Commit history" })).toBeNull();
       return results;
     }
+
+    // #1118: the search walks the history, so a refresh that kept the history (only the work tree
+    // changed) leaves the results alone.
+    it("keeps the search results when only the work tree changed", async () => {
+      const original = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = () => {};
+      try {
+        const stamp = { refs: "r1", workTree: "w1" };
+        const getStatus = vi.fn(async () => []);
+        const searchCommits = vi.fn(async () => ({ commits: [graph[1]], nextCursor: null, scanned: 2 }));
+        render(
+          <App
+            client={pickClient({ getStatus, searchCommits, cancelSearch: async () => {}, getChangeStamp: async () => ({ ...stamp }) })}
+          />,
+        );
+        await showSearchResults();
+        await waitFor(() => expect(searchCommits).toHaveBeenCalledTimes(1));
+        const reads = getStatus.mock.calls.length;
+
+        stamp.workTree = "w2";
+        act(() => {
+          window.dispatchEvent(new Event("focus"));
+        });
+        await waitFor(() => expect(getStatus.mock.calls.length).toBeGreaterThan(reads));
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        });
+        expect(searchCommits).toHaveBeenCalledTimes(1);
+        expect(screen.getByRole("listbox", { name: "Search results" })).toBeInTheDocument();
+      } finally {
+        Element.prototype.scrollIntoView = original;
+      }
+    });
 
     // #146: the dialog the palette opens returns focus to the commit list on Cancel (not to
     // whatever was focused before the palette). Since #507 the palette opens it directly.
