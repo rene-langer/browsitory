@@ -70,7 +70,9 @@ def not_run_reason(outcome, status, out_dir, run_url):
         return None  # cut off by the step's time limit; what finished is counted
     if status not in TESTED and status != BASELINE_FAILED:
         return f"Mutation testing didn't run: cargo-mutants stopped with exit status {status or 'unknown'}. See {run}."
-    if not pathlib.Path(out_dir).is_dir():
+    if not pathlib.Path(out_dir).is_dir() and status != "0":
+        # Exit 0 without `mutants.out`: the changed lines hold no mutants (test code only, #1201);
+        # cargo-mutants logs "No mutants to filter" and writes nothing. The report says so.
         return f"Mutation testing didn't run: cargo-mutants left no results (no `mutants.out`). See {run}."
     return None
 

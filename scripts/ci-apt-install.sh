@@ -17,6 +17,12 @@
 # Before every retry (of phase 1 or 2) it drops the first mirror from apt-mirrors.txt, so apt
 # moves on to the next one; it never drops the last one. Gives up after 3 attempts per phase.
 #
+# apt reads only the Ubuntu archive's sources (#1211): the runner image also lists other
+# vendors' repositories in sources.list.d (packages.microsoft.com), none of which the packages
+# come from, and on 2026-11-27 that one answered `update` with 403 Forbidden on every attempt.
+# Files there that name neither the mirror list nor an ubuntu.com host are left out, through
+# a copy of the rest given to apt as `Dir::Etc::SourceParts`; sources.list is read as before.
+#
 # Time budget, for the workflow step's timeout-minutes: `timeout --kill-after=10` stops an
 # attempt at most LIMIT + 10 s after it starts, so phases 1 and 2 take at most
 # 3 x (45 + 10) + 3 x (150 + 10) = 645 s, about 11 min. Phase 3 (unpack and configure, no
@@ -32,7 +38,9 @@ fi
 ATTEMPTS=3
 UPDATE_LIMIT=45
 DOWNLOAD_LIMIT=150
-MIRRORS=/etc/apt/apt-mirrors.txt
+# The tests point it at their own folder (scripts/test_ci_apt_install.py).
+APT_ETC=${CI_APT_ETC:-/etc/apt}
+MIRRORS=$APT_ETC/apt-mirrors.txt
 
 # Retries a connection that fails or goes silent for 30 s; dpkg waits up to 60 s for a lock
 # another apt process holds instead of failing at once.
@@ -42,6 +50,20 @@ APT_OPTS=(
   -o Acquire::https::Timeout=30
   -o DPkg::Lock::Timeout=60
 )
+
+# The Ubuntu archive's files in sources.list.d, copied into a folder of their own for
+# `Dir::Etc::SourceParts`; the others are named and left out.
+UBUNTU_SOURCES="$(mktemp -d)"
+trap 'rm -rf "$UBUNTU_SOURCES"' EXIT
+for f in "$APT_ETC"/sources.list.d/*.list "$APT_ETC"/sources.list.d/*.sources; do
+  [ -f "$f" ] || continue
+  if grep -qE 'mirror\+file:|://([a-z0-9-]+\.)*ubuntu\.com(/|:|[[:space:]]|$)' "$f"; then
+    cp "$f" "$UBUNTU_SOURCES/"
+  else
+    echo "Leaving out $f: not an Ubuntu archive source."
+  fi
+done
+APT_OPTS+=(-o "Dir::Etc::SourceParts=$UBUNTU_SOURCES")
 
 # Moves on from the first mirror in apt-mirrors.txt, if there is another one to move on to.
 drop_first_mirror() {
@@ -115,7 +137,7 @@ add_fallback_mirror
 
 # Shows where apt fetches from: the runner's sources point at mirror+file:$MIRRORS.
 echo "::group::apt sources and mirrors"
-for f in /etc/apt/sources.list /etc/apt/sources.list.d/* "$MIRRORS"; do
+for f in "$APT_ETC/sources.list" "$UBUNTU_SOURCES"/* "$MIRRORS"; do
   if [ -f "$f" ]; then
     echo "== $f"
     cat "$f"
