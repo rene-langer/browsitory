@@ -56,7 +56,10 @@ function createHarness() {
     dispose: vi.fn(),
   };
   let contentProvider:
-    | { provideTextDocumentContent: (uri: { path: string; query: string }) => Promise<string> }
+    | {
+        provideTextDocumentContent: (uri: { path: string; query: string }) => Promise<string>;
+        onDidChange?: (listener: (uri: unknown) => void) => { dispose: () => void };
+      }
     | undefined;
 
   const webview = {
@@ -114,6 +117,8 @@ function createHarness() {
     },
     workspace: {
       workspaceFolders: undefined as undefined | Array<{ uri: { scheme: string; fsPath: string } }>,
+      /** The documents VSCode has open, diff editor sides included (#1132). */
+      textDocuments: [] as Array<{ uri: unknown }>,
       fs: {
         stat: vi.fn(async (uri: Uri) => {
           if (!existing.has(uri.fsPath)) throw new Error("ENOENT");
@@ -142,12 +147,10 @@ function createHarness() {
         configurationListeners.add(listener);
         return { dispose: () => configurationListeners.delete(listener) };
       }),
-      registerTextDocumentContentProvider: vi.fn(
-        (_scheme: string, provider: { provideTextDocumentContent: (uri: { path: string; query: string }) => Promise<string> }) => {
-          contentProvider = provider;
-          return { dispose: vi.fn() };
-        },
-      ),
+      registerTextDocumentContentProvider: vi.fn((_scheme: string, provider: NonNullable<typeof contentProvider>) => {
+        contentProvider = provider;
+        return { dispose: vi.fn() };
+      }),
     },
     env: { openExternal: vi.fn(async () => true) },
     Uri: {
@@ -162,6 +165,19 @@ function createHarness() {
         readonly pattern: string,
       ) {
         this.base = base.fsPath;
+      }
+    },
+    EventEmitter: class<T> {
+      private readonly listeners = new Set<(value: T) => void>();
+      readonly event = (listener: (value: T) => void) => {
+        this.listeners.add(listener);
+        return { dispose: () => this.listeners.delete(listener) };
+      };
+      fire(value: T) {
+        for (const listener of [...this.listeners]) listener(value);
+      }
+      dispose() {
+        this.listeners.clear();
       }
     },
     ViewColumn: { One: 1, Active: -1 },
@@ -226,6 +242,11 @@ function createHarness() {
       if (!contentProvider) throw new Error("content provider was not registered");
       return contentProvider.provideTextDocumentContent(uri);
     },
+    /** Listens to the content provider's `onDidChange`, as VSCode does for open documents. */
+    onContentChange: (listener: (uri: unknown) => void) => {
+      if (!contentProvider?.onDidChange) throw new Error("the content provider has no onDidChange");
+      return contentProvider.onDidChange(listener);
+    },
     openPanel: () => {
       const open = commands.get("browsitory.open");
       if (!open) throw new Error("open command was not registered");
@@ -240,6 +261,12 @@ function createHarness() {
       await Promise.resolve();
     },
   };
+}
+
+/** A `browsitory-file:` URI of `a.ts` in `/repo`, as VSCode hands it to the content provider. */
+function fileVersion(version: Record<string, unknown>) {
+  const query = Buffer.from(JSON.stringify({ repoPath: "/repo", path: "a.ts", version }), "utf8").toString("base64url");
+  return { scheme: "browsitory-file", path: "/a.ts", query, fsPath: "/a.ts" };
 }
 
 describe("extension lifecycle", () => {
@@ -319,6 +346,68 @@ describe("extension lifecycle", () => {
     );
     await expect(content).resolves.toBe("hi");
     await expect(harness.provideContent({ path: "/a.ts", query: "bogus" })).rejects.toThrow();
+  });
+
+  // #1132: VSCode keeps a virtual document until the provider says it changed.
+  it("asks VSCode to read the open index, HEAD and conflict stage versions again when the repository changes", async () => {
+    activate(harness.context);
+    await harness.openPanel();
+    const head = fileVersion({ kind: "Head" });
+    const index = fileVersion({ kind: "Index" });
+    const stage = fileVersion({ kind: "Stage", stage: 2 });
+    const commit = fileVersion({ kind: "Commit", commitId: "abcdef1" });
+    const firstParent = fileVersion({ kind: "FirstParent", commitId: "abcdef1" });
+    const workTreeFile = { scheme: "file", path: "/repo/a.ts", query: "", fsPath: "/repo/a.ts" };
+    harness.vscode.workspace.textDocuments = [head, index, stage, commit, firstParent, workTreeFile].map((uri) => ({ uri }));
+    const changed: unknown[] = [];
+    harness.onContentChange((uri) => changed.push(uri));
+    await harness.dispatch({ jsonrpc: "2.0", id: 94, method: "get_status", params: { repoPath: "/repo" } });
+    await vi.waitFor(() => expect(harness.spawn).toHaveBeenCalledOnce());
+    const notify = (method: string, params: unknown) =>
+      harness.child.stdout.emit("data", Buffer.from(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`));
+
+    notify("repoWatch", { repoPath: "/repo", kind: "Changed" });
+    expect(changed).toEqual([head, index, stage]);
+
+    // An operation of the app itself (stage, commit, undo), also without a watcher.
+    changed.length = 0;
+    notify("operationLog", { repo: "/repo", kind: "Finished" });
+    expect(changed).toEqual([head, index, stage]);
+
+    changed.length = 0;
+    notify("repoWatch", { repoPath: "/repo", kind: "Stopped" });
+    notify("transferProgress", { operation: "Fetch" });
+    expect(changed).toEqual([]);
+  });
+
+  it("asks VSCode to read the open versions again when the diff tool opens", async () => {
+    activate(harness.context);
+    await harness.openPanel();
+    const index = fileVersion({ kind: "Index" });
+    harness.vscode.workspace.textDocuments = [{ uri: index }];
+    const changed: unknown[] = [];
+    harness.onContentChange((uri) => changed.push(uri));
+
+    await harness.dispatch({
+      jsonrpc: "2.0",
+      id: 95,
+      method: "open_diff_tool",
+      params: { repoPath: "/repo", path: "a.ts", source: { kind: "Unstaged" } },
+    });
+    await vi.waitFor(() => expect(harness.child.stdin.write).toHaveBeenCalledTimes(1));
+    const request = JSON.parse(harness.child.stdin.write.mock.calls[0]?.[0] ?? "{}") as { id: number; method: string };
+    expect(request.method).toBe("repo_workdir");
+    harness.child.stdout.emit("data", Buffer.from(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result: "/repo" })}\n`));
+
+    await vi.waitFor(() =>
+      expect(harness.vscode.commands.executeCommand).toHaveBeenCalledWith(
+        "vscode.diff",
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+      ),
+    );
+    expect(changed).toEqual([index]);
   });
 
   it("retains the webview context while the panel is hidden", async () => {
