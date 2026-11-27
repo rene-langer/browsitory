@@ -36,6 +36,7 @@ function bridgeWithoutSidecar() {
     context: {
       extension: { packageJSON: { version: "1.2.3" } },
       globalState: { get: () => undefined, update: async () => {} },
+      workspaceState: { get: () => undefined, update: async () => {} },
     } as unknown as ExtensionContext,
     postToWebview,
     showOpenDialog: async () => undefined,

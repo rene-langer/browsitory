@@ -28,19 +28,34 @@ class FakeSidecar extends EventEmitter implements SidecarProcess {
   readonly kill = vi.fn(() => true);
 }
 
-function fakeContext(version = "1.2.3") {
+function fakeContext(version = "1.2.3", openRepos: readonly string[] = []) {
   const values = new Map<string, unknown>([["lastSeenVersion", "0.9.0"]]);
   const get = vi.fn(<T>(key: string) => values.get(key) as T | undefined);
   const update = vi.fn(async (key: string, value: unknown) => {
     values.set(key, value);
   });
+  // The window's own state (#1128): the tabs its panel had open.
+  const windowValues = new Map<string, unknown>();
+  if (openRepos.length > 0) {
+    windowValues.set("openRepos", {
+      entries: openRepos.map((path) => ({ path, workspaceId: null })),
+      activePath: openRepos[0] ?? null,
+    });
+  }
+  const workspaceGet = vi.fn(<T>(key: string) => windowValues.get(key) as T | undefined);
+  const workspaceUpdate = vi.fn(async (key: string, value: unknown) => {
+    windowValues.set(key, value);
+  });
   return {
     context: {
       extension: { packageJSON: { version } },
       globalState: { get, update },
+      workspaceState: { get: workspaceGet, update: workspaceUpdate },
     } as unknown as ExtensionContext,
     get,
     update,
+    workspaceGet,
+    workspaceUpdate,
   };
 }
 
@@ -52,6 +67,8 @@ function createBridge(overrides: {
   savePath?: string | undefined;
   fileBytes?: Uint8Array;
   trusted?: boolean;
+  /** The repositories the window's state lists as open tabs (#1128). */
+  openRepos?: readonly string[];
 } = {}) {
   const child = new FakeSidecar();
   const spawnResults = overrides.spawnResults ?? [child];
@@ -77,7 +94,7 @@ function createBridge(overrides: {
       overrides.mergeEditorOpened ?? true,
   );
   const executeCommand = vi.fn(async (_command: string, ..._args: unknown[]) => undefined);
-  const state = fakeContext();
+  const state = fakeContext(undefined, overrides.openRepos);
   const bridge = new SidecarBridge({
     spawn,
     executablePath: "/workspace/target/debug/vscode-sidecar",
@@ -129,30 +146,15 @@ function writtenRequest(sidecar: FakeSidecar, index: number) {
   };
 }
 
+/**
+ * Answers the `open_repo` requests a replacement sidecar gets for the repositories the window's
+ * state lists (#1128); the bridge reads that list itself, so they are its first requests.
+ */
 async function completePersistedRepositoryRestore(
   sidecar: FakeSidecar,
   repoPaths: readonly string[] = [],
 ) {
-  await vi.waitFor(() => expect(sidecar.stdin.write).toHaveBeenCalledTimes(1));
-  const listRequest = writtenRequest(sidecar, 0);
-  expect(listRequest).toMatchObject({
-    jsonrpc: "2.0",
-    method: "list_open_repos",
-    params: {},
-  });
-  sidecar.stdout.push(
-    `${JSON.stringify({
-      jsonrpc: "2.0",
-      id: listRequest.id,
-      result: {
-        entries: repoPaths.map((path) => ({ path, workspaceId: null })),
-        activePath: repoPaths[0] ?? null,
-      },
-    })}\n`,
-  );
-
-  for (const [offset, repoPath] of repoPaths.entries()) {
-    const index = offset + 1;
+  for (const [index, repoPath] of repoPaths.entries()) {
     await vi.waitFor(() => expect(sidecar.stdin.write).toHaveBeenCalledTimes(index + 1));
     const openRequest = writtenRequest(sidecar, index);
     expect(openRequest).toMatchObject({
@@ -802,6 +804,7 @@ describe("SidecarBridge", () => {
     const replacement = new FakeSidecar();
     const { bridge, spawn, postToWebview } = createBridge({
       spawnResults: [first, replacement],
+      openRepos: ["/repo"],
     });
 
     await bridge.handleWebviewMessage({
@@ -846,7 +849,7 @@ describe("SidecarBridge", () => {
     await handling;
 
     expect(spawn).toHaveBeenCalledTimes(2);
-    expect(writtenRequest(replacement, 2)).toEqual(next);
+    expect(writtenRequest(replacement, 1)).toEqual(next);
     expect(first.stdin.write).not.toHaveBeenCalledWith(`${JSON.stringify(next)}\n`);
   });
 
@@ -896,7 +899,7 @@ describe("SidecarBridge", () => {
     await handling;
 
     expect(spawn).toHaveBeenCalledTimes(2);
-    expect(replacement.stdin.write).toHaveBeenCalledTimes(2);
+    expect(replacement.stdin.write).toHaveBeenCalledTimes(1);
     expect(replacement.stdin.write).toHaveBeenCalledWith(`${JSON.stringify(retry)}\n`);
     expect(first.stdin.write).toHaveBeenCalledTimes(2);
   });
@@ -907,6 +910,7 @@ describe("SidecarBridge", () => {
     const nextReplacement = new FakeSidecar();
     const { bridge, spawn, postToWebview } = createBridge({
       spawnResults: [first, replacement, nextReplacement],
+      openRepos: ["/repo-a", "/repo-b"],
     });
     await bridge.handleWebviewMessage({
       jsonrpc: "2.0", id: 54, method: "get_status", params: { repoPath: "/repo-a" },
@@ -922,25 +926,11 @@ describe("SidecarBridge", () => {
     };
     const handling = bridge.handleWebviewMessage(retry);
     await vi.waitFor(() => expect(replacement.stdin.write).toHaveBeenCalledTimes(1));
-    const listRequest = writtenRequest(replacement, 0);
-    replacement.stdout.push(
-      `${JSON.stringify({
-        jsonrpc: "2.0",
-        id: listRequest.id,
-        result: {
-          entries: [
-            { path: "/repo-a", workspaceId: null },
-            { path: "/repo-b", workspaceId: null },
-          ],
-          activePath: "/repo-a",
-        },
-      })}\n`,
-    );
-    await vi.waitFor(() => expect(replacement.stdin.write).toHaveBeenCalledTimes(2));
+    expect(writtenRequest(replacement, 0)).toMatchObject({ method: "open_repo", params: { path: "/repo-a" } });
     replacement.emit("exit", 9, null);
     await handling;
 
-    expect(replacement.stdin.write).toHaveBeenCalledTimes(2);
+    expect(replacement.stdin.write).toHaveBeenCalledTimes(1);
     expect(postToWebview).toHaveBeenCalledWith({
       jsonrpc: "2.0",
       id: 55,
@@ -950,7 +940,7 @@ describe("SidecarBridge", () => {
     const nextHandling = bridge.handleWebviewMessage({
       jsonrpc: "2.0", id: 56, method: "list_recent_repos", params: {},
     });
-    await completePersistedRepositoryRestore(nextReplacement);
+    await completePersistedRepositoryRestore(nextReplacement, ["/repo-a", "/repo-b"]);
     await nextHandling;
     expect(spawn).toHaveBeenCalledTimes(3);
   });

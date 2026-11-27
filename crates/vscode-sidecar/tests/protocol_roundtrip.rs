@@ -580,30 +580,6 @@ fn opening_a_repo_adds_it_to_recent_repos() {
 }
 
 #[test]
-fn persist_and_list_open_repos_round_trip() {
-    let (_guard, config_dir) = ConfigDirGuard::new();
-    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
-
-    let persist = sidecar.call(
-        1,
-        "persist_open_repos",
-        serde_json::json!({
-            "entries": [{"path": "/repos/a", "workspaceId": null}],
-            "activePath": "/repos/a",
-        }),
-    );
-    assert_eq!(persist["result"], serde_json::Value::Null);
-
-    let listed = sidecar.call(2, "list_open_repos", serde_json::json!({}));
-    assert_eq!(listed["result"]["entries"][0]["path"], "/repos/a");
-    assert_eq!(
-        listed["result"]["entries"][0]["workspaceId"],
-        serde_json::Value::Null
-    );
-    assert_eq!(listed["result"]["activePath"], "/repos/a");
-}
-
-#[test]
 fn user_commands_round_trip_app_wide_and_per_repository() {
     let (_guard, config_dir) = ConfigDirGuard::new();
     let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
