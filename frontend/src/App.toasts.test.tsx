@@ -155,6 +155,33 @@ describe("toasts of a tab that isn't shown (#1116)", () => {
     expect(await notifications().findByText(/^a: Couldn't push main/)).toBeInTheDocument();
   });
 
+  it("doesn't announce another action's error when a hidden tab's transfer succeeds", async () => {
+    const { subscribeTransferProgress, emit } = transferEvents();
+    const fetchRemote = vi.fn(async () => "fetch-1");
+    const stageFile = vi.fn(async () => {
+      throw new Error("index.lock exists");
+    });
+    render(
+      <App
+        client={twoTabs({
+          fetchRemote,
+          subscribeTransferProgress,
+          stageFile,
+          getStatus: async () => [{ path: "x.txt", oldPath: null, staged: false, kind: "Modified" }],
+        })}
+      />,
+    );
+    await fetchInA(fetchRemote);
+    fireEvent.click(await screen.findByRole("button", { name: "Stage x.txt" }));
+    await waitFor(() => expect(stageFile).toHaveBeenCalled());
+    await screen.findByText(/Couldn't stage x\.txt/);
+    await showTab("b");
+    emit("fetch-1", "Fetch", "Completed");
+
+    expect(await notifications().findByText("a: Fetched from origin. main is 2 commits behind origin/main.")).toBeInTheDocument();
+    expect(notifications().queryByText(/Couldn't stage/)).toBeNull();
+  });
+
   it("shows a user command's output only in its own tab, opening it from a hidden tab's toast", async () => {
     const command: UserCommand = {
       id: "lint",
