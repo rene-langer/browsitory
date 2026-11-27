@@ -24,21 +24,10 @@ export interface RepoToastsOptions {
  * buttons go.
  */
 export function useRepoToasts({ toasts, push, dismiss, activePath, mountedTabs, tabName, switchTo }: RepoToastsOptions) {
-  const latestPush = useRef(push);
+  const latest = useRef({ push, activePath, switchTo });
   useEffect(() => {
-    latestPush.current = push;
-  }, [push]);
-  // One stable pusher per repository: the outcome toasts' effects list it, and a new identity
-  // would show their toast again.
-  const pushers = useRef(new Map<string, PushToast>());
-  const pushToastFor = useCallback((repoPath: string): PushToast => {
-    let pusher = pushers.current.get(repoPath);
-    if (pusher === undefined) {
-      pusher = (message, options = {}) => latestPush.current(message, { ...options, repoPath });
-      pushers.current.set(repoPath, pusher);
-    }
-    return pusher;
-  }, []);
+    latest.current = { push, activePath, switchTo };
+  }, [push, activePath, switchTo]);
 
   // A button of a hidden tab's toast, run once its tab is shown: this effect runs after the
   // workspace's own layout effects have marked it shown.
@@ -49,6 +38,35 @@ export function useRepoToasts({ toasts, push, dismiss, activePath, mountedTabs, 
     pending.current = null;
     next.run();
   }, [activePath]);
+
+  // One stable pusher per repository: the outcome toasts' effects list it, and a new identity
+  // would show their toast again. Its buttons check at click time whether their tab is shown.
+  const pushers = useRef(new Map<string, PushToast>());
+  const pushToastFor = useCallback((repoPath: string): PushToast => {
+    let pusher = pushers.current.get(repoPath);
+    if (pusher === undefined) {
+      const inTab = (action: ToastAction): ToastAction => ({
+        ...action,
+        run: () => {
+          if (latest.current.activePath === repoPath) {
+            action.run();
+            return;
+          }
+          pending.current = { repoPath, run: action.run };
+          latest.current.switchTo(repoPath);
+        },
+      });
+      pusher = (message, options = {}) =>
+        latest.current.push(message, {
+          ...options,
+          action: options.action === undefined ? undefined : inTab(options.action),
+          actions: options.actions?.map(inTab),
+          repoPath,
+        });
+      pushers.current.set(repoPath, pusher);
+    }
+    return pusher;
+  }, []);
 
   useEffect(() => {
     for (const toast of toasts) {
@@ -63,19 +81,9 @@ export function useRepoToasts({ toasts, push, dismiss, activePath, mountedTabs, 
       toasts.map((toast): Toast => {
         const { repoPath } = toast;
         if (repoPath === undefined || repoPath === activePath) return toast;
-        const viaTab = (action: ToastAction): ToastAction => ({
-          ...action,
-          run: () => {
-            pending.current = { repoPath, run: action.run };
-            switchTo(repoPath);
-          },
-        });
-        const named: Toast = { ...toast, message: `${tabName(repoPath)}: ${toast.message}` };
-        if (toast.action !== undefined) named.action = viaTab(toast.action);
-        if (toast.actions !== undefined) named.actions = toast.actions.map(viaTab);
-        return named;
+        return { ...toast, message: `${tabName(repoPath)}: ${toast.message}` };
       }),
-    [toasts, activePath, tabName, switchTo],
+    [toasts, activePath, tabName],
   );
 
   return { toasts: shown, pushToastFor };
