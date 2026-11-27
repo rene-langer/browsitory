@@ -250,6 +250,73 @@ fn a_forge_request_that_waits_never_holds_the_worker() {
     assert!(pull_requests.pull_requests.is_empty());
 }
 
+/// #1160: creating a pull request on a forge that doesn't answer leaves the repository's reads
+/// (status, history) answering; the operation log still notes how the create ended.
+#[test]
+fn reads_answer_while_a_pull_request_is_being_created() {
+    let (dir, repo) = init_repo();
+    repo.remote("origin", "https://github.com/acme/widget.git")
+        .unwrap();
+    let (started_tx, started) = mpsc::channel();
+    let (release, release_rx) = mpsc::channel();
+    let worker = Worker::spawn_with(
+        dir.path().to_path_buf(),
+        FakeCredentialStore::default(),
+        StalledForgeApi {
+            started: Mutex::new(started_tx),
+            release: Mutex::new(release_rx),
+        },
+    )
+    .unwrap();
+    let handle = worker.handle();
+    handle
+        .save_forge_token(ForgeProvider::GitHub, "rene".to_string(), "t".to_string())
+        .unwrap();
+    let (created_tx, created) = mpsc::channel();
+    {
+        let handle = handle.clone();
+        thread::spawn(move || {
+            let create = crate::pull_requests::CreatePullRequest {
+                title: "Add feature".to_string(),
+                description: None,
+                source_branch: "feature/pr".to_string(),
+                target_branch: "main".to_string(),
+            };
+            let _ =
+                created_tx.send(handle.create_pull_request("origin".into(), "rene".into(), create));
+        });
+    }
+    started
+        .recv_timeout(Duration::from_secs(20))
+        .expect("the forge request is sent");
+
+    let (answered_tx, answered) = mpsc::channel();
+    {
+        let handle = handle.clone();
+        thread::spawn(move || {
+            let _ = answered_tx.send(handle.get_status());
+        });
+    }
+    let answer = answered.recv_timeout(Duration::from_secs(10));
+    let _ = release.send(());
+    answer
+        .expect("the worker waited for the forge request")
+        .expect("status");
+    // The fake forge answers `[]`, which isn't a pull request.
+    let error = created
+        .recv_timeout(Duration::from_secs(20))
+        .expect("the create answers once the forge does")
+        .expect_err("not a pull request");
+    handle.get_status().unwrap();
+    let entries = handle.operation_log(None, 10).entries;
+    let entry = entries
+        .iter()
+        .find(|entry| entry.name == "Create pull request")
+        .expect("the create is in the operation log");
+    assert_eq!(entry.outcome, crate::oplog::OperationOutcome::Failed);
+    assert_eq!(entry.message.as_deref(), Some(error.message.as_str()));
+}
+
 #[test]
 fn create_pull_request_round_trips_through_the_worker_without_exposing_the_token() {
     let (dir, repo) = init_repo();
