@@ -311,8 +311,14 @@ fn main() {
         log::error!("panic: {info}");
     }));
 
-    tauri::Builder::default()
-        // First: moves the 0.3.x folders to the new identifier's names before the log plugin
+    let mut builder = tauri::Builder::default();
+    // First of all: a second launch shows the running app's window and exits before any other
+    // plugin or the setup runs (#1136).
+    if let Some(single_instance) = single_instance::plugin() {
+        builder = builder.plugin(single_instance);
+    }
+    builder
+        // Then: moves the 0.3.x folders to the new identifier's names before the log plugin
         // opens its file and before the webview opens its storage (#433).
         .plugin(identifier_migration::plugin())
         .plugin(
