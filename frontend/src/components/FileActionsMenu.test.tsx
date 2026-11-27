@@ -91,6 +91,16 @@ describe("FileActionsMenu", () => {
     expect(discardAllConfirmMessage([tracked])).toBe("Discard changes to 1 file? Undo can bring them back.");
   });
 
+  it("treats an intent-to-add file as tracked: Discard, which empties it, and no Ignore (#1173)", () => {
+    const added = { ...untracked, path: "new.txt", intentToAdd: true };
+    expect(fileMenuItems(added, vi.fn()).map((i) => i.label)).toEqual(["Discard changes…", "Stash file…"]);
+    expect(discardConfirmMessage(added)).toBe(
+      'Discard changes to new.txt? It was added with "git add -N", so this empties it, as git restore does. ' +
+        "Undo can bring them back.",
+    );
+    expect(discardAllConfirmMessage([tracked, added])).toBe("Discard changes to 2 files? Undo can bring them back.");
+  });
+
   it("words the delete-untracked confirmation and points Discard all at it (#622)", () => {
     expect(deleteUntrackedConfirmMessage(["a.txt", "b/", "c.txt", "d.txt", "e.txt"])).toBe(
       "Delete 5 untracked files? Undo can bring them back.",

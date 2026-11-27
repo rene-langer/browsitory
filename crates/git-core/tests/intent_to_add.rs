@@ -196,3 +196,39 @@ fn a_hard_reset_to_a_commit_with_an_intent_to_add_path_matches_git() {
         std::fs::read_to_string(twin.path().join("new.txt")).unwrap()
     );
 }
+
+/// What `run` leaves in a fresh [`intent_to_add`] repository: `git status --short`, the index
+/// with its marks, and `new.txt` (`None` when it is gone).
+fn after(run: impl FnOnce(&Path, &git2::Repository)) -> (String, String, Option<String>) {
+    let (dir, repo) = intent_to_add();
+    let d = dir.path();
+    run(d, &repo);
+    (
+        git_out(d, &["status", "--short"]),
+        git_out(d, &["ls-files", "-v", "-s"]),
+        std::fs::read_to_string(d.join("new.txt")).ok(),
+    )
+}
+
+/// "Stage modified" sends the tracked changes, the intent-to-add file among them (#1173).
+#[test]
+fn staging_an_intent_to_add_file_with_the_tracked_changes_matches_git_add_u() {
+    let ours = after(|_, repo| {
+        git_core::stage::stage_paths(repo, &["new.txt".to_string()]).unwrap();
+    });
+    let git = after(|d, _| git_ok(d, &["add", "-u"]));
+
+    assert_eq!(ours, git);
+    assert_eq!(ours.0, "M  a.txt\nA  new.txt\n");
+}
+
+/// Discarding the file puts back the index's empty entry, as `git restore` does; the entry
+/// stays (#1173).
+#[test]
+fn discarding_an_intent_to_add_file_empties_it_as_git_restore_does() {
+    let ours = after(|_, repo| git_core::stage::discard_file(repo, "new.txt").unwrap());
+    let git = after(|d, _| git_ok(d, &["restore", "new.txt"]));
+
+    assert_eq!(ours, git);
+    assert_eq!(ours.2.as_deref(), Some(""));
+}

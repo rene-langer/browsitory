@@ -15,6 +15,15 @@ describe("statusLetter (#1027)", () => {
   });
 });
 
+describe("an intent-to-add file (#1173)", () => {
+  const added: StatusEntry = { ...entry(false, "New"), intentToAdd: true };
+
+  it("is tracked, shown as git's ' A' (added, not staged), not untracked", () => {
+    expect(isUntracked(added)).toBe(false);
+    expect(statusLetter(added)).toEqual({ letter: "A", kind: "Added" });
+  });
+});
+
 describe("isUntracked (#1060)", () => {
   it("is true only for an unstaged new file", () => {
     expect(isUntracked(entry(false, "New"))).toBe(true);
