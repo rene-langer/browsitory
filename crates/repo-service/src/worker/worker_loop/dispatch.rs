@@ -15,7 +15,7 @@ use crate::worker::{
 impl<S, A> WorkerLoop<S, A>
 where
     S: CredentialStore + Send + Sync + 'static,
-    A: ForgeApi + Send + 'static,
+    A: ForgeApi + Send + Sync + 'static,
 {
     /// Runs `command`, after `before` gated it. `guard` is the state lock `acquire` took.
     pub(super) fn dispatch(&mut self, command: Command, guard: Option<&StateGuard>) {
@@ -861,15 +861,19 @@ where
                 account,
                 create,
                 reply,
-            } => forge::create_pull_request(
-                &self.repo,
-                &self.credential_service,
-                &self.pull_request_service,
-                remote_name,
-                account,
-                create,
-                reply,
-            ),
+            } => {
+                let service = std::sync::Arc::clone(&self.pull_request_service);
+                let (mut host, credentials, _) = self.transfer_parts();
+                forge::create_pull_request(
+                    &mut host,
+                    credentials,
+                    &service,
+                    remote_name,
+                    account,
+                    create,
+                    reply,
+                );
+            }
             Command::Undo { reply } => {
                 let _ = reply.send(
                     self.undo_recorder

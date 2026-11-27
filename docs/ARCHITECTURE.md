@@ -1029,9 +1029,14 @@ across processes).
 ### Forge HTTP client
 
 The pull-request adapters talk to GitHub and Bitbucket through `ReqwestForgeApi`
-(`crates/repo-service/src/pull_requests.rs`), a blocking `reqwest` client. It is built lazily
-on the worker thread at its first request, because building it inside Tauri's tokio runtime
-panics. TLS is rustls with the ring crypto provider. reqwest is built with
+(`crates/repo-service/src/pull_requests.rs`), a blocking `reqwest` client with a 10 s connect
+and a 30 s total timeout. The worker only resolves the remote and reads the token; the request
+itself runs on a thread of its own (`worker/forge.rs`, #1160), so a forge that doesn't answer
+never holds the repository's commands for the timeout. Nothing waits for a listing but its
+caller; a create is noted in the operation log when it answers, so the worker waits for it and
+serves the read lane's commands meanwhile, as during a transfer. The client is built lazily on
+such a thread at its first request, because building it inside Tauri's tokio runtime panics.
+TLS is rustls with the ring crypto provider. reqwest is built with
 `rustls-no-provider`, so the client installs ring as rustls's process-wide default once, before
 its first build; if something else installed a provider first (Tauri's updater installs ring
 too), that one stays. Server certificates are checked against the operating system's

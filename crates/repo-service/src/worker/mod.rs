@@ -990,7 +990,7 @@ impl Worker {
     fn spawn_with<S, A>(path: PathBuf, credential_store: S, forge_api: A) -> Result<Self, String>
     where
         S: CredentialStore + Send + Sync + 'static,
-        A: ForgeApi + Send + 'static,
+        A: ForgeApi + Send + Sync + 'static,
     {
         Self::spawn_paused(path, credential_store, forge_api, None)
     }
@@ -1030,7 +1030,7 @@ impl Worker {
     ) -> Result<Self, String>
     where
         S: CredentialStore + Send + Sync + 'static,
-        A: ForgeApi + Send + 'static,
+        A: ForgeApi + Send + Sync + 'static,
     {
         let repo_path = path;
         let repo = git_core::repo::open(&repo_path).map_err(|error| error.to_string())?;
