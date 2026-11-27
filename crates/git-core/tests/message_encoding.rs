@@ -326,3 +326,278 @@ fn folding_into_an_older_latin1_commit_keeps_its_message_in_utf8() {
     assert_eq!((state, result), (None, RebaseStepResult::Done));
     assert_eq!(message_of(&repo, "HEAD~1"), utf8(LATIN1_AS_UTF8));
 }
+
+// Display and squash (#1203): every subject and message Browsitory shows or writes reads a
+// message that isn't UTF-8 as git does.
+
+const LATIN1_SUBJECT: &str = "Grüße aus Köln";
+
+/// What git prints for `args` in `dir`, as UTF-8 (git re-encodes messages to it for output).
+fn git_out(dir: &Path, args: &[&str]) -> String {
+    let output = test_support::git(dir, args);
+    assert!(output.status.success(), "git {args:?}: {output:?}");
+    String::from_utf8(output.stdout).expect("git's output is UTF-8")
+}
+
+fn all_local() -> git_core::graph::GraphSelection {
+    git_core::graph::GraphSelection {
+        local: None,
+        remote: Vec::new(),
+        first_parent: false,
+    }
+}
+
+fn id_of(repo: &git2::Repository, rev: &str) -> String {
+    repo.revparse_single(rev).unwrap().id().to_string()
+}
+
+#[test]
+fn the_graph_shows_a_latin1_subject_as_git_log_does() {
+    let (dir, repo) = latin1_topic();
+    let topic = id_of(&repo, "topic");
+
+    let graph = git_core::graph::graph_log(&repo, 50, &all_local()).unwrap();
+
+    let row = graph.iter().find(|commit| commit.id == topic).unwrap();
+    assert_eq!(
+        row.summary,
+        git_out(dir.path(), &["log", "-1", "--format=%s", "topic"]).trim_end()
+    );
+    assert_eq!(row.summary, LATIN1_SUBJECT);
+}
+
+#[test]
+fn the_graph_shows_a_windows_1252_subject_as_git_log_does() {
+    let (dir, repo) = topic_with(|dir, _| git_commit_encoded(dir, CP1252, "windows-1252"));
+    let topic = id_of(&repo, "topic");
+
+    let graph = git_core::graph::graph_log(&repo, 50, &all_local()).unwrap();
+
+    let row = graph.iter().find(|commit| commit.id == topic).unwrap();
+    assert_eq!(
+        row.summary,
+        git_out(dir.path(), &["log", "-1", "--format=%s", "topic"]).trim_end()
+    );
+    assert_eq!(row.summary, "Preis € 5");
+}
+
+#[test]
+fn the_commit_header_shows_a_latin1_message_in_utf8() {
+    let (_dir, repo) = latin1_topic();
+
+    let message = git_core::graph::commit_message(&repo, &id_of(&repo, "topic")).unwrap();
+
+    assert_eq!(message, LATIN1_AS_UTF8);
+}
+
+#[test]
+fn the_rebase_planner_shows_a_latin1_subject() {
+    let (_dir, repo) = latin1_topic();
+
+    let commits = git_core::rebase::commits_since(&repo, "master").unwrap();
+
+    let summaries: Vec<&str> = commits.iter().map(|c| c.summary.as_str()).collect();
+    assert_eq!(summaries, [LATIN1_SUBJECT]);
+}
+
+#[test]
+fn the_reflog_reads_gits_latin1_entry_and_its_commits_subject() {
+    let (dir, repo) = latin1_topic();
+    // git's reflog message carries the message's first line as committed: Latin-1 bytes.
+    let raw = test_support::git(dir.path(), &["log", "-g", "-1", "--format=%gs", "topic"]);
+    assert_eq!(raw.stdout, b"commit: Gr\xfc\xdfe aus K\xf6ln\n");
+
+    let entries = git_core::reflog::read_reflog(&repo, "refs/heads/topic").unwrap();
+
+    assert_eq!(entries[0].message, format!("commit: {LATIN1_SUBJECT}"));
+    assert_eq!(entries[0].summary.as_deref(), Some(LATIN1_SUBJECT));
+}
+
+#[test]
+fn a_stopped_sequence_names_the_latin1_head_it_kept() {
+    let (_dir, repo) = latin1_topic();
+    let master = id_of(&repo, "master");
+    let cancel = || true;
+
+    let run = git_core::pick::cherry_pick_many(
+        &repo,
+        &[master],
+        HookOptions {
+            cancel: Some(&cancel),
+            ..Default::default()
+        },
+    );
+
+    let Ok(SequenceOutcome::Stopped { kept, .. }) = &run.outcome else {
+        panic!("expected Stopped, got {:?}", run.outcome)
+    };
+    assert_eq!(kept, LATIN1_SUBJECT);
+}
+
+#[test]
+fn a_terminal_sequence_started_on_a_latin1_commit_names_its_subject() {
+    let (dir, repo) = latin1_topic();
+    // From the base: A adds t.txt (which conflicts with topic's), B adds u.txt.
+    git_ok(dir.path(), &["checkout", "-q", "-b", "other", "master~1"]);
+    write_file(dir.path(), "t.txt", "other t\n");
+    commit_all(&repo, "A");
+    write_file(dir.path(), "u.txt", "u\n");
+    commit_all(&repo, "B");
+    git_ok(dir.path(), &["checkout", "-q", "topic"]);
+    let picked = test_support::git(dir.path(), &["cherry-pick", "other~1", "other"]);
+    assert!(!picked.status.success(), "git's pick of A should conflict");
+
+    let sequence = git_core::pick::terminal_sequence(&repo).expect("a terminal sequence");
+
+    assert_eq!(sequence.started_at, id_of(&repo, "topic"));
+    assert_eq!(sequence.started_at_summary, LATIN1_SUBJECT);
+}
+
+/// The stash list's messages, newest first.
+fn stash_messages(repo: &mut git2::Repository) -> Vec<String> {
+    git_core::stash::list_stashes(repo)
+        .unwrap()
+        .into_iter()
+        .map(|entry| entry.message)
+        .collect()
+}
+
+fn assert_stash_message_matches_git(paths: &[&str]) {
+    let (dir, mut repo) = latin1_topic();
+    write_file(dir.path(), "t.txt", "changed\n");
+    let (twin_dir, _twin_repo) = twin(dir.path());
+    let mut args = vec!["stash", "push", "-q", "--"];
+    args.extend_from_slice(paths);
+    git_ok(twin_dir.path(), &args);
+    let git_message = git_out(twin_dir.path(), &["stash", "list", "--format=%gs"]);
+
+    git_core::stash::save_stash(
+        &mut repo,
+        &git_core::stash::StashOptions {
+            paths: paths.iter().map(|path| path.to_string()).collect(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(stash_messages(&mut repo), [git_message.trim_end()]);
+    let short = &id_of(&repo, "topic")[..7];
+    assert_eq!(
+        stash_messages(&mut repo),
+        [format!("WIP on topic: {short} {LATIN1_SUBJECT}")]
+    );
+}
+
+#[test]
+fn a_stash_on_a_latin1_head_gets_gits_message() {
+    assert_stash_message_matches_git(&[]);
+}
+
+#[test]
+fn a_stash_of_some_files_on_a_latin1_head_gets_gits_message() {
+    assert_stash_message_matches_git(&["t.txt"]);
+}
+
+#[test]
+fn the_stash_list_reads_a_stash_message_that_is_not_utf8() {
+    let (dir, mut repo) = latin1_topic();
+    write_file(dir.path(), "t.txt", "changed\n");
+    git_ok(dir.path(), &["stash", "push", "-q"]);
+    // As a tool that writes the subject's bytes as stored leaves it (libgit2 does).
+    let stash = repo.refname_to_id("refs/stash").unwrap();
+    let zero = "0".repeat(40);
+    std::fs::write(
+        repo.path().join("logs").join("refs").join("stash"),
+        [
+            format!("{zero} {stash} Test User <test@example.com> 1700000000 +0000\t").as_bytes(),
+            b"WIP on topic: 1234567 Gr\xfc\xdfe aus K\xf6ln\n",
+        ]
+        .concat(),
+    )
+    .unwrap();
+
+    let messages = stash_messages(&mut repo);
+
+    assert_eq!(
+        messages,
+        [format!("WIP on topic: 1234567 {LATIN1_SUBJECT}")]
+    );
+}
+
+#[test]
+fn a_squash_merge_of_a_latin1_commit_offers_gits_message() {
+    let (dir, repo) = latin1_topic();
+    git_ok(dir.path(), &["checkout", "-q", "master"]);
+    let (twin_dir, twin_repo) = twin(dir.path());
+    git_ok(twin_dir.path(), &["merge", "-q", "--squash", "topic"]);
+    let git_message = std::fs::read_to_string(twin_repo.path().join("SQUASH_MSG")).unwrap();
+    let without_dates: String = git_message
+        .split_inclusive('\n')
+        .filter(|line| !line.starts_with("Date:"))
+        .collect();
+
+    git_core::merge::start_merge(
+        &repo,
+        "topic",
+        git_core::merge::MergeOptions {
+            fast_forward: git_core::merge::FastForward::Allow,
+            squash: true,
+        },
+    )
+    .unwrap();
+
+    let message = git_core::merge::squash_message(&repo).unwrap();
+    assert_eq!(message, without_dates);
+    assert!(message.contains("    Grüße aus Köln\n    \n    Body ä, Ã©\n"));
+}
+
+#[test]
+fn a_file_folder_conflict_names_a_latin1_step_as_git_does() {
+    // The base has c.txt; `x` (Latin-1) adds the file c; `side` (checked out) replaces c.txt
+    // with c/g, so picking `x` moves c to `c~<short id> (<subject>)`.
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "c.txt", "c\n");
+    commit_all(&repo, "base");
+    git_ok(dir.path(), &["branch", "-M", "master"]);
+    git_ok(dir.path(), &["checkout", "-q", "-b", "x"]);
+    write_file(dir.path(), "c", "file\n");
+    git_commit_encoded(dir.path(), LATIN1, "ISO-8859-1");
+    git_ok(dir.path(), &["checkout", "-q", "-b", "side", "master"]);
+    std::fs::remove_file(dir.path().join("c.txt")).unwrap();
+    write_file(dir.path(), "c/g", "g\n");
+    commit_all(&repo, "c.txt becomes c/g");
+    let (twin_dir, _twin_repo) = twin(dir.path());
+    let picked = test_support::git(twin_dir.path(), &["cherry-pick", "x"]);
+    assert!(!picked.status.success(), "git's pick should conflict");
+    let moved = |dir: &Path| -> Vec<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with("c~"))
+            .collect()
+    };
+    let x = id_of(&repo, "x");
+
+    let outcome = git_core::pick::cherry_pick(&repo, &x, None, HookOptions::default()).unwrap();
+
+    assert!(matches!(outcome, PickOutcome::Conflicted { .. }));
+    assert_eq!(moved(dir.path()), moved(twin_dir.path()));
+    assert_eq!(
+        moved(dir.path()),
+        [format!("c~{} ({LATIN1_SUBJECT})", &x[..7])]
+    );
+}
+
+#[test]
+fn a_patch_of_a_latin1_commit_carries_its_message_in_utf8() {
+    let (_dir, repo) = latin1_topic();
+
+    let patch = git_core::patch::commits_patch(&repo, &[id_of(&repo, "topic")]).unwrap();
+
+    let text = String::from_utf8(patch).expect("the patch is UTF-8");
+    assert!(
+        text.contains(&format!("Subject: [PATCH] {LATIN1_SUBJECT}\n")),
+        "{text}"
+    );
+    assert!(text.contains("\nBody ä, Ã©\n"), "{text}");
+}
