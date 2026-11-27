@@ -165,6 +165,10 @@ faint dotted ruler marks column 72 for wrapping the body. Change the limit, the 
 co-author shows as a chip (× removes it) and is added to the message as a `Co-authored-by: Name
 <email>` trailer when you commit.
 
+The message you are writing, with its co-authors, is kept per repository on this computer
+until you commit or clear it: it comes back after a tab switch, closing and reopening the tab,
+quitting the app, closing the VSCode panel or reloading the window.
+
 **Recent messages** (next to the counter) opens a menu of earlier messages. Use the arrow keys
 and Enter, or click, to put that full message in the box; it replaces what was there. **Ctrl+Z**
 (**⌘Z** on macOS) in the field, or **Restore message**, brings back the replaced text until you

@@ -41,6 +41,11 @@ cd frontend && pnpm install && cd ../crates/tauri-app
 node ../../frontend/node_modules/@tauri-apps/cli/tauri.js dev
 ```
 
+The app runs once per user (#1136): while an installed Browsitory runs, a dev build only brings
+that window to the front and exits. Set `BROWSITORY_CONFIG_DIR` to an empty folder to run it
+beside the installed app with its own `config.toml` (on Linux the GTK application id still
+allows one copy per D-Bus session).
+
 ## Build a distributable
 
 ```bash

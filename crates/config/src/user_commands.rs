@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use git_core::process::CommandStyle;
 use serde::{Deserialize, Serialize};
 
-use super::{config_file_path, generate_workspace_id, read_config, write_config, ConfigError};
+use super::{config_file_path, generate_workspace_id, read_config, update_config, ConfigError};
 
 /// Where a command appears besides the command palette.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -35,7 +35,8 @@ pub struct UserCommand {
     /// `None`: the repository's root.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_directory: Option<String>,
-    #[serde(default)]
+    /// A target this version doesn't know is left out (#1137).
+    #[serde(default, deserialize_with = "crate::compat::readable_entries")]
     pub targets: Vec<UserCommandTarget>,
     #[serde(default)]
     pub confirm: bool,
@@ -157,8 +158,7 @@ pub fn set_user_commands_at(
             seen.insert(command.id.clone());
         }
     }
-    let mut config = read_config(config_file)?;
-    match repo_path {
+    update_config(config_file, |config| match repo_path {
         None => config.user_commands = cleaned.clone(),
         Some(path) => {
             config
@@ -171,7 +171,6 @@ pub fn set_user_commands_at(
                 });
             }
         }
-    }
-    write_config(config_file, &config)?;
+    })?;
     Ok(cleaned)
 }

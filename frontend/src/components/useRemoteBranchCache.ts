@@ -35,8 +35,8 @@ export type RemoteBranchCache = {
 /**
  * The remote folders of the Branches section and the lazy branch list of each, a cache of
  * `listRemoteBranches` that a folder fills on its first expand. A change of `refreshGeneration`
- * (`AppState.refreshGeneration`: a fetch from anywhere, a push that published a branch, a remote
- * branch delete) means the lists may have changed: open folders reload in place and closed ones
+ * (`AppState.historyGeneration`, #1118: a fetch from anywhere, a push that published a branch, a
+ * remote branch delete) means the lists may have changed: open folders reload in place and closed ones
  * forget theirs, so their next expand reloads.
  */
 export function useRemoteBranchCache({

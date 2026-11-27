@@ -959,6 +959,20 @@ describe("CommitGraph", () => {
     expect(drop).toHaveAttribute("title", "Merge and root commits can't be rebased.");
   });
 
+  // #1119: a rebase rewrites the current branch, so on a detached HEAD there is none to rewrite.
+  it("disables the multi-selection's rebase actions on a detached HEAD, saying why", () => {
+    renderChain({ currentBranch: null });
+
+    fireEvent.click(row("C"));
+    fireEvent.click(row("B"), { shiftKey: true });
+
+    for (const name of ["Interactive rebase…", "Squash 2 commits…", "Fixup 2 commits…", "Drop 2 commits…"]) {
+      const button = screen.getByRole("button", { name });
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute("title", "Check out a branch first.");
+    }
+  });
+
   it("Escape collapses a multi-selection back to the focused commit", () => {
     renderChain();
 

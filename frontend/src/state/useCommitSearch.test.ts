@@ -202,6 +202,33 @@ describe("useCommitSearch", () => {
     expect(selectRow).not.toHaveBeenCalled();
   });
 
+  // #1118: a history change runs the search again; until its first round is in, the matches
+  // already shown stay.
+  it("keeps the shown matches until the re-run's first round has arrived", async () => {
+    const ids = (prefix: string) => Array.from({ length: SEARCH_ROUND_SIZE }, (_, i) => `${prefix}${i}`);
+    const rerun = deferred<SearchPage>();
+    const searchCommits = vi.fn()
+      .mockResolvedValueOnce(page(ids("a"), "100:fp", 100))
+      .mockResolvedValueOnce(page(ids("b"), "200:fp", 200))
+      .mockReturnValueOnce(rerun.promise);
+    const { result, rerender } = setup(searchCommits);
+
+    act(() => result.current.setQuery("x"));
+    await waitFor(() => expect(result.current.results?.loading).toBe(false));
+    await act(async () => {
+      await result.current.loadMore();
+    });
+    expect(result.current.results?.commits).toHaveLength(200);
+
+    rerender({ generation: 1, local: ["main"], selected: "uncommitted" });
+    await waitFor(() => expect(searchCommits).toHaveBeenCalledTimes(3));
+    expect(result.current.results?.commits).toHaveLength(200);
+
+    await act(async () => rerun.resolve(page(ids("c"), "100:fp", 100)));
+    expect(result.current.results?.commits.map((c) => c.id)).toEqual(ids("c"));
+    expect(result.current.results?.loading).toBe(false);
+  });
+
   it("clearing the field closes the search", async () => {
     const searchCommits = vi.fn(async () => page(["c1"], null, 1));
     const { result, selectRow } = setup(searchCommits, { row: { commitId: "before" } });

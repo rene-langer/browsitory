@@ -201,6 +201,56 @@ describe("useAppState refresh scope", () => {
     expect(result.current.state.refreshGeneration).toBe(2);
   });
 
+  // #1118: what only history changes (commit search, file history, remote branches, a branch
+  // compare) follows `historyGeneration`, which a work-tree-only refresh leaves alone.
+  it("advances historyGeneration only when a refresh read the history again", async () => {
+    const { client, stamp } = scopedClient();
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    expect(result.current.state.historyGeneration).toBe(0);
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(result.current.state.historyGeneration).toBe(1);
+
+    stamp.workTree = "w2";
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(result.current.state.refreshGeneration).toBe(2);
+    expect(result.current.state.historyGeneration).toBe(1);
+
+    stamp.refs = "r2";
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(result.current.state.historyGeneration).toBe(2);
+
+    await act(async () => {
+      await result.current.refresh({ full: true });
+    });
+    expect(result.current.state.historyGeneration).toBe(3);
+  });
+
+  it("advances historyGeneration after a failed refresh", async () => {
+    let fail = false;
+    const { client } = scopedClient({
+      getStatus: vi.fn(async () => {
+        if (fail) throw new Error("status failed");
+        return [];
+      }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(async () => {
+      await result.current.refresh();
+    });
+    fail = true;
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(result.current.state.error).not.toBeNull();
+    expect(result.current.state.historyGeneration).toBe(2);
+  });
+
   it("reads the history again when the refs part changed", async () => {
     const { client, stamp, reads } = scopedClient();
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));

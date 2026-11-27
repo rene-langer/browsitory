@@ -146,7 +146,7 @@ export function RepoWorkspace({
   const fileHistory = useFileHistory(
     client,
     repoPath,
-    appState.state.refreshGeneration,
+    appState.state.historyGeneration,
     appState.state.selectedRow,
     appState.selectRow,
   );
@@ -173,12 +173,12 @@ export function RepoWorkspace({
   const commitSearch = useCommitSearch(
     client,
     repoPath,
-    appState.state.refreshGeneration,
+    appState.state.historyGeneration,
     appState.state.graphSelection,
     appState.state.selectedRow,
     selectSearchRow,
   );
-  const compare = useCompare(client, repoPath, appState.state.refreshGeneration, appState.state.selectedRow);
+  const compare = useCompare(client, repoPath, appState.state.historyGeneration, appState.state.selectedRow);
   // The graph's lanes, once for the commit list and the sidebar's branch swatches (#673).
   const graphLayout = useCommitGraphLayout(appState.state.commits, appState.state.expandedMerges);
   const conflictedPaths = useMemo(
@@ -589,9 +589,22 @@ export function RepoWorkspace({
     else if (remote !== null) void pushCurrentBranch(remote);
   }, [pushCurrentBranch, pushToast]);
   useOutcomeToasts(appState.state, pushToast, undoToastAction, pullFromToast, pushFromToast);
+  // A transfer that failed while another tab is shown (#1116): its banner waits in this tab, so a
+  // toast says so where the user is, as a success would. A failure sets its error in the update
+  // that ends the transfer; an error that was there before is another action's.
+  const transferError = appState.state.error;
+  const lastTransfer = useRef({ running: transfer !== null, error: transferError });
+  useEffect(() => {
+    const last = lastTransfer.current;
+    lastTransfer.current = { running: transfer !== null, error: transferError };
+    if (last.running && transfer === null && transferError !== null && transferError !== last.error && !active) {
+      pushToast(transferError, { tone: "error" });
+    }
+  }, [transfer, transferError, active, pushToast]);
   // No banner while a dialog handles the same error (#996): the identity dialog, the hook
   // failure's output, the force push confirm. Closing the last two brings it back. A dialog that
-  // shows its own failure (Rename branch, Connect, New pull request) keeps it, Cancel too.
+  // shows its own failure (Rename branch, Create tag, New worktree, Connect, New pull request)
+  // keeps it, Cancel too.
   const { error, errorSource } = appState.state;
   const errorFrom = (source: "dialog" | "read") =>
     error !== null && errorSource?.source === source && errorSource.error === error;
@@ -671,10 +684,8 @@ export function RepoWorkspace({
             const failure = await announce(`Switched to ${branchName}, tracking ${remoteName}/${branchName}`, appState.createBranch, {
               undoable: true,
             })(branchName, `${remoteName}/${branchName}`, true);
-            if (failure !== null) {
-              pushToast(failure);
-              return;
-            }
+            // The banner shows the failure (#1124).
+            if (failure !== null) return;
             await appState.setCurrentUpstream(remoteName, branchName);
             recordRecentBranch(repoPath, branchName);
           })(),
@@ -684,10 +695,7 @@ export function RepoWorkspace({
             const failure = await announce(`Created and switched to ${name}`, appState.createBranch, {
               undoable: true,
             })(name, "HEAD", true);
-            if (failure !== null) {
-              pushToast(failure);
-              return;
-            }
+            if (failure !== null) return;
             recordRecentBranch(repoPath, name);
           })(),
       },
@@ -969,7 +977,7 @@ export function RepoWorkspace({
           />
         </div>
       )}
-      {operationLog !== null && (
+      {active && operationLog !== null && (
         <OperationLogDialog
           client={client}
           repoPath={repoPath}
@@ -997,7 +1005,7 @@ export function RepoWorkspace({
           onClose={() => setOperationLog(null)}
         />
       )}
-      {userCommandRunner.confirming !== null && (
+      {active && userCommandRunner.confirming !== null && (
         <ConfirmDialog
           title={`Run ${userCommandRunner.confirming.command.name}`}
           message={
@@ -1013,7 +1021,7 @@ export function RepoWorkspace({
           onCancel={userCommandRunner.cancelConfirm}
         />
       )}
-      {userCommandRunner.output !== null && (
+      {active && userCommandRunner.output !== null && (
         <UserCommandOutputDialog
           output={userCommandRunner.output}
           onStop={userCommandRunner.stop}
