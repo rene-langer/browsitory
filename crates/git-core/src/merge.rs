@@ -427,8 +427,10 @@ fn merge_outside_cone(
         let mut checkout = git2::build::CheckoutBuilder::new();
         let filters = crate::hardlink::on_checkout(repo, &mut checkout);
         repo.merge(&[their_annotated], None, Some(&mut checkout))?;
-        Ok(filters.check()?)
-    })
+        Ok::<(), MergeError>(filters.check()?)
+    })?;
+    crate::merge_driver::keep_ours(repo);
+    Ok(())
 }
 
 /// `git merge --squash`: merge into the index and worktree, write `SQUASH_MSG`, and leave no

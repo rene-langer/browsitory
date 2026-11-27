@@ -203,6 +203,7 @@ where
         }
     }
     index.write()?;
+    crate::merge_driver::keep_ours(repo);
     Ok(index)
 }
 

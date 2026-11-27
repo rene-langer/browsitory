@@ -2082,6 +2082,7 @@ fn apply_routes(
             ),
         }
     })?;
+    crate::merge_driver::keep_ours(repo);
     let mut files = Vec::new();
     let repo_index = repo.index()?;
     if repo_index.has_conflicts() {
@@ -2573,6 +2574,7 @@ fn apply_in_order(
     }
     repo_index.write()?;
     if conflicted {
+        crate::merge_driver::keep_ours(repo);
         Ok(StashApplyOutcome::Conflicted {
             files: crate::file_folder::conflicted_files(&repo_index)?,
         })

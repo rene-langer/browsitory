@@ -136,13 +136,17 @@ A repository can name a merge driver for some files in its `.gitattributes`, suc
 (lock file and project file mergers work this way too). Browsitory doesn't run these programs.
 When both sides changed such a file, a merge, pull, cherry-pick, revert, rebase step or stash
 apply leaves it conflicted, so you decide: its row says "'ours' merge driver", and a note above
-the conflict says the driver wasn't run. Keep one side (for `merge=ours`, **Use ours (whole
-file)**) or edit it as the driver would have, then mark it resolved, or merge on the command
-line, where git runs the driver. Every other file merges as usual.
+the conflict says the driver wasn't run. The file holds your side, as git's own binary driver
+leaves it. Keep it (for `merge=ours`, mark it resolved), take theirs or edit it as the driver
+would have, then mark it resolved, or merge on the command line, where git runs the driver.
+Every other file merges as usual. A conflicted file marked `-merge` or `merge=binary` (or the
+`binary` macro, as lock files often are) holds your side too, as with git: nothing of theirs is
+mixed in, and the conflict view shows both sides.
 
 ??? note "Details"
-    The file shows both sides merged as text, with conflict markers where they overlap; where
-    they don't, it reads as merged, but it stays conflicted until you mark it resolved. A file
+    Your side is written as a checkout writes it (line endings and other conversions applied);
+    the index keeps all three versions. A file one side deleted keeps the other side's version,
+    as in git. A file
     only one side changed is taken from that side, and one both sides changed the same way is
     no conflict, as with git, which runs the driver in neither case. `merge.default` naming a
     configured driver counts for files without a `merge` attribute. The built-in

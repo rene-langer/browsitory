@@ -1181,6 +1181,7 @@ fn pick_step(
             error,
         ));
     }
+    crate::merge_driver::keep_ours(repo);
     Ok(())
 }
 

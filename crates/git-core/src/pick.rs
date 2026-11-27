@@ -703,6 +703,7 @@ fn apply_step_here(
             error,
         ));
     }
+    crate::merge_driver::keep_ours(repo);
     if matches!(kind, Kind::CherryPick) {
         // A paused pick's `MERGE_MSG` in UTF-8, as git writes it (#1149): the commit box offers
         // it. Left as libgit2 wrote it if that fails.
