@@ -1169,6 +1169,26 @@ describe("CommitGraph — keyboard access", () => {
     expect(list.getAttribute("aria-keyshortcuts")).toContain("Enter");
   });
 
+  // #1139: the focus stays on the list, so the selected row is its active descendant.
+  it("points the list's active descendant at the selected row", () => {
+    const { list, rerender, onSelectRow, onBranchFromCommit, onRebaseFromCommit, onRebaseSelection } = setup("uncommitted");
+    const option = (text: RegExp) => screen.getByText(text).closest("li")!;
+    expect(list).toHaveAttribute("aria-activedescendant", option(/^Uncommitted changes/).id);
+    expect(option(/^Uncommitted changes/).id).not.toBe("");
+    rerender(
+      <CommitGraph
+        {...historyProps}
+        status={status}
+        commits={chain}
+        selectedRow={{ commitId: "B" }}
+        operationsBlocked={false}
+        {...{ onSelectRow, onBranchFromCommit, onRebaseFromCommit, onRebaseSelection }}
+      />,
+    );
+    expect(list).toHaveAttribute("aria-activedescendant", option(/^B /).id);
+    expect(option(/^B /).id).not.toBe(option(/^Uncommitted changes/).id);
+  });
+
   it("Enter opens the context menu for the selected commit and Branch from here uses its id", () => {
     const { list, onBranchFromCommit } = setup({ commitId: "B" });
     fireEvent.keyDown(list, { key: "Enter" });
@@ -2339,6 +2359,32 @@ describe("CommitGraph — windowed rows", () => {
       // Row 701 (after "Uncommitted changes") ends at the pane's bottom edge.
       expect(pane.scrollTop).toBe(702 * ROW - 260);
       expect(screen.getByText(/commit 700$/)).toBeInTheDocument();
+    } finally {
+      restore();
+    }
+  });
+
+  // #1139: a jump to a row the window doesn't hold yet is announced; once rendered, it is the
+  // list's active descendant.
+  it("announces a selected row that wasn't rendered, then makes it the active descendant", () => {
+    const { rerender, restore } = renderInPane();
+    try {
+      rerender(
+        <CommitGraph
+          {...historyProps}
+          status={[]}
+          commits={many}
+          selectedRow={{ commitId: "id700" }}
+          operationsBlocked={false}
+          onSelectRow={vi.fn()}
+          onBranchFromCommit={vi.fn()}
+          onRebaseFromCommit={vi.fn()}
+        />,
+      );
+      const announcement = screen.getByText("id700 commit 700, 702 of 1001");
+      expect(announcement.closest('[aria-live="polite"]')).not.toBeNull();
+      const list = screen.getByRole("listbox", { name: "Commit history" });
+      expect(list).toHaveAttribute("aria-activedescendant", screen.getByText(/commit 700$/).closest("li")!.id);
     } finally {
       restore();
     }
