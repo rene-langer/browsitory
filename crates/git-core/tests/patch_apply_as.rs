@@ -542,8 +542,7 @@ mod hooks {
 
     #[test]
     fn pre_applypatch_runs_with_the_mail_in_the_index_before_its_commit() {
-        if !common::program_available("git") {
-            eprintln!("git CLI not found; skipping");
+        if !test_support::require_tool("git") {
             return;
         }
         let (_dir, repo, base, series) = series_on_base();
@@ -593,8 +592,7 @@ mod hooks {
 
     #[test]
     fn files_pre_applypatch_stages_are_part_of_the_commit() {
-        if !common::program_available("git") {
-            eprintln!("git CLI not found; skipping");
+        if !test_support::require_tool("git") {
             return;
         }
         let (dir, repo, _base, series) = series_on_base();

@@ -173,7 +173,9 @@ jobs:
       # `!cancelled()` rather than `always()`, so a cancelled run still stops here.
       - name: License compliance doc is in sync
         if: ${{ !cancelled() }}
-        run: python3 scripts/check-license-compliance.py
+        run: |
+          python3 scripts/test_check_license_compliance.py
+          python3 scripts/check-license-compliance.py
       # Every host the app's code names is listed in the privacy notice (#627).
       - name: Privacy notice lists every hard-coded host
         if: ${{ !cancelled() }}

@@ -20,14 +20,21 @@ DOC = ROOT / "docs" / "LICENSE_COMPLIANCE.md"
 WORKSPACE_CRATES = {"git-core", "config", "repo-service", "tauri-app", "vscode-sidecar", "test-support"}
 
 
+DEPENDENCY_SECTIONS = ("dependencies", "dev-dependencies", "build-dependencies")
+
+
 def rust_deps() -> set[str]:
+    """Direct dependencies of every workspace crate, including the platform-specific ones in
+    `[target.'cfg(...)'.dependencies]` and its dev/build variants (#1114)."""
     names: set[str] = set()
     for cargo_toml in ROOT.glob("crates/*/Cargo.toml"):
         data = tomllib.loads(cargo_toml.read_text())
-        for section in ("dependencies", "dev-dependencies", "build-dependencies"):
-            for name in data.get(section, {}):
-                if name not in WORKSPACE_CRATES:
-                    names.add(name)
+        tables = [data, *data.get("target", {}).values()]
+        for table in tables:
+            for section in DEPENDENCY_SECTIONS:
+                for name in table.get(section, {}):
+                    if name not in WORKSPACE_CRATES:
+                        names.add(name)
     return names
 
 

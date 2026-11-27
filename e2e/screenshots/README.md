@@ -23,8 +23,7 @@ the E2E build bakes `/tmp` paths into the app and `demoRepo.ts` uses `os.tmpdir(
 keeps your own `TMPDIR`, so a small tmpfs `/tmp` doesn't fill up with compiler temp files. The
 E2E build never checks for updates, so no "Update ready" banner lands in the shots and the
 capture needs no network. When it exits, the script removes
-`/tmp/browsitory-screenshots` (the demo repository and the temp HOME); run it with `KEEP=1` to
-keep that folder.
+`/tmp/browsitory-screenshots` (the demo repository); run it with `KEEP=1` to keep that folder.
 
 Then look at every changed image before you commit it.
 
@@ -33,10 +32,11 @@ Then look at every changed image before you commit it.
 - `demoRepo.ts` builds the demo repository `trailmap` in `/tmp/browsitory-screenshots/`. Its
   content, authors and dates are fixed: branches, a merge, tags, a remote (never contacted),
   two stashes, staged, unstaged and untracked files, and a branch that conflicts with `main`.
-- `../wdio.screenshots.conf.ts` reuses the E2E config (`wdio.conf.ts`) and points `HOME`, the
-  XDG folders, git's global config and the GnuPG home at a temp folder. The app's config and
-  webview data already live in temp folders in the E2E harness. Nothing reads or writes your
-  own settings, keys or Browsitory data.
+- `../wdio.screenshots.conf.ts` reuses the E2E config (`wdio.conf.ts`), which points `HOME`, the
+  XDG folders, git's global config and the GnuPG home at a temp folder
+  (`/tmp/browsitory-e2e-home`) and keeps the app's config and webview data in temp folders too.
+  Nothing reads or writes your own settings, keys or Browsitory data. It adds English dates
+  and the UTC time zone.
 - `capture.docs.ts` opens the demo from the repository picker, sets a 1280×800 window and the
   light theme, and saves each screen to `docs/guide/assets/<name>.png`. The `dark-theme` shot uses
   the dark theme, and `merge-editor` a wider and taller window, with room for the three panes.
@@ -81,4 +81,4 @@ TMPDIR=/tmp dbus-run-session -- xvfb-run -a -s "-screen 0 1920x1200x24" pnpm scr
 
 `INVENTORY_PHASES=A,B,…` limits the run to some phases. Each shot is its own test, and a failing
 shot doesn't stop the run. The run resets the shared `/tmp/browsitory-e2e-*` fixture paths, so
-don't run it next to the E2E suite.
+it takes the E2E suite's lock: next to an E2E run it stops at once, naming that run (#1144).
