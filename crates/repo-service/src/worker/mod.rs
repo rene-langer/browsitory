@@ -68,6 +68,7 @@ pub use hooks::{HookEvent, HookSource};
 pub use patch::{CommitChange, PatchSource};
 pub use rebase::{HistoryEdit, HistoryEditKind};
 pub use registry::{repo_key, WorkerRegistry};
+pub(crate) use transfer_thread::STALLED_CANCEL_GRACE;
 pub use undo::{UndoOutcome, UndoState};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

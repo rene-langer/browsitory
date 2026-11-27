@@ -1,12 +1,22 @@
 //! Repo-less clone jobs. A clone has no repository (and so no per-repo worker) until it
-//! finishes, so it runs here: one call per clone on the caller's thread, with its own cancel
-//! registry. Progress goes out as `TransferEvent::Progress` only — never `Started`/`Completed`,
-//! which an open repo tab's pending fetch/push would adopt as its own transfer.
+//! finishes, so it runs here: one call per clone, with its own cancel registry. Progress goes out
+//! as `TransferEvent::Progress` only — never `Started`/`Completed`, which an open repo tab's
+//! pending fetch/push would adopt as its own transfer.
+//!
+//! The clone runs on a helper thread and the caller's thread waits for it (#1159), as a fetch
+//! does on the worker (`worker::transfer_thread`): a clone still connecting, or one whose server
+//! went silent (preparing a big pack, or the network gone without a reset), calls none of
+//! libgit2's callbacks, so the cancel flag can't reach it. When a cancel goes unanswered for
+//! `STALLED_CANCEL_GRACE`, the caller gives up on the helper and answers `Cancelled`. The helper
+//! stays blocked until its connection fails (libgit2's server timeout or the operating system),
+//! then fails as cancelled and removes what it made; a clone that completes after the caller
+//! gave up is removed too (`TransferReporter::clone_complete`), and its token isn't saved.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 use git_core::clone::{clone_repo, CloneError, CloneOptions, CloneOutcome};
 use git_core::remote::{
@@ -14,7 +24,10 @@ use git_core::remote::{
 };
 
 use crate::credentials::{CredentialService, CredentialStore, RemoteCredentialProvider};
-use crate::worker::TransferEvent;
+use crate::worker::{TransferEvent, STALLED_CANCEL_GRACE};
+
+/// How often the caller looks at a helper that sends nothing.
+const POLL: Duration = Duration::from_millis(25);
 
 pub struct HttpsCredentialInput {
     pub username: String,
@@ -126,18 +139,108 @@ impl CredentialProvider for OneShotHttps<'_> {
     }
 }
 
-struct ChannelReporter<'a> {
-    events: &'a Sender<TransferEvent>,
-    operation_id: &'a str,
+/// Where a helper's clone is, as the caller and the helper agree on it under one lock: the
+/// caller gives up only on a clone still `Running`, and a clone is handed over only while the
+/// caller hasn't given up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Phase {
+    Running,
+    Complete,
+    Abandoned,
 }
 
-impl TransferReporter for ChannelReporter<'_> {
-    fn report(&mut self, progress: TransferProgress) {
-        let _ = self.events.send(TransferEvent::Progress(TransferProgress {
-            operation_id: self.operation_id.to_string(),
-            ..progress
-        }));
+#[derive(Clone)]
+struct SharedPhase(Arc<Mutex<Phase>>);
+
+impl SharedPhase {
+    fn new() -> Self {
+        Self(Arc::new(Mutex::new(Phase::Running)))
     }
+
+    fn lock(&self) -> MutexGuard<'_, Phase> {
+        self.0.lock().unwrap_or_else(|error| error.into_inner())
+    }
+
+    /// The helper's clone is complete: it is handed over unless the caller gave up on it.
+    fn complete(&self) -> bool {
+        let mut phase = self.lock();
+        if *phase == Phase::Abandoned {
+            return false;
+        }
+        *phase = Phase::Complete;
+        true
+    }
+
+    /// The caller gives up on a clone still running; one that is complete is about to answer.
+    fn abandon(&self) -> bool {
+        let mut phase = self.lock();
+        if *phase != Phase::Running {
+            return false;
+        }
+        *phase = Phase::Abandoned;
+        true
+    }
+}
+
+enum HelperMessage {
+    Progress(TransferProgress),
+    Done(Result<ServiceCloneOutcome, CloneError>),
+}
+
+/// Sends a helper's progress to the caller, which passes it on while it still waits. The helper
+/// never holds the caller's event channel, so an abandoned helper keeps no listener waiting.
+struct HelperReporter {
+    messages: Sender<HelperMessage>,
+    phase: SharedPhase,
+}
+
+impl TransferReporter for HelperReporter {
+    fn report(&mut self, progress: TransferProgress) {
+        let _ = self.messages.send(HelperMessage::Progress(progress));
+    }
+
+    fn clone_complete(&mut self) -> bool {
+        self.phase.complete()
+    }
+}
+
+fn helper_lost() -> CloneError {
+    CloneError::Io(std::io::Error::other("the clone thread ended unexpectedly"))
+}
+
+/// The clone with the credential provider `https` calls for, then the typed token saved when it
+/// was offered. Runs on the helper thread.
+fn clone_and_save<S: CredentialStore>(
+    service: &CredentialService<S>,
+    opts: &CloneOptions,
+    https: Option<&HttpsCredentialInput>,
+    reporter: &mut dyn TransferReporter,
+    cancel: &dyn Fn() -> bool,
+) -> Result<ServiceCloneOutcome, CloneError> {
+    let mut token_offered = false;
+    let result = match https {
+        Some(input) => {
+            let mut provider = OneShotHttps::new(input, opts.url.trim());
+            let result = clone_repo(opts, &mut provider, reporter, cancel);
+            token_offered = provider.offered;
+            result
+        }
+        None => {
+            let mut provider = RemoteCredentialProvider::new(service, None);
+            clone_repo(opts, &mut provider, reporter, cancel)
+        }
+    };
+    let outcome = result?;
+    let credential_save_failed = match https {
+        Some(input) if token_offered => {
+            persist_https(service, opts.url.trim(), &outcome, input).is_err()
+        }
+        _ => false,
+    };
+    Ok(ServiceCloneOutcome {
+        outcome,
+        credential_save_failed,
+    })
 }
 
 impl<S: CredentialStore> CloneService<S> {
@@ -212,45 +315,82 @@ impl<S: CredentialStore> CloneService<S> {
         clones.early.push_back(operation_id.to_string());
     }
 
+    /// Clones on a helper thread and waits for it (see the module docs), passing its progress
+    /// on to `events` stamped with `operation_id`.
     pub fn clone_repo(
         &self,
         operation_id: &str,
         opts: CloneOptions,
         https: Option<HttpsCredentialInput>,
         events: Sender<TransferEvent>,
-    ) -> Result<ServiceCloneOutcome, CloneError> {
+    ) -> Result<ServiceCloneOutcome, CloneError>
+    where
+        S: Send + 'static,
+    {
         let flag = self.register(operation_id);
-        let cancel = || flag.load(Ordering::Relaxed);
-        let mut reporter = ChannelReporter {
-            events: &events,
-            operation_id,
-        };
-        let service = CredentialService::new((self.new_store)());
-        let mut token_offered = false;
-        let result = match &https {
-            Some(input) => {
-                let mut provider = OneShotHttps::new(input, opts.url.trim());
-                let result = clone_repo(&opts, &mut provider, &mut reporter, &cancel);
-                token_offered = provider.offered;
-                result
-            }
-            None => {
-                let mut provider = RemoteCredentialProvider::new(&service, None);
-                clone_repo(&opts, &mut provider, &mut reporter, &cancel)
-            }
-        };
+        let result = self.run(operation_id, &flag, opts, https, &events);
         self.unregister(operation_id);
-        let outcome = result?;
-        let credential_save_failed = match &https {
-            Some(input) if token_offered => {
-                persist_https(&service, opts.url.trim(), &outcome, input).is_err()
-            }
-            _ => false,
+        result
+    }
+
+    fn run(
+        &self,
+        operation_id: &str,
+        flag: &Arc<AtomicBool>,
+        opts: CloneOptions,
+        https: Option<HttpsCredentialInput>,
+        events: &Sender<TransferEvent>,
+    ) -> Result<ServiceCloneOutcome, CloneError>
+    where
+        S: Send + 'static,
+    {
+        let phase = SharedPhase::new();
+        let (tx, rx) = mpsc::channel();
+        let store = (self.new_store)();
+        let spawned = {
+            let flag = Arc::clone(flag);
+            let phase = phase.clone();
+            std::thread::Builder::new()
+                .name("clone".to_string())
+                .spawn(move || {
+                    let cancel = || flag.load(Ordering::Relaxed);
+                    let mut reporter = HelperReporter {
+                        messages: tx.clone(),
+                        phase,
+                    };
+                    let service = CredentialService::new(store);
+                    let result =
+                        clone_and_save(&service, &opts, https.as_ref(), &mut reporter, &cancel);
+                    let _ = tx.send(HelperMessage::Done(result));
+                })
         };
-        Ok(ServiceCloneOutcome {
-            outcome,
-            credential_save_failed,
-        })
+        if spawned.is_err() {
+            return Err(helper_lost());
+        }
+        // When the caller first saw the cancel.
+        let mut cancelled_at: Option<Instant> = None;
+        loop {
+            match rx.recv_timeout(POLL) {
+                Ok(HelperMessage::Progress(progress)) => {
+                    let _ = events.send(TransferEvent::Progress(TransferProgress {
+                        operation_id: operation_id.to_string(),
+                        ..progress
+                    }));
+                }
+                Ok(HelperMessage::Done(result)) => return result,
+                Err(RecvTimeoutError::Timeout) => {}
+                // The helper panicked.
+                Err(RecvTimeoutError::Disconnected) => return Err(helper_lost()),
+            }
+            if cancelled_at.is_none() && flag.load(Ordering::Relaxed) {
+                cancelled_at = Some(Instant::now());
+            }
+            if cancelled_at.is_some_and(|at| at.elapsed() >= STALLED_CANCEL_GRACE)
+                && phase.abandon()
+            {
+                return Err(CloneError::Cancelled);
+            }
+        }
     }
 }
 

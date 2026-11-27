@@ -2917,6 +2917,16 @@ User-defined commands (epic #897) are programs the user adds to menus and the pa
   still waits is skipped too, so at most one per remote lingers. A skipped remote is a quiet
   `RemoteFailed` (`TransferFailed`). A fetch that connects, manual or background, ends the
   backoff.
+- **Clone answers a cancel within `STALLED_CANCEL_GRACE` (#1159).** A clone has no worker
+  (`repo_service::clone`), but the same stall applies: connecting, the server's "Counting
+  objects" phase of a big repository, or a connection gone silent call no libgit2 callback. The
+  clone runs on a helper thread; the caller's thread waits for it, polling, passes its progress
+  on, and gives up when the cancel goes unanswered for `STALLED_CANCEL_GRACE`, answering
+  `Cancelled`. The abandoned helper fails as cancelled once its socket fails and removes the
+  destination as any failed clone does; a clone that completes after the caller gave up is
+  removed too: git-core asks `TransferReporter::clone_complete` before handing it over, and the
+  phase (`Running` → `Complete`, or `Abandoned`) changes under one lock. The token typed in the
+  dialog is saved on the helper, only for a clone handed over.
 - Push and force push of the current branch go where `git-core::remote::push_target` resolves
   from `push.default` (unset = `simple`): `upstream`/`tracking` push to the upstream's branch,
   `current` to the local name, `simple`/`matching` only when the names match, `nothing` never.

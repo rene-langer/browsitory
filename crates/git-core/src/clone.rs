@@ -247,7 +247,9 @@ pub(crate) fn clone_repo_with(
     } else {
         Some(Vec::new())
     };
-    let Some(submodule_failures) = submodule_failures else {
+    let Some(submodule_failures) =
+        submodule_failures.filter(|_| reporter.borrow_mut().clone_complete())
+    else {
         drop(repo);
         cleanup(&opts.dest, state);
         return Err(CloneError::Cancelled);
