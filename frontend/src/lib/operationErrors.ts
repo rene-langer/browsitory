@@ -113,6 +113,9 @@ export const failedOperation = {
   commitPart: () => op("Couldn't commit this part", "Check the message and the staged changes, then commit again."),
   abortRebase: () => op("Couldn't abort the rebase", unlocked("abort again")),
   abortMerge: () => op("Couldn't abort the merge", unlocked("abort again")),
+  /** A stored or terminal cherry-pick/revert sequence (#1205); `null` when its kind isn't known. */
+  abortSequence: (kind: SequenceKind | null) =>
+    op(`Couldn't abort the ${kind === null ? "cherry-pick or revert" : kind === "CherryPick" ? "cherry-pick" : "revert"}`, unlocked("abort again")),
   /** A cherry-pick or revert that was refused before it started ("Cherry-pick of 4c5beaf", #997). */
   pick: (kind: SequenceKind, commitIds: readonly string[]) => {
     const noun = kind === "CherryPick" ? "Cherry-pick" : "Revert";
