@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { CircleAlert, CircleCheck, CircleX, Info, X, type LucideIcon } from "lucide-react";
 import { toastActions, type Toast, type ToastTone } from "../../state/useToasts";
 import styles from "./ToastRegion.module.css";
@@ -62,15 +62,34 @@ export function ToastRegion({
     onPauseChange(paused);
   }, [paused, onPauseChange]);
 
+  // A toast's own button (Undo, Dismiss) removes the toast, and the focus would drop to the page:
+  // it goes back to where it was before it entered the region (#1141).
+  const returnFocusTo = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const target = returnFocusTo.current;
+    const active = document.activeElement;
+    if (target === null || (active !== null && active !== document.body)) return;
+    returnFocusTo.current = null;
+    if (target.isConnected) target.focus({ preventScroll: true });
+  }, [toasts]);
+
   return (
     <div
       role="status"
       aria-live="polite"
       aria-label="Notifications"
       className={styles.region}
-      onFocus={() => setFocused(true)}
+      onFocus={(event) => {
+        setFocused(true);
+        const from = event.relatedTarget;
+        if (from instanceof HTMLElement && !event.currentTarget.contains(from)) returnFocusTo.current = from;
+      }}
       onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false);
+        const to = event.relatedTarget as Node | null;
+        if (event.currentTarget.contains(to)) return;
+        setFocused(false);
+        // Moved elsewhere on purpose; a removed button's blur (if any) has no target.
+        if (to !== null) returnFocusTo.current = null;
       }}
     >
       {children}
