@@ -57,6 +57,10 @@ pub enum SubmoduleError {
     /// A file to check out in the submodule uses an external filter driver (#1063); nothing changed.
     #[error(transparent)]
     ExternalFilter(#[from] crate::ExternalFilter),
+    /// The submodule's config (or, for one not cloned yet, the user's) has a conflict style
+    /// written without a value, which libgit2's checkout would crash on (#1189); nothing changed.
+    #[error(transparent)]
+    ValuelessSetting(#[from] crate::ValuelessSetting),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -180,6 +184,9 @@ fn guarded_update(
     // submodule (and fails as it would, when that isn't one).
     if !status.contains(git2::SubmoduleStatus::WD_UNINITIALIZED) {
         let sub = submodule.open()?;
+        // The checkouts below read the submodule's own config, which the superproject's
+        // refusal doesn't (#1189).
+        crate::valueless_setting::refuse_for_checkout::<SubmoduleError>(&sub)?;
         let target = submodule
             .index_id()
             .ok_or_else(|| git2::Error::from_str("could not get ID of submodule in index"))?;
@@ -221,6 +228,8 @@ fn guarded_update(
         }
         return Ok(());
     }
+    // The clone's repository has only the user's and the system's config yet (#1189).
+    crate::valueless_setting::refuse_for_new_checkout::<SubmoduleError>()?;
     let mut no_checkout = git2::build::CheckoutBuilder::new();
     no_checkout.dry_run();
     let mut options = git2::SubmoduleUpdateOptions::new();

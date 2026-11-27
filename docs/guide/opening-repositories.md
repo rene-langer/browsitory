@@ -68,7 +68,10 @@ folder and offers to open the result. The rest of this section is about the desk
   token couldn't be saved." — enter the token again later from the remote's **Manage
   credentials** action (right-click the remote in the Branches sidebar).
 
-Progress shows while cloning; **Cancel clone** stops it and removes what was downloaded.
+Progress shows while cloning; **Cancel clone** stops it and removes what was downloaded. A
+clone that gets no answer from the server (still connecting, the server still preparing a big
+repository, or the network gone) stops within a few seconds too; what it downloaded is removed
+once its connection ends.
 
 **New repository…** — pick (or create) a folder; Browsitory runs the equivalent of `git init`
 there, on your `init.defaultBranch` (or `main`), and opens it. Picking a folder that already

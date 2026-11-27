@@ -74,6 +74,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
           summary: null,
         },
       ],
+      reflogHasMore: false,
       remotes: [{ name: "origin", fetchUrl: "https://example.com/repo.git", pushUrl: null, authMode: null, authUsername: null }],
       tags: [{ name: "v1.0", targetId: "aaa", commitId: "aaa", annotated: false, message: null, taggerName: null, timestamp: null }],
       upstream: { localBranch: "main", remoteName: "origin", remoteBranch: "main" },
@@ -149,6 +150,8 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     initSubmodule: vi.fn(),
     updateSubmodule: vi.fn(),
     selectReflogReference: vi.fn(),
+    clearHistory: vi.fn(),
+    loadMoreReflog: vi.fn(),
     restoreReflogEntry: vi.fn(),
     addRemote: vi.fn(),
     renameRemote: vi.fn(),
@@ -888,8 +891,8 @@ describe("buildCommands", () => {
   });
 
   it("emits no per-entry restore-reflog commands, regardless of reflog size", () => {
-    // state.reflog is an unbounded read of the whole reflog for the selected
-    // reference — a per-entry command would grow without bound. Restoring is
+    // state.reflog holds as many entries of the selected reference's reflog as
+    // its pages loaded (#1161) — a per-entry command would grow with them. Restoring is
     // reachable only via the single "Go to Reflog" navigate command.
     const manyEntries = Array.from({ length: 500 }, (_, i) => ({
       reference: "HEAD@{0}",
@@ -1890,6 +1893,7 @@ describe("undo commands", () => {
       redoLabel: null,
       onUndo,
       onRedo: vi.fn(),
+      onClearHistory: vi.fn(),
     } });
     const undo = commands.find((c) => c.id === "undo");
     expect(undo?.label).toBe("Undo Stage a.txt");
@@ -1904,8 +1908,37 @@ describe("undo commands", () => {
       redoLabel: "x",
       onUndo: vi.fn(),
       onRedo: vi.fn(),
+      onClearHistory: vi.fn(),
     } });
     expect(commands.find((c) => c.id === "undo")).toBeUndefined();
+  });
+
+  // #1123: the undo refs keep snapshots of uncommitted and untracked files.
+  it("offers to clear the undo history, which asks first, with or without steps to undo", () => {
+    const onClearHistory = vi.fn();
+    const commands = commandsFor(makeAppState(), { undo: {
+      undoLabel: null,
+      redoLabel: null,
+      onUndo: vi.fn(),
+      onRedo: vi.fn(),
+      onClearHistory,
+    } });
+    const clear = commands.find((c) => c.id === "clear-undo-history");
+    expect(clear?.label).toBe("Clear undo history…");
+    expect(clear?.group).toBe("General");
+    clear?.run();
+    expect(onClearHistory).toHaveBeenCalledOnce();
+  });
+
+  it("omits clearing the undo history while a repository operation is running", () => {
+    const commands = commandsFor(makeAppState({ pending: true }), { undo: {
+      undoLabel: "Stage a.txt",
+      redoLabel: null,
+      onUndo: vi.fn(),
+      onRedo: vi.fn(),
+      onClearHistory: vi.fn(),
+    } });
+    expect(commands.find((c) => c.id === "clear-undo-history")).toBeUndefined();
   });
 });
 
@@ -2602,7 +2635,7 @@ const allFamilies = (appState: UseAppStateResult) =>
       requestDiscardSelection: noop,
       currentDiff: { path: "b.txt", canShowWholeFile: true, toggleWrap: noop, toggleWholeFile: noop },
     },
-    undo: { undoLabel: "commit", redoLabel: "checkout", onUndo: noop, onRedo: noop },
+    undo: { undoLabel: "commit", redoLabel: "checkout", onUndo: noop, onRedo: noop, onClearHistory: noop },
     search: { onSearchCommits: noop },
     tools: { onOpenTerminal: noop, onRevealRepository: noop, onOpenCurrentFileInEditor: noop, onOpenCurrentFileInDiffTool: noop },
     goTo: { onGoToCommit: noop, onSearchHistory: noop, onGoToBranch: noop, onGoToTag: noop, onGoToStash: noop },
@@ -2622,7 +2655,7 @@ function groupOf(id: string): CommandGroup {
 // by id, so a builder must keep the ids, and each group is now declared by the builder instead of
 // derived from the id. #583 and #592 moved the remote, diff and tag commands that had fallen
 // under "General" into their family's group. #621 added "stage-modified-files" since, #619
-// "rebase-onto-branch:<name>".
+// "rebase-onto-branch:<name>", #1123 "clear-undo-history".
 describe("command ids and groups", () => {
   const EXPECTED: Record<keyof typeof STATES, [string, CommandGroup][]> = {
     normal: [
@@ -2688,6 +2721,7 @@ describe("command ids and groups", () => {
       ["push-branch:origin", "Remotes"],
       ["push-tags:origin", "Tags"],
       ["redo", "General"],
+      ["clear-undo-history", "General"],
       ["refresh", "General"],
       ["toggle-collapse-merges", "General"],
       ["remove-remote:origin", "Remotes"],
@@ -2940,6 +2974,7 @@ describe("command ids and groups", () => {
       ["push-branch:origin", "Remotes"],
       ["push-tags:origin", "Tags"],
       ["redo", "General"],
+      ["clear-undo-history", "General"],
       ["refresh", "General"],
       ["toggle-collapse-merges", "General"],
       ["remove-remote:origin", "Remotes"],

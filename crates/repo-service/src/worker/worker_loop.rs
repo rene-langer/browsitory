@@ -37,7 +37,8 @@ pub(super) struct WorkerLoop<S: CredentialStore, A: ForgeApi> {
     // Shared with background fetch helpers (see `background_fetch`).
     credential_service: Arc<CredentialService<S>>,
     background_memory: background_fetch::Memory,
-    pull_request_service: PullRequestService<A>,
+    // Shared with the forge request threads (`forge::list_pull_requests`, #1160).
+    pull_request_service: Arc<PullRequestService<A>>,
     undo_recorder: undo::UndoRecorder,
     operations: Operations,
     // The clean merge this worker staged, so its commit runs `git merge`'s hooks
@@ -122,7 +123,7 @@ struct UndoTurn {
 impl<S, A> WorkerLoop<S, A>
 where
     S: CredentialStore + Send + Sync + 'static,
-    A: ForgeApi + Send + 'static,
+    A: ForgeApi + Send + Sync + 'static,
 {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
@@ -138,7 +139,7 @@ where
     ) -> Self {
         let credential_service = Arc::new(CredentialService::new(credential_store));
         let background_memory = background_fetch::Memory::default();
-        let pull_request_service = PullRequestService::new(forge_api);
+        let pull_request_service = Arc::new(PullRequestService::new(forge_api));
         let undo_recorder = undo::UndoRecorder::open(&repo);
         let sequence_store = SequenceStore::open(&repo);
         let rebase_store = RebaseStore::open(&repo);

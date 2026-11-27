@@ -777,12 +777,12 @@ describe("vscodeRepoClient", () => {
     respond(1, ["HEAD"]);
     await expect(refsPromise).resolves.toEqual(["HEAD"]);
 
-    const reflogPromise = vscodeRepoClient.getReflog("/repo", "HEAD");
+    const reflogPromise = vscodeRepoClient.getReflog("/repo", "HEAD", 201);
     expect(postMessage).toHaveBeenCalledWith({
       jsonrpc: "2.0",
       id: 2,
       method: "get_reflog",
-      params: { repoPath: "/repo", reference: "HEAD" },
+      params: { repoPath: "/repo", reference: "HEAD", limit: 201 },
     });
     respond(2, [
       {

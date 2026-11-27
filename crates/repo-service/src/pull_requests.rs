@@ -173,9 +173,16 @@ impl<T: ForgeApi + ?Sized> ForgeApi for &T {
     }
 }
 
-/// `reqwest`'s blocking client, matching this codebase's synchronous worker-thread model (see
-/// `crates/repo-service/src/worker/mod.rs` — one `thread::spawn`-owned thread per open
-/// repository, no tokio runtime anywhere in this crate).
+/// How long a forge request may take to connect (#1160): an unreachable host fails well before
+/// the whole request's limit.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a forge request may take in all.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// `reqwest`'s blocking client, matching this codebase's synchronous thread model (see
+/// `crates/repo-service/src/worker/mod.rs`: one `thread::spawn`-owned thread per open
+/// repository, no tokio runtime anywhere in this crate). Each request runs on a thread of its
+/// own that the worker doesn't wait for (`worker::forge`, #1160).
 ///
 /// The inner client is built lazily, on first use, rather than in `new()`. `Worker::spawn`
 /// constructs a `ReqwestForgeApi` on the *caller's* thread (before handing it off to the
@@ -185,8 +192,8 @@ impl<T: ForgeApi + ?Sized> ForgeApi for &T {
 /// internal tokio runtime as part of construction, which panics ("Cannot drop a runtime in a
 /// context where blocking is not allowed") if it happens while already inside another tokio
 /// runtime's async context — exactly `Worker::spawn`'s caller. Deferring the real `build()` call
-/// to first `send()` moves it onto the worker OS thread instead (the only place `send()` is ever
-/// called), which has no tokio runtime at all, matching this struct's doc comment above.
+/// to first `send()` moves it onto a forge request thread instead (the only place `send()` is
+/// ever called), which has no tokio runtime at all, matching this struct's doc comment above.
 pub struct ReqwestForgeApi {
     client: std::sync::OnceLock<Result<reqwest::blocking::Client, ()>>,
 }
@@ -203,7 +210,8 @@ impl ReqwestForgeApi {
             .get_or_init(|| {
                 install_crypto_provider();
                 reqwest::blocking::Client::builder()
-                    .timeout(Duration::from_secs(30))
+                    .connect_timeout(CONNECT_TIMEOUT)
+                    .timeout(REQUEST_TIMEOUT)
                     .build()
                     .map_err(|_| ())
             })

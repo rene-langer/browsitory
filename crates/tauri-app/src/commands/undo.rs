@@ -38,3 +38,14 @@ pub async fn redo_last(
             .await?,
     ))
 }
+
+/// Forgets the repository's undo history and removes the refs that keep its snapshots (#1123).
+#[tauri::command]
+pub async fn clear_undo_history(
+    repo_path: String,
+    state: State<'_, AppState>,
+) -> Result<(), ErrorDto> {
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.clear_undo_history())
+        .await
+}

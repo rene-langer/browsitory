@@ -700,6 +700,22 @@ impl UndoRecorder {
         Ok(UndoOutcome::Done { label })
     }
 
+    /// Forgets the whole history, a paused operation's entry included, and removes the refs that
+    /// keep its snapshots (#1123): their trees hold uncommitted, untracked and discarded file
+    /// contents, which anything that copies every ref (a mirror push, an all-refs bundle, a
+    /// mirror clone) would carry along. Under the caller's guard, or the lock taken within
+    /// `LOCK_WAIT`; `UNDO_BUSY` (nothing changed) while another holder keeps it. A history written
+    /// by a newer version is never overwritten, so it is refused too.
+    pub fn clear(&mut self, repo: &Repository, guard: Option<&StateGuard>) -> Result<(), ErrorDto> {
+        let Some(_exclusive) = self.exclusive(guard, LOCK_WAIT) else {
+            return Err(UNDO_BUSY.into());
+        };
+        let cleared = UndoStacks::default();
+        self.store.save(repo, &cleared)?;
+        self.stacks = cleared;
+        Ok(())
+    }
+
     /// A failed save never fails the user's command. When the file was written by a newer
     /// version the in-memory stacks are this session's history (see `reload`); after a transient
     /// failure the next locked write reloads the file first, so this entry may be lost but the
@@ -824,6 +840,12 @@ impl WorkerHandle {
 
     pub fn redo(&self) -> Result<UndoOutcome, ErrorDto> {
         self.request(|reply| Command::Redo { reply })
+    }
+
+    /// Forgets this worktree's undo and redo history and removes the refs that keep its
+    /// snapshots (#1123).
+    pub fn clear_undo_history(&self) -> Result<(), ErrorDto> {
+        self.request(|reply| Command::ClearUndoHistory { reply })
     }
 }
 

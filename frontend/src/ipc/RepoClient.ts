@@ -715,6 +715,8 @@ export type CloneErrorKind =
   | "CasePair"
   | "CaseConfig"
   | "FileInUse"
+  // A conflict style written without a value in the user's or the system's Git config (#1189).
+  | "ValuelessSetting"
   | TransferErrorKind;
 
 /** Clone/init failure; the backend sends `{ kind, message }` so callers can branch on `kind`. */
@@ -1655,7 +1657,8 @@ export interface RepoClient {
   initSubmodule(repoPath: string, path: string): Promise<void>;
   updateSubmodule(repoPath: string, path: string, recursive: boolean): Promise<void>;
   listReflogRefs(repoPath: string): Promise<string[]>;
-  getReflog(repoPath: string, reference: string): Promise<ReflogEntry[]>;
+  /** The newest `limit` entries of `reference`'s reflog, newest first (#1161). */
+  getReflog(repoPath: string, reference: string, limit: number): Promise<ReflogEntry[]>;
   restoreReflogEntry(repoPath: string, reference: string, newId: string): Promise<void>;
   listRemotes(repoPath: string): Promise<RemoteInfo[]>;
   listRemoteBranches(repoPath: string, remoteName: string): Promise<string[]>;
@@ -1807,6 +1810,11 @@ export interface RepoClient {
   /** Refusals (`Nothing`, `RepositoryChanged`, `BranchHeld`, `FileNotSaved`, `OperationInProgress`) resolve; only real failures reject. */
   undo(repoPath: string): Promise<UndoOutcome>;
   redo(repoPath: string): Promise<UndoOutcome>;
+  /**
+   * Forgets the undo and redo history of the repository (its open worktree) and removes the refs
+   * that keep its snapshots of uncommitted, untracked and discarded files (#1123).
+   */
+  clearUndoHistory(repoPath: string): Promise<void>;
   /** `mainline` (1-based parent) is required for a merge commit and refused for any other. */
   cherryPick(repoPath: string, commitId: string, mainline?: number | null): Promise<PickOutcome>;
   revertCommit(repoPath: string, commitId: string, mainline?: number | null): Promise<PickOutcome>;

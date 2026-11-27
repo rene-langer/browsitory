@@ -327,7 +327,14 @@ references, the stash list, the configuration, the operation files and the linke
 expanded merges, branches with ahead/behind, tags, the current and every remote's upstreams) when
 their key, the `refs` part plus the graph selection, "Collapse merges" and the limit, equals the
 one they were read with, so staging, unstaging, discarding or editing a file re-reads only the
-status, the stashes, the worktree, submodule and remote lists, HEAD and undo state. The Refresh
+status, the stashes, the worktree, submodule and remote lists, HEAD and undo state. The selected
+reflog goes with the history reads (#1161): it is kept when they are and it was read for the same
+reference and number of entries. It is read in pages, newest first (`get_reflog(reference,
+limit)`, `git_core::reflog::read_reflog_newest`: only the entries sent get their commit's
+summary looked up); the frontend asks for one entry more than it shows to know whether older
+ones follow, and **Load more** reads `REFLOG_PAGE_SIZE` (200) more. A reflog that changes
+without a ref moving (`git reflog expire` in a terminal) shows on the next Refresh command or
+ref change. The Refresh
 command (`refresh({ full: true })`), a failed refresh and a missing stamp read everything.
 `AppState.historyGeneration` advances only for a refresh that read the history again or failed
 (#1118), while `refreshGeneration` advances for every one: the open working-tree diffs follow the
@@ -930,8 +937,13 @@ menu's choice runs back through the session: the pick, the parent picker or a se
   `merge.conflictstyle` (`refuse_for_checkout`) at the start of every command that merges or
   checks out. The leftover check that compares HEAD with an in-memory pick or revert
   (`head_info`, Commit) counts the operation as still paused instead (`can_merge_in_memory`).
-  Clone and Update submodule read only the new or the submodule's repository and the user's
-  config there, and aren't guarded yet (#1189).
+  Clone and Update submodule check out in another repository (#1189): a clone, and a
+  submodule's first clone, refuse a valueless conflict style in the user's and the system's
+  config (`Config::open_default`, all the new repository has; `refuse_for_new_checkout`, before
+  the destination is made); Update submodule of a checked-out one refuses it in the submodule's
+  own repository (`refuse_for_checkout` on it). A clone's refusal crosses IPC as the
+  `CloneError` kind `ValuelessSetting`. The refusal names the level the setting is in, with the
+  `git config` flag that edits it (`--global` for the global and XDG files, `--system`).
 - **Branch and remote sections**: libgit2's `git_config_rename_section` picks a section's
   settings with the unanchored pattern `<section>\..+`, in every config file: deleting branch
   `a` removed branch `a.b`'s settings, renaming remote `origin` garbled
@@ -1106,9 +1118,14 @@ across processes).
 ### Forge HTTP client
 
 The pull-request adapters talk to GitHub and Bitbucket through `ReqwestForgeApi`
-(`crates/repo-service/src/pull_requests.rs`), a blocking `reqwest` client. It is built lazily
-on the worker thread at its first request, because building it inside Tauri's tokio runtime
-panics. TLS is rustls with the ring crypto provider. reqwest is built with
+(`crates/repo-service/src/pull_requests.rs`), a blocking `reqwest` client with a 10 s connect
+and a 30 s total timeout. The worker only resolves the remote and reads the token; the request
+itself runs on a thread of its own (`worker/forge.rs`, #1160), so a forge that doesn't answer
+never holds the repository's commands for the timeout. Nothing waits for a listing but its
+caller; a create is noted in the operation log when it answers, so the worker waits for it and
+serves the read lane's commands meanwhile, as during a transfer. The client is built lazily on
+such a thread at its first request, because building it inside Tauri's tokio runtime panics.
+TLS is rustls with the ring crypto provider. reqwest is built with
 `rustls-no-provider`, so the client installs ring as rustls's process-wide default once, before
 its first build; if something else installed a provider first (Tauri's updater installs ring
 too), that one stays. Server certificates are checked against the operating system's
@@ -1301,6 +1318,15 @@ certificate.
   worktree), an anchor commit visible in `git log --all`, plus
   `refs/browsitory/undo-keep/main/<n>` / `refs/browsitory/undo-keep/wt/<name>/<n>` refs for
   non-commit objects such as tag objects.
+- **Clear undo history (#1123)**: the anchor's tree holds the snapshots (uncommitted,
+  untracked and discarded file contents) and its parents deleted and rewritten history, so
+  anything that copies every ref (`git push --mirror`, `git bundle --all`, `git clone
+  --mirror`) carries them; the owner chose documentation and a command over another storage
+  format. `ClearUndoHistory` (palette "Clear undo history…", with a confirmation) runs under the
+  state lock like Undo (`UNDO_BUSY` when another holder keeps it), saves empty stacks (the
+  pending entry of a paused operation too), which deletes the open worktree's anchor and keep
+  refs, and refuses an `undo.json` written by a newer version. Other worktrees keep theirs.
+  Noted in the operation log as "Clear undo history".
 - **Known cost**: commands that touch the working tree hash every dirty/untracked file up to
   the size limit into the object database (before and after the command), so many or large
   untracked files make those commands slower and grow `.git` until gc after the entry ages out.
@@ -3092,6 +3118,16 @@ User-defined commands (epic #897) are programs the user adds to menus and the pa
   still waits is skipped too, so at most one per remote lingers. A skipped remote is a quiet
   `RemoteFailed` (`TransferFailed`). A fetch that connects, manual or background, ends the
   backoff.
+- **Clone answers a cancel within `STALLED_CANCEL_GRACE` (#1159).** A clone has no worker
+  (`repo_service::clone`), but the same stall applies: connecting, the server's "Counting
+  objects" phase of a big repository, or a connection gone silent call no libgit2 callback. The
+  clone runs on a helper thread; the caller's thread waits for it, polling, passes its progress
+  on, and gives up when the cancel goes unanswered for `STALLED_CANCEL_GRACE`, answering
+  `Cancelled`. The abandoned helper fails as cancelled once its socket fails and removes the
+  destination as any failed clone does; a clone that completes after the caller gave up is
+  removed too: git-core asks `TransferReporter::clone_complete` before handing it over, and the
+  phase (`Running` → `Complete`, or `Abandoned`) changes under one lock. The token typed in the
+  dialog is saved on the helper, only for a clone handed over.
 - Push and force push of the current branch go where `git-core::remote::push_target` resolves
   from `push.default` (unset = `simple`): `upstream`/`tracking` push to the upstream's branch,
   `current` to the local name, `simple`/`matching` only when the names match, `nothing` never.

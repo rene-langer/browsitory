@@ -68,6 +68,7 @@ pub use hooks::{HookEvent, HookSource};
 pub use patch::{CommitChange, PatchSource};
 pub use rebase::{HistoryEdit, HistoryEditKind};
 pub use registry::{repo_key, WorkerRegistry};
+pub(crate) use transfer_thread::STALLED_CANCEL_GRACE;
 pub use undo::{UndoOutcome, UndoState};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -461,6 +462,8 @@ pub(crate) enum Command {
     },
     GetReflog {
         reference: String,
+        /// The newest entries to read (#1161).
+        limit: usize,
         reply: Sender<Result<Vec<ReflogEntry>, ErrorDto>>,
     },
     RestoreReflogEntry {
@@ -901,6 +904,10 @@ pub(crate) enum Command {
     Redo {
         reply: Sender<Result<UndoOutcome, ErrorDto>>,
     },
+    /// Forgets the undo history and removes its refs (#1123).
+    ClearUndoHistory {
+        reply: Sender<Result<(), ErrorDto>>,
+    },
 }
 
 pub use cancel::CancelRegistry;
@@ -989,7 +996,7 @@ impl Worker {
     fn spawn_with<S, A>(path: PathBuf, credential_store: S, forge_api: A) -> Result<Self, String>
     where
         S: CredentialStore + Send + Sync + 'static,
-        A: ForgeApi + Send + 'static,
+        A: ForgeApi + Send + Sync + 'static,
     {
         Self::spawn_paused(path, credential_store, forge_api, None)
     }
@@ -1029,7 +1036,7 @@ impl Worker {
     ) -> Result<Self, String>
     where
         S: CredentialStore + Send + Sync + 'static,
-        A: ForgeApi + Send + 'static,
+        A: ForgeApi + Send + Sync + 'static,
     {
         let repo_path = path;
         let repo = git_core::repo::open(&repo_path).map_err(|error| error.to_string())?;

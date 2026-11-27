@@ -312,6 +312,8 @@ export function RepoWorkspace({
   const [discardRequest, setDiscardRequest] = useState<DiscardRequest | null>(null);
   // The operation strip's "Go to conflict" (#665): the working tree shows its first conflict.
   const [conflictRequest, setConflictRequest] = useState(false);
+  // The palette's Clear undo history asks first (#1123).
+  const [clearUndoOpen, setClearUndoOpen] = useState(false);
   const goToConflict = useCallback(() => {
     appState.selectRow("uncommitted");
     setConflictRequest(true);
@@ -742,6 +744,7 @@ export function RepoWorkspace({
         redoLabel: appState.state.undoState.redo,
         onUndo: handleUndo,
         onRedo: handleRedo,
+        onClearHistory: () => setClearUndoOpen(true),
       },
       search: { onSearchCommits: requestSearchFocus },
       tools: {
@@ -1003,6 +1006,29 @@ export function RepoWorkspace({
                   }),
           }}
           onClose={() => setOperationLog(null)}
+        />
+      )}
+      {active && clearUndoOpen && (
+        <ConfirmDialog
+          title="Clear undo history"
+          message={
+            <>
+              <p>
+                Undo and Redo keep copies of your uncommitted and untracked files, and of changes you discarded, in
+                this repository. A mirror push, a bundle of all refs or a mirror clone copies them too.
+              </p>
+              <p>Clear the undo history of this repository? Undo and Redo then have nothing to go back to.</p>
+              <p>This can't be undone.</p>
+            </>
+          }
+          confirmLabel="Clear undo history"
+          tone="danger"
+          confirmDisabled={discardDropBlockedReason !== null}
+          confirmReason={discardDropBlockedReason}
+          onConfirm={() => {
+            void appState.clearHistory().then(() => setClearUndoOpen(false));
+          }}
+          onCancel={() => setClearUndoOpen(false)}
         />
       )}
       {active && userCommandRunner.confirming !== null && (

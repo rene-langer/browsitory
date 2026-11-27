@@ -313,8 +313,8 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
     updateSubmodule: (repoPath: string, path: string, recursive: boolean) =>
       call<void>("update_submodule", { repoPath, path, recursive }),
     listReflogRefs: (repoPath: string) => call<string[]>("list_reflog_refs", { repoPath }),
-    getReflog: (repoPath: string, reference: string) =>
-      call<ReflogEntry[]>("get_reflog", { repoPath, reference }),
+    getReflog: (repoPath: string, reference: string, limit: number) =>
+      call<ReflogEntry[]>("get_reflog", { repoPath, reference, limit }),
     restoreReflogEntry: (repoPath: string, reference: string, newId: string) =>
       call<void>("restore_reflog_entry", { repoPath, reference, newId }),
     listRemotes: (repoPath: string) => call<RemoteInfo[]>("list_remotes", { repoPath }),
@@ -441,6 +441,7 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
     getUndoState: (repoPath: string) => call<UndoState>("get_undo_state", { repoPath }),
     undo: (repoPath: string) => call<UndoOutcome>("undo_last", { repoPath }),
     redo: (repoPath: string) => call<UndoOutcome>("redo_last", { repoPath }),
+    clearUndoHistory: (repoPath: string) => call<void>("clear_undo_history", { repoPath }),
     cherryPick: (repoPath: string, commitId: string, mainline?: number | null) =>
       call<PickOutcome>("cherry_pick", { repoPath, commitId, mainline: mainline ?? null }),
     revertCommit: (repoPath: string, commitId: string, mainline?: number | null) =>

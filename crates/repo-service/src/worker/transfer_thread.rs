@@ -37,9 +37,9 @@ use crate::credentials::{CredentialService, CredentialStore, RemoteCredentialPro
 /// How often the worker looks at a connecting helper.
 const POLL: Duration = Duration::from_millis(25);
 
-/// How long a transfer that connected may leave the user's cancel unanswered before the worker
-/// gives up on it as stalled (#1064).
-const STALLED_CANCEL_GRACE: Duration = Duration::from_secs(2);
+/// How long a transfer that connected (or a clone, #1159) may leave the user's cancel unanswered
+/// before the worker gives up on it as stalled (#1064).
+pub(crate) const STALLED_CANCEL_GRACE: Duration = Duration::from_secs(2);
 
 /// What the worker lends a transfer: its repository, and the queued reads it serves while it
 /// waits (see the module docs).

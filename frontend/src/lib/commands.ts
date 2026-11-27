@@ -63,6 +63,8 @@ export interface UndoCommands {
   redoLabel: string | null;
   onUndo: () => void;
   onRedo: () => void;
+  /** Opens the confirmation that clears the undo history (#1123). */
+  onClearHistory: () => void;
 }
 
 /**
@@ -594,6 +596,13 @@ function undoCommands({ undo, blocked }: FamilyContext): Command[] {
   if (undo.redoLabel !== null) {
     add({ id: "redo", label: `Redo ${undo.redoLabel}`, keywords: ["redo", "again"], run: undo.onRedo });
   }
+  // Offered with nothing to undo too: a paused operation's entry, or refs another window left.
+  add({
+    id: "clear-undo-history",
+    label: "Clear undo history…",
+    keywords: ["undo", "redo", "history", "forget", "delete", "privacy", "mirror"],
+    run: undo.onClearHistory,
+  });
   return commands;
 }
 

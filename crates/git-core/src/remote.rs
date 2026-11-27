@@ -250,6 +250,13 @@ pub trait TransferReporter {
     fn writing(&mut self) -> bool {
         true
     }
+
+    /// Told once a clone is complete, before it is handed over (#1159). `false` removes it
+    /// again, as `Cancelled`. A caller waiting on another thread uses it to give up on a clone
+    /// that stalled without one that just finished being left behind.
+    fn clone_complete(&mut self) -> bool {
+        true
+    }
 }
 
 pub trait CredentialProvider {

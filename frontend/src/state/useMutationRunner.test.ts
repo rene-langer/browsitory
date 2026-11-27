@@ -32,6 +32,7 @@ const BASE_STATE: AppState = {
   reflogRefs: [],
   selectedReflogReference: null,
   reflog: [],
+  reflogHasMore: false,
   remotes: [],
   tags: [],
   upstream: null,

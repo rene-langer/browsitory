@@ -64,6 +64,18 @@ pub enum CloneError {
     /// Windows: a checkout stopped at a file another program holds open (#303).
     #[error(transparent)]
     HeldOpen(#[from] crate::HeldOpen),
+    /// The user's or the system's config has a conflict style written without a value, which
+    /// libgit2's checkout of the new repository would crash on (#1189); nothing was made.
+    #[error(transparent)]
+    ValuelessSetting(#[from] crate::ValuelessSetting),
+}
+
+impl From<git2::Error> for CloneError {
+    fn from(error: git2::Error) -> Self {
+        let message = error.message().to_string();
+        let kind = RemoteError::Git(error).transfer_error_kind();
+        CloneError::Transfer { kind, message }
+    }
 }
 
 /// User-typed clone URLs may point at a local repository, so unlike submodule URLs `file://`
@@ -168,6 +180,7 @@ pub(crate) fn clone_repo_with(
     if cancel() {
         return Err(CloneError::Cancelled);
     }
+    crate::valueless_setting::refuse_for_new_checkout::<CloneError>()?;
     let state = prepare_dest(&opts.dest)?;
 
     let credentials = RefCell::new(credentials);
@@ -234,7 +247,9 @@ pub(crate) fn clone_repo_with(
     } else {
         Some(Vec::new())
     };
-    let Some(submodule_failures) = submodule_failures else {
+    let Some(submodule_failures) =
+        submodule_failures.filter(|_| reporter.borrow_mut().clone_complete())
+    else {
         drop(repo);
         cleanup(&opts.dest, state);
         return Err(CloneError::Cancelled);
@@ -478,6 +493,58 @@ mod tests {
         assert!(phases.0.contains(&TransferPhase::Updating));
         let repo = Repository::open(&dest).unwrap();
         assert!(crate::status::status(&repo).unwrap().is_empty());
+    }
+
+    /// A caller that gave up on the clone, which only learns that once the clone is complete.
+    struct GaveUp {
+        asked: usize,
+    }
+    impl TransferReporter for GaveUp {
+        fn report(&mut self, _event: TransferProgress) {}
+        fn clone_complete(&mut self) -> bool {
+            self.asked += 1;
+            false
+        }
+    }
+
+    /// #1159: a complete clone whose caller gave up on it is removed, not handed over: a folder
+    /// it made goes, one the user picked stays, emptied.
+    #[test]
+    fn a_complete_clone_the_caller_gave_up_on_is_removed() {
+        let src = source(false);
+        let parent = TempDir::new().unwrap();
+        let created = parent.path().join("created");
+        let mut reporter = GaveUp { asked: 0 };
+        let error = clone(src.path(), created.clone(), &mut reporter, &|| false).unwrap_err();
+        assert!(matches!(error, CloneError::Cancelled), "{error}");
+        assert_eq!(reporter.asked, 1);
+        assert!(!created.exists());
+
+        let existing = parent.path().join("existing");
+        std::fs::create_dir(&existing).unwrap();
+        let error = clone(src.path(), existing.clone(), &mut reporter, &|| false).unwrap_err();
+        assert!(matches!(error, CloneError::Cancelled), "{error}");
+        assert_eq!(std::fs::read_dir(&existing).unwrap().count(), 0);
+    }
+
+    /// A caller that keeps waiting gets the clone.
+    #[test]
+    fn a_complete_clone_is_handed_over_when_the_caller_still_waits() {
+        struct Waits(usize);
+        impl TransferReporter for Waits {
+            fn report(&mut self, _event: TransferProgress) {}
+            fn clone_complete(&mut self) -> bool {
+                self.0 += 1;
+                true
+            }
+        }
+        let src = source(false);
+        let parent = TempDir::new().unwrap();
+        let dest = parent.path().join("clone");
+        let mut reporter = Waits(0);
+        clone(src.path(), dest.clone(), &mut reporter, &|| false).unwrap();
+        assert_eq!(reporter.0, 1);
+        assert!(dest.join("a.txt").exists());
     }
 
     /// Windows: the clone's checkout stopping at a file another program holds open is

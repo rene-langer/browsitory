@@ -18,3 +18,9 @@ pub(super) fn redo_last(params: RepoPathParams, repos: &Repos) -> Result<Value, 
     let result = worker_handle(repos, &params.repo_path)?.redo()?;
     serde_json::to_value(UndoOutcomeDto::from(result)).map_err(ErrorDto::from_error)
 }
+
+/// #1123
+pub(super) fn clear_undo_history(params: RepoPathParams, repos: &Repos) -> Result<Value, ErrorDto> {
+    worker_handle(repos, &params.repo_path)?.clear_undo_history()?;
+    Ok(Value::Null)
+}

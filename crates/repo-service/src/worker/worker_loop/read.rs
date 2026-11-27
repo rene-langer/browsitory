@@ -226,7 +226,11 @@ pub(super) fn dispatch(
         Command::ListWorktrees { reply } => worktree::list(repo, reply),
         Command::ListSubmodules { reply } => submodule::list(repo, reply),
         Command::ListReflogRefs { reply } => reflog::list_refs(repo, reply),
-        Command::GetReflog { reference, reply } => reflog::get(repo, reference, reply),
+        Command::GetReflog {
+            reference,
+            limit,
+            reply,
+        } => reflog::get(repo, reference, limit, reply),
         Command::ListRemotes { reply } => remote::list(repo, reply),
         Command::ListRemoteBranches { remote_name, reply } => {
             remote::list_branches(repo, remote_name, reply)

@@ -61,7 +61,18 @@ pub fn list_reflog_refs(repo: &Repository) -> Result<Vec<String>, ReflogError> {
     Ok(references)
 }
 
+/// Every entry of `reference`'s reflog, newest first.
 pub fn read_reflog(repo: &Repository, reference: &str) -> Result<Vec<ReflogEntry>, ReflogError> {
+    read_reflog_newest(repo, reference, usize::MAX)
+}
+
+/// The newest `limit` entries of `reference`'s reflog, newest first (#1161). Only those are
+/// looked up for their commit's summary: `HEAD`'s reflog can hold hundreds of thousands.
+pub fn read_reflog_newest(
+    repo: &Repository,
+    reference: &str,
+    limit: usize,
+) -> Result<Vec<ReflogEntry>, ReflogError> {
     validate_reference(reference)?;
 
     if !repo.reference_has_log(reference)? {
@@ -70,6 +81,7 @@ pub fn read_reflog(repo: &Repository, reference: &str) -> Result<Vec<ReflogEntry
 
     repo.reflog(reference)?
         .iter()
+        .take(limit)
         .map(|entry| {
             let committer = entry.committer();
             let new_id = entry.id_new();

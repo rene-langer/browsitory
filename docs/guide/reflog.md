@@ -11,7 +11,10 @@ its message, then the short old and new commit IDs, who made the change and when
 time and the commit's summary. **Restore** at the end of the row moves the reference back to
 that entry's new ID, after you confirm with **Restore ⟨branch⟩**; **Undo** moves it back. A long
 reflog scrolls smoothly: only the entries in
-view are drawn.
+view are drawn. The section reads the newest 200 entries; when there are older ones, "Showing
+the latest 200 entries" and **Load more** below the list read 200 more each time. The entries
+are read again only when a branch, tag or HEAD moves (or with **Refresh**), not after staging
+or editing a file.
 
 Like `git branch -f`, Restore refuses a branch that another worktree has checked out
 ("branch 'topic' is checked out in another worktree at '/work/topic'"), and a branch that a

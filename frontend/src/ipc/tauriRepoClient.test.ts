@@ -230,13 +230,14 @@ describe("tauriRepoClient reflog", () => {
     vi.mocked(invoke).mockResolvedValue(undefined);
 
     await tauriRepoClient.listReflogRefs(TEST_REPO_PATH);
-    await tauriRepoClient.getReflog(TEST_REPO_PATH, "HEAD");
+    await tauriRepoClient.getReflog(TEST_REPO_PATH, "HEAD", 201);
     await tauriRepoClient.restoreReflogEntry(TEST_REPO_PATH, "HEAD", "0123456789abcdef");
 
     expect(invoke).toHaveBeenNthCalledWith(1, "list_reflog_refs", { repoPath: TEST_REPO_PATH });
     expect(invoke).toHaveBeenNthCalledWith(2, "get_reflog", {
       repoPath: TEST_REPO_PATH,
       reference: "HEAD",
+      limit: 201,
     });
     expect(invoke).toHaveBeenNthCalledWith(3, "restore_reflog_entry", {
       repoPath: TEST_REPO_PATH,

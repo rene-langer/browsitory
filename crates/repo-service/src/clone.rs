@@ -1,12 +1,22 @@
 //! Repo-less clone jobs. A clone has no repository (and so no per-repo worker) until it
-//! finishes, so it runs here: one call per clone on the caller's thread, with its own cancel
-//! registry. Progress goes out as `TransferEvent::Progress` only — never `Started`/`Completed`,
-//! which an open repo tab's pending fetch/push would adopt as its own transfer.
+//! finishes, so it runs here: one call per clone, with its own cancel registry. Progress goes out
+//! as `TransferEvent::Progress` only — never `Started`/`Completed`, which an open repo tab's
+//! pending fetch/push would adopt as its own transfer.
+//!
+//! The clone runs on a helper thread and the caller's thread waits for it (#1159), as a fetch
+//! does on the worker (`worker::transfer_thread`): a clone still connecting, or one whose server
+//! went silent (preparing a big pack, or the network gone without a reset), calls none of
+//! libgit2's callbacks, so the cancel flag can't reach it. When a cancel goes unanswered for
+//! `STALLED_CANCEL_GRACE`, the caller gives up on the helper and answers `Cancelled`. The helper
+//! stays blocked until its connection fails (libgit2's server timeout or the operating system),
+//! then fails as cancelled and removes what it made; a clone that completes after the caller
+//! gave up is removed too (`TransferReporter::clone_complete`), and its token isn't saved.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 use git_core::clone::{clone_repo, CloneError, CloneOptions, CloneOutcome};
 use git_core::remote::{
@@ -14,7 +24,10 @@ use git_core::remote::{
 };
 
 use crate::credentials::{CredentialService, CredentialStore, RemoteCredentialProvider};
-use crate::worker::TransferEvent;
+use crate::worker::{TransferEvent, STALLED_CANCEL_GRACE};
+
+/// How often the caller looks at a helper that sends nothing.
+const POLL: Duration = Duration::from_millis(25);
 
 pub struct HttpsCredentialInput {
     pub username: String,
@@ -126,17 +139,118 @@ impl CredentialProvider for OneShotHttps<'_> {
     }
 }
 
-struct ChannelReporter<'a> {
-    events: &'a Sender<TransferEvent>,
-    operation_id: &'a str,
+/// Where a helper's clone is, as the caller and the helper agree on it under one lock: the
+/// caller gives up only on a clone still `Running`, and a clone is handed over only while the
+/// caller hasn't given up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Phase {
+    Running,
+    Complete,
+    Abandoned,
 }
 
-impl TransferReporter for ChannelReporter<'_> {
+#[derive(Clone)]
+struct SharedPhase(Arc<Mutex<Phase>>);
+
+impl SharedPhase {
+    fn new() -> Self {
+        Self(Arc::new(Mutex::new(Phase::Running)))
+    }
+
+    fn lock(&self) -> MutexGuard<'_, Phase> {
+        self.0.lock().unwrap_or_else(|error| error.into_inner())
+    }
+
+    /// The helper's clone is complete: it is handed over unless the caller gave up on it.
+    fn complete(&self) -> bool {
+        let mut phase = self.lock();
+        if *phase == Phase::Abandoned {
+            return false;
+        }
+        *phase = Phase::Complete;
+        true
+    }
+
+    /// The caller gives up on a clone still running; one that is complete is about to answer.
+    fn abandon(&self) -> bool {
+        let mut phase = self.lock();
+        if *phase != Phase::Running {
+            return false;
+        }
+        *phase = Phase::Abandoned;
+        true
+    }
+}
+
+enum HelperMessage {
+    Progress(TransferProgress),
+    Done(Result<ServiceCloneOutcome, CloneError>),
+}
+
+/// Sends a helper's progress to the caller, which passes it on while it still waits. The helper
+/// never holds the caller's event channel, so an abandoned helper keeps no listener waiting.
+struct HelperReporter {
+    messages: Sender<HelperMessage>,
+    phase: SharedPhase,
+}
+
+impl TransferReporter for HelperReporter {
     fn report(&mut self, progress: TransferProgress) {
-        let _ = self.events.send(TransferEvent::Progress(TransferProgress {
-            operation_id: self.operation_id.to_string(),
-            ..progress
-        }));
+        let _ = self.messages.send(HelperMessage::Progress(progress));
+    }
+
+    fn clone_complete(&mut self) -> bool {
+        self.phase.complete()
+    }
+}
+
+fn helper_lost() -> CloneError {
+    CloneError::Io(std::io::Error::other("the clone thread ended unexpectedly"))
+}
+
+/// The clone with the credential provider `https` calls for, then the typed token saved when it
+/// was offered. Runs on the helper thread.
+fn clone_and_save<S: CredentialStore>(
+    service: &CredentialService<S>,
+    opts: &CloneOptions,
+    https: Option<&HttpsCredentialInput>,
+    reporter: &mut dyn TransferReporter,
+    cancel: &dyn Fn() -> bool,
+) -> Result<ServiceCloneOutcome, CloneError> {
+    let mut token_offered = false;
+    let result = match https {
+        Some(input) => {
+            let mut provider = OneShotHttps::new(input, opts.url.trim());
+            let result = clone_repo(opts, &mut provider, reporter, cancel);
+            token_offered = provider.offered;
+            result
+        }
+        None => {
+            let mut provider = RemoteCredentialProvider::new(service, None);
+            clone_repo(opts, &mut provider, reporter, cancel)
+        }
+    };
+    let outcome = result?;
+    let credential_save_failed =
+        save_offered_token(service, opts.url.trim(), &outcome, https, token_offered);
+    Ok(ServiceCloneOutcome {
+        outcome,
+        credential_save_failed,
+    })
+}
+
+/// Saves the token typed for the clone when the clone offered it; whether saving failed. A
+/// token never offered (a public repository never asks) is never saved.
+fn save_offered_token<S: CredentialStore>(
+    service: &CredentialService<S>,
+    url: &str,
+    outcome: &CloneOutcome,
+    https: Option<&HttpsCredentialInput>,
+    offered: bool,
+) -> bool {
+    match https {
+        Some(input) if offered => persist_https(service, url, outcome, input).is_err(),
+        _ => false,
     }
 }
 
@@ -212,45 +326,82 @@ impl<S: CredentialStore> CloneService<S> {
         clones.early.push_back(operation_id.to_string());
     }
 
+    /// Clones on a helper thread and waits for it (see the module docs), passing its progress
+    /// on to `events` stamped with `operation_id`.
     pub fn clone_repo(
         &self,
         operation_id: &str,
         opts: CloneOptions,
         https: Option<HttpsCredentialInput>,
         events: Sender<TransferEvent>,
-    ) -> Result<ServiceCloneOutcome, CloneError> {
+    ) -> Result<ServiceCloneOutcome, CloneError>
+    where
+        S: Send + 'static,
+    {
         let flag = self.register(operation_id);
-        let cancel = || flag.load(Ordering::Relaxed);
-        let mut reporter = ChannelReporter {
-            events: &events,
-            operation_id,
-        };
-        let service = CredentialService::new((self.new_store)());
-        let mut token_offered = false;
-        let result = match &https {
-            Some(input) => {
-                let mut provider = OneShotHttps::new(input, opts.url.trim());
-                let result = clone_repo(&opts, &mut provider, &mut reporter, &cancel);
-                token_offered = provider.offered;
-                result
-            }
-            None => {
-                let mut provider = RemoteCredentialProvider::new(&service, None);
-                clone_repo(&opts, &mut provider, &mut reporter, &cancel)
-            }
-        };
+        let result = self.run(operation_id, &flag, opts, https, &events);
         self.unregister(operation_id);
-        let outcome = result?;
-        let credential_save_failed = match &https {
-            Some(input) if token_offered => {
-                persist_https(&service, opts.url.trim(), &outcome, input).is_err()
-            }
-            _ => false,
+        result
+    }
+
+    fn run(
+        &self,
+        operation_id: &str,
+        flag: &Arc<AtomicBool>,
+        opts: CloneOptions,
+        https: Option<HttpsCredentialInput>,
+        events: &Sender<TransferEvent>,
+    ) -> Result<ServiceCloneOutcome, CloneError>
+    where
+        S: Send + 'static,
+    {
+        let phase = SharedPhase::new();
+        let (tx, rx) = mpsc::channel();
+        let store = (self.new_store)();
+        let spawned = {
+            let flag = Arc::clone(flag);
+            let phase = phase.clone();
+            std::thread::Builder::new()
+                .name("clone".to_string())
+                .spawn(move || {
+                    let cancel = || flag.load(Ordering::Relaxed);
+                    let mut reporter = HelperReporter {
+                        messages: tx.clone(),
+                        phase,
+                    };
+                    let service = CredentialService::new(store);
+                    let result =
+                        clone_and_save(&service, &opts, https.as_ref(), &mut reporter, &cancel);
+                    let _ = tx.send(HelperMessage::Done(result));
+                })
         };
-        Ok(ServiceCloneOutcome {
-            outcome,
-            credential_save_failed,
-        })
+        if spawned.is_err() {
+            return Err(helper_lost());
+        }
+        // When the caller first saw the cancel.
+        let mut cancelled_at: Option<Instant> = None;
+        loop {
+            match rx.recv_timeout(POLL) {
+                Ok(HelperMessage::Progress(progress)) => {
+                    let _ = events.send(TransferEvent::Progress(TransferProgress {
+                        operation_id: operation_id.to_string(),
+                        ..progress
+                    }));
+                }
+                Ok(HelperMessage::Done(result)) => return result,
+                Err(RecvTimeoutError::Timeout) => {}
+                // The helper panicked.
+                Err(RecvTimeoutError::Disconnected) => return Err(helper_lost()),
+            }
+            if cancelled_at.is_none() && flag.load(Ordering::Relaxed) {
+                cancelled_at = Some(Instant::now());
+            }
+            if cancelled_at.is_some_and(|at| at.elapsed() >= STALLED_CANCEL_GRACE)
+                && phase.abandon()
+            {
+                return Err(CloneError::Cancelled);
+            }
+        }
     }
 }
 
@@ -529,6 +680,63 @@ mod tests {
         assert!(matches!(result, Err(CloneError::Cancelled)), "{result:?}");
     }
 
+    /// #1159: a clone whose server went silent after its ref advertisement calls none of
+    /// libgit2's callbacks, so the cancel flag alone never reaches it. Cancel still ends it
+    /// within a few seconds; the abandoned clone removes what it made once its connection fails.
+    #[test]
+    fn cancel_ends_a_clone_that_stalled_after_connecting() {
+        use std::time::{Duration, Instant};
+
+        let server = test_support::StalledServer::start();
+        let target = tempfile::TempDir::new().unwrap();
+        let dest = target.path().join("c");
+        let service = Arc::new(CloneService::with_store_factory(SharedStore::default));
+        let (done_tx, done) = mpsc::channel();
+        {
+            let service = Arc::clone(&service);
+            let options = options(&server.url, dest.clone());
+            std::thread::spawn(move || {
+                let result = service.clone_repo("clone-stalled", options, None, mpsc::channel().0);
+                let _ = done_tx.send(result);
+            });
+        }
+        server
+            .stalled
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the clone connects and then waits for the server");
+
+        let cancelled = Instant::now();
+        service.cancel("clone-stalled");
+        let result = done
+            .recv_timeout(Duration::from_secs(15))
+            .unwrap_or_else(|_| {
+                panic!(
+                    "the clone was still running {:?} after Cancel",
+                    cancelled.elapsed()
+                )
+            });
+
+        assert!(matches!(result, Err(CloneError::Cancelled)), "{result:?}");
+        // A clone still receiving answers the cancel at its next callback and removes what it
+        // made itself: only one that left the cancel unanswered for the grace is given up on.
+        assert!(
+            cancelled.elapsed() >= crate::worker::STALLED_CANCEL_GRACE,
+            "given up after {:?}",
+            cancelled.elapsed()
+        );
+        assert!(service.is_idle());
+        drop(server);
+        let removed = Instant::now();
+        while dest.exists() {
+            assert!(
+                removed.elapsed() < Duration::from_secs(30),
+                "the abandoned clone left {}",
+                dest.display()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     #[test]
     fn late_cancels_for_finished_clones_are_capped() {
         let service = CloneService::with_store_factory(SharedStore::default);
@@ -702,5 +910,58 @@ mod tests {
 
         assert_eq!(result.err().unwrap().message(), MISSING_CREDENTIAL_ERROR);
         assert!(!provider.offered);
+    }
+
+    /// The typed token is saved only when the clone offered it, and only with an HTTPS input.
+    #[test]
+    fn the_typed_token_is_saved_only_when_the_clone_offered_it() {
+        let (_src, url) = bare_source();
+        let target = tempfile::TempDir::new().unwrap();
+        let cloned = CloneService::with_store_factory(SharedStore::default)
+            .clone_repo(
+                "clone-1",
+                options(&url, target.path().join("c")),
+                None,
+                mpsc::channel().0,
+            )
+            .unwrap();
+        let input = provider_input();
+        let url = "https://example.test/r.git";
+        let saved = |https: Option<&HttpsCredentialInput>, offered: bool| {
+            let store = SharedStore::default();
+            let service = crate::credentials::CredentialService::new(store.clone());
+            let failed = super::save_offered_token(&service, url, &cloned.outcome, https, offered);
+            let count = store.entries.lock().unwrap().len();
+            (failed, count)
+        };
+
+        assert_eq!(saved(Some(&input), true), (false, 1));
+        assert_eq!(saved(Some(&input), false), (false, 0));
+        assert_eq!(saved(None, true), (false, 0));
+    }
+
+    /// #1159: the caller gives up only on a clone still running, and a clone is handed over
+    /// only while the caller hasn't given up.
+    #[test]
+    fn a_clone_is_either_handed_over_or_given_up_on() {
+        use super::{HelperReporter, Phase, SharedPhase};
+        use git_core::remote::TransferReporter;
+
+        let running = SharedPhase::new();
+        assert!(running.abandon());
+        assert_eq!(*running.lock(), Phase::Abandoned);
+        assert!(!running.abandon());
+        assert!(!running.complete());
+        assert_eq!(*running.lock(), Phase::Abandoned);
+
+        let finished = SharedPhase::new();
+        let mut reporter = HelperReporter {
+            messages: mpsc::channel().0,
+            phase: finished.clone(),
+        };
+        assert!(reporter.clone_complete());
+        assert_eq!(*finished.lock(), Phase::Complete);
+        assert!(!finished.abandon());
+        assert_eq!(*finished.lock(), Phase::Complete);
     }
 }

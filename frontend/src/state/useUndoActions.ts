@@ -7,6 +7,8 @@ import type { RunMutationWithOutcome } from "./useMutationRunner";
 export interface UndoActions {
   undo(): Promise<UndoOutcome | null>;
   redo(): Promise<UndoOutcome | null>;
+  /** Forgets the undo and redo history and the refs that keep its snapshots (#1123). */
+  clearHistory(): Promise<void>;
 }
 
 // Refusals arrive as resolved outcomes (they cross the VSCode transport as plain data); they are
@@ -55,5 +57,8 @@ export function useUndoActions(
   );
   const undo = useCallback(() => step("undo"), [step]);
   const redo = useCallback(() => step("redo"), [step]);
-  return { undo, redo };
+  const clearHistory = useCallback(async () => {
+    await runMutationWithOutcome(() => client.clearUndoHistory(repoPath));
+  }, [client, repoPath, runMutationWithOutcome]);
+  return { undo, redo, clearHistory };
 }

@@ -156,6 +156,8 @@ export function WorkspaceSidebar({
           references={appState.state.reflogRefs}
           selectedReference={appState.state.selectedReflogReference}
           entries={appState.state.reflog}
+          hasMore={appState.state.reflogHasMore}
+          onLoadMore={() => void appState.loadMoreReflog()}
           onSelectReference={appState.selectReflogReference}
           onRestore={appState.restoreReflogEntry}
           operationDisabled={repositoryOperationDisabled}

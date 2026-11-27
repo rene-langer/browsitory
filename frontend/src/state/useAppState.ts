@@ -48,7 +48,9 @@ import { type HistoryActions, useHistoryActions } from "./useHistoryActions";
 import { type HookActions, useHookActions } from "./useHookActions";
 import { type MergeRebaseActions, useMergeRebaseActions } from "./useMergeRebaseActions";
 import { type PatchActions, usePatchActions } from "./usePatchActions";
-import { type ReflogActions, useReflogActions } from "./useReflogActions";
+import { type ReflogActions, type ReflogLoaded, readReflogPage, REFLOG_PAGE_SIZE, useReflogActions } from "./useReflogActions";
+
+export { REFLOG_PAGE_SIZE };
 import { type RemoteTransferActions, useRemoteTransferActions } from "./useRemoteTransferActions";
 import { type StagingActions, useStagingActions } from "./useStagingActions";
 import { type StashActions, useStashActions } from "./useStashActions";
@@ -114,7 +116,10 @@ export interface AppState {
   submodules: SubmoduleInfo[];
   reflogRefs: string[];
   selectedReflogReference: string | null;
+  /** The newest entries of the selected reference's reflog (#1161). */
   reflog: ReflogEntry[];
+  /** Older entries follow the ones read (`loadMoreReflog` reads them). */
+  reflogHasMore: boolean;
   remotes: RemoteInfo[];
   tags: TagInfo[];
   upstream: UpstreamInfo | null;
@@ -339,6 +344,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     reflogRefs: [],
     selectedReflogReference: null,
     reflog: [],
+    reflogHasMore: false,
     branches: [],
     remotes: [],
     tags: [],
@@ -393,6 +399,10 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
   const mergeLimits = useRef(new Map<string, number>());
   const selectedReflogReference = useRef<string | null>(null);
   const reflogRequestGeneration = useRef(0);
+  // How many entries of the selected reflog are shown, and what the reflog on screen was read
+  // for (#1161): a refresh that keeps its history keeps that reflog too.
+  const reflogLimit = useRef(REFLOG_PAGE_SIZE);
+  const reflogLoaded = useRef<ReflogLoaded | null>(null);
   const reflogError = useOwnError();
 
   // The message the last failed `refresh()` set, so a later successful one clears that error and
@@ -543,9 +553,20 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         ? reference
         : null;
       selectedReflogReference.current = selectedReference;
-      const reflog = selectedReference === null
-        ? []
-        : await client.getReflog(repoPath, selectedReference);
+      // A reflog only changes when a reference moves, which the `refs` stamp covers (#1161).
+      const loadedReflog = reflogLoaded.current;
+      const reflogLimitRead = reflogLimit.current;
+      const keepReflog =
+        keepHistory &&
+        selectedReference !== null &&
+        loadedReflog?.reference === selectedReference &&
+        loadedReflog.limit === reflogLimitRead;
+      const reflogPage =
+        selectedReference === null
+          ? { entries: [], hasMore: false }
+          : keepReflog
+            ? null
+            : await readReflogPage(client, repoPath, selectedReference, reflogLimitRead);
       const order = readOrder.current;
       if (ticket < order.refreshApplied) {
         // A refresh that sent its reads later has already landed: these results are older.
@@ -559,6 +580,10 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       }
       order.refreshApplied = ticket;
       tracking.stamp = stamp;
+      if (reflogPage !== null) {
+        reflogLoaded.current =
+          selectedReference === null ? null : { reference: selectedReference, limit: reflogLimitRead };
+      }
       if (history !== null) {
         historyKey.current = { base, limit: history.rowsLimit };
         graphLimit.current = history.rowsLimit;
@@ -604,7 +629,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
           submodules,
           reflogRefs,
           selectedReflogReference: selectedReference,
-          reflog,
+          ...(reflogPage === null ? {} : { reflog: reflogPage.entries, reflogHasMore: reflogPage.hasMore }),
           remotes,
           stashes,
           mergeMessage,
@@ -880,6 +905,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     setState,
     selectedReflogReference,
     reflogRequestGeneration,
+    reflogLimit,
+    reflogLoaded,
     reflogError,
   );
 

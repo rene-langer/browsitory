@@ -111,7 +111,8 @@ editor, terminal, diff and merge tools, GPG or SSH to sign commits, and
 
 ## Data kept on your computer
 
-None of this leaves your computer, and we can't see it.
+None of this leaves your computer through Browsitory, and we can't see it. The undo history is
+the one thing a Git command of yours can copy elsewhere: see below.
 
 | What | Where |
 |---|---|
@@ -141,6 +142,16 @@ remote addresses. It removes the user name and password from every URL and the v
 `Authorization` header, and never records a token. It lives only in the running app (in the VS
 Code extension, in its helper process) and goes when you quit.
 
+The undo history holds snapshots of your uncommitted and untracked files (those that aren't
+ignored) and of changes you discarded, kept in the repository under the Git references
+`refs/browsitory/`. Browsitory's own pushes never send them, but anything that copies every
+reference of a repository does: `git push --mirror`, `git bundle create … --all`, a
+`git clone --mirror` of the folder, and backup or migration tools built on them. A file you
+never committed, such as an untracked `notes.env` with a key in it, then reaches whoever can
+read the copy. Before such a transfer, run **Clear undo history…** from the command palette (in
+each worktree's tab), or delete the references as in step 4 below. See
+[Undo and redo](undo-redo.md#what-the-undo-history-keeps-and-clearing-it).
+
 ### Deleting it all
 
 Uninstall the app, then delete what you want to remove:
@@ -156,7 +167,8 @@ Uninstall the app, then delete what you want to remove:
 3. **Tokens:** before you uninstall, use **Forget HTTPS credential** in a remote's
    credentials dialog and **Disconnect** in a pull request card's **…** menu. Or delete the entries named
    `com.browsitory.git` and `com.browsitory.forge` in your system's credential store.
-4. **Per repository** (this also deletes undo history): delete `.git/browsitory/` (and
+4. **Per repository** (this also deletes undo history; **Clear undo history…** in the command
+   palette deletes the undo history of the open worktree alone): delete `.git/browsitory/` (and
    `.git/worktrees/*/browsitory/` for linked worktrees), run
    `git for-each-ref --format="delete %(refname)" refs/browsitory/ | git update-ref --stdin`,
    and for each remote run `git config --remove-section browsitory.remote.<remote name>`.
