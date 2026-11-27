@@ -1480,13 +1480,27 @@ fn apply_operation_reset(repo: &Repository, reset: OperationReset) -> Result<(),
         index.read(false)?;
         crate::index_marks::marks_after(repo, &index, &head_tree)?
     };
+    let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
     // A case pair's names are put back directly, never by the forced checkout (#511). A path
-    // back in the index outside the sparse checkout isn't written (#1172).
+    // back in the index outside the sparse checkout isn't written (#1172), nor is a marked one
+    // the operation changed whose file is missing: it keeps its mark (#1185).
+    let outside: std::collections::HashSet<&Vec<u8>> = marks
+        .skip_worktree
+        .iter()
+        .filter(|path| {
+            marks.sparse
+                && workdir
+                    .join(path_from_bytes(path))
+                    .symlink_metadata()
+                    .is_err()
+        })
+        .collect();
     let touched: Vec<Vec<u8>> = touched
         .into_iter()
-        .filter(|path| !pairs.covers(path) && !marks.added.contains(path))
+        .filter(|path| {
+            !pairs.covers(path) && !marks.added.contains(path) && !outside.contains(path)
+        })
         .collect();
-    let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
     // HEAD's files are written back unfiltered (#1063): refused before anything is removed.
     crate::external_filter::refuse_paths::<MergeError, _>(
         repo,
