@@ -94,3 +94,23 @@ the filter's; a note above the diff says so.
     up: a global `git lfs install` alone shows no notice. A fresh clone or a new worktree writes such files as they are stored (the LFS pointer,
     the encrypted bytes), as Git does without the program installed; run `git lfs pull` or
     `git-crypt unlock` there. Side files for external tools show the stored text too.
+
+## Files with a working-tree-encoding (UTF-16 and others)
+
+A `.gitattributes` line such as `*.ps1 text working-tree-encoding=UTF-16LE-BOM` tells Git to keep
+those files as UTF-8 in the repository and to convert them to the named encoding on disk (usual
+for PowerShell scripts, `.rc` and `.reg` files and SQL Server scripts). Browsitory can't convert
+them: it would commit the raw UTF-16 bytes (Git then sees a binary file) and write UTF-8 where
+your tools expect UTF-16. So it treats such a file like one under a filter driver (see above): it
+refuses every action that would store or write it, with an error such as "'setup.ps1' uses
+working-tree-encoding=UTF-16LE-BOM, which Browsitory can't convert, so it refused this change. Use
+git on the command line for it instead." The notice at the top of **Changes** names the encodings
+too, a changed file is marked with its encoding ("UTF-16LE-BOM encoding") and its Stage button is
+off, and **Stage all** and **Stage modified** leave it out. Its diff compares the file on disk with
+the UTF-8 version Git stored, so the difference may be only the encoding's.
+
+??? note "Details"
+
+    `working-tree-encoding=UTF-8` (or `utf8`, any case) converts nothing, so such files work as
+    usual. A `working-tree-encoding` without a value makes Git itself fail on the file; Browsitory
+    doesn't refuse it. The notice reads the same attribute files as for filters.
