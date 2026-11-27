@@ -127,18 +127,6 @@ pub fn write_file(dir: &Path, relative_path: &str, contents: &str) {
     std::fs::write(full_path, contents).expect("write file");
 }
 
-/// True when `program` can be spawned at all. Used to skip signing tests on machines (Windows
-/// CI) without gpg / ssh-keygen.
-#[allow(dead_code)]
-pub fn program_available(program: &str) -> bool {
-    std::process::Command::new(program)
-        .arg("--help")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok()
-}
-
 #[allow(dead_code)]
 pub struct SshKey {
     pub private: std::path::PathBuf,

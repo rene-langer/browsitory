@@ -216,8 +216,7 @@ fn a_pre_commit_reading_the_terminal_fails_instead_of_stopping() {
 
 #[test]
 fn pre_commit_that_stages_a_file_gets_it_committed() {
-    if !common::program_available("git") {
-        eprintln!("git CLI not found; skipping");
+    if !test_support::require_tool("git") {
         return;
     }
     let (dir, mut repo) = common::init_repo();
@@ -239,8 +238,7 @@ fn pre_commit_that_stages_a_file_gets_it_committed() {
 #[test]
 fn pre_commit_that_stages_from_a_subdirectory_stages_the_subdirectory_file() {
     // husky monorepo shape: `cd frontend && npx lint-staged`.
-    if !common::program_available("git") {
-        eprintln!("git CLI not found; skipping");
+    if !test_support::require_tool("git") {
         return;
     }
     let (dir, mut repo) = common::init_repo();
@@ -1165,8 +1163,7 @@ fn no_verify_skips_pre_merge_commit_and_commit_msg() {
 
 #[test]
 fn a_pre_merge_commit_that_stages_a_file_gets_it_committed() {
-    if !common::program_available("git") {
-        eprintln!("git CLI not found; skipping");
+    if !test_support::require_tool("git") {
         return;
     }
     let (dir, mut repo) = clean_merge_fixture();
@@ -1282,8 +1279,7 @@ fn clean_merge_with_side2() -> (tempfile::TempDir, git2::Repository, git2::Oid) 
 
 #[test]
 fn a_merge_restarted_during_pre_merge_commit_is_not_committed() {
-    if !common::program_available("git") {
-        eprintln!("git CLI not found; skipping");
+    if !test_support::require_tool("git") {
         return;
     }
     let (_dir, mut repo, side2) = clean_merge_with_side2();
@@ -1314,8 +1310,7 @@ fn a_merge_restarted_during_pre_merge_commit_is_not_committed() {
 fn a_merge_aborted_during_pre_merge_commit_is_not_committed() {
     // Aborted, not restarted: no merge is in progress any more, and the commit is refused
     // as a changed merge (not a failure to read the merge heads that are gone).
-    if !common::program_available("git") {
-        eprintln!("git CLI not found; skipping");
+    if !test_support::require_tool("git") {
         return;
     }
     let (_dir, mut repo, _side2) = clean_merge_with_side2();
@@ -1383,8 +1378,7 @@ fn a_clean_merges_message_hooks_get_merge_msg_like_git_merge() {
 
 #[test]
 fn git_merge_also_gives_prepare_commit_msg_merge_msg() {
-    if !common::program_available("git") {
-        eprintln!("git CLI not found; skipping");
+    if !test_support::require_tool("git") {
         return;
     }
     let (dir, repo) = merge_fixture(false);
@@ -1425,8 +1419,7 @@ fn a_cleanup_failure_after_a_merge_commit_still_reports_it() {
 
 #[test]
 fn a_merge_restarted_during_pre_merge_commit_keeps_the_new_merge_msg() {
-    if !common::program_available("git") {
-        eprintln!("git CLI not found; skipping");
+    if !test_support::require_tool("git") {
         return;
     }
     let (_dir, mut repo, _side2) = clean_merge_with_side2();

@@ -1,28 +1,64 @@
 //! Tests that need a tool the workspace doesn't build (#1113): gpg, ssh-keygen, the git CLI,
-//! Git for Windows' sh.exe.
+//! Git for Windows' sh.exe. Such a test starts with
+//!
+//! ```ignore
+//! if !test_support::require_tool("git") {
+//!     return;
+//! }
+//! ```
+//!
+//! Locally a missing tool skips the test with a note on stderr. Under CI (`CI` set, as GitHub
+//! Actions does) it fails the test instead: CI must have every tool, so a runner image that
+//! drops one can't quietly turn the test into a pass.
 
-/// Whether `program` can be started at all (`program --help` spawns).
+use std::io::Write;
+
+/// Whether `program` can be started at all (`program --help` spawns; its exit code doesn't
+/// matter).
 pub fn program_available(program: &str) -> bool {
-    let _ = program;
-    todo!()
+    std::process::Command::new(program)
+        .arg("--help")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok()
 }
 
-/// For a test that needs `program` on PATH: true when it is there.
+/// For a test that needs `program` on PATH: true when it is there. When it isn't, the test
+/// returns at once; see the module docs for what happens locally and on CI.
+#[track_caller]
 pub fn require_tool(program: &str) -> bool {
-    let _ = program;
-    todo!()
+    require(program, program_available(program))
 }
 
 /// [`require_tool`] for a requirement that isn't a program on PATH, such as Git for Windows'
 /// sh.exe: `what` names it, `available` says whether it was found.
+#[track_caller]
 pub fn require(what: &str, available: bool) -> bool {
-    let _ = (what, available);
-    todo!()
+    require_on(what, available, std::env::var_os("CI").is_some())
 }
 
+#[track_caller]
 fn require_on(what: &str, available: bool, on_ci: bool) -> bool {
-    let _ = (what, available, on_ci);
-    todo!()
+    if available {
+        return true;
+    }
+    assert!(
+        !on_ci,
+        "{what} is missing; CI must run this test, so the runner needs it (#1113)"
+    );
+    // Straight to stderr: the test harness captures `eprintln!` of a passing test, so the
+    // note would never show.
+    let test = std::thread::current()
+        .name()
+        .unwrap_or("this test")
+        .to_string();
+    let _ = writeln!(
+        std::io::stderr(),
+        "note: skipping {test}: {what} is missing (CI fails here instead)"
+    );
+    false
 }
 
 #[cfg(test)]

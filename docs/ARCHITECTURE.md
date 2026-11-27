@@ -1282,7 +1282,9 @@ certificate.
   - ssh: `find-principals` + `verify` against `gpg.ssh.allowedSignersFile`, falling back to
     `check-novalidate` (→ `GoodUntrusted`).
   - Unsigned commits never spawn a process; there is no cache.
-- Tests use real `gpg`/`ssh-keygen` with throwaway keys and skip when they are missing.
+- Tests use real `gpg`/`ssh-keygen` with throwaway keys. Without them they skip locally and
+  fail on CI (`test_support::require_tool`, see "Testing strategy"); the gpg tests run on Unix
+  only.
   `tests/signing_gpg.rs` is its own binary because it sets `GNUPGHOME` once per process.
 
 ## Commit search
@@ -3069,6 +3071,13 @@ only `error`.
   isolation to the command itself (it removes inherited `GIT_*` variables and sets the hermetic
   `HOME`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM=1`, `GNUPGHOME` and `LC_ALL=C`), so it holds
   even where a test changed the environment.
+- External tools (#1113): a test that needs a tool the workspace doesn't build (the `git` CLI,
+  `gpg`, `ssh-keygen`/`ssh-agent`/`ssh-add`, Git for Windows' `sh.exe`) starts with
+  `if !test_support::require_tool("git") { return; }` (`test_support::require(what, found)` for
+  something that isn't a program on PATH). Locally a missing tool skips the test with a note on
+  stderr, written past the test harness's capture so it shows for a passing test; under CI (`CI`
+  set) it fails the test, so a runner image that drops a tool can't turn its tests into passes.
+  The only deliberate skips left are the gpg tests on Windows and the read-only checks as root.
 - Lock-wait races: a test that changes the repository while a worker waits for the state lock
   uses `Worker::spawn_with_pause_on_lock_wait` (test-only) and `PauseControl`, not a fixed
   sleep: the worker stops when it first finds the lock busy, and its wait starts after `go`

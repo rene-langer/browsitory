@@ -10,10 +10,7 @@ mod common;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use common::{
-    commit_all, enable_ssh_signing, init_repo, program_available, ssh_key_fixture, user_config,
-    write_file,
-};
+use common::{commit_all, enable_ssh_signing, init_repo, ssh_key_fixture, user_config, write_file};
 use git_core::signing::{
     create_commit, signing_config, verify_commit, HeadUpdate, SignatureFormat, SignatureStatus,
 };
@@ -224,8 +221,7 @@ fn signing_uses_the_users_own_program_over_the_repositorys() {
 
 #[test]
 fn an_allowed_signers_file_set_only_in_the_repository_is_ignored() {
-    if !program_available("ssh-keygen") {
-        eprintln!("skipping: ssh-keygen not on PATH");
+    if !test_support::require_tool("ssh-keygen") {
         return;
     }
     let (dir, repo) = init_repo();

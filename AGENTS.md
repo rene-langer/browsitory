@@ -246,6 +246,11 @@ tree it pulls in (`deny.toml`, `scripts/check-dependency-licenses.py`); keep the
 
 - `git-core`/`repo-service`: real temp-dir repos via `git2::Repository::init`/`TempDir`, never a
   mocked `Repository`.
+- A Rust test that needs an external tool (the `git` CLI, `gpg`, `ssh-keygen`, Git for Windows'
+  `sh.exe`) starts with `if !test_support::require_tool("git") { return; }` (or
+  `test_support::require(what, found)`), never its own availability check: locally a missing
+  tool skips with a note, under CI it fails (#1113). A new tool must be on every CI runner the
+  test runs on.
 - `frontend`: Vitest + Testing Library, mocking `RepoClient` (a real interface seam) — never
   `@tauri-apps/api` or `postMessage` directly.
 - `tauri-app`: inline tests cover only its own DTO serialization; pass-through commands rely on

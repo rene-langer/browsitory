@@ -835,7 +835,7 @@ fn restoring_staged_changes_of_a_path_limited_stash_touches_only_its_files() {
 
 #[test]
 fn git_stash_apply_index_restores_the_selected_files_of_a_path_limited_stash() {
-    if !common::program_available("git") {
+    if !test_support::require_tool("git") {
         return;
     }
     let (dir, mut repo) = init_repo();
