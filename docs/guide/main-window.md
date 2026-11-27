@@ -208,6 +208,10 @@ icon. It closes by itself after 5 to 15 seconds, depending on its length; one wi
 (such as **Undo**) stays at least 10 seconds, and an error stays until you close it. While the
 pointer is over a notification or focus is on one of its buttons, none of them close. They never
 take focus: reach their buttons with Tab. Screen readers announce them without interrupting.
+A notification from a tab that isn't shown starts with that tab's name ("widget: Fetched from
+origin."), and its buttons first show that tab, then act there. A fetch, pull or push that fails
+in a tab that isn't shown says so in a notification too; its banner waits in its tab. Closing a
+tab closes its notifications that have buttons.
 
 ![The main window: sidebar, commit graph and diff pane](assets/overview.png)
 

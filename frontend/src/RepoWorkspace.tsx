@@ -589,6 +589,15 @@ export function RepoWorkspace({
     else if (remote !== null) void pushCurrentBranch(remote);
   }, [pushCurrentBranch, pushToast]);
   useOutcomeToasts(appState.state, pushToast, undoToastAction, pullFromToast, pushFromToast);
+  // A transfer that failed while another tab is shown (#1116): its banner waits in this tab, so a
+  // toast says so where the user is, as a success would.
+  const hadTransfer = useRef(transfer !== null);
+  const transferError = appState.state.error;
+  useEffect(() => {
+    const had = hadTransfer.current;
+    hadTransfer.current = transfer !== null;
+    if (had && transfer === null && transferError !== null && !active) pushToast(transferError, { tone: "error" });
+  }, [transfer, transferError, active, pushToast]);
   // No banner while a dialog handles the same error (#996): the identity dialog, the hook
   // failure's output, the force push confirm. Closing the last two brings it back. A dialog that
   // shows its own failure (Rename branch, Create tag, New worktree, Connect, New pull request)
@@ -965,7 +974,7 @@ export function RepoWorkspace({
           />
         </div>
       )}
-      {operationLog !== null && (
+      {active && operationLog !== null && (
         <OperationLogDialog
           client={client}
           repoPath={repoPath}
@@ -993,7 +1002,7 @@ export function RepoWorkspace({
           onClose={() => setOperationLog(null)}
         />
       )}
-      {userCommandRunner.confirming !== null && (
+      {active && userCommandRunner.confirming !== null && (
         <ConfirmDialog
           title={`Run ${userCommandRunner.confirming.command.name}`}
           message={
@@ -1009,7 +1018,7 @@ export function RepoWorkspace({
           onCancel={userCommandRunner.cancelConfirm}
         />
       )}
-      {userCommandRunner.output !== null && (
+      {active && userCommandRunner.output !== null && (
         <UserCommandOutputDialog
           output={userCommandRunner.output}
           onStop={userCommandRunner.stop}
