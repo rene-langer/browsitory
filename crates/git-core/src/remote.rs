@@ -3,8 +3,7 @@ use std::collections::BTreeSet;
 
 use git2::{
     build::CheckoutBuilder, AutotagOption, BranchType, Cred, CredentialType, Direction, ErrorClass,
-    ErrorCode, FetchOptions, PushOptions, RemoteCallbacks, RemoteUpdateFlags, Repository,
-    StatusOptions, Tag,
+    ErrorCode, FetchOptions, PushOptions, RemoteCallbacks, RemoteUpdateFlags, Repository, Tag,
 };
 use thiserror::Error;
 use url::Url;
@@ -587,8 +586,10 @@ pub enum RemoteError {
         .branches.join(", ")
     )]
     RemoteInUse { name: String, branches: Vec<String> },
-    #[error("cannot pull with a dirty worktree")]
-    DirtyWorktree,
+    /// The fast-forward would overwrite local changes (staged or not) to `paths`, or untracked
+    /// files there; nothing changed. Changes to other files don't stop a pull (#1152).
+    #[error("the pull would overwrite your local changes to {}", .paths.join(", "))]
+    DirtyWorktree { paths: Vec<String> },
     #[error("cannot pull while HEAD is detached")]
     DetachedHead,
     #[error("untracked or ignored files would be overwritten by the pull")]
@@ -1353,10 +1354,6 @@ pub fn pull_after_fetch(
     remote_branch: &str,
 ) -> Result<PullOutcome, RemoteError> {
     crate::valueless_setting::refuse_for_checkout::<RemoteError>(repo)?;
-    if !worktree_is_clean(repo)? {
-        return Err(RemoteError::DirtyWorktree);
-    }
-
     let local_branch = current_local_branch_name(repo)?;
     let upstream_ref = format!("refs/remotes/{remote_name}/{remote_branch}");
     let upstream_commit = repo.find_reference(&upstream_ref)?.peel_to_commit()?;
@@ -1387,27 +1384,43 @@ pub fn pull_after_fetch(
         Some(&repo.head()?.peel_to_tree()?),
     )?;
     let local_ref = format!("refs/heads/{local_branch}");
-    let mut checkout = CheckoutBuilder::new();
-    checkout.safe();
-    // A checkout that stops part-way (a file another program holds open, a read-only file) is
-    // rolled back, so the pull can be tried again (#321).
-    let written = crate::partial_checkout::Written::default();
-    let filters = written.record(repo, &mut checkout);
-    repo.checkout_tree(upstream_commit.as_object(), Some(&mut checkout))
-        .map_err(|error| {
-            let restored = crate::partial_checkout::roll_back(repo, &written);
-            if error.code() == ErrorCode::Conflict {
-                RemoteError::CheckoutConflict
-            } else {
-                crate::partial_checkout::report(
-                    repo,
-                    restored,
-                    crate::HeldDuring::RolledBack,
-                    error,
-                )
-            }
-        })?;
-    filters.check()?;
+    // The safe checkout refuses what it would overwrite, as `git pull` does, and keeps every
+    // other local change (#1152). A sparse checkout's files outside the cone stay out (#1191).
+    let checked_out = crate::outside_cone::around(
+        repo,
+        crate::outside_cone::Outcome::Tree(&upstream_tree),
+        || {
+            let mut checkout = CheckoutBuilder::new();
+            checkout.safe();
+            // A checkout that stops part-way (a file another program holds open, a read-only
+            // file) is rolled back, so the pull can be tried again (#321).
+            let written = crate::partial_checkout::Written::default();
+            let filters = written.record(repo, &mut checkout);
+            repo.checkout_tree(upstream_commit.as_object(), Some(&mut checkout))
+                .map_err(|error| {
+                    let restored = crate::partial_checkout::roll_back(repo, &written);
+                    if error.code() == ErrorCode::Conflict {
+                        RemoteError::CheckoutConflict
+                    } else {
+                        crate::partial_checkout::report(
+                            repo,
+                            restored,
+                            crate::HeldDuring::RolledBack,
+                            error,
+                        )
+                    }
+                })?;
+            Ok(filters.check()?)
+        },
+    );
+    if let Err(RemoteError::CheckoutConflict) = checked_out {
+        // Named once the checkout is undone; an ignored file in the way names nothing.
+        let paths = crate::branch::changes_in_the_way(repo, &upstream_tree)?;
+        if !paths.is_empty() {
+            return Err(RemoteError::DirtyWorktree { paths });
+        }
+    }
+    checked_out?;
     repo.reference(&local_ref, upstream_oid, true, "fast-forward pull")?;
 
     Ok(PullOutcome::FastForwarded { upstream_ref })
@@ -2189,12 +2202,6 @@ fn validate_tag_name(name: &str) -> Result<(), RemoteError> {
         return Err(git2::Error::from_str("invalid tag name").into());
     }
     Ok(())
-}
-
-fn worktree_is_clean(repo: &Repository) -> Result<bool, RemoteError> {
-    let mut options = StatusOptions::new();
-    options.include_untracked(true).recurse_untracked_dirs(true);
-    Ok(repo.statuses(Some(&mut options))?.is_empty())
 }
 
 fn validate_urls(fetch_url: &str, push_url: Option<&str>) -> Result<(), RemoteError> {
