@@ -472,3 +472,299 @@ fn the_binary_driver_conflicts_as_git_does() {
         );
     }
 }
+
+// A conflicted file whose driver doesn't merge text (#1204): `-merge`, `merge=binary` (also
+// through `merge.default` or the `binary` macro) and a configured driver Browsitory doesn't run
+// get our side in the work tree, as git's binary driver leaves it, in every operation that
+// merges; the index keeps the three stages. Compared with git on a copy.
+
+/// `version.txt`'s three stages as `diverged` leaves them.
+fn three_stages() -> Vec<(i32, String)> {
+    vec![
+        (1, BASE.to_string()),
+        (2, OURS.to_string()),
+        (3, THEIRS.to_string()),
+    ]
+}
+
+#[test]
+fn a_merge_keeps_ours_in_the_work_tree_for_a_file_that_isnt_merged_as_text_as_git_does() {
+    for attribute in ["-merge", "merge=binary", "binary"] {
+        let (dir, repo) = diverged(&format!("version.txt {attribute}\n"));
+
+        let (ours, gits) = merge_both(dir.path(), &repo);
+
+        assert_eq!(ours, gits, "{attribute}");
+        assert_eq!(ours, (true, OURS.to_string()), "{attribute}");
+        assert_eq!(stages(&repo, "version.txt"), three_stages(), "{attribute}");
+        assert_eq!(read(dir.path(), "other.txt"), MERGED, "{attribute}");
+    }
+}
+
+#[test]
+fn merge_default_binary_keeps_ours_as_git_does() {
+    let (dir, repo) = diverged("");
+    repo.config()
+        .unwrap()
+        .set_str("merge.default", "binary")
+        .unwrap();
+
+    let (ours, gits) = merge_both(dir.path(), &repo);
+
+    assert_eq!(ours, gits);
+    assert_eq!(ours, (true, OURS.to_string()));
+    assert_eq!(read(dir.path(), "other.txt"), OURS);
+}
+
+#[test]
+fn a_file_under_a_configured_driver_keeps_ours_as_the_driver_left_it_in_git() {
+    let (dir, repo) = diverged_under_ours();
+    let (twin_dir, _twin_repo) = twin(dir.path());
+    // git runs the driver, which leaves ours (`%A`) as it is.
+    git_ok(twin_dir.path(), &["merge", "-q", "--no-edit", "topic"]);
+    std::fs::remove_file(marker(&repo)).ok();
+
+    git_core::merge::start_merge(&repo, "topic", MergeOptions::default()).unwrap();
+
+    assert_eq!(
+        read(dir.path(), "version.txt"),
+        read(twin_dir.path(), "version.txt")
+    );
+    assert_eq!(read(dir.path(), "version.txt"), OURS);
+    assert_driver_file_conflicted(dir.path(), &repo);
+}
+
+#[test]
+fn a_text_conflict_keeps_its_markers_as_git_writes_them() {
+    for attributes in ["", "version.txt merge\n", "version.txt merge=text\n"] {
+        let (dir, repo) = init_repo();
+        let d = dir.path();
+        write_file(d, ".gitattributes", attributes);
+        write_file(d, "version.txt", BASE);
+        commit_all(&repo, "base");
+        git_ok(d, &["branch", "-M", "master"]);
+        git_ok(d, &["checkout", "-q", "-b", "topic"]);
+        write_file(d, "version.txt", "1 topic\n2\n3\n4\n5\n");
+        commit_all(&repo, "topic");
+        git_ok(d, &["checkout", "-q", "master"]);
+        write_file(d, "version.txt", OURS);
+        commit_all(&repo, "master");
+
+        let (ours, gits) = merge_both(d, &repo);
+
+        assert_eq!(ours, gits, "{attributes:?}");
+        assert!(ours.0, "{attributes:?}");
+        assert!(ours.1.contains("<<<<<<< "), "{attributes:?}: {}", ours.1);
+    }
+}
+
+#[test]
+fn a_file_one_side_deleted_keeps_the_other_sides_change_as_git_does() {
+    let (dir, repo) = diverged("version.txt -merge\n");
+    git_ok(dir.path(), &["rm", "-q", "version.txt"]);
+    git_ok(dir.path(), &["commit", "-q", "--amend", "--no-edit"]);
+
+    let (ours, gits) = merge_both(dir.path(), &repo);
+
+    assert_eq!(ours, gits);
+    assert_eq!(ours, (true, THEIRS.to_string()));
+}
+
+#[test]
+fn ours_is_written_through_the_checkout_filters_as_git_writes_it() {
+    let (dir, repo) = diverged("version.txt -merge text eol=crlf\n");
+    // Checked out again, as git writes it: with CRLF.
+    std::fs::remove_file(dir.path().join("version.txt")).unwrap();
+    git_ok(dir.path(), &["checkout", "--", "version.txt"]);
+    assert_eq!(read(dir.path(), "version.txt"), OURS.replace('\n', "\r\n"));
+
+    let (ours, gits) = merge_both(dir.path(), &repo);
+
+    assert_eq!(ours, gits);
+    assert_eq!(ours, (true, OURS.replace('\n', "\r\n")));
+}
+
+/// `version.txt -merge` changed on both sides, plus the file `c` added on master and `c.txt`
+/// replaced by `c/g` on topic: libgit2 misses that file/folder conflict (#410), so the merge
+/// takes Browsitory's own route.
+#[test]
+fn a_merge_with_a_file_folder_conflict_keeps_ours_too_as_git_does() {
+    let (dir, repo) = init_repo();
+    let d = dir.path();
+    write_file(d, ".gitattributes", "version.txt -merge\n");
+    write_file(d, "version.txt", BASE);
+    write_file(d, "c.txt", "c\n");
+    commit_all(&repo, "base");
+    git_ok(d, &["branch", "-M", "master"]);
+    git_ok(d, &["checkout", "-q", "-b", "topic"]);
+    write_file(d, "version.txt", THEIRS);
+    std::fs::remove_file(d.join("c.txt")).unwrap();
+    write_file(d, "c/g", "g\n");
+    commit_all(&repo, "topic");
+    git_ok(d, &["checkout", "-q", "master"]);
+    write_file(d, "version.txt", OURS);
+    write_file(d, "c", "file\n");
+    commit_all(&repo, "master");
+
+    let (ours, gits) = merge_both(d, &repo);
+
+    assert_eq!(ours, gits);
+    assert_eq!(ours, (true, OURS.to_string()));
+    assert_eq!(read(d, "c~HEAD"), "file\n");
+}
+
+#[test]
+fn a_cherry_pick_keeps_ours_as_git_does() {
+    let (dir, repo) = diverged("version.txt -merge\n");
+    let (twin_dir, _twin_repo) = twin(dir.path());
+    let gits = test_support::git(twin_dir.path(), &["cherry-pick", "topic"]);
+    assert!(!gits.status.success(), "git's pick should conflict");
+    let topic = repo.revparse_single("topic").unwrap().id().to_string();
+
+    let outcome = git_core::pick::cherry_pick(&repo, &topic, None, HookOptions::default()).unwrap();
+
+    assert_eq!(
+        outcome,
+        PickOutcome::Conflicted {
+            files: conflicted(&["version.txt"])
+        }
+    );
+    assert_eq!(
+        read(dir.path(), "version.txt"),
+        read(twin_dir.path(), "version.txt")
+    );
+    assert_eq!(read(dir.path(), "version.txt"), OURS);
+    assert_eq!(stages(&repo, "version.txt"), three_stages());
+}
+
+#[test]
+fn a_revert_keeps_ours_as_git_does() {
+    let (dir, repo) = init_repo();
+    let d = dir.path();
+    write_file(d, ".gitattributes", "version.txt -merge\n");
+    write_file(d, "version.txt", BASE);
+    commit_all(&repo, "base");
+    write_file(d, "version.txt", THEIRS);
+    commit_all(&repo, "change the last line");
+    let reverted = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+    write_file(d, "version.txt", MERGED);
+    commit_all(&repo, "change the first line");
+    let (twin_dir, _twin_repo) = twin(d);
+    let gits = test_support::git(twin_dir.path(), &["revert", "--no-edit", &reverted]);
+    assert!(!gits.status.success(), "git's revert should conflict");
+
+    let outcome = git_core::pick::revert(&repo, &reverted, None, HookOptions::default()).unwrap();
+
+    assert_eq!(
+        outcome,
+        PickOutcome::Conflicted {
+            files: conflicted(&["version.txt"])
+        }
+    );
+    assert_eq!(read(d, "version.txt"), read(twin_dir.path(), "version.txt"));
+    assert_eq!(read(d, "version.txt"), MERGED);
+}
+
+#[test]
+fn a_rebase_step_keeps_ours_as_git_does() {
+    let (dir, repo) = diverged("version.txt -merge\n");
+    git_ok(dir.path(), &["checkout", "-q", "topic"]);
+    let (twin_dir, _twin_repo) = twin(dir.path());
+    let gits = test_support::git(twin_dir.path(), &["rebase", "master"]);
+    assert!(!gits.status.success(), "git's rebase should stop");
+    let plan = git_core::rebase::commits_since(&repo, "master")
+        .unwrap()
+        .into_iter()
+        .map(|commit| RebasePlanEntry {
+            commit_id: commit.id,
+            action: RebaseAction::Pick,
+            combined_message: None,
+        })
+        .collect();
+
+    let (_, result) = git_core::rebase::start_rebase(&repo, "master", plan).unwrap();
+
+    assert_eq!(
+        result,
+        RebaseStepResult::Conflicted {
+            files: conflicted(&["version.txt"])
+        }
+    );
+    assert_eq!(
+        read(dir.path(), "version.txt"),
+        read(twin_dir.path(), "version.txt")
+    );
+    assert_eq!(read(dir.path(), "version.txt"), OURS);
+}
+
+/// `stash_over_a_change` with `version.txt -merge` instead of the configured driver.
+fn stash_over_a_change_unmerged() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = stash_over_a_change();
+    repo.config().unwrap().remove("merge.ours.driver").unwrap();
+    write_file(dir.path(), ".gitattributes", "version.txt -merge\n");
+    commit_all(&repo, "version.txt isn't merged");
+    (dir, repo)
+}
+
+#[test]
+fn a_stash_apply_keeps_ours_as_git_does() {
+    let (dir, mut repo) = stash_over_a_change_unmerged();
+    let (twin_dir, _twin_repo) = twin(dir.path());
+    let gits = test_support::git(twin_dir.path(), &["stash", "apply"]);
+    assert!(!gits.status.success(), "git's apply should conflict");
+
+    let outcome = git_core::stash::apply_stash(&mut repo, 0, None, false).unwrap();
+
+    assert_eq!(
+        outcome,
+        StashApplyOutcome::Conflicted {
+            files: conflicted(&["version.txt"])
+        }
+    );
+    assert_eq!(
+        read(dir.path(), "version.txt"),
+        read(twin_dir.path(), "version.txt")
+    );
+    assert_eq!(read(dir.path(), "version.txt"), OURS);
+    assert_eq!(read(dir.path(), "other.txt"), MERGED);
+}
+
+/// A stash whose untracked file `d` replaced the folder `d` (#186) takes Browsitory's own apply
+/// (`apply_in_order`).
+#[test]
+fn a_stash_apply_in_order_keeps_ours_as_git_does() {
+    let (dir, mut repo) = init_repo();
+    let d = dir.path();
+    write_file(d, ".gitattributes", "version.txt -merge\n");
+    write_file(d, "version.txt", BASE);
+    write_file(d, "d/f", "f\n");
+    commit_all(&repo, "base");
+    write_file(d, "version.txt", THEIRS);
+    std::fs::remove_dir_all(d.join("d")).unwrap();
+    write_file(d, "d", "untracked file\n");
+    git_core::stash::save_stash(&mut repo, &git_core::stash::StashOptions::default()).unwrap();
+    write_file(d, "version.txt", OURS);
+    commit_all(&repo, "change the first line");
+    let (twin_dir, _twin_repo) = twin(d);
+    let gits = test_support::git(twin_dir.path(), &["stash", "apply"]);
+    assert!(!gits.status.success(), "git's apply should conflict");
+
+    let outcome = git_core::stash::apply_stash(&mut repo, 0, None, false).unwrap();
+
+    assert!(
+        matches!(
+            &outcome,
+            StashApplyOutcome::Conflicted { files } if files.contains(&"version.txt".to_string())
+        ),
+        "{outcome:?}"
+    );
+    assert_eq!(read(d, "version.txt"), read(twin_dir.path(), "version.txt"));
+    assert_eq!(read(d, "version.txt"), OURS);
+    assert_eq!(read(d, "d"), "untracked file\n");
+}
