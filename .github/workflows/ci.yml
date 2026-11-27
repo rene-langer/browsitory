@@ -25,7 +25,7 @@ env:
   # extension/package.json's engines.vscode. Only one-digit patch numbers: test-electron
   # rejects 1.150.10 (renovate.json's allowedVersions, #921).
   # renovate: datasource=github-releases depName=microsoft/vscode
-  BROWSITORY_E2E_VSCODE_VERSION: 1.146.0
+  BROWSITORY_E2E_VSCODE_VERSION: 1.147.0
   # Set by the dtolnay/rust-toolchain action these jobs used before rust-toolchain.toml pinned
   # the version (#220): no incremental builds (CI builds once; rust-cache skips them anyway) and
   # colored cargo output in the logs.
