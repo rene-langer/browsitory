@@ -756,14 +756,13 @@ fn adds_nothing(repo: &Repository, state: &RebaseState) -> Result<bool, RebaseEr
 
 /// `commit` changes nothing against its first parent (or, a root commit, holds nothing).
 fn starts_empty(commit: &git2::Commit<'_>) -> Result<bool, git2::Error> {
-    Ok(match commit.parent_count() {
-        0 => commit.tree()?.is_empty(),
-        _ => commit.parent(0)?.tree_id() == commit.tree_id(),
-    })
+    let parent_tree = commit.parents().next().map(|parent| parent.tree_id());
+    let empty = commit.tree()?.is_empty();
+    Ok(parent_tree.map_or(empty, |parent_tree| parent_tree == commit.tree_id()))
 }
 
 /// `git rebase` leaves out a commit whose change the new base already has (a cherry-pick, a
-/// "Rebase and merge" or squash-merged pull request): its patch id equals that of a commit
+/// "Rebase and merge" pull request): its patch id equals that of a commit
 /// reachable from `onto` but not from `tip` (`--no-reapply-cherry-picks`, #1150). Each such
 /// `Pick` entry becomes `Drop`, except one leading a squash/fixup group (the group would lose
 /// its leader). Merge commits and empty commits have no patch id here, as in git.
@@ -821,10 +820,11 @@ fn change_of<'r>(
     if commit.parent_count() > 1 {
         return Ok(None);
     }
-    let parent_tree = match commit.parent_count() {
-        0 => None,
-        _ => Some(commit.parent(0)?.tree()?),
-    };
+    let parent_tree = commit
+        .parents()
+        .next()
+        .map(|parent| parent.tree())
+        .transpose()?;
     let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&commit.tree()?), None)?;
     let mut paths: Vec<Vec<u8>> = diff
         .deltas()
