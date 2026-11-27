@@ -12,6 +12,7 @@ use std::path::Path;
 use common::{git_ok, write_file};
 use git_core::branch::{checkout_commit, stash_and_switch, switch_branch, switch_conflicts};
 use git_core::branch::{BranchError, StashSwitchOutcome};
+use git_core::remote::{pull_after_fetch, PullOutcome};
 use git_core::undo::{capture, restore, SnapshotScope};
 
 fn git_out(dir: &Path, args: &[&str]) -> String {
@@ -252,6 +253,23 @@ fn undo_of_a_switch_outside_the_cone_restores_the_sparse_checkout() {
 
     assert_same_as_git(ours.path(), twin.path());
     assert_eq!(ls_files_v(ours.path()), MARKS);
+    assert_nothing_written_outside(ours.path());
+}
+
+/// A fast-forward pull (`origin/main` is `side`), as `git merge --ff-only` does it: the missing
+/// files outside the cone aren't local changes either (#1152).
+#[test]
+fn a_pull_that_changes_files_outside_the_cone_matches_git() {
+    let (ours, twin) = twins();
+    git_ok(twin.path(), &["merge", "-q", "--ff-only", "origin/main"]);
+
+    let outcome = pull_after_fetch(&open(ours.path()), "origin", "main").unwrap();
+
+    assert!(
+        matches!(outcome, PullOutcome::FastForwarded { .. }),
+        "{outcome:?}"
+    );
+    assert_same_as_git(ours.path(), twin.path());
     assert_nothing_written_outside(ours.path());
 }
 
