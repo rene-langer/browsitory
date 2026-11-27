@@ -77,3 +77,64 @@ fn lock_across_processes(path: &Path, wait: Duration) -> Option<File> {
         pause = (pause * 2).min(Duration::from_millis(50));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #1212: on a slow disk (Windows CI: about 200 ms per write) one process's run of writes
+    /// keeps the lock longer than the wait, though each write in it finishes. The waiter waits
+    /// for its turn instead of writing unlocked and undoing one of them.
+    #[test]
+    fn a_waiter_outlasts_the_wait_while_other_writers_keep_finishing() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("config.toml.lock");
+        let wait = Duration::from_secs(2);
+        let first = lock_across_processes(&path, wait).expect("the first writer locks");
+        let others = {
+            let path = path.clone();
+            std::thread::spawn(move || {
+                // Writes of 100 ms each, back to back, for three times the wait.
+                let mut held = Some(first);
+                let until = Instant::now() + wait * 3;
+                while Instant::now() < until {
+                    std::thread::sleep(Duration::from_millis(100));
+                    drop(held.take());
+                    held = lock_across_processes(&path, Duration::from_secs(60));
+                }
+            })
+        };
+
+        // It may also get in between two of the others' writes, which is just as safe.
+        let waiter = lock_across_processes(&path, wait);
+        let locked = waiter.is_some();
+        drop(waiter);
+        others.join().unwrap();
+
+        assert!(
+            locked,
+            "the waiter gave up while the other writers still finished writes"
+        );
+    }
+
+    /// A holder that finishes no write for the whole wait is stuck: the write goes ahead
+    /// unlocked rather than not at all.
+    #[test]
+    fn a_holder_that_finishes_nothing_is_waited_for_only_so_long() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("config.toml.lock");
+        let wait = Duration::from_millis(500);
+        let stuck = lock_across_processes(&path, wait).expect("the stuck writer locks");
+
+        let started = Instant::now();
+        let waiter = lock_across_processes(&path, wait);
+        let waited = started.elapsed();
+        drop(stuck);
+
+        assert!(waiter.is_none(), "the waiter got a lock that is still held");
+        assert!(
+            waited >= wait,
+            "gave up after {waited:?}, before the wait of {wait:?}"
+        );
+    }
+}
