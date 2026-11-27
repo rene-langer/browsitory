@@ -7,7 +7,7 @@ mod common;
 
 use std::path::Path;
 
-use common::{commit_all, git_ok, init_repo, write_file};
+use common::{commit_all, git_ok, init_repo, twin, write_file};
 use git_core::hooks::HookOptions;
 use git_core::pick::{PickOutcome, SequenceOutcome};
 use git_core::rebase::{RebaseAction, RebasePlanEntry, RebaseStepResult};
@@ -87,26 +87,6 @@ fn topic_with(commit: impl Fn(&Path, &git2::Repository)) -> (tempfile::TempDir, 
 
 fn latin1_topic() -> (tempfile::TempDir, git2::Repository) {
     topic_with(|dir, _| git_commit_encoded(dir, LATIN1, "ISO-8859-1"))
-}
-
-/// A copy of the repository at `from`, for git to run the same operation on.
-fn twin(from: &Path) -> (tempfile::TempDir, git2::Repository) {
-    fn copy(from: &Path, to: &Path) {
-        std::fs::create_dir_all(to).unwrap();
-        for entry in std::fs::read_dir(from).unwrap() {
-            let entry = entry.unwrap();
-            let target = to.join(entry.file_name());
-            if entry.file_type().unwrap().is_dir() {
-                copy(&entry.path(), &target);
-            } else {
-                std::fs::copy(entry.path(), target).unwrap();
-            }
-        }
-    }
-    let dir = tempfile::TempDir::new().unwrap();
-    copy(from, dir.path());
-    let repo = git2::Repository::open(dir.path()).unwrap();
-    (dir, repo)
 }
 
 /// The message bytes and `encoding` header of the commit `rev` names.
