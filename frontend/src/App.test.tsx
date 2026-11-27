@@ -3718,10 +3718,12 @@ describe("App external tools", () => {
       expect(alert).not.toHaveTextContent("keyring locked");
     });
 
-    it("shows a plain error's message alone", async () => {
+    it("shows a plain error's message after the operation, then the operation's next step (#1122)", async () => {
       const alert = await stageAndFail(vi.fn().mockRejectedValue(new Error("boom")));
-      // The message with no hint; then the banner's own buttons (#663): Details opens the log (#984).
-      expect(alert.querySelector("span")?.textContent).toBe("boom");
+      // The message and its next step; then the banner's own buttons (#663): Details opens the log (#984).
+      expect(alert.querySelector("span")?.textContent).toBe(
+        "Couldn't stage a.txt: boomCheck that no other Git program is using the repository, then stage again.",
+      );
       expect(within(alert).getByRole("button", { name: "Details" })).toBeInTheDocument();
     });
 
@@ -3737,7 +3739,7 @@ describe("App external tools", () => {
       expect(screen.getByRole("alert")).not.toHaveTextContent(PERMISSION_HINT);
       // The replaced error is kept under the new one until the banner is dismissed (#663).
       expect(within(screen.getByRole("alert")).getByText("1 earlier error")).toBeInTheDocument();
-      expect(within(screen.getByRole("alert")).getByText("Permission denied")).toBeInTheDocument();
+      expect(within(screen.getByRole("alert")).getByText("Couldn't stage a.txt: Permission denied")).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "Dismiss error" }));
       expect(screen.queryByRole("alert")).toBeNull();
     });
