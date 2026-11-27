@@ -110,6 +110,9 @@ pub struct HeadInfo {
     /// The configured external filter drivers (git-crypt, Git LFS) that the repository's
     /// attribute files name, which Browsitory can't run (#1087); sorted, each once.
     pub external_filters: Vec<String>,
+    /// The `working-tree-encoding` values other than UTF-8 that the same attribute files name,
+    /// which Browsitory can't convert (#1156); sorted, each once.
+    pub working_tree_encodings: Vec<String>,
 }
 
 /// Which command a terminal rebase folder belongs to.
@@ -792,6 +795,7 @@ pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
                 terminal_rebase: terminal_rebase(repo),
                 unborn_branch: unborn_branch(repo),
                 external_filters: crate::external_filter::named_drivers(repo),
+                working_tree_encodings: Vec::new(),
             });
         }
         Err(error) => return Err(error.into()),
@@ -815,6 +819,7 @@ pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
         terminal_rebase: terminal_rebase(repo),
         unborn_branch: None,
         external_filters: crate::external_filter::named_drivers(repo),
+        working_tree_encodings: Vec::new(),
     })
 }
 

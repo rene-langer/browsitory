@@ -21,6 +21,17 @@ export interface StatusEntry {
    * Absent on every other entry.
    */
   externalFilter?: string;
+  /**
+   * The working-tree-encoding (`UTF-16LE-BOM`, …) Browsitory can't convert (#1156), on an unstaged
+   * file that uses it: as with `externalFilter`, it refuses to stage it. Absent on every other
+   * entry.
+   */
+  workingTreeEncoding?: string;
+  /**
+   * `true` on the unstaged entry of a file added with `git add -N` (#1173): tracked, as git's
+   * ` A`, so not untracked. Absent on every other entry.
+   */
+  intentToAdd?: boolean;
 }
 
 export type DiffLineOrigin = "Add" | "Remove" | "Context";
@@ -336,6 +347,11 @@ export interface HeadInfo {
    * Browsitory can't run (#1087); absent when there are none.
    */
   externalFilters?: string[];
+  /**
+   * The working-tree-encodings the repository's attributes name, which Browsitory can't convert
+   * (#1156); absent when there are none.
+   */
+  workingTreeEncodings?: string[];
 }
 /**
  * A terminal rebase (`kind: "Rebase"`) or `git am` (`"Am"`). `branch` is the rebased branch's short

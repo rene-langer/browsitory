@@ -32,6 +32,12 @@ pub struct StatusEntry {
     /// stage (#1087): on an unstaged entry that reads the work-tree file (not a deletion, not a
     /// symbolic link) whose `filter` attribute names a configured driver.
     pub external_filter: Option<String>,
+    /// The `working-tree-encoding` (other than UTF-8) that git converts the file with and
+    /// Browsitory can't (#1156): on the same entries as `external_filter`.
+    pub working_tree_encoding: Option<String>,
+    /// An unstaged entry of a file added with `git add -N` (intent to add, #1173): tracked,
+    /// as git's ` A`, not untracked.
+    pub intent_to_add: bool,
 }
 
 /// An untracked folder with more files than this is listed as one entry (#845).
@@ -84,6 +90,8 @@ fn new_file(path: String) -> StatusEntry {
         kind: StatusKind::New,
         untracked_folder: false,
         external_filter: None,
+        working_tree_encoding: None,
+        intent_to_add: false,
     }
 }
 
@@ -150,6 +158,8 @@ pub(crate) fn entries(
                 kind: StatusKind::Conflicted,
                 untracked_folder: false,
                 external_filter: None,
+                working_tree_encoding: None,
+                intent_to_add: false,
             });
             continue;
         }
@@ -184,6 +194,8 @@ pub(crate) fn entries(
                 kind,
                 untracked_folder: false,
                 external_filter: None,
+                working_tree_encoding: None,
+                intent_to_add: false,
             });
         }
         if let Some(kind) = unstaged_kind(flags) {
@@ -201,6 +213,8 @@ pub(crate) fn entries(
                 kind,
                 untracked_folder: false,
                 external_filter: None,
+                working_tree_encoding: None,
+                intent_to_add: false,
             });
         }
     }

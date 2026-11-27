@@ -288,6 +288,8 @@ pub fn status_entries() -> Cases<git_core::status::StatusEntry> {
                     kind,
                     untracked_folder: false,
                     external_filter: None,
+                    working_tree_encoding: None,
+                    intent_to_add: false,
                 },
             )
         })
@@ -301,6 +303,8 @@ pub fn status_entries() -> Cases<git_core::status::StatusEntry> {
             kind: StatusKind::Renamed,
             untracked_folder: false,
             external_filter: None,
+            working_tree_encoding: None,
+            intent_to_add: false,
         },
     ));
     cases.push(case(
@@ -312,6 +316,8 @@ pub fn status_entries() -> Cases<git_core::status::StatusEntry> {
             kind: StatusKind::New,
             untracked_folder: true,
             external_filter: None,
+            working_tree_encoding: None,
+            intent_to_add: false,
         },
     ));
     // A file under a filter driver Browsitory can't run (#1087).
@@ -324,6 +330,36 @@ pub fn status_entries() -> Cases<git_core::status::StatusEntry> {
             kind: StatusKind::Modified,
             untracked_folder: false,
             external_filter: some("crypt"),
+            working_tree_encoding: None,
+            intent_to_add: false,
+        },
+    ));
+    // A file with a working-tree-encoding Browsitory can't convert (#1156).
+    cases.push(case(
+        "working-tree-encoding",
+        git_core::status::StatusEntry {
+            path: "setup.ps1".to_string(),
+            old_path: None,
+            staged: false,
+            kind: StatusKind::Modified,
+            untracked_folder: false,
+            external_filter: None,
+            working_tree_encoding: some("UTF-16LE-BOM"),
+            intent_to_add: false,
+        },
+    ));
+    // A file added with `git add -N` (#1173).
+    cases.push(case(
+        "intent-to-add",
+        git_core::status::StatusEntry {
+            path: "new.txt".to_string(),
+            old_path: None,
+            staged: false,
+            kind: StatusKind::New,
+            untracked_folder: false,
+            external_filter: None,
+            working_tree_encoding: None,
+            intent_to_add: true,
         },
     ));
     cases
@@ -1727,6 +1763,7 @@ fn empty_head() -> git_core::repo::HeadInfo {
         terminal_rebase: None,
         unborn_branch: None,
         external_filters: Vec::new(),
+        working_tree_encodings: Vec::new(),
     }
 }
 
@@ -1754,6 +1791,7 @@ pub fn head_infos() -> Cases<git_core::repo::HeadInfo> {
                 terminal_rebase: Some(terminal_rebase(TerminalRebaseKind::Rebase)),
                 unborn_branch: None,
                 external_filters: Vec::new(),
+                working_tree_encodings: Vec::new(),
             },
         ),
         // A new repository (#983): HEAD names a branch with no commit yet.
@@ -1769,6 +1807,14 @@ pub fn head_infos() -> Cases<git_core::repo::HeadInfo> {
             "external-filters",
             git_core::repo::HeadInfo {
                 external_filters: strings(&["crypt", "lfs"]),
+                ..empty_head()
+            },
+        ),
+        // Working-tree-encodings Browsitory can't convert (#1156).
+        case(
+            "working-tree-encodings",
+            git_core::repo::HeadInfo {
+                working_tree_encodings: strings(&["UTF-16LE-BOM", "UTF-32"]),
                 ..empty_head()
             },
         ),
@@ -1902,6 +1948,8 @@ pub fn statuses_with_stamps() -> Cases<git_core::change_stamp::StatusWithStamp> 
                 kind: git_core::status::StatusKind::Modified,
                 untracked_folder: false,
                 external_filter: None,
+                working_tree_encoding: None,
+                intent_to_add: false,
             }],
             stamp: git_core::change_stamp::ChangeStamp {
                 refs: "0123456789abcdef".to_string(),
