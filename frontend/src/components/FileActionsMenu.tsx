@@ -1,4 +1,5 @@
 import type { StatusEntry } from "../ipc/RepoClient";
+import { escapeIgnorePattern } from "../lib/ignorePattern";
 import { isUntracked } from "../lib/statusLetter";
 import type { ContextMenuItem } from "./primitives/ContextMenu";
 
@@ -27,17 +28,17 @@ export type FileAction =
   | { kind: "folderHistory" };
 
 export function ignorePatterns(path: string): Array<{ label: string; pattern: string }> {
-  const out = [{ label: "Ignore file", pattern: `/${path}` }];
+  const out = [{ label: "Ignore file", pattern: `/${escapeIgnorePattern(path)}` }];
   const name = path.split("/").pop() ?? path;
   const dot = name.lastIndexOf(".");
   if (dot > 0) {
     const ext = name.slice(dot);
-    out.push({ label: `Ignore all *${ext}`, pattern: `*${ext}` });
+    out.push({ label: `Ignore all *${ext}`, pattern: `*${escapeIgnorePattern(ext)}` });
   }
   const slash = path.lastIndexOf("/");
   if (slash > 0) {
     const folder = path.slice(0, slash + 1);
-    out.push({ label: `Ignore folder ${folder}`, pattern: `/${folder}` });
+    out.push({ label: `Ignore folder ${folder}`, pattern: `/${escapeIgnorePattern(folder)}` });
   }
   return out;
 }
@@ -61,7 +62,7 @@ export function fileMenuItems(
     // together; no editor or diff tool for a folder.
     items.push(
       { label: "Stage folder", onSelect: () => onPick({ kind: "stage" }), group: "file" },
-      { label: "Ignore folder", onSelect: () => onPick({ kind: "ignore", pattern: `/${entry.path}` }), group: "file" },
+      { label: "Ignore folder", onSelect: () => onPick({ kind: "ignore", pattern: `/${escapeIgnorePattern(entry.path)}` }), group: "file" },
       { label: "Delete folder…", destructive: true, onSelect: () => onPick({ kind: "discard" }), group: "discard" },
     );
     if (tools !== undefined) {

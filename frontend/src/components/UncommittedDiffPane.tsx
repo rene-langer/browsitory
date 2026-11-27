@@ -31,6 +31,7 @@ import {
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { isMenuKey } from "../lib/menuKeys";
 import { stageAllPaths, stageModifiedPaths, untrackedPaths } from "../lib/stagePaths";
+import { escapeIgnorePattern } from "../lib/ignorePattern";
 import { isUntracked } from "../lib/statusLetter";
 import { useFileListLayout, writeFileListLayout } from "../lib/fileListLayoutPreference";
 import { buildFileTree, type FileTreeNode } from "../lib/fileTree";
@@ -623,7 +624,7 @@ export function UncommittedDiffPane({
         if (paths.length > 0) setDiscardRequest({ kind: "files", paths });
         return;
       case "ignoreSelection": {
-        const patterns = entries.filter(isUntracked).map((entry) => `/${entry.path}`);
+        const patterns = entries.filter(isUntracked).map((entry) => `/${escapeIgnorePattern(entry.path)}`);
         if (patterns.length === 0) return;
         onIgnorePaths(patterns);
         break;

@@ -736,7 +736,16 @@ fn with_index_kept_on_error(
 /// write (#528). Every pattern is checked first: an invalid one writes nothing.
 pub fn ignore_paths(repo: &git2::Repository, patterns: &[String]) -> Result<(), StageError> {
     for pattern in patterns {
-        if pattern.is_empty() || pattern.contains(['\n', '\r']) || pattern.trim() != pattern {
+        // Whitespace around the pattern is refused, not trimmed, except a trailing space git
+        // keeps because a backslash escapes it (`name\ `, #1168).
+        let trailing = pattern.trim_end() != pattern
+            && (pattern.trim_end_matches(' ').trim_end() != pattern.trim_end_matches(' ')
+                || without_trailing_spaces(pattern) != pattern);
+        if pattern.is_empty()
+            || pattern.contains(['\n', '\r'])
+            || pattern.trim_start() != pattern
+            || trailing
+        {
             return Err(StageError::InvalidPattern);
         }
     }
@@ -757,7 +766,11 @@ pub fn ignore_paths(repo: &git2::Repository, patterns: &[String]) -> Result<(), 
             _ => return Err(StageError::InvalidPath),
         },
     };
-    let mut listed: Vec<&str> = existing.lines().map(str::trim_end).collect();
+    // Each line as git reads it (an escaped trailing space kept), and trimmed as before.
+    let mut listed: Vec<&str> = existing
+        .lines()
+        .flat_map(|line| [without_trailing_spaces(line), line.trim_end()])
+        .collect();
     let mut added = Vec::new();
     for pattern in patterns {
         if !listed.contains(&pattern.as_str()) {
@@ -791,6 +804,31 @@ pub fn ignore_paths(repo: &git2::Repository, patterns: &[String]) -> Result<(), 
         return Err(StageError::InvalidPath);
     }
     Ok(())
+}
+
+/// `line` as git reads a `.gitignore` line: its trailing spaces dropped, except one a
+/// backslash escapes and those before it (git's `trim_trailing_spaces`).
+fn without_trailing_spaces(line: &str) -> &str {
+    let bytes = line.as_bytes();
+    let mut last_space = None;
+    let mut at = 0;
+    while at < bytes.len() {
+        match bytes[at] {
+            b' ' => {
+                last_space.get_or_insert(at);
+            }
+            b'\\' => {
+                at += 1;
+                if at == bytes.len() {
+                    return line;
+                }
+                last_space = None;
+            }
+            _ => last_space = None,
+        }
+        at += 1;
+    }
+    last_space.map_or(line, |at| &line[..at])
 }
 
 /// Appends `pattern` to the repo-root `.gitignore` unless it is already listed.
