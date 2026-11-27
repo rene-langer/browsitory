@@ -358,6 +358,70 @@ describe("useAppState", () => {
   });
 });
 
+// #1124: Create tag and New worktree show their failure in their dialog, so the banner leaves
+// it out (#996): the failure is marked as the dialog's, a taken name too.
+describe("the create dialogs' failures", () => {
+  it("createTag marks a failed create as shown in its dialog", async () => {
+    const client = transferClient({
+      listTags: async () => [],
+      createTag: async () => {
+        throw new Error("invalid tag name");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    let outcome: string | null = null;
+    await act(async () => {
+      outcome = await result.current.createTag("v1", null, null);
+    });
+    expect(outcome).toContain("invalid tag name");
+    expect(result.current.state.errorSource).toEqual({ error: outcome, source: "dialog" });
+  });
+
+  it("createTag marks a taken name as shown in its dialog", async () => {
+    const tag: TagInfo = { name: "v1", targetId: "t", commitId: "c", annotated: false, message: null, taggerName: null, timestamp: null };
+    const client = transferClient({ listTags: async () => [tag] });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    let outcome: string | null = null;
+    await act(async () => {
+      outcome = await result.current.createTag("v1", null, null);
+    });
+    expect(outcome).not.toBeNull();
+    expect(result.current.state.errorSource).toEqual({ error: outcome, source: "dialog" });
+  });
+
+  it("createWorktree marks a failed create as shown in its dialog", async () => {
+    const client = transferClient({
+      listWorktrees: async () => [],
+      createWorktree: async () => {
+        throw new Error("folder exists");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    let outcome: string | null = null;
+    await act(async () => {
+      outcome = await result.current.createWorktree("wt", "/elsewhere/wt", "wt", null);
+    });
+    expect(outcome).toContain("folder exists");
+    expect(result.current.state.errorSource).toEqual({ error: outcome, source: "dialog" });
+  });
+
+  it("createWorktree marks a taken name as shown in its dialog", async () => {
+    const worktree: WorktreeInfo = { name: "wt", path: "/elsewhere/wt", head: null, isMain: false, isLocked: false, isPrunable: false };
+    const client = transferClient({ listWorktrees: async () => [worktree] });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    let outcome: string | null = null;
+    await act(async () => {
+      outcome = await result.current.createWorktree("wt", "/elsewhere/other", "other", null);
+    });
+    expect(outcome).not.toBeNull();
+    expect(result.current.state.errorSource).toEqual({ error: outcome, source: "dialog" });
+  });
+});
+
 // #1115: a failed stage restores the file list it changed, not the whole state of when it
 // started: a fetch that completed while the stage was out stays completed, and a commit
 // selected meanwhile stays selected.
