@@ -50,11 +50,13 @@ const CONFLICT_STYLE: &str = "merge.conflictstyle";
 
 /// Before a command that merges and checks out the result (merge, cherry-pick, revert, rebase,
 /// stash apply): refuses a merge driver or a conflict style written without a value, which git
-/// refuses too ("missing value").
+/// refuses too ("missing value"). Also puts the guard for custom merge drivers in place
+/// (`merge_driver::register`, #1165).
 pub(crate) fn refuse_for_merge<E>(repo: &Repository) -> Result<(), E>
 where
     E: From<git2::Error> + From<ValuelessSetting>,
 {
+    crate::merge_driver::register();
     refuse_valueless::<E>(repo, MERGE_DRIVER)?;
     refuse_for_checkout(repo)
 }
@@ -68,8 +70,10 @@ where
 }
 
 /// Whether a merge in memory can run: false when the merge driver is written without a value
-/// (or the config can't be read).
+/// (or the config can't be read). Puts the guard for custom merge drivers in place, as
+/// `refuse_for_merge` does.
 pub(crate) fn can_merge_in_memory(repo: &Repository) -> bool {
+    crate::merge_driver::register();
     refuse_valueless::<Unreadable>(repo, MERGE_DRIVER).is_ok()
 }
 

@@ -25,6 +25,7 @@ fn entry(path: &str, staged: bool, kind: StatusKind) -> StatusEntry {
         external_filter: None,
         working_tree_encoding: None,
         intent_to_add: false,
+        merge_driver: None,
     }
 }
 

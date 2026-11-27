@@ -446,7 +446,12 @@ workingTreeEncoding?: string,
 /**
  * Only on the unstaged entry of an intent-to-add file (`git add -N`, #1173): `true`.
  */
-intentToAdd?: boolean, };
+intentToAdd?: boolean, 
+/**
+ * The custom merge driver Browsitory doesn't run, on a conflicted file whose `merge`
+ * attribute names one (#1165); absent otherwise.
+ */
+mergeDriver?: string, };
 
 export type StatusKind = "New" | "Modified" | "Deleted" | "Renamed" | "TypeChange" | "Conflicted";
 

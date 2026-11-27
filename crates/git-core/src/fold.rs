@@ -58,7 +58,8 @@ pub fn fold_staged_into(
     }
 
     let committer = repo.signature()?;
-    let message = String::from_utf8_lossy(target.message_bytes()).into_owned();
+    // In UTF-8, as `git commit --amend` writes it (#1149).
+    let message = crate::message_text::message(&target);
     if target.id() == head.id() {
         // The latest commit: amend it, keeping its message, author and parents.
         let parents: Vec<git2::Commit<'_>> = head.parents().collect();
@@ -88,7 +89,7 @@ pub fn fold_staged_into(
             "the first commit of the history can't take staged changes".to_string(),
         )
     })?;
-    let summary = String::from_utf8_lossy(target.summary_bytes().unwrap_or_default()).into_owned();
+    let summary = crate::message_text::summary(&target);
     let fixup = crate::commit::create_signed_reporting(
         repo,
         &mut hooks,

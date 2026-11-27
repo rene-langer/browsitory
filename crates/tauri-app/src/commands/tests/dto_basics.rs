@@ -148,6 +148,7 @@ fn status_entry_dto_always_serializes_old_path() {
         external_filter: None,
         working_tree_encoding: None,
         intent_to_add: false,
+        merge_driver: None,
     });
     assert_eq!(
         serde_json::to_value(plain).unwrap(),
@@ -162,6 +163,7 @@ fn status_entry_dto_always_serializes_old_path() {
         external_filter: None,
         working_tree_encoding: None,
         intent_to_add: false,
+        merge_driver: None,
     });
     assert_eq!(
         serde_json::to_value(renamed).unwrap()["oldPath"],

@@ -916,3 +916,37 @@ describe("working-tree-encoding (#1156)", () => {
     );
   });
 });
+
+describe("custom merge drivers (#1165)", () => {
+  const version: StatusEntry = { ...entry("version.txt", false, "Conflicted"), mergeDriver: "ours" };
+  const unstagedList = () => screen.getByRole("listbox", { name: "Unstaged changes" });
+
+  it("marks a conflict under a merge driver Browsitory doesn't run, and says why", () => {
+    render(
+      <Pane
+        client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")}
+        status={[version, entry("z.txt", false, "Conflicted")]}
+      />,
+    );
+    const conflicts = within(unstagedList()).getByRole("group", { name: /^Conflicts \(2\)/ });
+    const row = within(conflicts).getByRole("option", { name: /^version\.txt/ });
+    const note = within(row).getByText("'ours' merge driver");
+    expect(note).toHaveAttribute("title", expect.stringContaining("Browsitory doesn't run the 'ours' merge driver"));
+    expect(within(conflicts).getByRole("option", { name: /^z\.txt/ })).not.toHaveTextContent("merge driver");
+  });
+
+  it("says above the conflict that the driver wasn't run", async () => {
+    render(
+      <Pane
+        client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")}
+        status={[version, entry("z.txt", false, "Conflicted")]}
+      />,
+    );
+    fireEvent.click(within(unstagedList()).getByRole("option", { name: /^version\.txt/ }));
+    const note = await screen.findByRole("note");
+    expect(note).toHaveTextContent("Browsitory doesn't run the 'ours' merge driver");
+    expect(note).toHaveTextContent("left conflicted");
+    fireEvent.click(within(unstagedList()).getByRole("option", { name: /^z\.txt/ }));
+    await waitFor(() => expect(screen.queryByText(/doesn't run the 'ours' merge driver/)).toBeNull());
+  });
+});

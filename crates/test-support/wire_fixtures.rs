@@ -292,6 +292,7 @@ pub fn status_entries() -> Cases<git_core::status::StatusEntry> {
                     external_filter: None,
                     working_tree_encoding: None,
                     intent_to_add: false,
+                    merge_driver: None,
                 },
             )
         })
@@ -307,6 +308,7 @@ pub fn status_entries() -> Cases<git_core::status::StatusEntry> {
             external_filter: None,
             working_tree_encoding: None,
             intent_to_add: false,
+            merge_driver: None,
         },
     ));
     cases.push(case(
@@ -320,6 +322,7 @@ pub fn status_entries() -> Cases<git_core::status::StatusEntry> {
             external_filter: None,
             working_tree_encoding: None,
             intent_to_add: false,
+            merge_driver: None,
         },
     ));
     // A file under a filter driver Browsitory can't run (#1087).
@@ -334,6 +337,7 @@ pub fn status_entries() -> Cases<git_core::status::StatusEntry> {
             external_filter: some("crypt"),
             working_tree_encoding: None,
             intent_to_add: false,
+            merge_driver: None,
         },
     ));
     // A file with a working-tree-encoding Browsitory can't convert (#1156).
@@ -348,6 +352,7 @@ pub fn status_entries() -> Cases<git_core::status::StatusEntry> {
             external_filter: None,
             working_tree_encoding: some("UTF-16LE-BOM"),
             intent_to_add: false,
+            merge_driver: None,
         },
     ));
     // A file added with `git add -N` (#1173).
@@ -362,6 +367,22 @@ pub fn status_entries() -> Cases<git_core::status::StatusEntry> {
             external_filter: None,
             working_tree_encoding: None,
             intent_to_add: true,
+            merge_driver: None,
+        },
+    ));
+    // A conflicted file under a merge driver Browsitory doesn't run (#1165).
+    cases.push(case(
+        "merge-driver",
+        git_core::status::StatusEntry {
+            path: "version.txt".to_string(),
+            old_path: None,
+            staged: false,
+            kind: StatusKind::Conflicted,
+            untracked_folder: false,
+            external_filter: None,
+            working_tree_encoding: None,
+            intent_to_add: false,
+            merge_driver: some("ours"),
         },
     ));
     cases
@@ -1952,6 +1973,7 @@ pub fn statuses_with_stamps() -> Cases<git_core::change_stamp::StatusWithStamp> 
                 external_filter: None,
                 working_tree_encoding: None,
                 intent_to_add: false,
+                merge_driver: None,
             }],
             stamp: git_core::change_stamp::ChangeStamp {
                 refs: "0123456789abcdef".to_string(),

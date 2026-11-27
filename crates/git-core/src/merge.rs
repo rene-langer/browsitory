@@ -1599,8 +1599,11 @@ fn path_from_bytes(bytes: &[u8]) -> std::path::PathBuf {
     std::path::PathBuf::from(String::from_utf8_lossy(bytes).into_owned())
 }
 
+/// `MERGE_MSG`, with any byte that isn't UTF-8 read as Latin-1 as `git commit` reads it (#1149).
+/// Not `Repository::message`, which panics on such a byte.
 pub fn merge_message(repo: &Repository) -> Option<String> {
-    repo.message().ok()
+    let bytes = std::fs::read(repo.path().join("MERGE_MSG")).ok()?;
+    Some(crate::message_text::text(&bytes))
 }
 
 pub fn is_merging(repo: &Repository) -> bool {
