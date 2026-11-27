@@ -461,6 +461,7 @@ pub fn start_rebase_with(
     let head_ref = repo.head()?;
     let original_branch_ref = head_ref.name()?.to_string();
     let original_tip = head_ref.peel_to_commit()?.id();
+    let plan = leave_out_upstream(repo, plan, onto_commit.id(), original_tip)?;
 
     // Checking out before detaching HEAD means a refused checkout (modified/untracked files in
     // the way) leaves the repo exactly as it was — the same safety ordering
@@ -728,15 +729,118 @@ fn land_or_close_split(
     message: Option<&str>,
     hooks: &mut HookOptions<'_>,
 ) -> Result<(), RebaseError> {
-    if editing_entry(state).is_some() {
-        let mut index = repo.index()?;
-        index.read(false)?;
-        let staged = crate::index_marks::committed_tree(repo, &mut index)?;
-        if staged == repo.head()?.peel_to_commit()?.tree_id() {
-            return after_landed(repo, state, hooks);
-        }
+    if adds_nothing(repo, state)? {
+        return after_landed(repo, state, hooks);
     }
     land_current_step(repo, state, message, hooks)
+}
+
+/// The applied step at the cursor adds nothing to HEAD and is left out, as `git rebase` drops a
+/// commit that becomes empty (`--empty=drop`, #1150), also after a conflict resolved to nothing.
+/// A commit that was empty from the start is kept, as git keeps it. At an edit stop, nothing
+/// staged ends the step whatever the commit was (#884).
+fn adds_nothing(repo: &Repository, state: &RebaseState) -> Result<bool, RebaseError> {
+    let mut index = repo.index()?;
+    index.read(false)?;
+    let staged = crate::index_marks::committed_tree(repo, &mut index)?;
+    if staged != repo.head()?.peel_to_commit()?.tree_id() {
+        return Ok(false);
+    }
+    if editing_entry(state).is_some() {
+        return Ok(true);
+    }
+    let entry = &state.plan[state.cursor];
+    let picked = repo.find_commit(Oid::from_str(&entry.commit_id)?)?;
+    Ok(!starts_empty(&picked)?)
+}
+
+/// `commit` changes nothing against its first parent (or, a root commit, holds nothing).
+fn starts_empty(commit: &git2::Commit<'_>) -> Result<bool, git2::Error> {
+    Ok(match commit.parent_count() {
+        0 => commit.tree()?.is_empty(),
+        _ => commit.parent(0)?.tree_id() == commit.tree_id(),
+    })
+}
+
+/// `git rebase` leaves out a commit whose change the new base already has (a cherry-pick, a
+/// "Rebase and merge" or squash-merged pull request): its patch id equals that of a commit
+/// reachable from `onto` but not from `tip` (`--no-reapply-cherry-picks`, #1150). Each such
+/// `Pick` entry becomes `Drop`, except one leading a squash/fixup group (the group would lose
+/// its leader). Merge commits and empty commits have no patch id here, as in git.
+fn leave_out_upstream(
+    repo: &Repository,
+    mut plan: Vec<RebasePlanEntry>,
+    onto: Oid,
+    tip: Oid,
+) -> Result<Vec<RebasePlanEntry>, RebaseError> {
+    let mut ours = Vec::new();
+    for (index, entry) in plan.iter().enumerate() {
+        if entry.action != RebaseAction::Pick || starts_a_group(&plan, index) {
+            continue;
+        }
+        let commit = repo.find_commit(Oid::from_str(&entry.commit_id)?)?;
+        if let Some((paths, diff)) = change_of(repo, &commit)? {
+            ours.push((index, paths, diff.patchid(None)?));
+        }
+    }
+    if ours.is_empty() {
+        return Ok(plan);
+    }
+    let mut walk = repo.revwalk()?;
+    walk.push(onto)?;
+    walk.hide(tip)?;
+    let mut upstream = std::collections::HashSet::new();
+    for oid in walk {
+        let commit = repo.find_commit(oid?)?;
+        // Only a commit touching exactly the paths of one of ours can share its patch id; the
+        // tree comparison is cheap, the patch id reads every blob.
+        let Some((paths, diff)) = change_of(repo, &commit)? else {
+            continue;
+        };
+        if ours.iter().any(|(_, mine, _)| *mine == paths) {
+            upstream.insert(diff.patchid(None)?);
+        }
+    }
+    for (index, _, patch_id) in ours {
+        if upstream.contains(&patch_id) {
+            plan[index].action = RebaseAction::Drop;
+        }
+    }
+    Ok(plan)
+}
+
+/// A commit's change: the paths it touches, sorted, and the diff.
+type Change<'r> = (Vec<Vec<u8>>, git2::Diff<'r>);
+
+/// A commit's change against its first parent (the empty tree for a root commit). `None` for a
+/// merge commit or one that changes nothing.
+fn change_of<'r>(
+    repo: &'r Repository,
+    commit: &git2::Commit<'_>,
+) -> Result<Option<Change<'r>>, git2::Error> {
+    if commit.parent_count() > 1 {
+        return Ok(None);
+    }
+    let parent_tree = match commit.parent_count() {
+        0 => None,
+        _ => Some(commit.parent(0)?.tree()?),
+    };
+    let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&commit.tree()?), None)?;
+    let mut paths: Vec<Vec<u8>> = diff
+        .deltas()
+        .filter_map(|delta| {
+            delta
+                .new_file()
+                .path_bytes()
+                .or(delta.old_file().path_bytes())
+                .map(<[u8]>::to_vec)
+        })
+        .collect();
+    if paths.is_empty() {
+        return Ok(None);
+    }
+    paths.sort();
+    Ok(Some((paths, diff)))
 }
 
 /// `rebase_continue` with a cancel check and a reporter for the signing program, as in
@@ -1063,7 +1167,7 @@ fn advance(
             return Ok(RebaseStepResult::PausedForEdit);
         }
 
-        land_current_step(repo, state, None, hooks)?;
+        land_or_close_split(repo, state, None, hooks)?;
         state.cursor += 1;
     }
 }
@@ -1230,22 +1334,26 @@ fn after_landed(
                     .to_string(),
             )
         })?)?;
-        // No `HeadUpdate` here: libgit2 rejects a ref-updating commit() whose
-        // first parent isn't the ref's *current* target, and the current target is the last
-        // intermediate commit in the group's chain, not `group_parent` — that's the whole point
-        // of the collapse (reparenting past that chain). Create the commit untethered, then move
-        // HEAD to it directly.
-        let final_oid = crate::commit::create_signed_reporting(
-            repo,
-            hooks,
-            None,
-            &leader_commit.author(),
-            &committer,
-            &combined_message,
-            &final_tree,
-            &[&group_parent],
-        )?;
-        repo.set_head_detached(final_oid)?;
+        // Every step of the group added nothing and was left out (#1150): no commit, as git
+        // leaves none.
+        if repo.head()?.peel_to_commit()?.id() != group_parent.id() {
+            // No `HeadUpdate` here: libgit2 rejects a ref-updating commit() whose
+            // first parent isn't the ref's *current* target, and the current target is the last
+            // intermediate commit in the group's chain, not `group_parent` — that's the whole
+            // point of the collapse (reparenting past that chain). Create the commit untethered,
+            // then move HEAD to it directly.
+            let final_oid = crate::commit::create_signed_reporting(
+                repo,
+                hooks,
+                None,
+                &leader_commit.author(),
+                &committer,
+                &combined_message,
+                &final_tree,
+                &[&group_parent],
+            )?;
+            repo.set_head_detached(final_oid)?;
+        }
         state.group_start_parent = None;
     }
 

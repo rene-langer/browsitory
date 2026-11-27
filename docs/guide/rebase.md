@@ -42,6 +42,13 @@ A merge commit can't be replayed (the rebase follows first parents only): its ro
 commit: can't be replayed" and has no action, and **Start rebase** is unavailable and says why.
 Rebase onto the merge commit or a newer one instead.
 
+**Commits already there.** As `git rebase` does, a commit whose change the new base already
+has (cherry-picked there, or rebased there by a pull request) is left out even when the planner
+lists it as Pick, and a commit that adds nothing once replayed is dropped, also when you resolve
+its conflict by keeping the base's side and continue. A commit that was empty to begin with is
+kept. Messages written in another encoding than UTF-8 (ISO-8859-1, Windows-1252) are replayed
+in UTF-8, as git replays them.
+
 **Edit** stops the rebase at that commit as **Edit commit…** does (see [Editing older
 commits](rewriting-commits.md)): HEAD is the commit's parent, the commit's changes are staged,
 and the status strip says "Editing 1a2b3c4: change the files, then Continue rebase". Change, stage or
