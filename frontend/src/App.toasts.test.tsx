@@ -74,7 +74,7 @@ describe("toasts of a tab that isn't shown (#1116)", () => {
   it("names the tab, and its Pull shows that tab and pulls there", async () => {
     const { subscribeTransferProgress, emit } = transferEvents();
     const fetchRemote = vi.fn(async () => "fetch-1");
-    const pullCurrentUpstream = vi.fn(async () => ({ kind: "UpToDate" as const }));
+    const pullCurrentUpstream = vi.fn<RepoClient["pullCurrentUpstream"]>(async () => ({ kind: "UpToDate" }));
     render(<App client={twoTabs({ fetchRemote, pullCurrentUpstream, subscribeTransferProgress })} />);
     await fetchInA(fetchRemote);
     await showTab("b");
@@ -103,7 +103,7 @@ describe("toasts of a tab that isn't shown (#1116)", () => {
   });
 
   it("runs its Undo in its tab once that tab is shown", async () => {
-    const undo = vi.fn(async () => ({ kind: "Undone" as const, label: "Commit" }));
+    const undo = vi.fn<RepoClient["undo"]>(async () => ({ kind: "Done", label: "Commit" }));
     render(
       <App
         client={twoTabs({
