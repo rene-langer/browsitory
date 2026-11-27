@@ -288,3 +288,23 @@ fn switching_with_non_cone_patterns_matches_git() {
     assert_same_as_git(ours.path(), twin.path());
     assert_nothing_written_outside(ours.path());
 }
+
+/// A tracked file inside the cone deleted by hand is a local change the switch would
+/// overwrite: it is named, unlike the missing files outside the cone.
+#[test]
+fn a_refused_switch_names_a_deleted_file_inside_the_cone() {
+    let (ours, _twin) = twins();
+    std::fs::remove_file(ours.path().join("app/main.rs")).unwrap();
+    let repo = open(ours.path());
+
+    let result = switch_branch(&repo, "side");
+
+    assert!(
+        matches!(result, Err(BranchError::LocalChanges(ref name)) if name == "side"),
+        "{result:?}"
+    );
+    assert_eq!(
+        switch_conflicts(&repo, "side").unwrap(),
+        vec!["app/main.rs".to_string()]
+    );
+}

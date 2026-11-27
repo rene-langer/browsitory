@@ -466,3 +466,22 @@ fn aborting_a_cherry_pick_outside_the_cone_matches_git() {
     assert_eq!(ls_files_v(ours.path()), MARKS);
     assert_nothing_written_outside(ours.path());
 }
+
+/// A marked file the merge changed that is on disk again when Abort runs (written by hand, as
+/// the index has it): git refuses its abort ("not uptodate"); here HEAD's version is put back on
+/// disk, as for a file inside the cone, since the file holds nothing the index doesn't.
+#[test]
+fn aborting_a_merge_whose_changed_file_outside_the_cone_is_on_disk_puts_heads_version_back() {
+    let (ours, _twin) = twins();
+    let repo = open(ours.path());
+    start_merge(&repo, "side", MergeOptions::default()).unwrap();
+    write_file(ours.path(), "docs/guide.md", "guide from side\n");
+
+    git_core::merge::abort_merge(&repo).unwrap();
+
+    assert_eq!(git_out(ours.path(), &["status", "--short"]), "");
+    assert_eq!(
+        std::fs::read_to_string(ours.path().join("docs/guide.md")).unwrap(),
+        "guide\n"
+    );
+}
