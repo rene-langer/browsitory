@@ -32,6 +32,9 @@ pub struct StatusEntry {
     /// stage (#1087): on an unstaged entry that reads the work-tree file (not a deletion, not a
     /// symbolic link) whose `filter` attribute names a configured driver.
     pub external_filter: Option<String>,
+    /// The custom merge driver (`merge.<name>.driver`) Browsitory doesn't run (#1165): on a
+    /// conflicted entry whose `merge` attribute (or `merge.default`) names a configured one.
+    pub merge_driver: Option<String>,
 }
 
 /// An untracked folder with more files than this is listed as one entry (#845).
@@ -84,6 +87,7 @@ fn new_file(path: String) -> StatusEntry {
         kind: StatusKind::New,
         untracked_folder: false,
         external_filter: None,
+        merge_driver: None,
     }
 }
 
@@ -150,6 +154,7 @@ pub(crate) fn entries(
                 kind: StatusKind::Conflicted,
                 untracked_folder: false,
                 external_filter: None,
+                merge_driver: None,
             });
             continue;
         }
@@ -184,6 +189,7 @@ pub(crate) fn entries(
                 kind,
                 untracked_folder: false,
                 external_filter: None,
+                merge_driver: None,
             });
         }
         if let Some(kind) = unstaged_kind(flags) {
@@ -201,6 +207,7 @@ pub(crate) fn entries(
                 kind,
                 untracked_folder: false,
                 external_filter: None,
+                merge_driver: None,
             });
         }
     }
@@ -221,6 +228,7 @@ pub fn status_refreshing_index(repo: &git2::Repository) -> Result<Vec<StatusEntr
     let expansion = crate::untracked::expand(repo, &statuses);
     let mut entries = entries(&statuses, &expansion, &index);
     crate::external_filter::annotate(repo, &mut entries);
+    crate::merge_driver::annotate(repo, &mut entries);
     Ok(entries)
 }
 

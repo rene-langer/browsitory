@@ -237,6 +237,28 @@ pub fn commit_at(repo: &Repository, parents: &[Oid], message: &str, seconds: i64
         .unwrap()
 }
 
+/// A copy of the repository (work tree and git dir) at `from`, for git to run the same operation
+/// on as the app, to compare the outcomes.
+#[allow(dead_code)]
+pub fn twin(from: &Path) -> (TempDir, Repository) {
+    fn copy(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), target).unwrap();
+            }
+        }
+    }
+    let dir = TempDir::new().unwrap();
+    copy(from, dir.path());
+    let repo = Repository::open(dir.path()).unwrap();
+    (dir, repo)
+}
+
 /// A directory outside any repository holding `target.txt` and `f`, both "OUTSIDE\n".
 #[allow(dead_code)]
 pub fn outside_dir() -> TempDir {
