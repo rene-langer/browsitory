@@ -1535,4 +1535,49 @@ mod tests {
         );
         assert_eq!(counts(&repo), (0, 0), "(staged, unstaged)");
     }
+
+    /// Only a path with an intent-to-add mark keeps libgit2 from writing the stat data of what
+    /// the discard wrote (#1173): the others are recorded as written, as before.
+    #[test]
+    fn a_discard_records_the_written_files_stat_data() {
+        let (dir, repo) = changed(2, 0);
+        let indexed_size = |path: &str| {
+            let mut index = repo.index().unwrap();
+            index.read(true).unwrap();
+            index.get_path(Path::new(path), 0).unwrap().file_size
+        };
+        std::fs::write(dir.path().join("t00"), "a much longer edit\n").unwrap();
+        stage_file(&repo, "t00").unwrap();
+        std::fs::write(dir.path().join("t00"), "x\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.read(true).unwrap();
+        // A stale size: the stat data no longer matches what the discard will write.
+        let mut entry = index.get_path(Path::new("t00"), 0).unwrap();
+        entry.file_size = 1;
+        index.add(&entry).unwrap();
+        index.write().unwrap();
+
+        discard_all_unstaged(&repo, &["t00".to_string(), "t01".to_string()]).unwrap();
+
+        assert_eq!(indexed_size("t00"), "a much longer edit\n".len() as u32);
+    }
+
+    /// git's `trim_trailing_spaces` (dir.c) on the same lines.
+    #[test]
+    fn trailing_spaces_are_dropped_as_git_drops_them() {
+        for (line, read) in [
+            ("a", "a"),
+            ("a  ", "a"),
+            ("a\\ ", "a\\ "),
+            ("a\\  ", "a\\ "),
+            ("a \\ ", "a \\ "),
+            ("a\\\\ ", "a\\\\"),
+            ("a\\", "a\\"),
+            ("a \\", "a \\"),
+            ("  ", ""),
+            ("", ""),
+        ] {
+            assert_eq!(without_trailing_spaces(line), read, "{line:?}");
+        }
+    }
 }

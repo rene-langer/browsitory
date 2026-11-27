@@ -570,3 +570,29 @@ fn attribute_values<'t>(text: &'t [u8], prefix: &[u8]) -> Vec<&'t [u8]> {
     }
     names
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_an_encoding_other_than_utf8_is_converted_to() {
+        for value in ["UTF-16LE-BOM", "ISO-8859-1", "UTF-16", "utf-32"] {
+            assert!(converts_to(value.as_bytes()), "{value}");
+        }
+        for value in ["", "UTF-8", "utf-8", "UTF8", "Utf8"] {
+            assert!(!converts_to(value.as_bytes()), "{value:?}");
+        }
+    }
+
+    #[test]
+    fn attribute_values_reads_the_words_after_each_pattern() {
+        let text = b"# working-tree-encoding=NO\n*.ps1 text working-tree-encoding=UTF-16\n\
+            [attr]sql working-tree-encoding=UTF-32 -text\n\"a b\" working-tree-encoding=X\n\
+            working-tree-encoding=pattern-only\n";
+        assert_eq!(
+            attribute_values(text, b"working-tree-encoding="),
+            [&b"UTF-16"[..], b"UTF-32", b"X"]
+        );
+    }
+}

@@ -100,6 +100,10 @@ fn a_status_read_keeps_what_isnt_a_scratch_folder() {
     status_refreshing_index(&repo).unwrap();
 
     assert!(other.join("notes.txt").exists());
+    assert!(
+        other.join("index").exists(),
+        "the index copy beside it was removed"
+    );
     assert!(file.exists());
     assert!(unrelated.exists());
 }
@@ -114,11 +118,15 @@ fn a_status_read_removes_an_old_scratch_folder_without_a_process_id() {
     let (_dir, repo) = committed_repo();
     let old = leftover(repo.path(), &format!("{PREFIX}a1B2c3"), &["index"]);
     let recent = leftover(repo.path(), &format!("{PREFIX}d4E5f6"), &["index"]);
-    let two_hours_ago = SystemTime::now() - Duration::from_secs(2 * 60 * 60);
-    std::fs::File::open(&old)
-        .unwrap()
-        .set_modified(two_hours_ago)
-        .unwrap();
+    // Older than any scan, but not an hour old yet.
+    let half_hour = leftover(repo.path(), &format!("{PREFIX}g7H8i9"), &["index"]);
+    let now = SystemTime::now();
+    for (folder, age) in [(&old, 2 * 60 * 60), (&half_hour, 30 * 60)] {
+        std::fs::File::open(folder)
+            .unwrap()
+            .set_modified(now - Duration::from_secs(age))
+            .unwrap();
+    }
 
     status_refreshing_index(&repo).unwrap();
 
@@ -127,6 +135,7 @@ fn a_status_read_removes_an_old_scratch_folder_without_a_process_id() {
         recent.exists(),
         "a folder a running scan may use was removed"
     );
+    assert!(half_hour.exists(), "a folder under an hour old was removed");
 }
 
 #[test]
