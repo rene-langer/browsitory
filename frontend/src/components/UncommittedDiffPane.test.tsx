@@ -848,3 +848,71 @@ describe("external filter drivers (#1087)", () => {
     expect(screen.queryByText(/Browsitory can't run the 'crypt' filter/)).toBeNull();
   });
 });
+
+// #1156: files with a working-tree-encoding Browsitory can't convert (UTF-16 and the like).
+describe("working-tree-encoding (#1156)", () => {
+  beforeEach(() => localStorage.clear());
+
+  const script: StatusEntry = { ...entry("setup.ps1", false), workingTreeEncoding: "UTF-16LE-BOM" };
+  const unstagedList = () => screen.getByRole("listbox", { name: "Unstaged changes" });
+
+  it("says which encodings the repository uses, until dismissed", () => {
+    render(
+      <Pane
+        client={fakeRepoClient({}, "empty")}
+        status={[]}
+        headInfo={{ ...NO_HEAD_INFO, headId: "abc", workingTreeEncodings: ["UTF-16", "UTF-16LE-BOM"] }}
+      />,
+    );
+    const notice = screen.getByText(
+      /uses the 'UTF-16' and 'UTF-16LE-BOM' working-tree-encodings, which Browsitory can't convert/,
+    );
+    expect(notice).toHaveTextContent("use git on the command line");
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss notice" }));
+    expect(screen.queryByText(/which Browsitory can't convert/)).toBeNull();
+  });
+
+  it("names filters and encodings in one notice", () => {
+    render(
+      <Pane
+        client={fakeRepoClient({}, "empty")}
+        status={[]}
+        headInfo={{ ...NO_HEAD_INFO, headId: "abc", externalFilters: ["lfs"], workingTreeEncodings: ["UTF-16LE-BOM"] }}
+      />,
+    );
+    const notice = screen.getByText(/This repository uses the 'lfs' filter, which Browsitory can't run/);
+    expect(notice).toHaveTextContent(
+      "It also uses the 'UTF-16LE-BOM' working-tree-encoding, which Browsitory can't convert",
+    );
+    expect(screen.getAllByRole("button", { name: "Dismiss notice" })).toHaveLength(1);
+  });
+
+  it("marks such a file and doesn't offer to stage it", () => {
+    const onStageFile = vi.fn();
+    render(
+      <Pane
+        client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")}
+        status={[script, entry("a.txt", false)]}
+        actions={{ onStageFile }}
+      />,
+    );
+    const row = within(unstagedList()).getByRole("option", { name: /^setup\.ps1/ });
+    expect(row).toHaveTextContent("UTF-16LE-BOM encoding");
+    const stage = within(row).getByRole("button", { name: "Stage setup.ps1" });
+    expect(stage).toBeDisabled();
+    expect(stage).toHaveAttribute("title", expect.stringContaining("can't convert the 'UTF-16LE-BOM' encoding"));
+    fireEvent.click(stage);
+    expect(onStageFile).not.toHaveBeenCalled();
+  });
+
+  it("says above such a file's diff that the difference may be only the encoding's", async () => {
+    render(
+      <Pane client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")} status={[script, entry("a.txt", false)]} />,
+    );
+    fireEvent.click(within(unstagedList()).getByRole("option", { name: /^setup\.ps1/ }));
+    expect(await screen.findByText("unstaged setup.ps1")).toBeInTheDocument();
+    expect(screen.getByText(/Browsitory can't convert the 'UTF-16LE-BOM' encoding/)).toHaveTextContent(
+      "the difference may be only the encoding's",
+    );
+  });
+});

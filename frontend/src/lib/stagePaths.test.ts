@@ -28,3 +28,16 @@ describe("stage paths", () => {
     expect(stageModifiedPaths(status)).toEqual(["a.txt"]);
   });
 });
+
+describe("stage paths with a working-tree-encoding (#1156)", () => {
+  const status = [
+    entry("a.txt", "Modified"),
+    entry("setup.ps1", "Modified", { workingTreeEncoding: "UTF-16LE-BOM" }),
+    entry("new.ps1", "New", { workingTreeEncoding: "UTF-16LE-BOM" }),
+  ];
+
+  it("Stage all and Stage modified leave out files Browsitory can't convert", () => {
+    expect(stageAllPaths(status)).toEqual(["a.txt"]);
+    expect(stageModifiedPaths(status)).toEqual(["a.txt"]);
+  });
+});
