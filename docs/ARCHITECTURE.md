@@ -501,7 +501,9 @@ menu's choice runs back through the session: the pick, the parent picker or a se
     (git drops its mark when it reads the index) that the operation changes ends marked and
     removed, as with git. A refused operation is rolled back (`OutsideCone::roll_back`). Only
     with readable patterns (`Sparse` not `Off`): without them git applies no sparse checkout.
-    As for Reset (decision 2 of #1172), entries the operation doesn't change keep their mark as
+    Abort of a merge, cherry-pick or revert (`apply_operation_reset`) leaves a touched marked
+    path whose file is missing out of its forced checkout: only its index entry goes back to
+    HEAD's, marked, as git's `reset --merge` leaves it. As for Reset (decision 2 of #1172), entries the operation doesn't change keep their mark as
     they are; git's unpack-trees also re-applies the patterns to them (an unmarked clean file
     outside the cone is marked and removed, a marked one inside is written), which matters only
     when marks and patterns disagree. `branch::changes_in_the_way` (the files a refused switch

@@ -113,7 +113,7 @@ then. **Undo** reverts a squash.
     either, and neither is listed as a change. A conflict in such a file is written to disk with
     its conflict markers, so you can resolve it, and stays there like any file of the chosen
     folders. git's merge does the same; its cherry-pick, revert and rebase leave that file off
-    the disk. A file outside the folders that is on disk anyway and that the operation changes
+    the disk. **Abort** puts the earlier versions back the same way, without writing them. A file outside the folders that is on disk anyway and that the operation changes
     is taken off the disk again, as git does; other files keep their state (git would take off
     every unchanged file outside the folders too; `git sparse-checkout reapply` does that).
     With patterns set by `git sparse-checkout set --no-cone`, which Browsitory doesn't match,
