@@ -38,6 +38,7 @@ export function SetUpstreamDialog({
 }) {
   // The visible reason the submit button is disabled is its description (#664).
   const reasonId = useId();
+  const optionsId = useId();
   const [upstreamRemoteField, setUpstreamRemoteField] = useState(() => preselectedRemote(remotes));
   const [upstreamBranchField, setUpstreamBranchField] = useState(currentBranchName);
   const [remoteBranchOptions, setRemoteBranchOptions] = useState<string[]>([]);
@@ -97,12 +98,12 @@ export function SetUpstreamDialog({
         <label className={styles.label}>
           Upstream branch
           <input
-            list="upstream-branch-options"
+            list={optionsId}
             value={upstreamBranchField}
             onChange={(event) => setUpstreamBranchField(event.target.value)}
           />
         </label>
-        <datalist id="upstream-branch-options">
+        <datalist id={optionsId}>
           {remoteBranchOptions.map((name) => (
             <option key={name} value={name} />
           ))}

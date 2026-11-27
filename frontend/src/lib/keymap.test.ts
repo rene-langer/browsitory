@@ -227,6 +227,16 @@ describe("reserved keys (#898, owner decision)", () => {
     expect(chordsFor("refresh", false)).toEqual([{ key: "F5" }]);
   });
 
+  it.each(["Backspace", "Delete", "Home", "End", "PageUp", "PageDown"])(
+    "reserves the editing key %s on its own, which text fields use (#1142)",
+    (key) => {
+      expect(isReservedChord({ key }, false)).toBe(true);
+      expect(isReservedChord({ key }, true)).toBe(true);
+      expect(addShortcutChord("fetch", { key }, {}, false)).toEqual({ ok: false, reason: "reserved" });
+      expect(chordsFor("fetch", false)).toEqual([{ shift: true, key: "F5" }]);
+    },
+  );
+
   it("lets a shortcut keep its own built-in reserved keys", () => {
     removeShortcutChord("redo", { mod: true, shift: true, key: "z" }, false);
     expect(chordsFor("redo", false)).toEqual([{ ctrl: true, key: "y" }]);

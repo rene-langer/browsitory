@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { type DiffHunk, type DiffLine, type DiffLineOrigin } from "../ipc/RepoClient";
 import { EMPTY_SELECTION, reduceSelection, type LineSelection, type SelectionAction } from "../lib/lineSelection";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
@@ -13,6 +13,9 @@ import { DiffLineContent } from "./DiffLineContent";
 import { DIFF_WINDOW_LINES, collapseReason, diffLineCount, windowHunks } from "../lib/largeDiff";
 import { hunkRange } from "../lib/hunkRange";
 import styles from "./DiffView.module.css";
+
+/** A selectable line's element id, which the diff's `aria-activedescendant` names. */
+const lineRowId = (idBase: string, hunkIndex: number, lineIndex: number) => `${idBase}-${hunkIndex}-${lineIndex}`;
 
 /**
  * Pairs up a hunk's Remove/Add lines so word-level diffing and the split view can line them up.
@@ -232,6 +235,7 @@ export function DiffView({
   const loadRef = useRef<HTMLButtonElement | null>(null);
   const focusAfterLoad = useRef(false);
   const scrollPending = useRef<number | null>(null);
+  const revealCursor = useRef(false);
   const focusedKey = useRef<number | undefined>(undefined);
   const idBase = useId();
   const loaded = hunks !== null;
@@ -293,6 +297,15 @@ export function DiffView({
     scrollPending.current = null;
     hunkRefs.current[index]?.scrollIntoView?.({ block: "nearest" });
   });
+  const rowId = (hunkIndex: number, lineIndex: number) => lineRowId(idBase, hunkIndex, lineIndex);
+  // The arrow keys keep the focus on the diff and prevent its scroll, so the cursor's row is
+  // scrolled into view here (#1138): `s` and `d` act on it. Only after a key: a clicked row is in
+  // view already.
+  useLayoutEffect(() => {
+    if (!revealCursor.current || selection.hunkIndex === null || selection.cursor === null) return;
+    revealCursor.current = false;
+    document.getElementById(lineRowId(idBase, selection.hunkIndex, selection.cursor))?.scrollIntoView?.({ block: "nearest" });
+  }, [idBase, selection.hunkIndex, selection.cursor]);
   const wordSegments = useMemo(() => computeWordSegments(windowed), [windowed]);
   const { settings, update } = useDiffSettingsContext();
   const tokens = useHunkTokens(
@@ -394,7 +407,6 @@ export function DiffView({
   const selectedCount = selection.selected.size;
   // Selectable lines are a listbox per hunk (#668): each Add/Remove line an option with its
   // selected state, the keyboard cursor the diff's active descendant.
-  const rowId = (hunkIndex: number, lineIndex: number) => `${idBase}-${hunkIndex}-${lineIndex}`;
   const cursorId =
     lineActions && selection.hunkIndex !== null && selection.cursor !== null
       ? rowId(selection.hunkIndex, selection.cursor)
@@ -479,6 +491,7 @@ export function DiffView({
       apply({ type: "clear" });
     } else if ((event.key === "ArrowDown" || event.key === "ArrowUp") && lineActions) {
       const delta = event.key === "ArrowDown" ? 1 : -1;
+      revealCursor.current = true;
       if (selection.hunkIndex !== active) apply({ type: "focusHunk", hunkIndex: active });
       apply(event.shiftKey ? { type: "extend", delta } : { type: "moveCursor", delta });
     } else if (event.key === "s" && byLines) {

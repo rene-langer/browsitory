@@ -51,8 +51,8 @@ on with the next row. Changes left unstaged make Continue ask whether to commit 
 
 **Selecting several commits.** Ctrl/Cmd+click (mouse) toggles individual commits, which is how you
 select non-adjacent ones; Shift+click or Shift+Arrow selects a range. With two or more selected, a
-toolbar under the graph (and the right-click menu) offers **Interactive rebase…**, **Squash N commits**,
-**Fixup N commits** and **Drop N commits**. Each opens the rebase planner, based on the parent of the oldest selected
+toolbar under the graph (and the right-click menu) offers **Interactive rebase…**, **Squash N commits…**,
+**Fixup N commits…** and **Drop N commits…**. Each opens the rebase planner, based on the parent of the oldest selected
 commit and listing every commit from there to the current HEAD. The selected commits are pre-marked
 with the chosen action; for Interactive rebase… they are listed as **Pick**, but are still checked
 against the branch history. With Squash or Fixup the oldest selected commit stays **Pick** and the

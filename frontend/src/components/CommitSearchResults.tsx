@@ -9,6 +9,7 @@ import type { CommitSearchResultsState } from "../state/useCommitSearch";
 import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
 import { RefBadges } from "./RefBadges";
+import { useActiveRow } from "./useActiveRow";
 import { useVirtualRows } from "./useVirtualRows";
 import graphStyles from "./CommitGraph.module.css";
 import styles from "./CommitSearchResults.module.css";
@@ -52,6 +53,15 @@ export function CommitSearchResults({
     [listRef],
   );
   const virtual = useVirtualRows(listElement, results.commits.length);
+  const { rowId, activeDescendant, announcement } = useActiveRow({
+    index: selectedIndex,
+    start: virtual.start,
+    end: virtual.end,
+    label: (index) => {
+      const commit = results.commits[index];
+      return `${commit.shortId} ${commit.summary}, ${index + 1} of ${results.commits.length}`;
+    },
+  });
 
   // Keep the keyboard-driven selection visible in a long result list.
   const { scrollToIndex } = virtual;
@@ -93,11 +103,15 @@ export function CommitSearchResults({
           {searchStatusText(results)}
         </p>
       )}
+      <span aria-live="polite" className={graphStyles.srOnly}>
+        {announcement}
+      </span>
       <ul
         ref={attachList}
         className={graphStyles.list}
         role="listbox"
         aria-label="Search results"
+        aria-activedescendant={activeDescendant}
         tabIndex={0}
         onKeyDown={handleKeyDown}
         aria-keyshortcuts="ArrowUp ArrowDown Escape Control+F Meta+F"
@@ -106,6 +120,7 @@ export function CommitSearchResults({
         {results.commits.slice(virtual.start, virtual.end).map((commit, offset) => (
           <ListRow
             key={commit.id}
+            id={rowId(virtual.start + offset)}
             rowIndex={virtual.start + offset}
             setSize={results.commits.length}
             className="commit-row"

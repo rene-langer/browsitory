@@ -33,6 +33,8 @@ export function NewBranchForm({
   onClose: () => void;
 }) {
   const reasonId = useId();
+  const nameId = useId();
+  const problemId = useId();
   // On by default and remembered (#656).
   const [checkoutAfterCreate, setCheckoutAfterCreate] = useState(readCheckoutNewBranch);
   const [newBranchName, setNewBranchName] = useState("");
@@ -84,15 +86,15 @@ export function NewBranchForm({
       <p className={styles.draftBase}>
         New branch from <strong>{createBaseLabel}</strong>
       </p>
-      <label htmlFor="new-branch-name" className={styles.draftLabel}>
+      <label htmlFor={nameId} className={styles.draftLabel}>
         Branch name
       </label>
       <input
-        id="new-branch-name"
+        id={nameId}
         ref={nameRef}
         value={newBranchName}
         aria-invalid={newBranchProblem !== null}
-        aria-describedby={newBranchProblem !== null ? "new-branch-name-problem" : undefined}
+        aria-describedby={newBranchProblem !== null ? problemId : undefined}
         onChange={(event) => {
           setNewBranchName(event.target.value);
           setCreateError(null);
@@ -100,7 +102,7 @@ export function NewBranchForm({
         placeholder="New branch name"
       />
       {newBranchProblem !== null && (
-        <p id="new-branch-name-problem" className={styles.draftProblem}>
+        <p id={problemId} className={styles.draftProblem}>
           {newBranchProblem}
         </p>
       )}
