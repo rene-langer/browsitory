@@ -3512,7 +3512,8 @@ describe("App", () => {
       expect(undo).not.toHaveBeenCalled();
     });
 
-    it("a toast's Redo does nothing once its repo tab was switched away", async () => {
+    // #1116: the Redo of a toast whose tab isn't shown shows that tab first, then redoes there.
+    it("a toast's Redo shows its repo tab again and redoes there once that tab was switched away", async () => {
       const undo = vi.fn(async () => ({ kind: "Done" as const, label: "Stage a.txt" }));
       const redo = vi.fn(async () => ({ kind: "Done" as const, label: "Stage a.txt" }));
       render(
@@ -3533,12 +3534,13 @@ describe("App", () => {
       );
       await screen.findByRole("button", { name: "Undo Stage a.txt" });
       fireEvent.keyDown(window, { key: "z", ctrlKey: true });
-      const toastRedo = await screen.findByRole("button", { name: "Redo" });
+      await screen.findByRole("button", { name: "Redo" });
       fireEvent.click(screen.getByRole("tab", { name: "b" }));
       await waitFor(() => expect(screen.getByRole("tab", { name: "b" })).toHaveAttribute("aria-selected", "true"));
-      fireEvent.click(toastRedo);
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(redo).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Redo" }));
+      await waitFor(() => expect(screen.getByRole("tab", { name: "a" })).toHaveAttribute("aria-selected", "true"));
+      await waitFor(() => expect(redo).toHaveBeenCalledTimes(1));
+      expect(redo).toHaveBeenCalledWith("/repos/a");
     });
 
     function committingClient(overrides: Partial<RepoClient> = {}) {
