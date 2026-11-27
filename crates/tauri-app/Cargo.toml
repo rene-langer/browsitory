@@ -50,6 +50,8 @@ tauri-plugin-log = "2"
 log = "0.4"
 
 [dev-dependencies]
+# `test`: a mock app for the exit tests (#1131); dev-only, so the shipped build has no mock runtime.
+tauri = { version = "2", features = ["test"] }
 ts-rs = "12"
 # `ts`: the DTO binding test (#306) needs `TS` on the shared wire DTOs; repo-service's `ts`
 # also enables git-core's, for the git-core enums those DTOs carry.
