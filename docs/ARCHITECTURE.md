@@ -456,7 +456,9 @@ Windows delivers no HTML5 drag events inside the page; pointer events work the s
 WebKitGTK and in the VSCode webview. A press turns into a drag after 4 px. The listeners sit on
 `window`, so a source row that a windowed list unmounts mid-drag doesn't end it. The target is
 the element under the pointer (`elementFromPoint`) carrying `dropTargetProps(scope, key)`, so
-each drag sees only its own targets. Escape or `pointercancel` cancels, and the click that ends a
+each drag sees only its own targets. The window listeners call the callbacks of the latest
+render through a ref set in a layout effect: an event between a commit and its passive effects
+must not reach the render before (#1207). Escape or `pointercancel` cancels, and the click that ends a
 drag is swallowed. A drag is never the only way: the rebase planner's rows also move with
 **Move up**/**Move down** and Alt+Up/Down, and every move is announced in a status region.
 
@@ -2749,6 +2751,10 @@ work to a `HighlightTransport` (`highlightWorkerProtocol.ts`):
   event loop a turn between chunks. A caller that moves on (another file, an unmounted view)
   aborts its `AbortSignal`; `highlightLines` shares one request between callers asking for the
   same text and cancels it once none wants it, and the worker drops it after its current chunk.
+  Shiki's per-line time limit (500 ms, then the rest of the line is one plain token) stays on,
+  so a pathological line can't hold up the worker for long; the cold first line of a grammar
+  (its patterns compile while it is tokenized, about 230 ms in V8) can run over it on a busy
+  machine. `TokenizeOptions.timeLimitMs: 0` turns it off for tests that compare two runs (#1210).
 - The entry points pick the transport. The desktop app (`main.tsx`) starts a module worker with
   `new Worker(new URL("./lib/highlight.worker.ts", import.meta.url), { type: "module" })`; its
   grammars stay separate chunks that load on first use (`vite.config.ts`'s `worker` options,
