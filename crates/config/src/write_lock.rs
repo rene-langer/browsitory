@@ -6,6 +6,9 @@
 //! (`flock` on Linux/macOS, `LockFileEx` on Windows, through std's `File::try_lock`), like the
 //! undo bookkeeping's `state.lock` (`repo-service`'s `worker/state_lock.rs`, which explains the
 //! explicit unlock): a process that exits or is killed releases it, and the file is never deleted.
+//!
+//! A writer that gets the lock moves the lock file's length on by one (1 to `TURNS` bytes, then
+//! back to 1), so a waiting process can see writes finish while the lock stays taken (#1212).
 
 use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
@@ -14,9 +17,14 @@ use std::time::{Duration, Instant};
 
 static IN_PROCESS: Mutex<()> = Mutex::new(());
 
-/// How long a writer waits for another process's write. One takes milliseconds; a holder that
-/// keeps it this long is stuck, and the write then goes ahead unlocked rather than not at all.
+/// How long a writer waits while no other process finishes a write. One takes milliseconds (on
+/// a busy Windows runner about 200 ms, and one process's run of writes can keep the lock for
+/// seconds); a holder that finishes none for this long is stuck, and the write then goes ahead
+/// unlocked rather than not at all.
 const WAIT: Duration = Duration::from_secs(5);
+
+/// The lock file's lengths that count the turns: more than a waiter can miss between two looks.
+const TURNS: u64 = 64;
 
 /// Exclusion until dropped.
 pub(crate) struct WriteGuard {
@@ -61,20 +69,39 @@ fn lock_across_processes(path: &Path, wait: Duration) -> Option<File> {
         .write(true)
         .open(path)
         .ok()?;
-    let deadline = Instant::now() + wait;
+    let mut seen_turn = turn(&file);
+    let mut deadline = Instant::now() + wait;
     let mut pause = Duration::from_millis(1);
     loop {
         match file.try_lock() {
-            Ok(()) => return Some(file),
+            Ok(()) => {
+                take_turn(&file);
+                return Some(file);
+            }
             Err(TryLockError::WouldBlock) => {}
             Err(TryLockError::Error(_)) => return None,
         }
         let now = Instant::now();
-        if now >= deadline {
+        let current_turn = turn(&file);
+        if current_turn != seen_turn {
+            seen_turn = current_turn;
+            deadline = now + wait;
+        } else if now >= deadline {
             return None;
         }
         std::thread::sleep(pause.min(deadline - now));
         pause = (pause * 2).min(Duration::from_millis(50));
+    }
+}
+
+/// Reads the length on the waiter's own handle: on Windows the locked bytes can't be read.
+fn turn(file: &File) -> Option<u64> {
+    file.metadata().ok().map(|metadata| metadata.len())
+}
+
+fn take_turn(file: &File) {
+    if let Some(len) = turn(file) {
+        let _ = file.set_len(len % TURNS + 1);
     }
 }
 

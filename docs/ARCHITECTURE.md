@@ -3149,8 +3149,12 @@ its marketplace, the desktop app through its own updater.
   the undo state's `state.lock`). A tab restore opens all tabs at once, each `open_repo` moving its
   repository to the front of the recent list, and the sidecar runs each request on its own
   thread; without the lock the later write undid the earlier one. Where the lock file can't be
-  created or locked, or another process holds it for 5 s, the write goes ahead with only the
-  in-process exclusion. Getters read without the lock: the write replaces the file atomically (a
+  created or locked, or other processes hold it for 5 s without finishing a write, the write
+  goes ahead with only the in-process exclusion. Each writer that gets the lock moves the lock
+  file's length on by one (1 to 64 bytes, round and round), and a waiter that sees it move starts
+  its 5 s again (#1212): on the Windows runner a write takes about 200 ms, so one process's run
+  of 25 writes kept the lock past 5 s, and the waiters then wrote unlocked and undid writes.
+  Getters read without the lock: the write replaces the file atomically (a
   temp file, synced, then renamed). A symlinked `config.toml` is resolved first, so the link
   stays and the file it points to is replaced.
 - **What this version doesn't know stays (#1137).** `update_config` also reads the file as a
