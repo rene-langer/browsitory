@@ -825,6 +825,10 @@ impl WorkerHandle {
     pub fn redo(&self) -> Result<UndoOutcome, ErrorDto> {
         self.request(|reply| Command::Redo { reply })
     }
+
+    pub fn clear_undo_history(&self) -> Result<(), ErrorDto> {
+        Ok(())
+    }
 }
 
 impl ReadHandle {

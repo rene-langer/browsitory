@@ -993,3 +993,203 @@ fn undo_of_create_and_switch_from_another_commit_restores_the_work_tree() {
     );
     assert!(!dir.path().join("only-other.txt").exists());
 }
+
+/// The refs that keep undo snapshots alive, of every worktree.
+fn undo_refs(repo: &Repository) -> Vec<String> {
+    let mut names: Vec<String> = repo
+        .references_glob("refs/browsitory/undo*")
+        .unwrap()
+        .map(|reference| reference.unwrap().name().unwrap().to_string())
+        .collect();
+    names.sort();
+    names
+}
+
+/// #1123: Clear undo history forgets every Undo and Redo step and removes the refs that keep
+/// their snapshots (a mirror push would copy them, untracked and discarded file contents
+/// included). Nothing else changes, and the next command is recorded again.
+#[test]
+fn clear_undo_history_forgets_every_step_and_removes_its_refs() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "one\n");
+    commit_all(&repo, "initial");
+    let tagged = test_support::git(dir.path(), &["tag", "-a", "-m", "annotated", "v1"]);
+    assert!(tagged.status.success(), "{tagged:?}");
+    write_file(dir.path(), "a.txt", "secret\n");
+    write_file(dir.path(), "notes.env", "API_KEY=1\n");
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    handle.discard_file("a.txt".into()).unwrap();
+    handle.delete_tag("v1".into()).unwrap();
+    handle.undo().unwrap();
+    assert_eq!(
+        handle.get_undo_state().unwrap(),
+        UndoState {
+            undo: Some("Discard changes to a.txt".into()),
+            redo: Some("Delete tag v1".into())
+        }
+    );
+    assert_eq!(
+        undo_refs(&repo),
+        [
+            "refs/browsitory/undo-keep/main/0",
+            "refs/browsitory/undo/main"
+        ]
+    );
+
+    handle.clear_undo_history().unwrap();
+
+    assert_eq!(
+        handle.get_undo_state().unwrap(),
+        UndoState {
+            undo: None,
+            redo: None
+        }
+    );
+    assert_eq!(undo_refs(&repo), Vec::<String>::new());
+    assert_eq!(handle.undo().unwrap(), UndoOutcome::Nothing);
+    assert_eq!(handle.redo().unwrap(), UndoOutcome::Nothing);
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        "one\n"
+    );
+    assert!(dir.path().join("notes.env").exists());
+    assert!(repo.find_reference("refs/tags/v1").is_ok());
+    drop(worker);
+    let reopened = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = reopened.handle();
+    assert_eq!(
+        handle.get_undo_state().unwrap(),
+        UndoState {
+            undo: None,
+            redo: None
+        }
+    );
+    handle
+        .create_branch("after".into(), "HEAD".into(), false)
+        .unwrap();
+    assert_eq!(
+        handle.get_undo_state().unwrap().undo,
+        Some("Create branch after".into())
+    );
+}
+
+/// #1123: a paused operation's entry goes too: the merge finished after the clear leaves
+/// nothing to undo.
+#[test]
+fn clear_undo_history_during_a_paused_merge_leaves_nothing_to_undo_when_it_ends() {
+    let (dir, repo) = conflicting_branches();
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    handle
+        .start_merge(
+            "feature".into(),
+            git_core::merge::MergeOptions::default(),
+            no_events(),
+        )
+        .unwrap();
+    assert_eq!(undo_refs(&repo), ["refs/browsitory/undo/main"]);
+
+    handle.clear_undo_history().unwrap();
+    assert_eq!(undo_refs(&repo), Vec::<String>::new());
+    handle
+        .resolve_conflict("a.txt".into(), "resolved\n".into())
+        .unwrap();
+    handle
+        .commit("Merge feature".into(), false, Vec::new(), mpsc::channel().0)
+        .unwrap();
+
+    assert_eq!(
+        handle.get_undo_state().unwrap(),
+        UndoState {
+            undo: None,
+            redo: None
+        }
+    );
+    assert_eq!(undo_refs(&repo), Vec::<String>::new());
+}
+
+/// #1123: the history cleared is the open worktree's, as Undo and Redo show it; a linked
+/// worktree keeps its own.
+#[test]
+fn clear_undo_history_leaves_another_worktrees_history() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "one\n");
+    commit_all(&repo, "initial");
+    let base = repo.head().unwrap().shorthand().unwrap().to_string();
+    let parent = TempDir::new().unwrap();
+    let linked = parent.path().join("linked");
+    git_core::worktree::create_worktree(&repo, "linked", &linked, "linked", Some(&base)).unwrap();
+    let main = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let other = Worker::spawn(linked.clone()).unwrap();
+    main.handle()
+        .create_branch("in-main".into(), "HEAD".into(), false)
+        .unwrap();
+    other
+        .handle()
+        .create_branch("in-linked".into(), "HEAD".into(), false)
+        .unwrap();
+    assert_eq!(
+        undo_refs(&repo),
+        [
+            "refs/browsitory/undo/main",
+            "refs/browsitory/undo/wt/linked"
+        ]
+    );
+
+    main.handle().clear_undo_history().unwrap();
+
+    assert_eq!(undo_refs(&repo), ["refs/browsitory/undo/wt/linked"]);
+    assert_eq!(main.handle().get_undo_state().unwrap().undo, None);
+    assert_eq!(
+        other.handle().get_undo_state().unwrap().undo,
+        Some("Create branch in-linked".into())
+    );
+}
+
+/// #1123: while another window keeps the undo history busy, Clear says so and changes nothing.
+#[test]
+fn clear_undo_history_refuses_while_another_window_keeps_the_history_busy() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "one\n");
+    commit_all(&repo, "initial");
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    handle
+        .create_branch("b".into(), "HEAD".into(), false)
+        .unwrap();
+    let held = match super::super::state_lock::StateLock::open(&repo).try_acquire() {
+        super::super::state_lock::Acquire::Held(guard) => guard,
+        _ => panic!("the lock is free"),
+    };
+
+    let error = handle.clear_undo_history().unwrap_err();
+
+    assert_eq!(error.message, super::super::undo::UNDO_BUSY);
+    drop(held);
+    assert_eq!(undo_refs(&repo), ["refs/browsitory/undo/main"]);
+    assert_eq!(
+        handle.get_undo_state().unwrap().undo,
+        Some("Create branch b".into())
+    );
+}
+
+/// #1123: a history written by a newer version is never overwritten, cleared or not.
+#[test]
+fn clear_undo_history_refuses_a_history_written_by_a_newer_version() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "one\n");
+    commit_all(&repo, "initial");
+    let file = repo.path().join("browsitory").join("undo.json");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(&file, r#"{"version":999,"undo":[],"redo":[]}"#).unwrap();
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+
+    let error = worker.handle().clear_undo_history().unwrap_err();
+
+    assert!(error.message.contains("newer version"), "{error:?}");
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        r#"{"version":999,"undo":[],"redo":[]}"#
+    );
+}

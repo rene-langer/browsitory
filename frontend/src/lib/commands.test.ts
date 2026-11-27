@@ -1908,6 +1908,34 @@ describe("undo commands", () => {
     } });
     expect(commands.find((c) => c.id === "undo")).toBeUndefined();
   });
+
+  // #1123: the undo refs keep snapshots of uncommitted and untracked files.
+  it("offers to clear the undo history, which asks first, with or without steps to undo", () => {
+    const onClearHistory = vi.fn();
+    const commands = commandsFor(makeAppState(), { undo: {
+      undoLabel: null,
+      redoLabel: null,
+      onUndo: vi.fn(),
+      onRedo: vi.fn(),
+      onClearHistory,
+    } });
+    const clear = commands.find((c) => c.id === "clear-undo-history");
+    expect(clear?.label).toBe("Clear undo history…");
+    expect(clear?.group).toBe("General");
+    clear?.run();
+    expect(onClearHistory).toHaveBeenCalledOnce();
+  });
+
+  it("omits clearing the undo history while a repository operation is running", () => {
+    const commands = commandsFor(makeAppState({ pending: true }), { undo: {
+      undoLabel: "Stage a.txt",
+      redoLabel: null,
+      onUndo: vi.fn(),
+      onRedo: vi.fn(),
+      onClearHistory: vi.fn(),
+    } });
+    expect(commands.find((c) => c.id === "clear-undo-history")).toBeUndefined();
+  });
 });
 
 describe("preferences and external tool commands", () => {

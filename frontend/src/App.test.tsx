@@ -409,6 +409,49 @@ describe("App", () => {
     expect(listRemoteBranches).toHaveBeenCalledWith("/repos/a", "origin");
   });
 
+  // #1123: the undo refs hold snapshots of uncommitted and untracked files.
+  it("clears the undo history from the palette after a confirmation that says what goes", async () => {
+    const clearUndoHistory = vi.fn(async () => {});
+    let undoState = { undo: "Discard changes to a.txt", redo: null as string | null };
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => graphPage([]),
+      listBranches: async () => [],
+      listStashes: async () => [],
+      getUndoState: async () => undoState,
+      clearUndoHistory: vi.fn(async () => {
+        await clearUndoHistory();
+        undoState = { undo: null, redo: null };
+      }),
+    });
+    const { container } = render(<App client={client} />);
+    await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+    const openClear = async () => {
+      fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+      fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), {
+        target: { value: "Clear undo history" },
+      });
+      fireEvent.click(await screen.findByRole("option", { name: "Clear undo history…" }));
+      return screen.findByRole("dialog", { name: "Clear undo history" });
+    };
+
+    const dialog = await openClear();
+    expect(dialog).toHaveTextContent(
+      "Undo and Redo keep copies of your uncommitted and untracked files, and of changes you discarded, in this repository.",
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Clear undo history" })).toBeNull());
+    expect(clearUndoHistory).not.toHaveBeenCalled();
+
+    fireEvent.click(within(await openClear()).getByRole("button", { name: "Clear undo history" }));
+    await waitFor(() => expect(clearUndoHistory).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Clear undo history" })).toBeNull());
+    expect(client.clearUndoHistory).toHaveBeenCalledWith("/repos/a");
+  });
+
   function guideClient(openExternalUrl: RepoClient["openExternalUrl"]) {
     return fakeClient({
       listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),

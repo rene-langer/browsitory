@@ -114,4 +114,22 @@ describe("useUndoActions", () => {
     expect(outcome).toBeNull();
     expect(getState().error).toBe("Undo failed: io error: permission denied");
   });
+
+  // #1123
+  it("clears the undo history through the client", async () => {
+    const clearUndoHistory = vi.fn(async () => {});
+    const client = fakeRepoClient({ clearUndoHistory });
+    const runMutationWithOutcome = vi.fn(async (mutate: () => Promise<void>) => {
+      await mutate();
+      return true;
+    });
+    const { result } = renderHook(() =>
+      useUndoActions(client, "/repo", runMutationWithOutcome, vi.fn(), async () => {}),
+    );
+
+    await act(() => result.current.clearHistory());
+
+    expect(clearUndoHistory).toHaveBeenCalledWith("/repo");
+    expect(runMutationWithOutcome).toHaveBeenCalledOnce();
+  });
 });
