@@ -7,7 +7,7 @@ positions, open panels, search and file history, and reads the repository again
 only if it changed meanwhile. A tab you haven't looked at for longer starts
 fresh and reloads its history and changes; its half-typed commit message is
 still kept. Open another via
-**+** at the end of the tab bar, or (desktop app) drop its folder on the window. Close a tab with its **×** button (dimmed on the other tabs), **Delete**
+**+** at the end of the tab bar, or (desktop app) drop its folder on the window. Close a tab with its **×** button, **Delete**
 on the focused tab, or **Close tab** in the command palette. While a push,
 fetch, or similar operation is running in the active tab, that tab can't be
 closed until it finishes.
