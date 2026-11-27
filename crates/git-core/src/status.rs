@@ -228,6 +228,7 @@ pub fn status_refreshing_index(repo: &git2::Repository) -> Result<Vec<StatusEntr
     let expansion = crate::untracked::expand(repo, &statuses);
     let mut entries = entries(&statuses, &expansion, &index);
     crate::external_filter::annotate(repo, &mut entries);
+    crate::merge_driver::annotate(repo, &mut entries);
     Ok(entries)
 }
 

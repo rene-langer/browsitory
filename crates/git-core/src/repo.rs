@@ -25,12 +25,16 @@ pub enum RepoError {
 /// Sets libgit2's server timeout to `SERVER_TIMEOUT` (#1064): a fetch, pull, push or clone whose
 /// connection goes silent after connecting fails instead of waiting forever. libgit2's WinHTTP
 /// transport (HTTP(S) on Windows) ignores it. See `docs/ARCHITECTURE.md`.
+///
+/// Registers the guard for custom merge drivers (`merge_driver`, #1165), so merges in memory
+/// see it from the start too.
 pub fn configure_libgit2() {
     git2::opts::strict_hash_verification(false);
     let timeout = i32::try_from(SERVER_TIMEOUT.as_millis()).unwrap_or(i32::MAX);
     // SAFETY: called once at startup, before any other thread uses libgit2. It fails only for a
     // negative timeout.
     let _ = unsafe { git2::opts::set_server_timeout_in_milliseconds(timeout) };
+    crate::merge_driver::register();
 }
 
 /// How long a socket read or write on a remote's connection may get nothing before the transfer

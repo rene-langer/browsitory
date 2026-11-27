@@ -79,6 +79,7 @@ pub fn status_with_stamp(repo: &git2::Repository) -> Result<StatusWithStamp, git
     let workdir = repo.workdir().unwrap_or(Path::new(""));
     let mut status = crate::status::entries(&statuses, &expansion, &index);
     crate::external_filter::annotate(repo, &mut status);
+    crate::merge_driver::annotate(repo, &mut status);
     Ok(StatusWithStamp {
         status,
         stamp: ChangeStamp {
