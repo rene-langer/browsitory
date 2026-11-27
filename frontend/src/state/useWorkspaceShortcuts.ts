@@ -77,6 +77,10 @@ function inOverlay(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest('dialog, [role="dialog"], [role="alertdialog"], [role="menu"]') !== null;
 }
 
+function inPalette(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest("[data-command-palette]") !== null;
+}
+
 /**
  * `RepoWorkspace`'s window-level keyboard shortcuts (`lib/keybindings`): the command palette, the
  * shortcut sheet (?), Undo/Redo, closing and reopening the tab, Back/Forward through the visited
@@ -193,6 +197,9 @@ export function useWorkspaceShortcuts({
       // Text fields keep their own keys (native undo in the commit message, "?" typed, …), and
       // every key that types there, whatever the user bound to it (#898).
       if ((!shortcut.inTextFields || event.typesText) && isTextField(target)) return;
+      // A dialog, a menu or the palette owns its keys: nothing runs behind it (#1117), except
+      // the palette's own key, which closes the palette.
+      if (inOverlay(target) && !(shortcut.id === "palette" && inPalette(target))) return;
       switch (shortcut.id) {
         case "palette":
           event.preventDefault();
@@ -253,12 +260,11 @@ export function useWorkspaceShortcuts({
         case "next-tab":
         case "previous-tab":
         case "tab-by-number":
-          if (inOverlay(target)) return;
           if (switchTab(event, shortcut.id)) event.preventDefault();
           return;
         case "next-pane":
         case "previous-pane":
-          if (inOverlay(target) || workspaceElement === null) return;
+          if (workspaceElement === null) return;
           event.preventDefault();
           focusAdjacentPane(workspaceElement, shortcut.id === "next-pane" ? 1 : -1, lastFocused.current);
           return;
@@ -266,7 +272,7 @@ export function useWorkspaceShortcuts({
           // Refresh, Fetch, Pull, Push, Stage all and the commit message (#646): the palette's
           // commands, so they follow its rules (`operationBlockers`).
           if (!COMMAND_SHORTCUTS.has(shortcut.id)) return;
-          if (inOverlay(target) || event.defaultPrevented) return;
+          if (event.defaultPrevented) return;
           const runCommand = latest.current.runCommand;
           if (runCommand === undefined) return;
           event.preventDefault();

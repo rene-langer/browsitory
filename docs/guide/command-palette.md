@@ -98,8 +98,9 @@ shows a command's shortcut at the right of its row, and the toolbar's tooltips s
 (**Refresh (F5)**). They show your own keys once you change them (see
 [Change the shortcuts](#change-the-shortcuts)).
 
-The global shortcuts work anywhere in the window. The list names each as the command palette
-does:
+The global shortcuts work anywhere in the window except in an open dialog or menu, which keeps
+its keys: Ctrl+Z there undoes nothing behind it, and Ctrl+W closes no tab (in the command
+palette, Ctrl+K closes the palette). The list names each as the command palette does:
 
 | Windows and Linux | macOS | What they do |
 |---|---|---|
