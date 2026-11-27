@@ -588,9 +588,7 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
         pending: false,
         pendingPull: null,
         pullOutcome: null,
-        ...(kind === "DirtyWorktree"
-          ? { error: "Commit or stash your changes before pulling.", errorHint: null }
-          : failureError(err)),
+        ...failureError(err),
       }));
     }
   }, [client, refresh, repoPath, setState]);

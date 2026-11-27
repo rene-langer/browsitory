@@ -486,19 +486,24 @@ fn pull_fast_forwards_a_clean_branch_after_fetch() {
     );
 }
 
+/// #1152: an untracked file the pull doesn't write doesn't stop it, as with `git pull`.
 #[test]
-fn pull_rejects_a_dirty_worktree_before_changing_head() {
+fn pull_fast_forwards_past_an_untracked_file_it_does_not_touch() {
     let fixture = local_and_bare_remote();
     fixture.remote_commit("remote change");
     fixture.write_local("dirty.txt", "dirty");
-    let local_head = fixture.local.head().unwrap().target();
 
-    assert!(matches!(
-        pull_after_fetch(&fixture.local, "origin", "main"),
-        Err(RemoteError::DirtyWorktree)
-    ));
-    assert_eq!(fixture.local.head().unwrap().target(), local_head);
-    assert_ne!(local_head, Some(fixture.remote_tip()));
+    let outcome = pull_after_fetch(&fixture.local, "origin", "main").unwrap();
+
+    assert!(matches!(outcome, PullOutcome::FastForwarded { .. }));
+    assert_eq!(
+        fixture.local.head().unwrap().target(),
+        Some(fixture.remote_tip())
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.local_dir.path().join("dirty.txt")).unwrap(),
+        "dirty"
+    );
 }
 
 #[test]
@@ -3376,8 +3381,142 @@ fn no_ff_leaves_up_to_date_and_diverged_pulls_as_they_were() {
     ));
 }
 
+/// The status of `path` in `repo`.
+fn status_of(repo: &git2::Repository, path: &str) -> git2::Status {
+    repo.status_file(std::path::Path::new(path)).unwrap()
+}
+
+/// #1152: a staged and an unstaged change to a file the pull doesn't change stay as they are.
 #[test]
-fn no_ff_still_refuses_a_dirty_worktree_first() {
+fn pull_fast_forwards_keeping_local_changes_to_a_file_it_does_not_change() {
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit("remote change");
+    fixture.write_local("README.md", "staged\n");
+    let mut index = fixture.local.index().unwrap();
+    index.add_path(std::path::Path::new("README.md")).unwrap();
+    index.write().unwrap();
+    fixture.write_local("README.md", "staged, then edited\n");
+
+    let outcome = pull_after_fetch(&fixture.local, "origin", "main").unwrap();
+
+    assert!(matches!(outcome, PullOutcome::FastForwarded { .. }));
+    assert_eq!(
+        fixture.local.head().unwrap().target(),
+        Some(fixture.remote_tip())
+    );
+    assert_eq!(
+        status_of(&fixture.local, "README.md"),
+        git2::Status::INDEX_MODIFIED | git2::Status::WT_MODIFIED
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.local_dir.path().join("README.md")).unwrap(),
+        "staged, then edited\n"
+    );
+    assert_eq!(
+        status_of(&fixture.local, "remote.txt"),
+        git2::Status::CURRENT
+    );
+}
+
+/// #1152: a local change to a file the pull changes stops it, named; nothing moves.
+#[test]
+fn pull_refuses_a_local_change_to_a_file_it_changes_naming_it() {
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit_file("README.md", "remote readme\n");
+    fixture.write_local("README.md", "mine\n");
+    let local_head = fixture.local.head().unwrap().target();
+
+    let error = pull_after_fetch(&fixture.local, "origin", "main").unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "the pull would overwrite your local changes to README.md"
+    );
+    assert_eq!(fixture.local.head().unwrap().target(), local_head);
+    assert_eq!(
+        std::fs::read_to_string(fixture.local_dir.path().join("README.md")).unwrap(),
+        "mine\n"
+    );
+}
+
+/// #1152: a staged change to a file the pull changes stops it too.
+#[test]
+fn pull_refuses_a_staged_change_to_a_file_it_changes_naming_it() {
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit_file("README.md", "remote readme\n");
+    fixture.write_local("README.md", "mine\n");
+    let mut index = fixture.local.index().unwrap();
+    index.add_path(std::path::Path::new("README.md")).unwrap();
+    index.write().unwrap();
+    let local_head = fixture.local.head().unwrap().target();
+
+    let error = pull_after_fetch(&fixture.local, "origin", "main").unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "the pull would overwrite your local changes to README.md"
+    );
+    assert_eq!(fixture.local.head().unwrap().target(), local_head);
+    assert_eq!(
+        status_of(&fixture.local, "README.md"),
+        git2::Status::INDEX_MODIFIED
+    );
+}
+
+/// #1152: an untracked file where the pull writes one stops it, named, and stays as it is.
+#[test]
+fn pull_refuses_an_untracked_file_in_its_way_naming_it() {
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit("remote change");
+    fixture.write_local("remote.txt", "mine");
+    fixture.write_local("notes.txt", "notes");
+    let local_head = fixture.local.head().unwrap().target();
+
+    let error = pull_after_fetch(&fixture.local, "origin", "main").unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "the pull would overwrite your local changes to remote.txt"
+    );
+    assert_eq!(fixture.local.head().unwrap().target(), local_head);
+    assert_eq!(
+        std::fs::read_to_string(fixture.local_dir.path().join("remote.txt")).unwrap(),
+        "mine"
+    );
+}
+
+/// #1152: with nothing to pull, local changes don't matter.
+#[test]
+fn pull_with_local_changes_is_up_to_date() {
+    let fixture = local_and_bare_remote();
+    fixture.write_local("README.md", "mine\n");
+    fixture.write_local("notes.txt", "notes");
+
+    assert_eq!(
+        pull_after_fetch(&fixture.local, "origin", "main").unwrap(),
+        PullOutcome::UpToDate
+    );
+}
+
+/// #1152: a diverged branch with local changes is reported as diverged; the merge or rebase
+/// the user then picks checks its own way.
+#[test]
+fn pull_with_local_changes_reports_diverged() {
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit("remote change");
+    fixture.local_commit("local change");
+    fixture.write_local("notes.txt", "notes");
+
+    assert!(matches!(
+        pull_after_fetch(&fixture.local, "origin", "main").unwrap(),
+        PullOutcome::Diverged { .. }
+    ));
+}
+
+/// #1152: an untracked file doesn't stop a pull that asks for its merge commit; the merge
+/// itself refuses what it would overwrite.
+#[test]
+fn no_ff_with_an_untracked_file_asks_for_the_merge_commit() {
     let fixture = local_and_bare_remote();
     fixture.remote_commit("remote change");
     fixture
@@ -3389,7 +3528,7 @@ fn no_ff_still_refuses_a_dirty_worktree_first() {
     fixture.write_local("dirty.txt", "dirty");
     assert!(matches!(
         pull_after_fetch(&fixture.local, "origin", "main"),
-        Err(RemoteError::DirtyWorktree)
+        Ok(PullOutcome::NoFastForward { .. })
     ));
 }
 

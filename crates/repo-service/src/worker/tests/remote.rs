@@ -634,12 +634,31 @@ fn pull_fetch_failure_returns_only_a_sanitized_error() {
     assert!(!error.message.contains("alice-secret"));
 }
 
+/// #1152: only an untracked file the pull would write stops it, named in the message. The
+/// repository is its own `origin`; the upstream is its `incoming` branch, which adds the file.
 #[test]
-fn pull_with_untracked_file_reports_dirty_worktree() {
+fn pull_with_an_untracked_file_in_its_way_reports_dirty_worktree() {
     let (local_dir, repo) = init_repo();
     write_file(local_dir.path(), "README.md", "initial commit\n");
     commit_all(&repo, "initial commit");
     let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+    {
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        let mut builder = repo.treebuilder(Some(&head.tree().unwrap())).unwrap();
+        let blob = repo.blob(b"incoming\n").unwrap();
+        builder.insert("untracked.txt", blob, 0o100_644).unwrap();
+        let tree = repo.find_tree(builder.write().unwrap()).unwrap();
+        let signature = repo.signature().unwrap();
+        repo.commit(
+            Some("refs/heads/incoming"),
+            &signature,
+            &signature,
+            "incoming",
+            &tree,
+            &[&head],
+        )
+        .unwrap();
+    }
     repo.remote("origin", local_dir.path().to_str().unwrap())
         .unwrap();
     let mut config = repo.config().unwrap();
@@ -647,10 +666,7 @@ fn pull_with_untracked_file_reports_dirty_worktree() {
         .set_str(&format!("branch.{branch}.remote"), "origin")
         .unwrap();
     config
-        .set_str(
-            &format!("branch.{branch}.merge"),
-            &format!("refs/heads/{branch}"),
-        )
+        .set_str(&format!("branch.{branch}.merge"), "refs/heads/incoming")
         .unwrap();
     drop(config);
     drop(repo);
@@ -662,10 +678,17 @@ fn pull_with_untracked_file_reports_dirty_worktree() {
     let error = worker
         .handle()
         .pull_current_upstream(event_tx)
-        .expect_err("pull should refuse a dirty worktree");
+        .expect_err("pull should refuse to overwrite the untracked file");
 
-    assert_eq!(error.message, "cannot pull with a dirty worktree");
+    assert_eq!(
+        error.message,
+        "the pull would overwrite your local changes to untracked.txt"
+    );
     assert_eq!(error.kind, crate::wire::ErrorKind::DirtyWorktree);
+    assert_eq!(
+        std::fs::read_to_string(local_dir.path().join("untracked.txt")).unwrap(),
+        "x"
+    );
 }
 
 #[test]
