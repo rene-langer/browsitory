@@ -12,3 +12,5 @@
 - Fixed: two E2E runs of the same suite at once (two worktrees) no longer delete each other's
   fixtures: each run takes a lock in the temp folder before it resets them, and a second run
   stops at once, naming the first; the Tauri suite also checks its driver ports up front (#1144).
+- Fixed: six E2E specs' comments no longer say the stage control is transparent until hovered,
+  which it hasn't been since #648 (#1199).

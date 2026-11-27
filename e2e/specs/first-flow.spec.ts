@@ -34,10 +34,11 @@ describe("Browsitory first flow", () => {
     // first, unlike the old `button=Stage` text match.
     const stageButton = await $('button[aria-label="Stage first-flow-fixture.txt"]');
     await stageButton.waitForExist();
-    // The control is `opacity: 0` until its row is hovered/focused (`DiffPane.module.css`'s
-    // `.stageToggle`), so every interaction with it has to go through `browser.execute` —
-    // WebDriver's own element-displayed check (which `scrollIntoView()` and `.click()` both
-    // run) rejects a fully transparent element.
+    // The scroll and the click go through `browser.execute`, which skips WebDriver's
+    // element-displayed check. They were written when the control was `opacity: 0` until its row
+    // was hovered or focused, which that check rejects; it no longer is (`DiffPane.module.css`'s
+    // `.stageToggle` is always shown in the muted text colour, #648, #1140), so a plain
+    // `scrollIntoView()` and `.click()` may work now, but haven't been tried (#1199).
     await browser.execute((el) => (el as HTMLElement).scrollIntoView({ block: "center" }), stageButton);
     await browser.execute((el) => (el as HTMLElement).click(), stageButton);
     // Wait for the row to move under Staged before committing (#697).
