@@ -200,12 +200,14 @@ are saved with your other preferences, in the `[keybindings]` section of Browsit
 
     Some keys can't be used, so text fields, dialogs and the window keep working: Ctrl+C, Ctrl+V,
     Ctrl+X, Ctrl+A, Ctrl+Z and Ctrl+Y (⌘ on macOS), Esc, Tab, Shift+Tab, Enter, Space, the arrow
-    keys on their own, F6 and Shift+F6, and the keys that quit or close the app (⌘Q and ⌘W on
-    macOS, Alt+F4). A command keeps these keys when they are its own built-in ones: Undo keeps
-    Ctrl+Z, and moving between panes keeps F6. Ctrl+1 … Ctrl+9 (⌘1 … ⌘9) can't be changed.
+    keys, Backspace, Delete, Home, End, Page Up and Page Down on their own, F6 and Shift+F6, and
+    the keys that quit or close the app (⌘Q and ⌘W on macOS, Alt+F4). A command keeps these keys
+    when they are its own built-in ones: Undo keeps Ctrl+Z, and moving between panes keeps F6.
+    Ctrl+1 … Ctrl+9 (⌘1 … ⌘9) can't be changed.
 
     A key without Ctrl, Cmd or Alt, such as a single letter, works only outside text fields, so
-    you can still type it.
+    you can still type it. So does Backspace, Delete, Home, End, Page Up or Page Down with a
+    modifier (Ctrl+Backspace deletes a word there).
 
 **In VSCode** the keys are VSCode keybindings, so you change them in VSCode itself:
 **Preferences → Keyboard** has **Open Keyboard Shortcuts**, which opens VSCode's Keyboard

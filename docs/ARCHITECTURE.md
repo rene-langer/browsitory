@@ -113,8 +113,10 @@ answers the same commands, but the VSCode webview never connects, and the genera
 keybindings stay the built-in ones. `keybindings.ts` reads the effective keys wherever it
 reads a shortcut's (`chordsFor`, the labels, `matchShortcut`), and components that show keys
 re-render through `useKeymap`. Reserved keys (copy, paste, Esc, Tab, Enter, Space, plain arrows,
-F6, the OS quit/close keys) can't be taken; a shortcut keeps its own reserved built-in keys, and
-Ctrl/Cmd+1 … 9 stays fixed. A key that types a character never runs a shortcut from a text field.
+plain Backspace/Delete/Home/End/PageUp/PageDown, F6, the OS quit/close keys) can't be taken; a
+shortcut keeps its own reserved built-in keys, and Ctrl/Cmd+1 … 9 stays fixed. A key that types
+a character, and Backspace, Delete, Home, End, PageUp or PageDown with any modifier
+(`TEXT_FIELD_KEYS`, #1142), never runs a shortcut from a text field.
 No window shortcut runs while the focus is in a dialog, a menu or the palette
 (`useWorkspaceShortcuts`, #1117), except the palette's own key, which closes it.
 

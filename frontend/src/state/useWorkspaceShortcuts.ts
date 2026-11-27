@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { GLOBAL_SHORTCUTS, matchShortcut, type GlobalShortcut, type ShortcutId } from "../lib/keybindings";
+import { TEXT_FIELD_KEYS } from "../lib/keymap";
 import { focusAdjacentPane, paneOf } from "../lib/paneFocus";
 import { isApplePlatform, isVscodeHost } from "../lib/platform";
 import { onWorkspaceRequest } from "../lib/workspaceRequests";
@@ -31,7 +32,7 @@ interface ShortcutPress {
   digit: number | null;
   /** Back (-1) or Forward (1) for the Back/Forward keys. */
   direction: -1 | 1 | null;
-  /** The key types a character in a text field (#898: a user's key may be a plain letter). */
+  /** The key types a character in a text field (#898: a user's key may be a plain letter), or edits or moves there (#1142). */
   typesText: boolean;
 }
 
@@ -40,9 +41,11 @@ function direction(id: ShortcutId): -1 | 1 | null {
 }
 
 function keyPress(event: KeyboardEvent, id: ShortcutId): ShortcutPress {
-  // Option types characters on macOS (Option+C is "ç").
+  // Option types characters on macOS (Option+C is "ç"). The editing and moving keys work there
+  // with any modifier (Ctrl+Backspace deletes a word, Shift+End selects), so they count too.
   const typesText =
-    event.key.length === 1 && !event.ctrlKey && !event.metaKey && (!event.altKey || isApplePlatform());
+    TEXT_FIELD_KEYS.has(event.key) ||
+    (event.key.length === 1 && !event.ctrlKey && !event.metaKey && (!event.altKey || isApplePlatform()));
   return {
     target: event.target,
     preventDefault: () => event.preventDefault(),
