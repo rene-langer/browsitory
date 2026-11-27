@@ -228,10 +228,12 @@ export function UncommittedDiffPane({
   // The untracked files whose contents the user asked for while "Expand untracked files" is off
   // (#623), by `entryKey`; kept across refreshes while the pane is open.
   const [revealedUntracked, setRevealedUntracked] = useState<ReadonlySet<string>>(new Set());
-  // The filter drivers whose notice (#1087) was dismissed: it shows again when they change.
+  // The filter drivers and encodings whose notice (#1087, #1156) was dismissed: it shows again when
+  // they change.
   const [dismissedFilters, setDismissedFilters] = useState<string | null>(null);
   const externalFilters = headInfo.externalFilters ?? [];
-  const filtersKey = externalFilters.join("\n");
+  const workingTreeEncodings = headInfo.workingTreeEncodings ?? [];
+  const filtersKey = [...externalFilters, "", ...workingTreeEncodings].join("\n");
   const { expandUntracked } = useDiffSettingsContext().settings;
   const contentsHidden = (entry: StatusEntry) =>
     !expandUntracked && isUntracked(entry) && !revealedUntracked.has(entryKey(entry));
@@ -1031,10 +1033,10 @@ export function UncommittedDiffPane({
       <span aria-live="polite" aria-atomic="true" className={styles.srOnly} data-testid="file-selection-announcement">
         {selectionAnnouncement}
       </span>
-      {externalFilters.length > 0 && filtersKey !== dismissedFilters && (
+      {externalFilters.length + workingTreeEncodings.length > 0 && filtersKey !== dismissedFilters && (
         <div className={styles.filterNotice}>
           <GoToNotice
-            notice={{ message: externalFiltersNotice(externalFilters), action: null }}
+            notice={{ message: externalFiltersNotice(externalFilters, workingTreeEncodings), action: null }}
             onDismiss={() => setDismissedFilters(filtersKey)}
           />
         </div>
@@ -1206,6 +1208,13 @@ export function UncommittedDiffPane({
               Browsitory can&apos;t run the &apos;{currentEntry.externalFilter}&apos; filter, so this compares the file
               on disk with the version git stored: the difference may be only the filter&apos;s. Use git on the
               command line to stage or discard it.
+            </p>
+          )}
+          {currentEntry.workingTreeEncoding !== undefined && (
+            <p className={styles.filterNote}>
+              Browsitory can&apos;t convert the &apos;{currentEntry.workingTreeEncoding}&apos; encoding, so this
+              compares the file on disk with the UTF-8 version git stored: the difference may be only the
+              encoding&apos;s. Use git on the command line to stage or discard it.
             </p>
           )}
           <UncommittedFileViewer

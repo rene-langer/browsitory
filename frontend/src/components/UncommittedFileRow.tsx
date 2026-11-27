@@ -18,7 +18,7 @@ import { ContextMenu } from "./primitives/ContextMenu";
 import { ListRow } from "./primitives/ListRow";
 import { useMarkResolved } from "./useMarkResolved";
 import { statusLetter } from "../lib/statusLetter";
-import { filteredFileReason } from "../lib/externalFilters";
+import { unconvertible } from "../lib/externalFilters";
 
 /**
  * One file in the working tree's list (#639): its status letter and path, its "⋯" menu and its
@@ -126,6 +126,8 @@ export function UncommittedFileRow({
   const hasFileActions = menuItems.length > 0;
   const mergeToolResult = externalTools?.mergeToolResults.get(entry.path);
   const isConflicted = entry.kind === "Conflicted";
+  // A filter Browsitory can't run or an encoding it can't convert (#1087, #1156).
+  const refused = unconvertible(entry);
   const { letter, kind } = statusLetter(entry);
   const renamedFrom = entry.staged ? (entry.oldPath ?? null) : null;
 
@@ -175,9 +177,9 @@ export function UncommittedFileRow({
         {entry.untrackedFolder === true && (
           <span className={styles.folderNote}>untracked folder, more than 500 files</span>
         )}
-        {entry.externalFilter !== undefined && (
-          <span className={styles.folderNote} title={filteredFileReason(entry.externalFilter)}>
-            &apos;{entry.externalFilter}&apos; filter
+        {refused !== undefined && (
+          <span className={styles.folderNote} title={refused.reason}>
+            {refused.note}
           </span>
         )}
         <div className={styles.rowActions}>
@@ -243,8 +245,8 @@ export function UncommittedFileRow({
               type="button"
               className={styles.stageToggle}
               aria-label={`Stage ${entry.path}`}
-              title={entry.externalFilter === undefined ? "Stage" : filteredFileReason(entry.externalFilter)}
-              disabled={entry.externalFilter !== undefined}
+              title={refused === undefined ? "Stage" : refused.reason}
+              disabled={refused !== undefined}
               onClick={(event) => {
                 event.stopPropagation();
                 onStageFile(entry.path);
