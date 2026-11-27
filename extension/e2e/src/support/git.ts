@@ -4,7 +4,8 @@
 // run (environment, line endings, error output) is made once. Like `fixtureRepo.ts`, it lives
 // here because this package compiles with `rootDir: "src"`; keep it dependency-free (Node
 // built-ins only) and valid under both packages' tsconfigs. The child inherits the runner's
-// environment, so a run that isolates HOME and git's global config isolates these calls too.
+// environment: every run isolates HOME and git's global config before its first git command
+// (`isolatedHome.ts`, #1112), so these calls never see the developer's.
 import { execFileSync } from "node:child_process";
 
 export interface GitOptions {

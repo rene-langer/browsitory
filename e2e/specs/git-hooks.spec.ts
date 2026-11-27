@@ -45,7 +45,7 @@ describe("Browsitory git hooks", () => {
     await commitMessageInput.waitForExist();
     const stageButton = await $(`button[aria-label="Stage ${FILE}"]`);
     await stageButton.waitForExist();
-    // Same opacity-0 workaround as first-flow.spec.ts.
+    // Clicked inside the page, as in first-flow.spec.ts (see its note).
     await browser.execute((el) => (el as HTMLElement).scrollIntoView({ block: "center" }), stageButton);
     await browser.execute((el) => (el as HTMLElement).click(), stageButton);
     // The installed hook makes the "Skip hooks" checkbox appear.
