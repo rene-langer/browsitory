@@ -590,13 +590,16 @@ export function RepoWorkspace({
   }, [pushCurrentBranch, pushToast]);
   useOutcomeToasts(appState.state, pushToast, undoToastAction, pullFromToast, pushFromToast);
   // A transfer that failed while another tab is shown (#1116): its banner waits in this tab, so a
-  // toast says so where the user is, as a success would.
-  const hadTransfer = useRef(transfer !== null);
+  // toast says so where the user is, as a success would. A failure sets its error in the update
+  // that ends the transfer; an error that was there before is another action's.
   const transferError = appState.state.error;
+  const lastTransfer = useRef({ running: transfer !== null, error: transferError });
   useEffect(() => {
-    const had = hadTransfer.current;
-    hadTransfer.current = transfer !== null;
-    if (had && transfer === null && transferError !== null && !active) pushToast(transferError, { tone: "error" });
+    const last = lastTransfer.current;
+    lastTransfer.current = { running: transfer !== null, error: transferError };
+    if (last.running && transfer === null && transferError !== null && transferError !== last.error && !active) {
+      pushToast(transferError, { tone: "error" });
+    }
   }, [transfer, transferError, active, pushToast]);
   // No banner while a dialog handles the same error (#996): the identity dialog, the hook
   // failure's output, the force push confirm. Closing the last two brings it back. A dialog that
