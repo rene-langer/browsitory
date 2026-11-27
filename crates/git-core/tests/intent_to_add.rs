@@ -28,6 +28,14 @@ fn entry(path: &str, staged: bool, kind: StatusKind) -> StatusEntry {
     }
 }
 
+/// The unstaged entry of a `git add -N` file: marked, so the app shows it as git's ` A` (#1173).
+fn intent_to_add_entry(path: &str, kind: StatusKind) -> StatusEntry {
+    StatusEntry {
+        intent_to_add: true,
+        ..entry(path, false, kind)
+    }
+}
+
 /// `a.txt` committed, then edited and staged; `new.txt` added with `git add -N`.
 fn intent_to_add() -> (tempfile::TempDir, git2::Repository) {
     let (dir, repo) = init_repo();
@@ -50,7 +58,7 @@ fn status_lists_an_intent_to_add_file_as_unstaged_new_only() {
     let (_dir, repo) = intent_to_add();
     let expected = vec![
         entry("a.txt", true, StatusKind::Modified),
-        entry("new.txt", false, StatusKind::New),
+        intent_to_add_entry("new.txt", StatusKind::New),
     ];
 
     assert_eq!(git_core::status::status(&repo).unwrap(), expected);
@@ -73,7 +81,7 @@ fn status_lists_a_removed_intent_to_add_file_as_unstaged_deleted_only() {
         git_core::status::status(&repo).unwrap(),
         vec![
             entry("a.txt", true, StatusKind::Modified),
-            entry("new.txt", false, StatusKind::Deleted),
+            intent_to_add_entry("new.txt", StatusKind::Deleted),
         ]
     );
 }
