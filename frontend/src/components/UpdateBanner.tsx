@@ -1,5 +1,6 @@
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
-import { checkForUpdate, type UpdateInfo } from "../ipc/updater";
+import { checkForUpdate, relaunchApp, type UpdateInfo } from "../ipc/updater";
+import type { RepoClient } from "../ipc/RepoClient";
 import { UpdateCheckContext, type UpdateCheckOutcome } from "../state/updateCheck";
 import { useUpdateSettingsContext } from "../state/useUpdateSettings";
 import { logFailure } from "../lib/logger";
@@ -19,15 +20,21 @@ function retryDelayMs(failures: number): number {
 
 const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
+/** Why the last install failed, and whether only a restart of the app helps now (#1194). */
+interface InstallFailure {
+  message: string;
+  restartNeeded: boolean;
+}
+
 /**
  * The desktop app's updater: checks for a new version, downloads one it finds and offers the
  * restart. It checks on its own at start and every 6 hours only while `[updates]
  * check_automatically` is on (#630); "Check for updates" (registered with `UpdateCheckContext`)
  * checks whenever asked.
  */
-export function UpdateBanner() {
+export function UpdateBanner({ client }: { client: Pick<RepoClient, "recoverFromFailedUpdate"> }) {
   const [readyUpdate, setReadyUpdate] = useState<UpdateInfo | null>(null);
-  const [installError, setInstallError] = useState<string | null>(null);
+  const [installError, setInstallError] = useState<InstallFailure | null>(null);
   const { settings, status } = useUpdateSettingsContext();
   const registry = useContext(UpdateCheckContext);
   const ready = useRef<UpdateInfo | null>(null);
@@ -100,26 +107,49 @@ export function UpdateBanner() {
   if (readyUpdate === null) return null;
 
   // A failed install (rpm refusing the package, a cancelled password prompt, #1077) is shown and
-  // logged; the button stays so the user can try again.
+  // logged; the button stays so the user can try again. Unless the updater got the app ready to
+  // exit first (Windows, #1194): the backend shows the hidden window again, and only a restart
+  // brings the repositories and the update back.
   const install = () => {
     setInstallError(null);
-    readyUpdate.installAndRelaunch().catch((error: unknown) => {
+    readyUpdate.installAndRelaunch().catch(async (error: unknown) => {
       logFailure(`Installing update v${readyUpdate.version} failed`, error);
-      setInstallError(errorMessage(error));
+      let restartNeeded = false;
+      try {
+        restartNeeded = await client.recoverFromFailedUpdate();
+      } catch (recoveryError) {
+        logFailure("Recovering from the failed update install failed", recoveryError);
+      }
+      setInstallError({ message: errorMessage(error), restartNeeded });
     });
   };
+
+  const restart = () => {
+    relaunchApp().catch((error: unknown) => logFailure("Restarting Browsitory failed", error));
+  };
+
+  let message = `Update v${readyUpdate.version} ready`;
+  if (installError?.restartNeeded) {
+    message =
+      `Couldn't start the installer for update v${readyUpdate.version}: ${installError.message.replace(/\.$/, "")}. ` +
+      "Restart Browsitory to keep working, then try the update again.";
+  } else if (installError !== null) {
+    message = `Couldn't install update v${readyUpdate.version}: ${installError.message}`;
+  }
 
   return (
     // No role of its own: it sits in the toast region, which is the live region (#1000).
     <div className={installError === null ? styles.banner : `${styles.banner} ${styles.failed}`}>
-      <span>
-        {installError === null
-          ? `Update v${readyUpdate.version} ready`
-          : `Couldn't install update v${readyUpdate.version}: ${installError}`}
-      </span>
-      <button className={styles.restartButton} onClick={install}>
-        Restart to update
-      </button>
+      <span>{message}</span>
+      {installError?.restartNeeded ? (
+        <button className={styles.restartButton} onClick={restart}>
+          Restart Browsitory
+        </button>
+      ) : (
+        <button className={styles.restartButton} onClick={install}>
+          Restart to update
+        </button>
+      )}
     </div>
   );
 }

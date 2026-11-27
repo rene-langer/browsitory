@@ -58,6 +58,24 @@ pub fn let_running_writes_finish<R: Runtime>(app: &AppHandle<R>) {
     });
 }
 
+/// After a failed "Restart to update" (#1194): shows the window again and answers whether the app
+/// has to be restarted.
+///
+/// On Windows the updater runs `cleanup_before_exit` before `ShellExecuteW` starts the installer:
+/// that hides the window, stops the workers and empties the resource tables, the downloaded
+/// update included. When the installer then doesn't start (it can't be run, or the UAC prompt is
+/// declined), `install` returns the error and the process keeps running like that. Only a restart
+/// brings the repositories back. A failure before that cleanup changed nothing.
+pub fn recover_from_failed_update<R: Runtime>(app: &AppHandle<R>) -> bool {
+    let stopped = app
+        .try_state::<Waited>()
+        .is_some_and(|waited| waited.0.get().is_some());
+    if stopped {
+        crate::single_instance::show_main_window(app, "after a failed update install");
+    }
+    stopped
+}
+
 #[cfg(test)]
 mod tests {
     use tauri::Manager;
@@ -91,6 +109,50 @@ mod tests {
         assert!(
             registry.open(second.path().to_str().unwrap()).is_err(),
             "a repository still opens after the cleanup before an exit"
+        );
+    }
+
+    /// On Windows the updater runs `cleanup_before_exit` before it starts the installer, and
+    /// returns the error when the installer doesn't start: the process then keeps running with
+    /// its workers stopped (#1194). The recovery tells the frontend that only a restart helps.
+    #[test]
+    fn a_failed_install_after_the_cleanup_needs_a_restart() {
+        let app = tauri::test::mock_builder()
+            .manage(AppState::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        super::wait_for_writes_at_exit(app.handle());
+
+        app.handle().cleanup_before_exit();
+
+        assert!(
+            super::recover_from_failed_update(app.handle()),
+            "an install that failed after the cleanup before an exit isn't reported as stopped"
+        );
+    }
+
+    /// An install that fails before that cleanup (a package that doesn't verify or extract, or
+    /// any failure on macOS and Linux) leaves the window and the workers as they were: trying
+    /// again needs no restart.
+    #[test]
+    fn a_failed_install_without_the_cleanup_needs_no_restart() {
+        let app = tauri::test::mock_builder()
+            .manage(AppState::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        super::wait_for_writes_at_exit(app.handle());
+        let dir = repo();
+
+        assert!(
+            !super::recover_from_failed_update(app.handle()),
+            "an install that failed before the cleanup before an exit is reported as stopped"
+        );
+        assert!(
+            app.state::<AppState>()
+                .registry
+                .open(dir.path().to_str().unwrap())
+                .is_ok(),
+            "the recovery stopped the workers"
         );
     }
 }

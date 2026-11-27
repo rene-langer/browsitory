@@ -26,6 +26,6 @@ const loadThirdPartyNotices = thirdPartyNoticesLoader(thirdPartyNoticesUrl(null,
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App client={tauriRepoClient} updateBanner={<UpdateBanner />} loadThirdPartyNotices={loadThirdPartyNotices} />
+    <App client={tauriRepoClient} updateBanner={<UpdateBanner client={tauriRepoClient} />} loadThirdPartyNotices={loadThirdPartyNotices} />
   </StrictMode>,
 )

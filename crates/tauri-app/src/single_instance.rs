@@ -22,17 +22,21 @@ pub fn applies(config_dir_override: Option<OsString>) -> bool {
 /// The plugin for this launch, to register before every other one; `None` when it runs beside a
 /// running app (see `applies`).
 pub fn plugin<R: Runtime>() -> Option<TauriPlugin<R>> {
-    applies(std::env::var_os(CONFIG_DIR_VARIABLE))
-        .then(|| tauri_plugin_single_instance::init(|app, _args, _cwd| show_main_window(app)))
+    applies(std::env::var_os(CONFIG_DIR_VARIABLE)).then(|| {
+        tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main_window(app, "for a second launch")
+        })
+    })
 }
 
-fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
+/// Brings the main window to the front; `occasion` ends the log line when that fails.
+pub fn show_main_window<R: Runtime>(app: &AppHandle<R>, occasion: &str) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
     for result in [window.unminimize(), window.show(), window.set_focus()] {
         if let Err(error) = result {
-            log::warn!("could not bring the window to the front for a second launch: {error}");
+            log::warn!("could not bring the window to the front {occasion}: {error}");
         }
     }
 }
