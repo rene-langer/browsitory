@@ -98,6 +98,7 @@ const MARKS: &str =
 /// - `side` changes `docs/guide.md`, adds `docs/new.md` and deletes `lib/other/o.rs`;
 /// - `clash` changes `docs/clash.md`;
 /// - `inside` changes `app/main.rs`;
+/// - `grow` adds `app/added.rs` and `docs/more.md`;
 /// - `main` changes `app/main.rs` and `docs/clash.md` (so `clash` and `inside` conflict with it);
 /// - `ahead` is `main` plus `side`'s changes (a fast-forward from `main`).
 ///
@@ -123,6 +124,10 @@ fn build(d: &Path) {
     git_ok(d, &["checkout", "-q", "-b", "inside", "main"]);
     write_file(d, "app/main.rs", "fn main() { inside() }\n");
     commit(d, "inside");
+    git_ok(d, &["checkout", "-q", "-b", "grow", "main"]);
+    write_file(d, "app/added.rs", "added\n");
+    write_file(d, "docs/more.md", "more\n");
+    commit(d, "grow");
     git_ok(d, &["checkout", "-q", "main"]);
     write_file(d, "app/main.rs", "fn main() { run() }\n");
     write_file(d, "docs/clash.md", "clash from main\n");
@@ -370,6 +375,37 @@ fn a_merge_with_non_cone_patterns_matches_git() {
             ls_files_v(d),
             "H app/main.rs\nS docs/clash.md\nS docs/guide.md\nS lib/other/o.rs\nS top.txt\n"
         );
+    }
+    git_ok(twin.path(), &["merge", "-q", "--no-commit", "side"]);
+
+    let outcome = start_merge(&open(ours.path()), "side", MergeOptions::default()).unwrap();
+
+    assert_eq!(outcome, MergeOutcome::Merged);
+    assert_same_as_git(ours.path(), twin.path());
+    assert_nothing_written_outside(ours.path());
+}
+
+/// A new file inside the cone is written, unmarked; one outside is marked and not written.
+#[test]
+fn a_merge_that_adds_files_inside_and_outside_the_cone_matches_git() {
+    let (ours, twin) = twins();
+    git_ok(twin.path(), &["merge", "-q", "--no-commit", "grow"]);
+
+    let outcome = start_merge(&open(ours.path()), "grow", MergeOptions::default()).unwrap();
+
+    assert_eq!(outcome, MergeOutcome::Merged);
+    assert_same_as_git(ours.path(), twin.path());
+    assert!(ours.path().join("app/added.rs").exists());
+    assert_nothing_written_outside(ours.path());
+}
+
+/// A marked file that is on disk anyway, as the index has it: git drops the mark of a file it
+/// finds on disk, then its merge marks the changed file again and removes it.
+#[test]
+fn a_merge_that_changes_a_marked_file_found_on_disk_matches_git() {
+    let (ours, twin) = twins();
+    for d in [ours.path(), twin.path()] {
+        write_file(d, "docs/guide.md", "guide\n");
     }
     git_ok(twin.path(), &["merge", "-q", "--no-commit", "side"]);
 
