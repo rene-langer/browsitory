@@ -289,4 +289,19 @@ describe("ReflogPanel — date format", () => {
     expect(screen.getByText(`1111111 → 2222222 · Ada Lovelace · ${day}`)).toBeInTheDocument();
     expect(screen.getByTitle(/^Old ID: /).getAttribute("title")).toContain(`\n${time}\n`);
   });
+
+  it("offers the older entries when the reflog has more than it shows (#1161)", () => {
+    const onLoadMore = vi.fn();
+    renderPanel({ hasMore: true, onLoadMore });
+
+    expect(screen.getByText("Showing the latest 1 entry")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(onLoadMore).toHaveBeenCalledOnce();
+  });
+
+  it("offers no more entries when it shows the whole reflog (#1161)", () => {
+    renderPanel({ hasMore: false, onLoadMore: vi.fn() });
+
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+  });
 });

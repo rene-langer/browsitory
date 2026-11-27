@@ -90,6 +90,14 @@ pub fn read_reflog(repo: &Repository, reference: &str) -> Result<Vec<ReflogEntry
         .collect()
 }
 
+pub fn read_reflog_newest(
+    repo: &Repository,
+    reference: &str,
+    _limit: usize,
+) -> Result<Vec<ReflogEntry>, ReflogError> {
+    read_reflog(repo, reference)
+}
+
 pub fn restore_reflog_entry(
     repo: &Repository,
     reference: &str,
