@@ -893,4 +893,29 @@ mod tests {
         assert_eq!(result.err().unwrap().message(), MISSING_CREDENTIAL_ERROR);
         assert!(!provider.offered);
     }
+
+    /// #1159: the caller gives up only on a clone still running, and a clone is handed over
+    /// only while the caller hasn't given up.
+    #[test]
+    fn a_clone_is_either_handed_over_or_given_up_on() {
+        use super::{HelperReporter, Phase, SharedPhase};
+        use git_core::remote::TransferReporter;
+
+        let running = SharedPhase::new();
+        assert!(running.abandon());
+        assert_eq!(*running.lock(), Phase::Abandoned);
+        assert!(!running.abandon());
+        assert!(!running.complete());
+        assert_eq!(*running.lock(), Phase::Abandoned);
+
+        let finished = SharedPhase::new();
+        let mut reporter = HelperReporter {
+            messages: mpsc::channel().0,
+            phase: finished.clone(),
+        };
+        assert!(reporter.clone_complete());
+        assert_eq!(*finished.lock(), Phase::Complete);
+        assert!(!finished.abandon());
+        assert_eq!(*finished.lock(), Phase::Complete);
+    }
 }
