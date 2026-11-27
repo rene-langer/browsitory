@@ -216,7 +216,12 @@ unbornBranch?: string,
  * The external filter drivers the repository's attributes name, which Browsitory can't
  * run (#1087); absent when there are none.
  */
-externalFilters?: Array<string>, };
+externalFilters?: Array<string>, 
+/**
+ * The working-tree-encodings the repository's attributes name, which Browsitory can't
+ * convert (#1156); absent when there are none.
+ */
+workingTreeEncodings?: Array<string>, };
 
 export type HistoryEditKind = "Reword" | "Squash" | "Fixup" | "MoveUp" | "MoveDown" | "Drop" | "Edit" | "Split";
 
@@ -433,6 +438,15 @@ untrackedFolder?: boolean,
  * change it can't compare (#1087); absent otherwise.
  */
 externalFilter?: string, 
+/**
+ * The working-tree-encoding Browsitory can't convert, on an unstaged file that uses it
+ * (#1156); absent otherwise.
+ */
+workingTreeEncoding?: string, 
+/**
+ * Only on the unstaged entry of an intent-to-add file (`git add -N`, #1173): `true`.
+ */
+intentToAdd?: boolean, 
 /**
  * The custom merge driver Browsitory doesn't run, on a conflicted file whose `merge`
  * attribute names one (#1165); absent otherwise.

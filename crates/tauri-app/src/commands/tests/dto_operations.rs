@@ -121,6 +121,7 @@ fn head_info_dto_serializes_camel_case_with_operation_name() {
         terminal_rebase: None,
         unborn_branch: None,
         external_filters: Vec::new(),
+        working_tree_encodings: Vec::new(),
     });
     assert_eq!(
         serde_json::to_value(dto).unwrap(),
@@ -141,6 +142,7 @@ fn head_info_dto_serializes_camel_case_with_operation_name() {
         terminal_rebase: None,
         unborn_branch: None,
         external_filters: Vec::new(),
+        working_tree_encodings: Vec::new(),
     });
     assert_eq!(
         serde_json::to_value(dto).unwrap()["squashMessage"],
@@ -240,6 +242,7 @@ fn sequence_outcome_and_progress_dtos_serialize_tagged_camel_case() {
             terminal_rebase: None,
             unborn_branch: None,
             external_filters: Vec::new(),
+            working_tree_encodings: Vec::new(),
         }))
         .unwrap()
     };
@@ -511,6 +514,7 @@ fn head_info_with_rebase(health: git_core::rebase::RebaseHealth) -> serde_json::
         terminal_rebase: None,
         unborn_branch: None,
         external_filters: Vec::new(),
+        working_tree_encodings: Vec::new(),
     }))
     .unwrap()
 }
@@ -555,6 +559,7 @@ fn head_info_dto_serializes_a_terminal_sequence() {
             terminal_rebase: None,
             unborn_branch: None,
             external_filters: Vec::new(),
+            working_tree_encodings: Vec::new(),
         }))
         .unwrap()
     };
@@ -601,6 +606,7 @@ fn head_info_dto_serializes_a_terminal_rebase() {
             terminal_rebase,
             unborn_branch: None,
             external_filters: Vec::new(),
+            working_tree_encodings: Vec::new(),
         }))
         .unwrap()
     };
@@ -652,6 +658,7 @@ fn head_info_dto_serializes_a_bisect() {
             terminal_rebase: None,
             unborn_branch: None,
             external_filters: Vec::new(),
+            working_tree_encodings: Vec::new(),
         }))
         .unwrap()
     };

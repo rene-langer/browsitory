@@ -96,7 +96,13 @@ as a tree** sets it too.
     on disk and aren't listed, as with `git status`; the same for a file you marked with `git
     update-index --skip-worktree` (a local configuration file you keep edited). Such a file
     can't be staged, as `git add` refuses it. A file added with `git add -N` (intent to add) is
-    listed as untracked until you stage it, and a commit leaves it out, as `git commit` does.
+    listed under **Changes** with **A** (added, not staged), as `git status` shows ` A`, until you
+    stage it, and a commit leaves it out, as `git commit` does. **Stage modified** stages it, as
+    `git add -u` does; **Discard changes…** empties it, as `git restore` does (its staged
+    version is empty), and **Delete untracked…** leaves it alone.
+
+    A file name with `[`, `]`, `*` or `?` in it (`pages/[id].tsx`) is just a name: staging,
+    unstaging or discarding it never touches the other files the name would match as a pattern.
 
 ## The diff viewer
 
@@ -233,7 +239,10 @@ be deleted along with the rest.
 For untracked files the menu also offers ignore items. Each appends a pattern to the
 repository's `.gitignore` (creating it if needed). **Ignore file** is always offered. **Ignore
 all \*.ext** appears only when the file name has an extension. **Ignore folder ⟨folder⟩/**
-appears only when the file is in a subfolder.
+appears only when the file is in a subfolder. The pattern names exactly that file or folder:
+characters that `.gitignore` reads as a pattern (`[`, `*`, `?`, `\` and trailing spaces) get a
+backslash, so ignoring `pages/[id].tsx` writes `/pages/\[id].tsx`, which doesn't ignore
+`pages/i.tsx`.
 
 ??? note "Details"
     You can discard while a merge, rebase, cherry-pick or revert is paused, to resolve it; while

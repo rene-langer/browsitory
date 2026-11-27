@@ -123,8 +123,10 @@ fn refreshing_scan(repo: &git2::Repository) -> Option<(git2::Statuses<'_>, git2:
     if repo.is_bare() || !index_path.is_file() || lock_path(&index_path).exists() {
         return None;
     }
+    remove_leftovers(git_dir);
+    // The process id in the name tells a later read whether the folder's owner still runs.
     let folder = tempfile::Builder::new()
-        .prefix("browsitory-index-refresh-")
+        .prefix(&format!("{SCRATCH_PREFIX}{}-", std::process::id()))
         .tempdir_in(git_dir)
         .ok()?;
     let scratch_path = folder.path().join("index");
@@ -157,6 +159,68 @@ fn refreshing_scan(repo: &git2::Repository) -> Option<(git2::Statuses<'_>, git2:
         }
     }
     Some((statuses, scratch))
+}
+
+/// The start of a scratch folder's name: `<prefix><process id>-<random>`, or before #1162
+/// `<prefix><random>`.
+const SCRATCH_PREFIX: &str = "browsitory-index-refresh-";
+
+/// A scratch folder without a process id in its name is left alone until it is this old: no
+/// scan takes that long.
+const UNOWNED_AGE: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
+/// Removes the scratch folders in `git_dir` that a process killed during its scan left
+/// (#1162): those whose process no longer runs, or without a process id and an hour old. Only
+/// a folder that holds nothing but the index copy and its lock; anything unexpected stays.
+fn remove_leftovers(git_dir: &Path) {
+    let Ok(entries) = fs::read_dir(git_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(rest) = name
+            .to_str()
+            .and_then(|name| name.strip_prefix(SCRATCH_PREFIX))
+        else {
+            continue;
+        };
+        let owner_ended = match rest.split_once('-') {
+            Some((pid, _)) => match pid.parse::<u32>() {
+                Ok(pid) => pid != std::process::id() && !crate::process::process_alive(pid),
+                Err(_) => continue,
+            },
+            None => entry
+                .metadata()
+                .and_then(|meta| meta.modified())
+                .is_ok_and(|modified| {
+                    modified
+                        .elapsed()
+                        .is_ok_and(|elapsed| elapsed >= UNOWNED_AGE)
+                }),
+        };
+        if owner_ended && entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            remove_scratch(&entry.path());
+        }
+    }
+}
+
+/// Removes the scratch folder `folder` when it holds only `index` and `index.lock`; `remove_dir`
+/// leaves it when anything else is in it.
+fn remove_scratch(folder: &Path) {
+    let Ok(entries) = fs::read_dir(folder) else {
+        return;
+    };
+    let ours = entries.flatten().all(|entry| {
+        matches!(entry.file_name().to_str(), Some("index" | "index.lock"))
+            && entry.file_type().is_ok_and(|kind| kind.is_file())
+    });
+    if !ours {
+        return;
+    }
+    for file in ["index", "index.lock"] {
+        let _ = fs::remove_file(folder.join(file));
+    }
+    let _ = fs::remove_dir(folder);
 }
 
 /// Gives the repository its own index back.

@@ -307,7 +307,12 @@ index it read at the start of the scan without checking that the file is still t
 scan reads a hard-linked scratch copy in the git folder, libgit2 writes its refresh there, and the
 real index is replaced under `index.lock` only while it is still the one the copy was made from. A
 held lock, a changed index or any error skips the write; the read never waits or fails for it. An
-index with an intent-to-add entry isn't refreshed (libgit2 would drop the mark).
+index with an intent-to-add entry isn't refreshed (libgit2 would drop the mark). The scratch
+folder is `browsitory-index-refresh-<pid>-<random>`; a process killed during the scan leaves it
+behind, so each scan first removes such folders whose process no longer runs (never its own
+process's), and those named without a process id (before #1162) once they are an hour old. Only
+a folder holding nothing but `index` and `index.lock` is removed, file by file, then
+`remove_dir` (#1162).
 
 The status scan doesn't recurse into a wholly untracked folder (#845): libgit2 reports it as one
 `dir/` entry, and `git_core::untracked` walks it, stopping one file past
@@ -558,9 +563,14 @@ menu's choice runs back through the session: the pick, the parent picker or a se
     as deleted (inside them git would write it, or list it as deleted).
   - **intent-to-add** (`git add -N`): an entry with the empty blob. libgit2's status reports it
     as a staged new file and `write_tree` commits the empty blob (#1164). The status lists it as
-    one unstaged new file (deleted when its file is gone), and every commit made from the
-    repository's index writes its tree with `committed_tree`, which leaves such entries out.
-    `read_tree` drops them, as `git reset` does; the file stays, untracked.
+    one unstaged new file (deleted when its file is gone) with `StatusEntry.intent_to_add` (wire
+    `intentToAdd`), so the app shows git's ` A` rather than untracked: Stage modified includes
+    it (`git add -u`), Delete untracked leaves it out, and its discard empties it as `git
+    restore` does (#1173). libgit2's checkout rewrites an entry whose stat data it writes
+    without the mark (the emptied file would then be staged), so `stage::checkout_tracked` runs
+    with `update_index(false)` when an intent-to-add path is among its paths. Every commit made
+    from the repository's index writes its tree with `committed_tree`, which leaves such
+    entries out. `read_tree` drops them, as `git reset` does; the file stays, untracked.
 - libgit2 1.9.6's path-limited stash (`stash_save_ext` with a pathspec) is unusable: after
   stashing the paths it resets the *whole* index and worktree to HEAD (forced checkout, plus
   removing untracked files), discarding every change outside the paths, and its untracked commit
@@ -2552,7 +2562,7 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   process) to have created it on the same filesystem.
 - External filter drivers (#1063, `external_filter`): libgit2 runs only its built-in filters
   (CRLF/eol, `ident`), so a path whose `filter` attribute names a driver git would run
-  (git-crypt, Git LFS) is refused with `ExternalFilter { path, driver }` by every operation
+  (git-crypt, Git LFS) is refused with `ExternalFilter::Driver { path, driver }` by every operation
   that would pass it through a filter, before it writes anything: git-crypt's plaintext would
   be committed, LFS pointers written over the real files. A driver counts when its
   `filter.<name>.clean`, `.smudge` or `.process` is non-empty (the last value, all config
@@ -2604,6 +2614,19 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   default global attribute files aren't read). The Changes pane shows a dismissible notice for
   them, marks the rows, disables their Stage button and leaves them out of Stage all
   (`lib/stagePaths`); the refusals above are unchanged.
+
+  `working-tree-encoding` (#1156) has the same effect and the same treatment: git keeps such a
+  file as UTF-8 in the repository and converts it to the named encoding in the work tree, and
+  libgit2 ignores the attribute (it would store raw UTF-16 and write UTF-8). `Drivers::load`
+  also notes whether the attribute files (`attribute_files`: the same ones `named_drivers`
+  reads) name an encoding git converts to: any value but an empty one and `UTF-8`/`UTF8` (any
+  case, git's `is_encoding_utf8`); a bare `working-tree-encoding` (git fails on it) isn't
+  counted. If so, `Drivers::refusal` looks the path's encoding up after its filter, so every
+  refusal above covers it as `ExternalFilter::Encoding { path, encoding }`, `annotate` sets
+  `StatusEntry.working_tree_encoding` (`workingTreeEncoding`), and
+  `HeadInfo.working_tree_encodings` (`workingTreeEncodings`, `named_encodings`) feeds the same
+  notice. The status can't tell whether such a file really changed (UTF-16 bytes against a UTF-8
+  blob), so it stays listed and marked.
 - Custom merge drivers (#1165, `merge_driver`): a path's `merge` attribute (or `merge.default`
   without one) can name a driver configured as `merge.<name>.driver`, a command. libgit2 knows
   only its built-in `text`, `binary` and `union` and merged every other file as text, so
@@ -2637,8 +2660,18 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   folder) or in HEAD (a folder that replaced a committed link or file), or else the path itself
   when it is a non-folder on one side and a folder on the other. The pair's index entries are
   removed first (libgit2 can't reset a root whose entries sit across the swap), then
-  `reset_default` with the root restores HEAD's. Staged renames into the unit unstage with it;
+  `reset_entries` with the root restores HEAD's. Staged renames into the unit unstage with it;
   a rename source inside another staged pair is left out (its deletion belongs to that pair).
+- Paths are paths, not patterns (#1148): libgit2's `reset_default` reads its paths as globs, so
+  unstaging `pages/[id].tsx` also unstaged `pages/i.tsx` and `pages/d.tsx`. `unstage_file`
+  uses `stage::reset_entries` instead: the same steps (a reversed tree-to-index diff, each
+  entry put back to HEAD's or removed, conflict entries dropped, one index write) with
+  `disable_pathspec_match`. Every other libgit2 call that takes a picked path matches it
+  literally too (`index.add_path`/`remove_path`, checkouts and status scans with
+  `disable_pathspec_match`); a search's `path:` term is meant as a glob. The ignore items
+  escape `\`, `[`, `*`, `?` and trailing spaces in the `.gitignore` line they write
+  (`lib/ignorePattern`, #1168); `ignore_paths` accepts a trailing space a backslash escapes,
+  as git's `trim_trailing_spaces` reads the line.
 - A file in a folder's place (#154): `worktree_guard::file_in_place_of_folder` finds a proper
   ancestor that is now a regular file (links are left to the symlink checks).
   `discard_file` of a tracked path then refuses with `StageError::FolderIsNowAFile` (libgit2
@@ -2658,15 +2691,25 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   `git stash push -u -- d` accepts it.
 - Conflicts below a pair (#187): when the index has conflict entries (stage 1–3) at or below the
   pair root, `unstage_file` refuses with `StageError::ConflictsBelow` before changing anything:
-  libgit2's `reset_default` fails on them ("invalid entry mode"), and dropping them would
-  discard a side of the merge. The pair's removals stay in memory (`reset_default` uses the same
-  repository index and writes it once); a failed reset re-reads the index from disk.
-- Several paths at once (#528): `stage_paths` and `unstage_paths` run `stage_file` /
-  `unstage_file` per path but keep a copy of `.git/index` first; when one path fails, the copy
-  is written back and the repository's index object re-read, so nothing is staged or unstaged
-  and the worker records no undo entry. `ignore_paths` checks every pattern before reading
-  `.gitignore`, then writes it once. Each is one worker command and so one undo step ("Stage 3
-  files", "Ignore 2 patterns"; one path keeps the single-path label).
+  libgit2 can't reset them ("invalid entry mode"), and dropping them would discard a side of
+  the merge. The pair's removals stay in memory (`reset_entries` works on the same repository
+  index and writes it once); a failed reset re-reads the index from disk.
+- Several paths at once (#528): `stage_paths` and `unstage_paths` keep a copy of `.git/index`
+  first; when one path fails, the copy is written back and the repository's index object
+  re-read, so nothing is staged or unstaged and the worker records no undo entry.
+  `ignore_paths` checks every pattern before reading `.gitignore`, then writes it once. Each is
+  one worker command and so one undo step ("Stage 3 files", "Ignore 2 patterns"; one path keeps
+  the single-path label). They do their work once for all paths (#1155; before, Stage all
+  wrote the whole index once per file, Unstage all scanned the whole work tree once per file):
+  `stage_paths` stages every path into the repository's index in memory and writes it once
+  (the filter drivers loaded once); `unstage_paths` finds the pair units of all paths, the
+  staged renames from one status scan, and resets them in one `reset_entries`;
+  `discard_all_unstaged` checks each tracked path, then writes them in one checkout, and
+  discards path by path only when that checkout fails (a file held open, a refusal), so the
+  others are still discarded and the failures named. `worktree_guard`'s path selection (the
+  forced-checkout scans and case checks) looks up each entry's folders in a set (`Selection`)
+  instead of comparing it with every selected path. Tests in `stage.rs` count index writes,
+  status scans and checkouts (`stage::work`).
 
 ## Syntax highlighting
 

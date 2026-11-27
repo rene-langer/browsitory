@@ -146,6 +146,8 @@ fn status_entry_dto_always_serializes_old_path() {
         kind: StatusKind::Modified,
         untracked_folder: false,
         external_filter: None,
+        working_tree_encoding: None,
+        intent_to_add: false,
         merge_driver: None,
     });
     assert_eq!(
@@ -159,6 +161,8 @@ fn status_entry_dto_always_serializes_old_path() {
         kind: StatusKind::Renamed,
         untracked_folder: false,
         external_filter: None,
+        working_tree_encoding: None,
+        intent_to_add: false,
         merge_driver: None,
     });
     assert_eq!(

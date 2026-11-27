@@ -47,6 +47,33 @@ describe("FileActionsMenu", () => {
     expect(ignorePatterns("Makefile")).toEqual([{ label: "Ignore file", pattern: "/Makefile" }]);
   });
 
+  it("escapes what .gitignore reads as a pattern, so the line names exactly the picked file (#1168)", () => {
+    expect(ignorePatterns("pages/[id].tsx")).toEqual([
+      { label: "Ignore file", pattern: "/pages/\\[id].tsx" },
+      { label: "Ignore all *.tsx", pattern: "*.tsx" },
+      { label: "Ignore folder pages/", pattern: "/pages/" },
+    ]);
+    expect(ignorePatterns("src/[slug]/report*?.t[s]")).toEqual([
+      { label: "Ignore file", pattern: "/src/\\[slug]/report\\*\\?.t\\[s]" },
+      { label: "Ignore all *.t[s]", pattern: "*.t\\[s]" },
+      { label: "Ignore folder src/[slug]/", pattern: "/src/\\[slug]/" },
+    ]);
+    expect(ignorePatterns("a\\b")).toEqual([{ label: "Ignore file", pattern: "/a\\\\b" }]);
+    // git drops trailing spaces unless escaped; a leading `#` or `!` is covered by the `/`.
+    expect(ignorePatterns("trail  ")).toEqual([{ label: "Ignore file", pattern: "/trail\\ \\ " }]);
+    expect(ignorePatterns("#notes")).toEqual([{ label: "Ignore file", pattern: "/#notes" }]);
+    expect(ignorePatterns("!keep")).toEqual([{ label: "Ignore file", pattern: "/!keep" }]);
+  });
+
+  it("escapes an untracked folder's Ignore folder pattern (#1168)", () => {
+    const onPick = vi.fn();
+    const folder = { path: "[id]/", oldPath: null, staged: false, kind: "New" as const, untrackedFolder: true };
+    fileMenuItems(folder, onPick)
+      .find((i) => i.label === "Ignore folder")!
+      .onSelect();
+    expect(onPick).toHaveBeenCalledWith({ kind: "ignore", pattern: "/\\[id]/" });
+  });
+
   it("marks discard destructive and reports the picked action", () => {
     const onPick = vi.fn();
     const items = fileMenuItems(untracked, onPick);
@@ -62,6 +89,16 @@ describe("FileActionsMenu", () => {
       "Discard changes to 2 files (1 untracked will be deleted)? Undo can bring them back.",
     );
     expect(discardAllConfirmMessage([tracked])).toBe("Discard changes to 1 file? Undo can bring them back.");
+  });
+
+  it("treats an intent-to-add file as tracked: Discard, which empties it, and no Ignore (#1173)", () => {
+    const added = { ...untracked, path: "new.txt", intentToAdd: true };
+    expect(fileMenuItems(added, vi.fn()).map((i) => i.label)).toEqual(["Discard changes…", "Stash file…"]);
+    expect(discardConfirmMessage(added)).toBe(
+      'Discard changes to new.txt? It was added with "git add -N", so this empties it, as git restore does. ' +
+        "Undo can bring them back.",
+    );
+    expect(discardAllConfirmMessage([tracked, added])).toBe("Discard changes to 2 files? Undo can bring them back.");
   });
 
   it("words the delete-untracked confirmation and points Discard all at it (#622)", () => {
