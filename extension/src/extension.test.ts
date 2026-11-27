@@ -369,7 +369,7 @@ describe("extension lifecycle", () => {
     notify("repoWatch", { repoPath: "/repo", kind: "Changed" });
     expect(changed).toEqual([head, index, stage]);
 
-    // An operation of the app itself (stage, commit, undo), also without a watcher.
+    // An operation of the app itself (stage, commit, undo), once the operation log is followed.
     changed.length = 0;
     notify("operationLog", { repo: "/repo", kind: "Finished" });
     expect(changed).toEqual([head, index, stage]);

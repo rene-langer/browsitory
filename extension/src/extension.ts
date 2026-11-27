@@ -152,7 +152,11 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   }
 
-  /** A watcher's report or an operation of the app itself may have changed the repository. */
+  /**
+   * A watcher's report, or an operation of the app itself, may have changed the repository. The
+   * sidecar sends `operationLog` once the webview showed the operation log; without either, the
+   * versions are read again when the diff or merge tool opens.
+   */
   function onSidecarNotification(method: string, params: unknown): void {
     const changed =
       method === "operationLog" ||
