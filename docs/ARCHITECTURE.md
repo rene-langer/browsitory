@@ -2521,6 +2521,29 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   default global attribute files aren't read). The Changes pane shows a dismissible notice for
   them, marks the rows, disables their Stage button and leaves them out of Stage all
   (`lib/stagePaths`); the refusals above are unchanged.
+- Custom merge drivers (#1165, `merge_driver`): a path's `merge` attribute (or `merge.default`
+  without one) can name a driver configured as `merge.<name>.driver`, a command. libgit2 knows
+  only its built-in `text`, `binary` and `union` and merged every other file as text, so
+  `merge=ours` silently took the other side's changes. Owner decision: Browsitory never runs the
+  command; when both sides changed such a file it is a conflict for the user to resolve. The
+  module registers a driver under libgit2's `*` wildcard in its process-wide registry
+  (`git_merge_driver_register`, which git2 doesn't wrap, declared `extern "C"`), once per
+  process, from `valueless_setting::refuse_for_merge` and `can_merge_in_memory` (which every
+  merging command and in-memory merge calls first) and `repo::configure_libgit2`. libgit2
+  calls it only for a file both sides changed differently whose driver name it doesn't know,
+  as git calls a driver; it answers `GIT_EMERGECONFLICT` when `merge.<name>.driver` is set (any
+  config level, any value; a config it can't read or a panic counts too) and `GIT_PASSTHROUGH`
+  otherwise, so an unconfigured name merges as text, as in git. So every merge libgit2 makes
+  for the app sees it: merge (a pull's too), squash, cherry-pick, revert, rebase step, stash
+  apply and pop, and the merges in memory the checks compute. The work tree gets libgit2's
+  text merge of the file (conflict markers where the sides overlap; git's `binary` driver would
+  leave ours), the index the three stages. A driver configured under a built-in name
+  (`merge.text.driver`) isn't caught: libgit2 uses its own, where git would run the command.
+  `merge_driver::annotate`, in the app's status reads (`status_refreshing_index`,
+  `status_with_stamp`), sets `StatusEntry.merge_driver` (wire `mergeDriver`) on a conflicted
+  entry whose driver is configured; the Changes pane marks the row ("'ours' merge driver") and
+  says above the conflict that the driver wasn't run (`lib/mergeDrivers`). Twinned with `git
+  merge` for the built-in drivers in `tests/merge_driver.rs`.
 - Folder/link pairs in the index (#157): `stage_file` of `d/f` below a symlinked `d` removes
   `d/f`'s stage-0 entry (stages its deletion; git sees no file there) and reads nothing through
   the link; conflict entries there are still refused (`BeyondSymlink`), as are hunk and line

@@ -19,6 +19,7 @@ import { ListRow } from "./primitives/ListRow";
 import { useMarkResolved } from "./useMarkResolved";
 import { statusLetter } from "../lib/statusLetter";
 import { filteredFileReason } from "../lib/externalFilters";
+import { mergeDriverReason } from "../lib/mergeDrivers";
 
 /**
  * One file in the working tree's list (#639): its status letter and path, its "⋯" menu and its
@@ -178,6 +179,11 @@ export function UncommittedFileRow({
         {entry.externalFilter !== undefined && (
           <span className={styles.folderNote} title={filteredFileReason(entry.externalFilter)}>
             &apos;{entry.externalFilter}&apos; filter
+          </span>
+        )}
+        {entry.mergeDriver !== undefined && (
+          <span className={styles.folderNote} title={mergeDriverReason(entry.mergeDriver)}>
+            &apos;{entry.mergeDriver}&apos; merge driver
           </span>
         )}
         <div className={styles.rowActions}>

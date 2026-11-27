@@ -131,6 +131,25 @@ choice, or delete it, then mark it resolved. If the stash's staged changes meet 
 and folder, **Apply** and **Pop** (which restore them as staged) refuse instead and change
 nothing, as `git stash apply --index` does; use **Apply as unstaged** or **Pop as unstaged**.
 
+A repository can name a merge driver for some files in its `.gitattributes`, such as
+`version.txt merge=ours`, with the program to run set as `merge.ours.driver` in its git config
+(lock file and project file mergers work this way too). Browsitory doesn't run these programs.
+When both sides changed such a file, a merge, pull, cherry-pick, revert, rebase step or stash
+apply leaves it conflicted, so you decide: its row says "'ours' merge driver", and a note above
+the conflict says the driver wasn't run. Keep one side (for `merge=ours`, **Use ours (whole
+file)**) or edit it as the driver would have, then mark it resolved, or merge on the command
+line, where git runs the driver. Every other file merges as usual.
+
+??? note "Details"
+    The file shows both sides merged as text, with conflict markers where they overlap; where
+    they don't, it reads as merged, but it stays conflicted until you mark it resolved. A file
+    only one side changed is taken from that side, and one both sides changed the same way is
+    no conflict, as with git, which runs the driver in neither case. `merge.default` naming a
+    configured driver counts for files without a `merge` attribute. The built-in
+    `merge=binary` (and `-merge`), `merge=text` and `merge=union` work as in git, and so does a
+    driver name without config, which git merges as text. A driver configured under one of
+    those built-in names isn't run by git's rules here: Browsitory uses the built-in one.
+
 If the conflicted file is read-only, **Save resolution**, **Use ours (whole file)** and **Use
 theirs (whole file)** change nothing and say so: "'f.txt' is read-only. Make it writable, then
 try again." Clear the file's read-only flag (Windows) or give yourself write permission (macOS,
