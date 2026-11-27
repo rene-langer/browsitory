@@ -213,5 +213,7 @@ are saved with your other preferences, in the `[keybindings]` section of Browsit
 **Preferences → Keyboard** has **Open Keyboard Shortcuts**, which opens VSCode's Keyboard
 Shortcuts on Browsitory's commands (`browsitory.shortcut.…`). There you can give a command
 other keys or remove them. The shortcut sheet, the palette and the tooltips show the keys you
-set there. The keys Browsitory handles itself in VSCode (Ctrl+Shift+L, Ctrl+Shift+K, the merge
-editor's keys and the others VSCode doesn't bind) keep their built-in keys.
+set there (in a remote window, such as WSL or SSH, they show the built-in keys; see
+[Install](install.md#keyboard-shortcuts-in-vscode)). The keys Browsitory handles itself in VSCode
+(Ctrl+Shift+L, Ctrl+Shift+K, the merge editor's keys and the others VSCode doesn't bind) keep
+their built-in keys.

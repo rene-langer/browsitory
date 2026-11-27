@@ -107,13 +107,9 @@ async function smokeTest({
   fs.mkdirSync(isolatedEnv.GNUPGHOME, { mode: 0o700 });
   createRepository(repoPath, { ...process.env, ...isolatedEnv });
 
-  // The sidecar reopens the repositories listed here when it starts, so the webview shows the
-  // repository without the folder picker. JSON strings are valid TOML basic strings.
+  // VSCode opens the repository as the window's folder: "Browsitory: Open" opens it as a tab
+  // (a new window has no tabs of its own yet, #1128).
   fs.mkdirSync(configDir);
-  fs.writeFileSync(
-    path.join(configDir, "config.toml"),
-    `active_repo = ${JSON.stringify(repoPath)}\n\n[[open_repos]]\npath = ${JSON.stringify(repoPath)}\n`,
-  );
 
   // `runTests` needs a development extension to host the test runner. This empty one keeps the
   // real extension out of development mode, so VSCode loads the installed package.

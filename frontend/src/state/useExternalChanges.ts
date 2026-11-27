@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RepoClient } from "../ipc/RepoClient";
+import { subscribeTransportStatus } from "../ipc/transportStatus";
 import { useHostVisible } from "./useAutoFetch";
 
 /** How often the visible tab checks for changes made outside the app, at the least. */
@@ -112,6 +113,9 @@ export function useExternalChanges({ client, repoPath, active, busy, checkForCha
  * Watches `repoPath` while mounted (#756) and calls `onChange` for each change the watcher
  * reports. Returns whether the watcher runs: `false` until `watchRepo` answers, when it can't
  * start, and after it reports `Stopped`.
+ *
+ * Starts the watcher again after the connection to the backend was lost (#1130): in VSCode the
+ * watchers live in the sidecar, and the one started in its place watches nothing.
  */
 function useRepoWatch(client: RepoClient, repoPath: string, onChange: () => Promise<void>): boolean {
   const [watching, setWatching] = useState(false);
@@ -119,6 +123,8 @@ function useRepoWatch(client: RepoClient, repoPath: string, onChange: () => Prom
   useEffect(() => {
     latestOnChange.current = onChange;
   });
+  const [connectionLosses, setConnectionLosses] = useState(0);
+  useEffect(() => subscribeTransportStatus(() => setConnectionLosses((n) => n + 1)), []);
 
   useEffect(() => {
     let mounted = true;
@@ -140,7 +146,7 @@ function useRepoWatch(client: RepoClient, repoPath: string, onChange: () => Prom
       setWatching(false);
       void client.unwatchRepo(repoPath).catch(() => {});
     };
-  }, [client, repoPath]);
+  }, [client, repoPath, connectionLosses]);
 
   return watching;
 }

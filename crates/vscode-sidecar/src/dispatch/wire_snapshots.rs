@@ -1,8 +1,7 @@
 //! #306: byte-exact snapshots of the sidecar's wire output, checked in as
 //! `crates/vscode-sidecar/tests/wire/dto-snapshots.txt`. Each line is one DTO built from the
 //! shared domain values in `crates/test-support/wire_fixtures.rs` through the same `From` impls
-//! and helpers the handlers call (`repo_service::wire`, plus `OpenReposDto` in `dispatch/repos.rs`),
-//! serialized the way the sidecar sends it. A second test compares the cases both
+//! and helpers the handlers call (`repo_service::wire`), serialized the way the sidecar sends it. A second test compares the cases both
 //! transports share with the desktop app's snapshots
 //! (`crates/tauri-app/src/commands/wire_snapshots.rs`).
 //! Regenerate with `UPDATE_TRANSPORT_METHODS=1 cargo test -p vscode-sidecar wire_snapshots`
@@ -60,15 +59,6 @@ fn snapshots() -> Vec<(String, String)> {
     let mut s = Snapshots::default();
     shared_wire_cases(&mut s);
 
-    // Sidecar only: `list_open_repos`.
-    s.add("OpenRepos", fixtures::open_repo_entries(), |entry| {
-        let active = Some(entry.path.clone());
-        OpenReposDto::from((vec![entry], active))
-    });
-    s.0.push((
-        "OpenRepos/none".to_string(),
-        wire(&OpenReposDto::from((Vec::new(), None))),
-    ));
     // Every method's error, as the JSON-RPC error's `data` (#496).
     s.add("RepoErrorPayload", fixtures::errors(), |error| {
         crate::protocol::JsonRpcResponse::err(1, error)
@@ -95,7 +85,7 @@ fn sidecar_snapshot_path() -> PathBuf {
 
 /// What only the desktop app sends: its event names, clone and init (desktop only), the merge
 /// tool outcome (the sidecar hands the merge tool to VSCode instead), and `list_open_repos`'s
-/// tuple (the sidecar answers `OpenRepos`).
+/// tuple (in VSCode the extension host answers it from the window's state, #1128).
 const DESKTOP_ONLY: &[&str] = &[
     // Tauri event names; the sidecar's notification methods are pinned by the relay tests below.
     "TransferProgressEvent",
@@ -108,8 +98,9 @@ const DESKTOP_ONLY: &[&str] = &[
     "ListOpenRepos",
 ];
 
-/// DTOs only the sidecar sends: `list_open_repos`'s object.
-const SIDECAR_ONLY: &[&str] = &["OpenRepos"];
+/// DTOs only the sidecar sends: none. (`list_open_repos` is answered by the extension host from
+/// the window's state, #1128.)
+const SIDECAR_ONLY: &[&str] = &[];
 
 fn dto_of(case: &str) -> &str {
     case.split_once('/').map_or(case, |(dto, _)| dto)

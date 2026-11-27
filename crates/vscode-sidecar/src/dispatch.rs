@@ -175,8 +175,6 @@ methods!(|params, repos, stdout| {
     "list_pinned_repos" => list_pinned_repos(),
     "pin_recent_repo" => pin_recent_repo(PinRecentRepoParams),
     "unpin_recent_repo" => unpin_recent_repo(PinRecentRepoParams),
-    "list_open_repos" => list_open_repos_handler(),
-    "persist_open_repos" => persist_open_repos(PersistOpenReposParams),
     "list_repo_aliases" => list_repo_aliases(),
     "set_repo_alias" => set_repo_alias(SetRepoAliasParams),
     "scan_repos_in_root" => scan_repos_in_root(ScanReposInRootParams),

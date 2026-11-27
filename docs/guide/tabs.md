@@ -50,6 +50,20 @@ The **Refresh** command still reloads at once.
 Reopening Browsitory restores every tab you had open, workspace groupings
 included.
 
+In VSCode, each window keeps its own tabs: reloading or reopening a window
+brings back the tabs that window had open, and the desktop app and your other
+VSCode windows keep theirs. Recent and pinned repositories, workspaces and
+settings are shared by all of them. A window that had no Browsitory tabs yet
+opens none; **Browsitory: Open** then opens its workspace's repositories (see
+[Install](install.md#vscode-extension)).
+
+??? note "Details"
+    Up to version 0.17, the desktop app and every VSCode window shared one list of open tabs,
+    so each of them showed and overwrote the tabs of the others. Since 0.18 the tabs of a VSCode
+    window are kept by VSCode for that window. The first time you open Browsitory in a window
+    after the update, it has no tabs of its own yet, so none are restored there; the desktop
+    app keeps its tabs.
+
 ## Naming a tab
 
 A tab is named after its repository's folder. To give it a name of its own, for
