@@ -112,8 +112,8 @@ export type BackendCall = <T>(method: string, params?: Record<string, unknown>) 
  *   own commands (`supportsCloneAndInit: false`), which `runHostGitCommand` runs there (#680).
  * - `openHostKeybindings` (#900): VSCode's Keyboard Shortcuts; the desktop app rebinds the keys
  *   in Preferences itself.
- * - `listOpenRepos`: the Tauri command answers a `[entries, activePath]` tuple, the sidecar an
- *   object.
+ * - `listOpenRepos`: the Tauri command answers a `[entries, activePath]` tuple, the VSCode
+ *   extension host an object (#1128).
  * - the two progress subscriptions and the repository watchers' reports: Tauri events on the
  *   desktop, JSON-RPC notifications in VSCode.
  * - file drops (#649): the desktop webview's drag and drop events and `readPatchFile`; none in

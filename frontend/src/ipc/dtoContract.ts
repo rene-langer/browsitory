@@ -8,7 +8,6 @@
 import type * as Hand from "./RepoClient";
 import type * as Wire from "./generated/wire-dto";
 import type * as Tauri from "./generated/tauri-dto";
-import type * as Sidecar from "./generated/sidecar-dto";
 
 /** `true` only when `A` and `B` are the same type (not merely assignable either way). */
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
@@ -27,9 +26,10 @@ type Loosen<T, K extends keyof T> = Flat<Omit<T, K> & Partial<Pick<T, K>>>;
 //   its own line).
 // - `MergeToolOutcome` (desktop only): `"HandedOff"` comes from the VSCode extension host, never
 //   from Tauri.
-// - `listOpenRepos`: the sidecar answers `OpenRepos`, compared with the method's return type.
-//   The desktop app's command returns an `(entries, activePath)` tuple, not a DTO, which
-//   `tauriRepoClient.ts` turns into the same shape; only its `OpenRepoEntry` is compared.
+// - `listOpenRepos`: the desktop app's command returns an `(entries, activePath)` tuple, not a
+//   DTO, which `tauriRepoClient.ts` turns into `OpenRepos`; only its `OpenRepoEntry` is
+//   compared. In VSCode the extension host answers it (#1128); its copy of `OpenRepos` is checked
+//   by `extension/src/frontendTypes.contract.test.ts`.
 
 export type DtoContract = [
   Expect<Equal<Hand.BisectInfo, Wire.BisectInfo>>,
@@ -188,5 +188,4 @@ export type DtoContract = [
   Expect<Equal<Hand.WorktreeInfo, Wire.WorktreeInfo>>,
   // `persistOpenRepos` sends `OpenRepoEntry`s; the backends read them as `OpenRepoEntryInput`.
   Expect<Equal<Hand.OpenRepoEntry, Wire.OpenRepoEntryInput>>,
-  Expect<Equal<Awaited<ReturnType<Hand.RepoClient["listOpenRepos"]>>, Sidecar.OpenRepos>>,
 ];
