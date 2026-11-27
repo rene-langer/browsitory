@@ -687,7 +687,6 @@ pub fn ignore_path(repo: &git2::Repository, pattern: &str) -> Result<(), StageEr
 /// its deletion belongs to that pair, which stays staged (as `git restore --staged` leaves it).
 pub fn unstage_file(repo: &git2::Repository, path: &str) -> Result<(), StageError> {
     let head_commit = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
-    let target = head_commit.as_ref().map(|c| c.as_object());
     let head_tree = head_commit.as_ref().map(|c| c.tree()).transpose()?;
     let mut index = repo.index()?;
     let root = pair_root(&index, head_tree.as_ref(), path)?;
@@ -716,7 +715,7 @@ pub fn unstage_file(repo: &git2::Repository, path: &str) -> Result<(), StageErro
             let _ = index.remove_path(Path::new(&unit));
             index.remove_dir(Path::new(&unit), 0)?;
         }
-        repo.reset_default(target, paths.iter())
+        reset_entries(repo, &mut index, head_tree.as_ref(), &paths)
     };
     if let Err(error) = remove_and_reset() {
         // Drop the in-memory removals: the repository's index object is shared (the worker keeps
@@ -729,6 +728,53 @@ pub fn unstage_file(repo: &git2::Repository, path: &str) -> Result<(), StageErro
         });
     }
     Ok(())
+}
+
+/// Puts `index`'s entries at and below each of `paths` back to `tree`'s (removed where `tree`,
+/// or HEAD's absence, has none), then writes the index once: libgit2's `reset_default`, step by
+/// step, but with the paths matched literally. `reset_default` reads them as globs, so
+/// unstaging `[id].tsx` also unstaged `i.tsx` and `d.tsx` (#1148).
+fn reset_entries(
+    repo: &git2::Repository,
+    index: &mut git2::Index,
+    tree: Option<&git2::Tree<'_>>,
+    paths: &[String],
+) -> Result<(), git2::Error> {
+    let mut options = git2::DiffOptions::new();
+    // Reversed, as `reset_default`: the new side of each delta is the tree's entry.
+    options.reverse(true).disable_pathspec_match(true);
+    for path in paths {
+        options.pathspec(path);
+    }
+    let diff = repo.diff_tree_to_index(tree, Some(&*index), Some(&mut options))?;
+    let deltas: Vec<_> = diff
+        .deltas()
+        .map(|delta| {
+            let old = delta.old_file().path_bytes().unwrap_or_default().to_vec();
+            let new = delta.new_file();
+            let path = new.path_bytes().unwrap_or_default().to_vec();
+            (delta.status(), old, path, new.id(), u32::from(new.mode()))
+        })
+        .collect();
+    drop(diff);
+    for (status, old, path, id, mode) in deltas {
+        let old = crate::worktree_guard::path_from_bytes(&old);
+        match index.conflict_remove(&old) {
+            Err(error)
+                if status == git2::Delta::Added && error.code() == git2::ErrorCode::NotFound => {}
+            Err(error) => return Err(error),
+            Ok(()) => {}
+        }
+        if status == git2::Delta::Deleted {
+            index.remove(&old, 0)?;
+        } else {
+            let mut entry = crate::undo::index_entry("", id, mode);
+            entry.flags = path.len().min(0xfff) as u16;
+            entry.path = path;
+            index.add(&entry)?;
+        }
+    }
+    index.write()
 }
 
 /// True when the index has a conflict entry (stage 1–3) at `path` or below the folder `path`.

@@ -1816,6 +1816,7 @@ fn is_clean_tracked_folder(
         .recurse_untracked_dirs(true)
         .include_ignored(true)
         .recurse_ignored_dirs(true)
+        .disable_pathspec_match(true)
         .pathspec(&prefix);
     let statuses = repo.statuses(Some(&mut options))?;
     Ok(statuses.iter().all(|entry| {
