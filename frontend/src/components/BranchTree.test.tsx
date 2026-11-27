@@ -1729,7 +1729,12 @@ describe("BranchTree — focus after deleting a branch (#1141)", () => {
   const left = three.filter((branch) => branch.name !== "b1");
 
   it("moves the focus to the row now in that place after a delete without a confirmation", async () => {
-    const { props, rerender } = renderTree({ branches: three, onCountCommitsOnlyOnBranch: vi.fn().mockResolvedValue(0) });
+    // Still running: the app removes the branch (optimistically) before the delete settles.
+    const { props, rerender } = renderTree({
+      branches: three,
+      onCountCommitsOnlyOnBranch: vi.fn().mockResolvedValue(0),
+      onDeleteBranch: vi.fn(() => new Promise<void>(() => {})),
+    });
     const actions = screen.getByRole("button", { name: "Actions for b1" });
     actions.focus();
     fireEvent.click(actions);
