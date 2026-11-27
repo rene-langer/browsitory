@@ -106,7 +106,7 @@ export default function App(props: {
           <RenderErrorFallback
             title="Browsitory couldn't show this window"
             caught={caught}
-            hint="Reload to open your repositories again. If it happens again, copy the details into a bug report."
+            hint="Reload to open your repositories again. Your commit message drafts are kept. If it happens again, copy the details into a bug report."
             reloadLabel="Reload"
             onReload={reset}
             getAppVersion={() => props.client.getAppVersion()}
