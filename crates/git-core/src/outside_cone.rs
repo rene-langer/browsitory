@@ -53,13 +53,12 @@ impl Outcome<'_, '_> {
         }
     }
 
-    /// Every stage-0 path the operation leaves, with its version.
+    /// Every entry the operation leaves, with its version. A conflicted path's are those of
+    /// its sides, which no stage-0 entry has.
     fn entries(&self) -> Result<Vec<(Vec<u8>, Version)>, git2::Error> {
-        let stage_zero = |entry: &git2::IndexEntry| (entry.flags >> 12) & 0x3 == 0;
         let collect = |index: &git2::Index| {
             index
                 .iter()
-                .filter(stage_zero)
                 .map(|entry| (entry.path, Some((entry.id, entry.mode))))
                 .collect()
         };
@@ -105,7 +104,7 @@ where
 
 impl OutsideCone {
     /// [`Self::prepare`] for an operation that leaves `outcome`, in a sparse checkout with
-    /// patterns: a marked stage-0 path whose version `outcome` changes is `changed`, marked
+    /// patterns: a marked path whose version `outcome` changes is `changed`, marked
     /// again afterwards when the operation left that version (git, which drops the mark of a
     /// marked file it finds on disk, marks a changed one again and removes it, as one outside
     /// the patterns); the other marked paths are `kept`; a path new to the index that lies
@@ -127,7 +126,9 @@ impl OutsideCone {
         let mut present = HashSet::new();
         for entry in index.iter() {
             present.insert(entry.path.clone());
-            if entry.flags_extended & SKIP_WORKTREE == 0 || (entry.flags >> 12) & 0x3 != 0 {
+            // git drops the mark of a conflicted entry, and none of these operations runs with
+            // conflicts.
+            if entry.flags_extended & SKIP_WORKTREE == 0 {
                 continue;
             }
             let after = outcome.version(&entry.path);
@@ -247,16 +248,20 @@ impl OutsideCone {
                     continue;
                 };
                 let name = String::from_utf8_lossy(path).into_owned();
-                if blob_on_disk(repo, workdir, &name, &config, entry.mode)?
-                    == Some((entry.id, entry.mode))
-                {
+                let on_disk = crate::stash::worktree_blob::<Failure>(
+                    repo,
+                    workdir,
+                    &name,
+                    &config,
+                    Some(entry.mode),
+                )
+                .map_err(|failure| failure.0)?;
+                if on_disk == Some((entry.id, entry.mode)) {
                     crate::worktree_guard::remove_and_prune_beneath(workdir, &rel).map_err(os)?;
                 }
             }
         }
-        let mut mark = self.changed.clone();
-        mark.extend(self.kept.iter().cloned());
-        crate::index_marks::mark_skip_worktree(&mut index, &mark)?;
+        crate::index_marks::mark_skip_worktree(&mut index, &self.changed)?;
         index.write()?;
         Ok(())
     }
@@ -271,7 +276,7 @@ fn os(error: std::io::Error) -> git2::Error {
     )
 }
 
-/// `filtered_blob`'s error type: both kinds end up as a libgit2 error.
+/// `worktree_blob`'s error type: both kinds end up as a libgit2 error.
 struct Failure(git2::Error);
 
 impl From<git2::Error> for Failure {
@@ -284,26 +289,4 @@ impl From<std::io::Error> for Failure {
     fn from(error: std::io::Error) -> Self {
         Self(os(error))
     }
-}
-
-/// Blob id and mode of a work-tree file, with clean filters applied (as `git add` would);
-/// `None` when the file is gone.
-fn blob_on_disk(
-    repo: &Repository,
-    workdir: &std::path::Path,
-    path: &str,
-    config: &crate::undo::WorktreeConfig,
-    previous_mode: u32,
-) -> Result<Version, git2::Error> {
-    let Some((bytes, mode)) =
-        crate::undo::read_worktree_file(workdir, path, config, Some(previous_mode)).map_err(os)?
-    else {
-        return Ok(None);
-    };
-    let id = if mode == crate::undo::MODE_LINK {
-        repo.blob(&bytes)?
-    } else {
-        crate::undo::filtered_blob::<Failure>(repo, path, &bytes).map_err(|failure| failure.0)?
-    };
-    Ok(Some((id, mode)))
 }

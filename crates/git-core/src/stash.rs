@@ -790,7 +790,7 @@ fn build_untracked_commit<'r>(
     }
     let mut overlay = git2::Index::new()?;
     for path in untracked {
-        if let Some((id, mode)) = worktree_blob(repo, workdir, path, config, None)? {
+        if let Some((id, mode)) = worktree_blob::<StashError>(repo, workdir, path, config, None)? {
             overlay.add(&crate::undo::index_entry(path, id, mode))?;
         }
     }
@@ -827,7 +827,7 @@ fn build_worktree_tree<'r>(
         let previous_mode = overlay
             .get_path(std::path::Path::new(path), 0)
             .map(|entry| entry.mode);
-        match worktree_blob(repo, workdir, path, config, previous_mode)? {
+        match worktree_blob::<StashError>(repo, workdir, path, config, previous_mode)? {
             Some((id, mode)) => overlay.add(&crate::undo::index_entry(path, id, mode))?,
             None => {
                 let _ = overlay.remove_path(std::path::Path::new(path));
@@ -1708,13 +1708,16 @@ fn entry_in_the_way(
 
 /// Blob id and mode of a worktree file, with clean filters applied (as `git add` would);
 /// `None` when the file is gone.
-fn worktree_blob(
+pub(crate) fn worktree_blob<E>(
     repo: &Repository,
     workdir: &std::path::Path,
     path: &str,
     config: &crate::undo::WorktreeConfig,
     previous_mode: Option<u32>,
-) -> Result<Option<(git2::Oid, u32)>, StashError> {
+) -> Result<Option<(git2::Oid, u32)>, E>
+where
+    E: From<git2::Error> + From<std::io::Error>,
+{
     let Some((bytes, mode)) =
         crate::undo::read_worktree_file(workdir, path, config, previous_mode)?
     else {
@@ -1723,7 +1726,7 @@ fn worktree_blob(
     let id = if mode == crate::undo::MODE_LINK {
         repo.blob(&bytes)?
     } else {
-        crate::undo::filtered_blob::<StashError>(repo, path, &bytes)?
+        crate::undo::filtered_blob::<E>(repo, path, &bytes)?
     };
     Ok(Some((id, mode)))
 }
