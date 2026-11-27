@@ -1,11 +1,16 @@
 use std::io::{self, BufRead, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 mod dispatch;
 mod protocol;
 
 use protocol::{JsonRpcRequest, JsonRpcResponse};
+
+/// `exit_grace`'s default, the extension's `SIDECAR_EXIT_GRACE_MS`.
+const EXIT_GRACE: Duration = Duration::from_secs(5);
 
 /// One JSON-RPC request in, one response line out — but each request is dispatched on its own
 /// thread rather than inline in this loop. `dispatch::dispatch` blocks the calling thread on a
@@ -32,6 +37,8 @@ fn main() {
     let stdin = io::stdin();
     let stdout = Arc::new(Mutex::new(io::stdout()));
     let repos: dispatch::Repos = Arc::default();
+    // Set once an answer can't be written: nothing reads stdout any more.
+    let reader_gone = Arc::new(AtomicBool::new(false));
     // The request threads still running, finished ones dropped as new requests arrive.
     let mut running: Vec<thread::JoinHandle<()>> = Vec::new();
 
@@ -51,6 +58,7 @@ fn main() {
 
         let repos = Arc::clone(&repos);
         let stdout = Arc::clone(&stdout);
+        let reader_gone = Arc::clone(&reader_gone);
         running.retain(|request| !request.is_finished());
         running.push(thread::spawn(move || {
             let response =
@@ -59,29 +67,55 @@ fn main() {
                     Err(error) => JsonRpcResponse::err(request.id, error),
                 };
 
+            if reader_gone.load(Ordering::Relaxed) {
+                return;
+            }
             let serialized = serde_json::to_string(&response).expect("response always serializes");
-            let written = {
-                let mut out = stdout.lock().unwrap_or_else(|error| error.into_inner());
-                writeln!(out, "{serialized}").and_then(|()| out.flush())
-            };
-            if written.is_err() {
-                // The reading end (the extension host) has gone away. Each request now runs on
-                // its own thread, so there's no single loop left to `break` out of gracefully as
-                // the pre-concurrency version did — exit the whole process instead, matching the
-                // same "reading end is gone, stop" outcome.
-                std::process::exit(0);
+            let mut out = stdout.lock().unwrap_or_else(|error| error.into_inner());
+            if writeln!(out, "{serialized}")
+                .and_then(|()| out.flush())
+                .is_err()
+            {
+                // The extension host has gone away (a window reload or close). The other
+                // requests keep running to their end (#1129): exiting here would cut a
+                // checkout or an index write off halfway. Stdin ends with the host too, and
+                // `main` then returns below.
+                reader_gone.store(true, Ordering::Relaxed);
             }
         }));
     }
 
-    // Stdin ended: the extension closes it when its panel closes (#961). Returning from `main`
-    // would end the process at once, cutting a running request off wherever it is; in the middle
-    // of a libgit2 index write that leaves `.git/index.lock` behind, and every later git command
-    // in the repository fails on it. So the running requests finish (and are answered) first.
-    // The extension kills the sidecar if they take longer than its grace period.
-    for request in running {
-        let _ = request.join();
+    // Stdin ended: the extension closes it when its panel closes (#961), and it ends when the
+    // extension host exits. Returning from `main` would end the process at once, cutting a
+    // running request off wherever it is; in the middle of a libgit2 index write that leaves
+    // `.git/index.lock` behind, and every later git command in the repository fails on it. So
+    // the running requests finish (and are answered) first, for at most the grace period. The
+    // extension's own kill after its grace period is a timer in the extension host, which never
+    // fires when the host itself exits (#1129).
+    let deadline = Instant::now() + exit_grace();
+    loop {
+        running.retain(|request| !request.is_finished());
+        if running.is_empty() {
+            return;
+        }
+        if Instant::now() >= deadline {
+            eprintln!(
+                "vscode-sidecar: {} request(s) still running after the exit grace period; exiting",
+                running.len()
+            );
+            std::process::exit(1);
+        }
+        thread::sleep(Duration::from_millis(20));
     }
+}
+
+/// How long the running requests may take after stdin ended: the extension's
+/// `SIDECAR_EXIT_GRACE_MS`. Only the tests set `BROWSITORY_SIDECAR_TEST_EXIT_GRACE_MS`.
+fn exit_grace() -> Duration {
+    std::env::var("BROWSITORY_SIDECAR_TEST_EXIT_GRACE_MS")
+        .ok()
+        .and_then(|millis| millis.parse().ok())
+        .map_or(EXIT_GRACE, Duration::from_millis)
 }
 
 // Hide the developer's / CI runner's global and system git config from every test (#111).
