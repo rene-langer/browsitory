@@ -912,6 +912,34 @@ mod tests {
         assert!(!provider.offered);
     }
 
+    /// The typed token is saved only when the clone offered it, and only with an HTTPS input.
+    #[test]
+    fn the_typed_token_is_saved_only_when_the_clone_offered_it() {
+        let (_src, url) = bare_source();
+        let target = tempfile::TempDir::new().unwrap();
+        let cloned = CloneService::with_store_factory(SharedStore::default)
+            .clone_repo(
+                "clone-1",
+                options(&url, target.path().join("c")),
+                None,
+                mpsc::channel().0,
+            )
+            .unwrap();
+        let input = provider_input();
+        let url = "https://example.test/r.git";
+        let saved = |https: Option<&HttpsCredentialInput>, offered: bool| {
+            let store = SharedStore::default();
+            let service = crate::credentials::CredentialService::new(store.clone());
+            let failed = super::save_offered_token(&service, url, &cloned.outcome, https, offered);
+            let count = store.entries.lock().unwrap().len();
+            (failed, count)
+        };
+
+        assert_eq!(saved(Some(&input), true), (false, 1));
+        assert_eq!(saved(Some(&input), false), (false, 0));
+        assert_eq!(saved(None, true), (false, 0));
+    }
+
     /// #1159: the caller gives up only on a clone still running, and a clone is handed over
     /// only while the caller hasn't given up.
     #[test]
