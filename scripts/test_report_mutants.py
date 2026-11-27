@@ -69,9 +69,18 @@ class ReportMutantsTests(unittest.TestCase):
         self.assertNotIn("| Caught |", text)
 
     def test_no_results_folder_is_not_a_success(self):
-        text = self.report(outcome="success", status="0")
+        # Missed mutants without a results folder: something went wrong, nothing to report.
+        text = self.report(outcome="success", status="2")
         self.assertIn(DIDNT_RUN, text)
         self.assertIn("no results", text)
+        self.assertNotIn(CLAIM, text)
+
+    def test_nothing_to_mutate_in_the_changed_code_without_a_results_folder(self):
+        # A diff that changes only test code in src/ (#1201): cargo-mutants logs "No mutants to
+        # filter", exits 0 and writes no `mutants.out`.
+        text = self.report(outcome="success", status="0")
+        self.assertIn("No mutants were generated for the changed code.", text)
+        self.assertNotIn(DIDNT_RUN, text)
         self.assertNotIn(CLAIM, text)
 
     def test_a_failed_baseline_says_no_mutant_was_tested(self):
