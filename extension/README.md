@@ -59,6 +59,9 @@ Browsitory, run **Open user guide** from its command palette.
   platform gets its own package with a matching native helper program, so you don't need Git
   or any other tool installed.
 - Browsitory does not run in vscode.dev or GitHub Codespaces in the browser.
+- Remote windows (WSL, Remote - SSH, Dev Containers) work: Browsitory runs on the remote
+  machine, which needs to be Linux x64 with glibc 2.39 or newer. There Browsitory shows its
+  built-in shortcut keys, even for keys you changed in VSCode (they still work).
 
 ## Install from a VSIX file
 
