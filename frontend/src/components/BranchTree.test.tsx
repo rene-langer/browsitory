@@ -1722,3 +1722,38 @@ describe("BranchTree — dragging a branch onto a branch", () => {
     fireEvent.keyDown(window, { key: "Escape" });
   });
 });
+
+// #1141: deleting a branch from its menu keeps the focus in the tree, as the Stashes section does.
+describe("BranchTree — focus after deleting a branch (#1141)", () => {
+  const three = [{ name: "main", isCurrent: true }, { name: "a1", isCurrent: false }, { name: "b1", isCurrent: false }, { name: "c1", isCurrent: false }];
+  const left = three.filter((branch) => branch.name !== "b1");
+
+  it("moves the focus to the row now in that place after a delete without a confirmation", async () => {
+    // Still running: the app removes the branch (optimistically) before the delete settles.
+    const { props, rerender } = renderTree({
+      branches: three,
+      onCountCommitsOnlyOnBranch: vi.fn().mockResolvedValue(0),
+      onDeleteBranch: vi.fn(() => new Promise<void>(() => {})),
+    });
+    const actions = screen.getByRole("button", { name: "Actions for b1" });
+    actions.focus();
+    fireEvent.click(actions);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    await waitFor(() => expect(props.onDeleteBranch).toHaveBeenCalledWith("b1", true));
+    rerender(<BranchTreeWithDialogs {...props} branches={left} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Actions for c1" })).toHaveFocus());
+  });
+
+  it("moves the focus to the row now in that place after a confirmed delete", async () => {
+    const { props, rerender } = renderTree({ branches: three, onCountCommitsOnlyOnBranch: vi.fn().mockResolvedValue(2) });
+    const actions = screen.getByRole("button", { name: "Actions for b1" });
+    actions.focus();
+    fireEvent.click(actions);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete b1" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete branch" }));
+    expect(props.onDeleteBranch).toHaveBeenCalledWith("b1", true);
+    rerender(<BranchTreeWithDialogs {...props} branches={left} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Actions for c1" })).toHaveFocus());
+  });
+});

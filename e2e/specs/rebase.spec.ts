@@ -425,7 +425,7 @@ describe("Browsitory interactive rebase", () => {
       el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: true }));
     }, third);
 
-    const dropButton = await $("button=Drop 2 commits");
+    const dropButton = await $("button=Drop 2 commits…");
     await dropButton.waitForExist();
     await dropButton.click();
 

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { RemoteInfo, TagInfo } from "../ipc/RepoClient";
 import { TagPanel } from "./TagPanel";
@@ -536,5 +536,40 @@ describe("TagPanel — Create tag at HEAD… (#649)", () => {
   it("has no + without a HEAD commit", () => {
     render(<TagPanel {...props()} />);
     expect(screen.queryByRole("button", { name: "Create tag at HEAD…" })).not.toBeInTheDocument();
+  });
+});
+
+// #1141: deleting a row from its menu keeps the focus in the list, as the Stashes section does.
+describe("TagPanel — focus after deleting a tag (#1141)", () => {
+  const named = (name: string): TagInfo => ({ ...tag, name });
+
+  async function deleteFromMenu(name: string, tags: TagInfo[], left: TagInfo[]) {
+    let finish = () => {};
+    const onDelete = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
+    const { rerender, props: p } = renderPanel({ tags, onDelete });
+    const actions = screen.getByRole("button", { name: `Actions for ${name}` });
+    actions.focus();
+    fireEvent.click(actions);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete tag…" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete tag" }));
+    expect(onDelete).toHaveBeenCalledWith(name);
+    rerender(<TagPanel {...p} tags={left} />);
+    await act(async () => finish());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  }
+
+  it("moves the focus to the row now in that place", async () => {
+    await deleteFromMenu("v2", [named("v1"), named("v2"), named("v3")], [named("v1"), named("v3")]);
+    expect(screen.getByRole("button", { name: "Actions for v3" })).toHaveFocus();
+  });
+
+  it("moves the focus to the last row after deleting the last one", async () => {
+    await deleteFromMenu("v3", [named("v1"), named("v2"), named("v3")], [named("v1"), named("v2")]);
+    expect(screen.getByRole("button", { name: "Actions for v2" })).toHaveFocus();
+  });
+
+  it("moves the focus to the section header after deleting the only tag", async () => {
+    await deleteFromMenu("v1", [named("v1")], []);
+    expect(screen.getByRole("button", { name: "Tags" })).toHaveFocus();
   });
 });

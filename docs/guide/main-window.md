@@ -83,7 +83,10 @@ keep their width when you resize the window; only the diff pane grows or shrinks
 sidebar, the commit graph, the diff pane) and **Shift+F6** back, returning to where the focus
 last was in each. The toolbar's **Refresh**, **Fetch**, **Pull** and **Push** have shortcuts
 too (F5, Shift+F5, Ctrl+Shift+L, Ctrl+Shift+K; see
-[Keyboard shortcuts](command-palette.md#keyboard-shortcuts)), which their tooltips show.
+[Keyboard shortcuts](command-palette.md#keyboard-shortcuts)), which their tooltips show. When
+you delete a branch, tag, worktree or stash from its menu, the focus moves to the row now in
+its place (or the section's header once the list is empty), and a notification's own button
+(**Undo**, **Dismiss**) returns the focus to where it was before.
 
 **Narrow windows.** When the window (or, in VSCode, the editor group) is narrower than 900
 pixels, or too narrow for all three columns, the sidebar hides by itself and comes back once

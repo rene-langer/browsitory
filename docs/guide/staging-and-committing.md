@@ -46,8 +46,8 @@ Both groups are always on screen: each scrolls on its own when it holds many fil
 one says so. Each row shows a status letter (**M** modified, **A** added, **?** untracked, as in
 `git status --short`, **D** deleted, **R** renamed, **T** type changed, **C** conflicted; hover it
 for the word), the path, a **⋯** menu and a stage or unstage button. The two buttons are always
-there, dimmed until you point at the row or select it. Above the diff, the file's state reads
-**Untracked**, **Modified, not staged** or **Added, staged**.
+there, in a muted colour that brightens when you point at them. Above the diff, the file's state
+reads **Untracked**, **Modified, not staged** or **Added, staged**.
 
 A new folder with more than 500 files that git doesn't ignore (a `node_modules` or build output
 not yet in `.gitignore`) is one row, **untracked folder, more than 500 files**, instead of one row
@@ -199,7 +199,8 @@ hunk when nothing is selected.
 ??? note "Details"
     A selected line has a bar on its right edge (the line cursor's bar is on the left) and keeps
     its added or removed colour. With the keyboard, `↑`/`↓` move a line cursor inside the active
-    hunk and select that line, `Shift+↑`/`Shift+↓` extend the selection, and `[` / `]` jump to
+    hunk and select that line (the diff scrolls to keep it in view), `Shift+↑`/`Shift+↓` extend
+    the selection, and `[` / `]` jump to
     the previous or next hunk (which clears the selection). A screen reader reads the line under
     the cursor, whether it is added or removed, its number and whether it is selected (see
     [Diff options](history.md#diff-options)).
