@@ -498,6 +498,33 @@ fn a_stash_of_some_files_on_a_latin1_head_gets_gits_message() {
     assert_stash_message_matches_git(&["t.txt"]);
 }
 
+/// `refs/stash`'s newest reflog message in `dir`, its bytes as written.
+fn raw_stash_message(dir: &Path) -> Vec<u8> {
+    let output = test_support::git(dir, &["log", "-g", "-1", "--format=%gs", "refs/stash"]);
+    assert!(output.status.success(), "{output:?}");
+    output.stdout
+}
+
+#[test]
+fn a_stash_on_a_windows_1252_head_writes_gits_message() {
+    let (dir, mut repo) = topic_with(|dir, _| git_commit_encoded(dir, CP1252, "windows-1252"));
+    write_file(dir.path(), "t.txt", "changed\n");
+    let (twin_dir, _twin_repo) = twin(dir.path());
+    git_ok(twin_dir.path(), &["stash", "push", "-q"]);
+
+    git_core::stash::save_stash(&mut repo, &git_core::stash::StashOptions::default()).unwrap();
+
+    assert_eq!(
+        raw_stash_message(dir.path()),
+        raw_stash_message(twin_dir.path())
+    );
+    let short = &id_of(&repo, "topic")[..7];
+    assert_eq!(
+        stash_messages(&mut repo),
+        [format!("WIP on topic: {short} Preis € 5")]
+    );
+}
+
 #[test]
 fn the_stash_list_reads_a_stash_message_that_is_not_utf8() {
     let (dir, mut repo) = latin1_topic();
