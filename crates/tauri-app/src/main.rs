@@ -3,6 +3,7 @@
 mod commands;
 mod exit;
 mod identifier_migration;
+mod single_instance;
 
 use tauri::Manager;
 
