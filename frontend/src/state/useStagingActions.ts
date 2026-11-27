@@ -97,6 +97,7 @@ export function useStagingActions(
       runOptimisticMutation(
         (prev) => ({ ...prev, status: withFilesStaged(prev.status, [path], true) }),
         () => client.stageFile(repoPath, path),
+        failedOperation.stage([path]),
       ),
     [client, runOptimisticMutation, repoPath],
   );
@@ -105,6 +106,7 @@ export function useStagingActions(
       runOptimisticMutation(
         (prev) => ({ ...prev, status: withFilesStaged(prev.status, [path], false) }),
         () => client.unstageFile(repoPath, path),
+        failedOperation.unstage([path]),
       ),
     [client, runOptimisticMutation, repoPath],
   );
@@ -115,6 +117,7 @@ export function useStagingActions(
       runOptimisticMutation(
         (prev) => ({ ...prev, status: withFilesStaged(prev.status, paths, true) }),
         () => client.stagePaths(repoPath, paths),
+        failedOperation.stage(paths),
       ),
     [client, runOptimisticMutation, repoPath],
   );
@@ -123,57 +126,68 @@ export function useStagingActions(
       runOptimisticMutation(
         (prev) => ({ ...prev, status: withFilesStaged(prev.status, paths, false) }),
         () => client.unstagePaths(repoPath, paths),
+        failedOperation.unstage(paths),
       ),
     [client, runOptimisticMutation, repoPath],
   );
   const stageHunk = useCallback(
     (path: string, oldStart: number, newStart: number, hunk: HunkOptions) =>
-      runMutation(() => client.stageHunk(repoPath, path, oldStart, newStart, hunk)),
+      runMutation(() => client.stageHunk(repoPath, path, oldStart, newStart, hunk), failedOperation.stageHunk(path)),
     [client, runMutation, repoPath],
   );
   const unstageHunk = useCallback(
     (path: string, oldStart: number, newStart: number, hunk: HunkOptions) =>
-      runMutation(() => client.unstageHunk(repoPath, path, oldStart, newStart, hunk)),
+      runMutation(() => client.unstageHunk(repoPath, path, oldStart, newStart, hunk), failedOperation.unstageHunk(path)),
     [client, runMutation, repoPath],
   );
   const discardHunk = useCallback(
     (path: string, oldStart: number, newStart: number, hunk: HunkOptions) =>
-      runMutation(() => client.discardHunk(repoPath, path, oldStart, newStart, hunk)),
+      runMutation(() => client.discardHunk(repoPath, path, oldStart, newStart, hunk), failedOperation.discardHunk(path)),
     [client, runMutation, repoPath],
   );
   const stageLines = useCallback(
     (path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) =>
-      runMutation(() => client.stageLines(repoPath, path, oldStart, newStart, hunk, lineIndices, expectedLines)),
+      runMutation(
+        () => client.stageLines(repoPath, path, oldStart, newStart, hunk, lineIndices, expectedLines),
+        failedOperation.stageLines(path),
+      ),
     [client, runMutation, repoPath],
   );
   const unstageLines = useCallback(
     (path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) =>
-      runMutation(() => client.unstageLines(repoPath, path, oldStart, newStart, hunk, lineIndices, expectedLines)),
+      runMutation(
+        () => client.unstageLines(repoPath, path, oldStart, newStart, hunk, lineIndices, expectedLines),
+        failedOperation.unstageLines(path),
+      ),
     [client, runMutation, repoPath],
   );
   const discardLines = useCallback(
     (path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) =>
-      runMutation(() => client.discardLines(repoPath, path, oldStart, newStart, hunk, lineIndices, expectedLines)),
+      runMutation(
+        () => client.discardLines(repoPath, path, oldStart, newStart, hunk, lineIndices, expectedLines),
+        failedOperation.discardLines(path),
+      ),
     [client, runMutation, repoPath],
   );
   const discardFile = useCallback(
-    (path: string) => runMutation(() => client.discardFile(repoPath, path)),
+    (path: string) => runMutation(() => client.discardFile(repoPath, path), failedOperation.discard([path])),
     [client, runMutation, repoPath],
   );
   const restoreFileVersion = useCallback(
-    (commitId: string, path: string) => runMutation(() => client.restoreFileVersion(repoPath, commitId, path)),
+    (commitId: string, path: string) =>
+      runMutation(() => client.restoreFileVersion(repoPath, commitId, path), failedOperation.restoreFile(commitId, path)),
     [client, runMutation, repoPath],
   );
   const discardAllUnstaged = useCallback(
-    (paths: string[]) => runMutation(() => client.discardAllUnstaged(repoPath, paths)),
+    (paths: string[]) => runMutation(() => client.discardAllUnstaged(repoPath, paths), failedOperation.discard(paths)),
     [client, runMutation, repoPath],
   );
   const ignorePath = useCallback(
-    (pattern: string) => runMutation(() => client.ignorePath(repoPath, pattern)),
+    (pattern: string) => runMutation(() => client.ignorePath(repoPath, pattern), failedOperation.ignore([pattern])),
     [client, runMutation, repoPath],
   );
   const ignorePaths = useCallback(
-    (patterns: string[]) => runMutation(() => client.ignorePaths(repoPath, patterns)),
+    (patterns: string[]) => runMutation(() => client.ignorePaths(repoPath, patterns), failedOperation.ignore(patterns)),
     [client, runMutation, repoPath],
   );
   const commit = useCallback(

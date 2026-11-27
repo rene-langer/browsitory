@@ -230,6 +230,215 @@ describe("a failed operation's banner (#1032)", () => {
     expect(hint).toBe(next);
   });
 
+  // #1122: staging, discarding, conflict resolution, remotes, the upstream, the graph's branch
+  // selection and the forge account name the operation and the next step too.
+  describe("for the actions #1032 left out (#1122)", () => {
+    const HUNK = { contextLines: 3, algorithm: "Default" as const };
+    const CHANGED = "Check that the file hasn't changed since the diff was shown, then";
+
+    it.each<[string, Partial<RepoClient>, (app: UseAppStateResult) => Promise<unknown>, string, string | null]>([
+      ["stage a file", { stageFile: rejects() }, (app) => app.stageFile("src/a.ts"), "Couldn't stage src/a.ts", `${LOCKED}, then stage again.`],
+      ["unstage a file", { unstageFile: rejects() }, (app) => app.unstageFile("src/a.ts"), "Couldn't unstage src/a.ts", `${LOCKED}, then unstage again.`],
+      ["stage files", { stagePaths: rejects() }, (app) => app.stageAllFiles(["a.ts", "b.ts"]), "Couldn't stage 2 files", `${LOCKED}, then stage again.`],
+      ["stage one file of a selection", { stagePaths: rejects() }, (app) => app.stageAllFiles(["a.ts"]), "Couldn't stage a.ts", `${LOCKED}, then stage again.`],
+      ["unstage files", { unstagePaths: rejects() }, (app) => app.unstageAllFiles(["a.ts", "b.ts"]), "Couldn't unstage 2 files", `${LOCKED}, then unstage again.`],
+      ["stage a hunk", { stageHunk: rejects() }, (app) => app.stageHunk("a.ts", 1, 1, HUNK), "Couldn't stage the hunk in a.ts", `${CHANGED} stage it again.`],
+      ["unstage a hunk", { unstageHunk: rejects() }, (app) => app.unstageHunk("a.ts", 1, 1, HUNK), "Couldn't unstage the hunk in a.ts", `${CHANGED} unstage it again.`],
+      ["discard a hunk", { discardHunk: rejects() }, (app) => app.discardHunk("a.ts", 1, 1, HUNK), "Couldn't discard the hunk in a.ts", `${CHANGED} discard it again.`],
+      [
+        "stage lines",
+        { stageLines: rejects() },
+        (app) => app.stageLines("a.ts", 1, 1, HUNK, [0], ["x"]),
+        "Couldn't stage the selected lines in a.ts",
+        `${CHANGED} stage them again.`,
+      ],
+      [
+        "unstage lines",
+        { unstageLines: rejects() },
+        (app) => app.unstageLines("a.ts", 1, 1, HUNK, [0], ["x"]),
+        "Couldn't unstage the selected lines in a.ts",
+        `${CHANGED} unstage them again.`,
+      ],
+      [
+        "discard lines",
+        { discardLines: rejects() },
+        (app) => app.discardLines("a.ts", 1, 1, HUNK, [0], ["x"]),
+        "Couldn't discard the selected lines in a.ts",
+        `${CHANGED} discard them again.`,
+      ],
+      ["discard a file", { discardFile: rejects() }, (app) => app.discardFile("a.ts"), "Couldn't discard the changes to a.ts", `${LOCKED}, then discard again.`],
+      [
+        "discard all files",
+        { discardAllUnstaged: rejects() },
+        (app) => app.discardAllUnstaged(["a.ts", "b.ts", "c.ts"]),
+        "Couldn't discard the changes to 3 files",
+        `${LOCKED}, then discard again.`,
+      ],
+      [
+        "restore a file's version",
+        { restoreFileVersion: rejects() },
+        (app) => app.restoreFileVersion(ID, "a.ts"),
+        "Couldn't restore a.ts as of 4c5beaf",
+        `${LOCKED}, then restore it again.`,
+      ],
+      [
+        "ignore a path",
+        { ignorePath: rejects() },
+        (app) => app.ignorePath("build/"),
+        "Couldn't ignore build/",
+        "Check that you can write to .gitignore, then ignore it again.",
+      ],
+      [
+        "ignore paths",
+        { ignorePaths: rejects() },
+        (app) => app.ignorePaths(["a.log", "b.log"]),
+        "Couldn't ignore 2 paths",
+        "Check that you can write to .gitignore, then ignore them again.",
+      ],
+      [
+        "resolve a conflict",
+        { resolveConflict: rejects() },
+        (app) => app.resolveConflict("a.ts", "x\n"),
+        "Couldn't resolve a.ts",
+        `${LOCKED}, then resolve it again.`,
+      ],
+      [
+        "resolve an add/delete conflict",
+        { resolveAddDeleteConflict: rejects() },
+        (app) => app.resolveAddDeleteConflict("a.ts", "Delete"),
+        "Couldn't resolve a.ts",
+        `${LOCKED}, then resolve it again.`,
+      ],
+      [
+        "resolve a whole file",
+        { resolveWholeFile: rejects() },
+        (app) => app.resolveWholeFile("a.ts", "Ours"),
+        "Couldn't resolve a.ts",
+        `${LOCKED}, then resolve it again.`,
+      ],
+      [
+        "mark resolved",
+        { markResolved: rejects() },
+        (app) => app.markResolved("a.ts", false),
+        "Couldn't mark a.ts as resolved",
+        `${LOCKED}, then mark it again.`,
+      ],
+      [
+        "add a remote",
+        { listRemotes: async () => [], addRemote: rejects() },
+        (app) => app.addRemote("fork", "../fork.git", null),
+        "Couldn't add remote fork",
+        "Check the name and the URL, then add it again.",
+      ],
+      [
+        "rename a remote",
+        { renameRemote: rejects() },
+        (app) => app.renameRemote("origin", "upstream"),
+        "Couldn't rename remote origin to upstream",
+        "Check the name, then rename it again.",
+      ],
+      [
+        "edit a remote's URLs",
+        { updateRemoteUrls: rejects() },
+        (app) => app.updateRemoteUrls("origin", "../o.git", null),
+        "Couldn't change the URLs of remote origin",
+        "Check the URLs, then save them again.",
+      ],
+      ["remove a remote", { removeRemote: rejects() }, (app) => app.removeRemote("origin", false), "Couldn't remove remote origin", `${LOCKED}, then remove it again.`],
+      [
+        "save a credential",
+        { saveHttpsCredential: rejects() },
+        (app) => app.saveHttpsCredential("origin", "rene", "token"),
+        "Couldn't save the credential for origin",
+        "Check the user name and the token, then save them again.",
+      ],
+      [
+        "forget a credential",
+        { forgetHttpsCredential: rejects() },
+        (app) => app.forgetHttpsCredential("origin"),
+        "Couldn't forget the credential for origin",
+        null,
+      ],
+      [
+        "set a remote's sign-in mode",
+        { setRemoteAuthMode: rejects() },
+        (app) => app.setRemoteAuthMode("origin", "SshAgent", null),
+        "Couldn't save how to sign in to origin",
+        `${LOCKED}, then save it again.`,
+      ],
+      [
+        "set the upstream",
+        { setCurrentUpstream: rejects() },
+        (app) => app.setCurrentUpstream("origin", "topic"),
+        "Couldn't set origin/topic as upstream",
+        "Check that the remote branch exists, then set it again.",
+      ],
+      ["clear the upstream", { clearCurrentUpstream: rejects() }, (app) => app.clearCurrentUpstream(), "Couldn't clear the upstream", `${LOCKED}, then clear it again.`],
+      [
+        "choose the graph's branches",
+        { setGraphBranchSelection: rejects() },
+        (app) => app.setGraphBranchSelection(["main"]),
+        "Couldn't change which branches the graph shows",
+        `${LOCKED}, then try again.`,
+      ],
+      [
+        "choose the graph's remote branches",
+        { setGraphRemoteBranchSelection: rejects() },
+        (app) => app.setGraphRemoteBranchSelection(["origin/main"]),
+        "Couldn't change which branches the graph shows",
+        `${LOCKED}, then try again.`,
+      ],
+      [
+        "reset the graph's branches",
+        { clearGraphBranchSelection: rejects() },
+        (app) => app.clearGraphBranchSelection(),
+        "Couldn't change which branches the graph shows",
+        `${LOCKED}, then try again.`,
+      ],
+      [
+        "show all branches",
+        { clearGraphBranchSelection: rejects() },
+        (app) => app.showAllGraphBranches(),
+        "Couldn't change which branches the graph shows",
+        `${LOCKED}, then try again.`,
+      ],
+      [
+        "isolate a branch",
+        { setGraphBranchSelection: rejects() },
+        (app) => app.isolateGraphBranch("local", "topic"),
+        "Couldn't isolate topic",
+        `${LOCKED}, then try again.`,
+      ],
+      ["collapse merges", { setGraphCollapseMerges: rejects() }, (app) => app.setCollapseMerges(true), "Couldn't collapse merges", `${LOCKED}, then try again.`],
+      ["expand merges", { setGraphCollapseMerges: rejects() }, (app) => app.setCollapseMerges(false), "Couldn't expand merges", `${LOCKED}, then try again.`],
+      [
+        "connect a forge account",
+        { saveForgeToken: rejects() },
+        (app) => app.saveForgeToken("GitHub", "rene", "token"),
+        "Couldn't connect to GitHub as rene",
+        "Check the account and the token, then connect again.",
+      ],
+      [
+        "disconnect a forge account",
+        { forgetForgeToken: rejects() },
+        (app) => app.forgetForgeToken("GitHub", "rene"),
+        "Couldn't disconnect rene from GitHub",
+        null,
+      ],
+      [
+        "create a pull request",
+        { createPullRequest: rejects() },
+        (app) => app.createPullRequest("origin", "rene", { title: "x", description: null, sourceBranch: "topic", targetBranch: "main" }),
+        "Couldn't create the pull request from topic into main",
+        "Check the branches and the title, then create it again.",
+      ],
+    ])("%s", async (_name, overrides, run, operation, next) => {
+      const { error, hint } = await failed(overrides, run);
+      expect(error).toBe(`${operation}: ${RAW}`);
+      expect(hint).toBe(next);
+    });
+  });
+
   it("ends with the next step the error's kind has, when it has one", async () => {
     const { error, hint } = await failed(
       {

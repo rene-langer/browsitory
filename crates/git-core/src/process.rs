@@ -1939,10 +1939,15 @@ mod tests {
         );
     }
 
-    /// Git for Windows' `sh.exe` running `script`, with `MARKER` pointing at `marker`.
+    /// Git for Windows' `sh.exe` running `script`, with `MARKER` pointing at `marker`; None
+    /// when sh.exe is missing, which fails the test on CI (`test_support::require`, #1113).
     #[cfg(windows)]
     fn windows_sh(script: &str, marker: &std::path::Path) -> Option<Command> {
-        let sh = find_sh()?;
+        let sh = find_sh();
+        if !test_support::require("Git for Windows' sh.exe", sh.is_some()) {
+            return None;
+        }
+        let sh = sh?;
         let mut command = Command::new(sh);
         command.args(["-c", script]).env("MARKER", marker);
         Some(command)
@@ -1951,8 +1956,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn timeout_kills_a_hooks_background_grandchild_on_windows() {
-        if find_sh().is_none() {
-            eprintln!("no sh.exe found; skipping");
+        if !test_support::require("Git for Windows' sh.exe", find_sh().is_some()) {
             return;
         }
         assert_a_timeout_kills_the_background_job(|marker, limit| {
@@ -1968,7 +1972,6 @@ mod tests {
     fn cancel_kills_a_hooks_background_grandchild_on_windows() {
         let dir = MarkerDir::new();
         let Some(command) = windows_sh(&grandchild_script(30), &dir.marker) else {
-            eprintln!("no sh.exe found; skipping");
             return;
         };
         let result = run_captured(
@@ -1994,7 +1997,6 @@ mod tests {
         let dir = MarkerDir::new();
         let marker = &dir.marker;
         let Some(mut command) = windows_sh(&grandchild_script(5), marker) else {
-            eprintln!("no sh.exe found; skipping");
             return;
         };
         command
@@ -2141,7 +2143,6 @@ mod tests {
             r#"(sleep 2; echo alive > "$MARKER") >/dev/null 2>&1 & exit 0"#,
             marker,
         ) else {
-            eprintln!("no sh.exe found; skipping");
             return;
         };
         let captured =

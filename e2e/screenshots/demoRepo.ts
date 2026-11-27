@@ -13,8 +13,6 @@ import path from "node:path";
 export const SCREENSHOT_ROOT = path.join(os.tmpdir(), "browsitory-screenshots");
 /** The demo repository the app opens. Its folder name is the tab title. */
 export const DEMO_REPO_PATH = path.join(SCREENSHOT_ROOT, "trailmap");
-/** Throwaway HOME (and XDG dirs, git and GnuPG config) for the run, see `isolateHome`. */
-export const ISOLATED_HOME = path.join(SCREENSHOT_ROOT, "home");
 
 const AUTHORS = {
   alex: { name: "Alex Rivera", email: "alex@example.com" },
@@ -23,28 +21,11 @@ const AUTHORS = {
 type Author = keyof typeof AUTHORS;
 
 /**
- * Points HOME, the XDG dirs, git's global config and GnuPG at empty temp dirs, for this process
- * and everything it starts (the WebDriver workers, tauri-driver and the app). The run then never
- * reads the user's own git config, signing keys or app data, and never writes to them.
+ * English dates and a fixed time zone, whatever the machine's own settings are, for this
+ * process and everything it starts (the WebDriver workers, tauri-driver and the app). The HOME,
+ * git and GnuPG isolation is the E2E suite's (`wdio.conf.ts`'s `onPrepare`, #1112).
  */
-export function isolateHome(): void {
-  fs.rmSync(ISOLATED_HOME, { recursive: true, force: true });
-  const dirs = {
-    HOME: ISOLATED_HOME,
-    XDG_CONFIG_HOME: path.join(ISOLATED_HOME, ".config"),
-    XDG_CACHE_HOME: path.join(ISOLATED_HOME, ".cache"),
-    XDG_STATE_HOME: path.join(ISOLATED_HOME, ".local", "state"),
-    GNUPGHOME: path.join(ISOLATED_HOME, ".gnupg"),
-  };
-  for (const [name, dir] of Object.entries(dirs)) {
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-    process.env[name] = dir;
-  }
-  const gitConfig = path.join(ISOLATED_HOME, ".gitconfig");
-  fs.writeFileSync(gitConfig, "");
-  process.env.GIT_CONFIG_GLOBAL = gitConfig;
-  process.env.GIT_CONFIG_NOSYSTEM = "1";
-  // English dates and a fixed time zone, whatever the machine's own settings are.
+export function pinLocale(): void {
   process.env.LANG = "en_US.UTF-8";
   process.env.LC_ALL = "en_US.UTF-8";
   process.env.LANGUAGE = "en_US";

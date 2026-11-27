@@ -1,9 +1,17 @@
 // What the app keeps per repository in web storage, by key prefix (the repository path
 // follows): recent searches (`recentSearches.ts`), recent commit messages
-// (`commitMessageHistory.ts`), the last branches switched to (`recentBranches.ts`), the Prune
-// choice (`fetchPrune.ts`) and Fetch automatically (`autoFetch.ts`). It goes when the
-// repository leaves Recent repositories (#1096).
-const REPO_KEY_PREFIXES = ["commit-searches:", "commit-messages:", "recent-branches:", "fetch-prune:", "auto-fetch:"];
+// (`commitMessageHistory.ts`), the commit message being written (`commitDraftStorage.ts`,
+// #1143), the last branches switched to (`recentBranches.ts`), the Prune choice
+// (`fetchPrune.ts`) and Fetch automatically (`autoFetch.ts`). It goes when the repository leaves
+// Recent repositories (#1096).
+const REPO_KEY_PREFIXES = [
+  "commit-searches:",
+  "commit-messages:",
+  "commit-draft:",
+  "recent-branches:",
+  "fetch-prune:",
+  "auto-fetch:",
+];
 
 /** Removes everything web storage keeps for `repoPath`. */
 export function forgetRepoWebStorage(repoPath: string): void {

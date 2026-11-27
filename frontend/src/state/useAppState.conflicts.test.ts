@@ -48,6 +48,6 @@ describe("useAppState markResolved", () => {
     });
 
     expect(outcome).toBeNull();
-    expect(result.current.state.error).toBe("no conflict found for path 'a.txt'");
+    expect(result.current.state.error).toBe("Couldn't mark a.txt as resolved: no conflict found for path 'a.txt'");
   });
 });

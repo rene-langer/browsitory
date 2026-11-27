@@ -1016,7 +1016,7 @@ function remoteCommands({ appState, state, blockers, blocked, sidebar }: FamilyC
 
   for (const remote of state.remotes) {
     // App state owns their dialogs, so they open even while the Branches section is collapsed.
-    const actions = remoteActions(blockers, remote.name);
+    const actions = remoteActions(blockers, remote.name, state.branches.find((branch) => branch.isCurrent)?.name ?? null);
     offer(`fetch-remote:${remote.name}`, actions.fetch, ["fetch", "remote", remote.name], () =>
       void appState.fetchRemote(remote.name),
     );

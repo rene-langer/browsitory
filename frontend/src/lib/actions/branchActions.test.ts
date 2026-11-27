@@ -41,10 +41,46 @@ describe("branchActions", () => {
 
 describe("remoteBranchActions", () => {
   it("names the branch in Delete and follows the busy rule", () => {
-    expect(remoteBranchActions(free, "origin", "topic").delete).toMatchObject({ label: "Delete origin/topic…", enabled: true });
-    for (const action of Object.values(remoteBranchActions(busy, "origin", "topic"))) {
+    expect(remoteBranchActions(free, "origin", "topic", "main").delete).toMatchObject({ label: "Delete origin/topic…", enabled: true });
+    for (const action of Object.values(remoteBranchActions(busy, "origin", "topic", "main"))) {
       expect(action).toMatchObject({ enabled: false, reason: busy.reason });
     }
+  });
+});
+
+// #1119: the upstream is set on the checked-out branch, so a detached HEAD has none to set it on.
+describe("remoteBranchActions on a detached HEAD", () => {
+  it("refuses Set as upstream for current branch, saying why, and keeps the others", () => {
+    const actions = remoteBranchActions(free, "origin", "topic", null);
+    expect(actions.setAsUpstream).toMatchObject({ enabled: false, reason: "Check out a branch first." });
+    expect(actions.checkout.enabled).toBe(true);
+    expect(actions.delete.enabled).toBe(true);
+  });
+});
+
+// #1120: the backend refuses to delete the checked-out branch, so the menu says why instead.
+describe("branchActions' Delete", () => {
+  it("refuses the current branch, saying why", () => {
+    expect(branchActions({ blockers: free, remoteCount: 1, upstream }, { name: "main", isCurrent: true }).delete).toEqual({
+      label: "Delete",
+      enabled: false,
+      reason: "Switch to another branch first.",
+    });
+  });
+
+  it("offers another branch", () => {
+    expect(branchActions({ blockers: free, remoteCount: 1, upstream }, { name: "topic", isCurrent: false }).delete).toEqual({
+      label: "Delete",
+      enabled: true,
+      reason: undefined,
+    });
+  });
+
+  it("gives the busy reason first", () => {
+    expect(branchActions({ blockers: busy, remoteCount: 1, upstream }, { name: "main", isCurrent: true }).delete).toMatchObject({
+      enabled: false,
+      reason: busy.reason,
+    });
   });
 });
 

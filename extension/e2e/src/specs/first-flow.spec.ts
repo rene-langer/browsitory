@@ -21,10 +21,9 @@ describe("Browsitory VSCode extension first flow", () => {
     // Driven via raw CDP `Runtime.evaluate` (see `support/webviewPage.ts`) rather than
     // Playwright Locators — the webview's real content lives in a nested same-process iframe
     // that Playwright's own frame discovery doesn't reliably surface when connected externally
-    // via `connectOverCDP` to this Electron instance. A plain DOM `.click()` also sidesteps the
-    // old Playwright-actionability concern (the stage control is `opacity: 0` until its row is
-    // hovered/focused, mirroring `e2e/specs/first-flow.spec.ts`'s own comment) since there's no
-    // actionability check at this level.
+    // via `connectOverCDP` to this Electron instance. A plain DOM `.click()` runs no
+    // actionability check either (the stage control is always shown since #648 and #1140; see
+    // `e2e/specs/first-flow.spec.ts`'s note).
     const webview = await connectToWebview(`http://127.0.0.1:${cdpPort}`);
 
     try {

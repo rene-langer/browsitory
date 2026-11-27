@@ -1166,8 +1166,7 @@ fn continue_with_no_verify_skips_pre_commit_and_commit_msg() {
 #[cfg(unix)]
 #[test]
 fn a_pre_commit_that_stages_a_file_is_part_of_the_continued_step() {
-    if !common::program_available("git") {
-        eprintln!("git CLI not found; skipping");
+    if !test_support::require_tool("git") {
         return;
     }
     let (_dir, repo, _ids, state) = resolved();
@@ -1288,8 +1287,7 @@ fn a_revert_sequence_continue_runs_the_commit_hooks() {
 #[cfg(unix)]
 #[test]
 fn a_pre_commit_that_empties_the_step_skips_it() {
-    if !common::program_available("git") {
-        eprintln!("git CLI not found; skipping");
+    if !test_support::require_tool("git") {
         return;
     }
     let (_dir, repo, ids, state) = resolved();
@@ -1364,8 +1362,7 @@ fn clean_sequence_steps_run_prepare_commit_msg_and_post_commit() {
 #[cfg(unix)]
 #[test]
 fn git_cherry_pick_runs_the_same_hooks_on_clean_steps() {
-    if !common::program_available("git") {
-        eprintln!("git CLI not found; skipping");
+    if !test_support::require_tool("git") {
         return;
     }
     let (dir, repo, ids) = side_branch(false, true);
@@ -1411,8 +1408,7 @@ fn clean_revert_steps_run_prepare_commit_msg_and_post_commit() {
 #[cfg(unix)]
 #[test]
 fn git_revert_runs_the_same_hooks_on_clean_steps() {
-    if !common::program_available("git") {
-        eprintln!("git CLI not found; skipping");
+    if !test_support::require_tool("git") {
         return;
     }
     let (dir, repo, ids) = side_branch(false, true);
