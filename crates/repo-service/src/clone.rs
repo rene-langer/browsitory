@@ -231,16 +231,27 @@ fn clone_and_save<S: CredentialStore>(
         }
     };
     let outcome = result?;
-    let credential_save_failed = match https {
-        Some(input) if token_offered => {
-            persist_https(service, opts.url.trim(), &outcome, input).is_err()
-        }
-        _ => false,
-    };
+    let credential_save_failed =
+        save_offered_token(service, opts.url.trim(), &outcome, https, token_offered);
     Ok(ServiceCloneOutcome {
         outcome,
         credential_save_failed,
     })
+}
+
+/// Saves the token typed for the clone when the clone offered it; whether saving failed. A
+/// token never offered (a public repository never asks) is never saved.
+fn save_offered_token<S: CredentialStore>(
+    service: &CredentialService<S>,
+    url: &str,
+    outcome: &CloneOutcome,
+    https: Option<&HttpsCredentialInput>,
+    offered: bool,
+) -> bool {
+    match https {
+        Some(input) if offered => persist_https(service, url, outcome, input).is_err(),
+        _ => false,
+    }
 }
 
 impl<S: CredentialStore> CloneService<S> {
