@@ -347,7 +347,7 @@ RepoErrorPayload/Other {"kind":"Other","message":"repo not open: /repo"}
 RepoErrorPayload/WorkerStopped {"kind":"WorkerStopped","message":"worker thread stopped"}
 RepoErrorPayload/WorkerStoppedBeforeReplying {"kind":"WorkerStopped","message":"worker thread stopped before replying"}
 RepoErrorPayload/CredentialStoreFailure {"kind":"CredentialStoreFailure","message":"credential keychain failure: locked"}
-RepoErrorPayload/DirtyWorktree {"kind":"DirtyWorktree","message":"cannot pull with a dirty worktree"}
+RepoErrorPayload/DirtyWorktree {"kind":"DirtyWorktree","message":"the pull would overwrite your local changes to notes.txt"}
 RepoErrorPayload/PullFailed {"kind":"PullFailed","message":"pull failed"}
 RepoErrorPayload/Cancelled {"kind":"Cancelled","message":"the transfer was cancelled"}
 RepoErrorPayload/AddDeleteConflict {"kind":"AddDeleteConflict","message":"'a.bin' is an add/delete conflict, not a text conflict"}

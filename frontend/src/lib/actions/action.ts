@@ -19,6 +19,9 @@ export interface PaletteAction extends MenuAction {
   paletteLabel: string;
 }
 
+/** Why an action on the current branch can't run on a detached HEAD (#1119). */
+export const NO_BRANCH = "Check out a branch first.";
+
 /** What an unavailable action says when it gives no reason of its own. */
 export const UNAVAILABLE_REASON = "Not available right now.";
 

@@ -1,4 +1,5 @@
 import { readAutoFetchOverride, writeAutoFetchOverride } from "../lib/autoFetch";
+import { readCommitDraft, writeCommitDraft } from "../lib/commitDraftStorage";
 import { readCommitMessages, recordCommitMessage } from "../lib/commitMessageHistory";
 import { readFetchPrune, writeFetchPrune } from "../lib/fetchPrune";
 import { readRecentBranches, recordRecentBranch } from "../lib/recentBranches";
@@ -12,6 +13,7 @@ export function rememberRepo(path: string): void {
   recordRecentBranch(path, "main");
   writeFetchPrune(path, true);
   writeAutoFetchOverride(path, 10);
+  writeCommitDraft(path, { message: "wip: half-typed", lastSeeded: "" });
 }
 
 export function remembered(path: string) {
@@ -21,8 +23,16 @@ export function remembered(path: string) {
     branches: readRecentBranches(path),
     prune: readFetchPrune(path),
     autoFetch: readAutoFetchOverride(path),
+    draft: readCommitDraft(path)?.message ?? null,
   };
 }
 
-export const NOTHING = { searches: [], messages: [], branches: [], prune: null, autoFetch: null };
-export const SOMETHING = { searches: ["fix"], messages: ["Fix the build"], branches: ["main"], prune: true, autoFetch: 10 };
+export const NOTHING = { searches: [], messages: [], branches: [], prune: null, autoFetch: null, draft: null };
+export const SOMETHING = {
+  searches: ["fix"],
+  messages: ["Fix the build"],
+  branches: ["main"],
+  prune: true,
+  autoFetch: 10,
+  draft: "wip: half-typed",
+};

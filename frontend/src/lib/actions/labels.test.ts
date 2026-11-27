@@ -57,7 +57,7 @@ function everyPaletteAction(): [string, Pick<PaletteAction, "label" | "paletteLa
   }
   add("branch", branchActions({ blockers: free, remoteCount: 1, upstream: null }, { name: "feature", isCurrent: false }));
   add("rebaseOnto", { action: rebaseOntoAction(free, "main", { kind: "local", name: "feature" }) });
-  add("remote", remoteActions(free, "origin"));
+  add("remote", remoteActions(free, "origin", "main"));
   add("remote", { add: addRemoteAction() });
   add("stash", stashActions({ apply: null, drop: null }, stash));
   add("worktree", worktreeActions(free, worktree));

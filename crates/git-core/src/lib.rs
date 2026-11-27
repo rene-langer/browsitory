@@ -26,6 +26,7 @@ pub mod merge;
 mod merge_driver;
 mod message_text;
 pub mod os_error;
+mod outside_cone;
 mod partial_checkout;
 pub mod patch;
 mod patch_mail;

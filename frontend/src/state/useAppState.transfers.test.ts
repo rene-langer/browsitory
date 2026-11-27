@@ -192,7 +192,7 @@ describe("useAppState", () => {
     await act(() => result.current.clearCurrentUpstream());
 
     expect(result.current.state.upstream).toEqual(upstream);
-    expect(result.current.state.error).toBe("clear failed");
+    expect(result.current.state.error).toBe("Couldn't clear the upstream: clear failed");
   });
 
   it("records a divergent pull without beginning reconciliation", async () => {
@@ -288,10 +288,11 @@ describe("useAppState", () => {
     expect(result.current.state.rebasePreset).toBeNull();
   });
 
+  // #1152: the message names the files the pull would overwrite; the hint says what to do.
   it("reports a dirty pull without leaving reconciliation pending", async () => {
     const client = transferClient({
       pullCurrentUpstream: async () => {
-        throw new RepoError("DirtyWorktree", "cannot pull with a dirty worktree");
+        throw new RepoError("DirtyWorktree", "the pull would overwrite your local changes to notes.txt");
       },
     });
 
@@ -300,7 +301,8 @@ describe("useAppState", () => {
     await act(() => result.current.pullCurrentUpstream());
 
     expect(result.current.state.pendingPull).toBeNull();
-    expect(result.current.state.error).toBe("Commit or stash your changes before pulling.");
+    expect(result.current.state.error).toBe("the pull would overwrite your local changes to notes.txt");
+    expect(result.current.state.errorHint).toBe("Commit or stash your changes, then try again.");
   });
 
   // #496: the kind decides, not the text.

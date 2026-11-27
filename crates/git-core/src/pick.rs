@@ -640,8 +640,23 @@ fn step(
 
 /// Applies `target` to the index and work tree (`merged` is libgit2's in-memory result of it).
 /// A checkout that stops part-way (a file another program holds open, a read-only file) is
-/// rolled back, so the step can be tried again (#321).
+/// rolled back, so the step can be tried again (#321). A sparse checkout's files outside the
+/// cone stay out, as git keeps them; a conflicted one is written, unmarked (#1185).
 fn apply_step(
+    repo: &Repository,
+    target: &Commit<'_>,
+    kind: Kind,
+    mainline: Option<u32>,
+    merged: &git2::Index,
+) -> Result<(), PickError> {
+    let outcome = crate::outside_cone::Outcome::Index(merged);
+    crate::outside_cone::around(repo, outcome, || {
+        apply_step_here(repo, target, kind, mainline, merged)
+    })
+}
+
+/// [`apply_step`] without the files outside a sparse checkout.
+fn apply_step_here(
     repo: &Repository,
     target: &Commit<'_>,
     kind: Kind,
@@ -1570,10 +1585,14 @@ fn rewind_to(repo: &Repository, original: &Commit<'_>, reflog: &str) -> Result<(
         None,
     )?;
     if pairs.is_empty() {
-        let mut checkout = git2::build::CheckoutBuilder::new();
-        let filters = crate::hardlink::on_checkout(repo, &mut checkout);
-        repo.checkout_tree(original.as_object(), Some(&mut checkout))?;
-        filters.check()?;
+        // A sparse checkout's files outside the cone stay out (#1185).
+        let outcome = crate::outside_cone::Outcome::Tree(&tree);
+        crate::outside_cone::around(repo, outcome, || {
+            let mut checkout = git2::build::CheckoutBuilder::new();
+            let filters = crate::hardlink::on_checkout(repo, &mut checkout);
+            repo.checkout_tree(original.as_object(), Some(&mut checkout))?;
+            Ok::<_, PickError>(filters.check()?)
+        })?;
     } else {
         rewind_around_case_pairs(repo, &tree, &pairs)?;
     }

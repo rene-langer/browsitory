@@ -183,8 +183,8 @@ function BranchTreeContent({
    */
   onGoToBranch?: (kind: "local" | "remote", name: string) => void;
   /**
-   * `AppState.refreshGeneration`. A change means remote branches may have changed (a fetch from
-   * anywhere, a push that published one, a remote branch delete): open remote folders reload
+   * `AppState.historyGeneration` (#1118). A change means remote branches may have changed (a fetch
+   * from anywhere, a push that published one, a remote branch delete): open remote folders reload
    * their list in place and closed ones forget theirs.
    */
   refreshGeneration: number;
@@ -682,6 +682,7 @@ function BranchTreeContent({
                   remoteName,
                   fetchUrl: remote.fetchUrl,
                   pushUrl: remote.pushUrl,
+                  branches,
                   blockers,
                   // The cache's `refreshGeneration` reload already refreshes the branch list after
                   // any fetch; this explicit drop-and-reload just makes the update immediate here.

@@ -473,20 +473,23 @@ pub fn start_rebase_with(
     )?;
     // A checkout that stops part-way (a file another program holds open, a read-only file) is
     // rolled back, so the rebase can be started again (#321).
-    let written = crate::partial_checkout::Written::default();
-    let mut checkout = git2::build::CheckoutBuilder::new();
-    let filters = written.record(repo, &mut checkout);
-    repo.checkout_tree(onto_commit.as_object(), Some(&mut checkout))
-        .map_err(|error| {
-            let restored = crate::partial_checkout::roll_back(repo, &written);
-            crate::partial_checkout::report::<RebaseError>(
-                repo,
-                restored,
-                crate::HeldDuring::RolledBack,
-                error,
-            )
-        })?;
-    filters.check()?;
+    // A sparse checkout's files outside the cone stay out (#1185).
+    crate::outside_cone::around(repo, crate::outside_cone::Outcome::Tree(&onto_tree), || {
+        let written = crate::partial_checkout::Written::default();
+        let mut checkout = git2::build::CheckoutBuilder::new();
+        let filters = written.record(repo, &mut checkout);
+        repo.checkout_tree(onto_commit.as_object(), Some(&mut checkout))
+            .map_err(|error| {
+                let restored = crate::partial_checkout::roll_back(repo, &written);
+                crate::partial_checkout::report::<RebaseError>(
+                    repo,
+                    restored,
+                    crate::HeldDuring::RolledBack,
+                    error,
+                )
+            })?;
+        Ok::<_, RebaseError>(filters.check()?)
+    })?;
     repo.set_head_detached(onto_commit.id())?;
 
     let mut state = RebaseState {
@@ -1121,35 +1124,11 @@ fn advance(
         if colliding {
             return stop_at_file_folder_conflict(repo, state, merged, &commit);
         }
-        // A checkout that stops part-way (a file another program holds open, a read-only file,
-        // a full disk) is rolled back, like `pick::apply`'s (#329): the step is then as if never
-        // started, HEAD stays at `expected_head`, and Continue applies it again. libgit2's own
-        // default strategy for a pick is safe with conflicts allowed; a builder of our own must
-        // say so.
-        let written = crate::partial_checkout::Written::default();
-        let mut checkout = git2::build::CheckoutBuilder::new();
-        checkout.safe().allow_conflicts(true);
-        let filters = written.record(repo, &mut checkout);
-        written.expect_conflicts(repo, &merged);
-        let mut options = git2::CherrypickOptions::new();
-        options.checkout_builder(checkout);
-        let picked = repo.cherrypick(&commit, Some(&mut options));
-        if let Err(refusal) = filters.check() {
-            // Checked before the step (`refuse_merged`); libgit2 wrote its state files only.
-            let _ = crate::commit::clear_operation_files(repo);
-            return Err(refusal.into());
-        }
-        if let Err(error) = picked {
-            let restored = crate::partial_checkout::roll_back(repo, &written);
-            // libgit2 removes the pick's state files on an error; make sure.
-            let _ = crate::commit::clear_operation_files(repo);
-            return Err(crate::partial_checkout::report::<RebaseError>(
-                repo,
-                restored,
-                crate::HeldDuring::RolledBack,
-                error,
-            ));
-        }
+        // A sparse checkout's files outside the cone stay out; a conflicted one is written,
+        // unmarked (#1185).
+        crate::outside_cone::around(repo, crate::outside_cone::Outcome::Index(&merged), || {
+            pick_step(repo, &commit, &merged)
+        })?;
         // A commit made from the pause's `MERGE_MSG` (`git commit` in a terminal) gets the
         // message in UTF-8, as after git's pick (#1149). Left as libgit2 wrote it if that fails:
         // the step itself lands with the decoded message.
@@ -1170,6 +1149,44 @@ fn advance(
         land_or_close_split(repo, state, None, hooks)?;
         state.cursor += 1;
     }
+}
+
+/// `advance`'s pick of `commit` (`merged` is libgit2's in-memory result of it) into the index
+/// and work tree. A checkout that stops part-way (a file another program holds open, a
+/// read-only file, a full disk) is rolled back, like `pick::apply`'s (#329): the step is then
+/// as if never started, HEAD stays at `expected_head`, and Continue applies it again. libgit2's
+/// own default strategy for a pick is safe with conflicts allowed; a builder of our own must say
+/// so.
+fn pick_step(
+    repo: &Repository,
+    commit: &git2::Commit<'_>,
+    merged: &git2::Index,
+) -> Result<(), RebaseError> {
+    let written = crate::partial_checkout::Written::default();
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.safe().allow_conflicts(true);
+    let filters = written.record(repo, &mut checkout);
+    written.expect_conflicts(repo, merged);
+    let mut options = git2::CherrypickOptions::new();
+    options.checkout_builder(checkout);
+    let picked = repo.cherrypick(commit, Some(&mut options));
+    if let Err(refusal) = filters.check() {
+        // Checked before the step (`refuse_merged`); libgit2 wrote its state files only.
+        let _ = crate::commit::clear_operation_files(repo);
+        return Err(refusal.into());
+    }
+    if let Err(error) = picked {
+        let restored = crate::partial_checkout::roll_back(repo, &written);
+        // libgit2 removes the pick's state files on an error; make sure.
+        let _ = crate::commit::clear_operation_files(repo);
+        return Err(crate::partial_checkout::report::<RebaseError>(
+            repo,
+            restored,
+            crate::HeldDuring::RolledBack,
+            error,
+        ));
+    }
+    Ok(())
 }
 
 /// The step's merge holds a file and a folder of the same name that libgit2 didn't see as a

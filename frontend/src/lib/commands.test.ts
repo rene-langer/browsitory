@@ -117,6 +117,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       addRemoteDraftOpen: false,
       dialog: null,
       refreshGeneration: 0,
+      historyGeneration: 0,
       undoState: { undo: null, redo: null },
       ...overrides,
     },

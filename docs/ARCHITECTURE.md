@@ -323,7 +323,12 @@ expanded merges, branches with ahead/behind, tags, the current and every remote'
 their key, the `refs` part plus the graph selection, "Collapse merges" and the limit, equals the
 one they were read with, so staging, unstaging, discarding or editing a file re-reads only the
 status, the stashes, the worktree, submodule and remote lists, HEAD and undo state. The Refresh
-command (`refresh({ full: true })`), a failed refresh and a missing stamp read everything. When the
+command (`refresh({ full: true })`), a failed refresh and a missing stamp read everything.
+`AppState.historyGeneration` advances only for a refresh that read the history again or failed
+(#1118), while `refreshGeneration` advances for every one: the open working-tree diffs follow the
+second, and what only the history changes follows the first (an open commit search, which keeps
+the matches on screen until its re-run's first round is in, a file or line history, the open
+remote folders' branch lists and a branch compare's range). When the
 history reads do run, the worker keeps each branch's ahead/behind count by its pair of tips
 (`git_core::ahead_behind::AheadBehindCache`, #112): only a branch or upstream that moved is
 counted again, the upstream reads after the branch list count nothing, the branch list drops the
@@ -509,8 +514,37 @@ menu's choice runs back through the session: the pick, the parent picker or a se
     new to the index) whose staged version is its work-tree version then ends marked, its file
     removed, as git leaves it; every other marked path keeps its mark. Deliberate difference:
     restoring staged changes, git drops an unstaged edit of a marked path (the file stays
-    marked and missing); here it is written and unmarked, as git does without `--index`. This
-    is the stash part of the merge-family gap in sparse checkouts (#1185).
+    marked and missing); here it is written and unmarked, as git does without `--index`.
+    `OutsideCone` lives in `git_core::outside_cone` and serves the operations below too.
+  - **Merge, cherry-pick, revert, rebase, switch, check out commit and pull** (#1185, #1191):
+    libgit2's merge and checkout took a missing marked file they change for a local deletion
+    and refused ("1 uncommitted change would be overwritten by merge", `LocalChanges` for a
+    switch), and wrote a file they add outside the cone, unmarked. `outside_cone::around` wraps
+    the libgit2 call (`Repository::merge` for merge and squash, `cherrypick`/`revert` for a pick
+    step and each rebase step, the safe `checkout_tree` of a fast-forward, switch, checkout
+    commit, rebase onto, pull fast-forward and the rewind of an aborted cherry-pick/revert
+    sequence), given what it leaves: the merged index (`merge_commits`, `cherrypick_commit`,
+    `revert_commit`, which the callers compute for their guards anyway) or the target tree.
+    Before it, every marked stage-0 path whose version that outcome changes is unmarked and its
+    missing file written from the index (`OutsideCone::prepare`), so libgit2 merges or checks
+    it out as any file. Afterwards each such path whose stage-0 entry is the outcome's version,
+    and each path new to the index outside the sparse patterns, is marked and its file removed;
+    every other marked path keeps its mark. That is git's result: unpack-trees keeps a changed
+    marked file marked and unwritten with the new blob, and marks a new path outside the
+    patterns. A conflicted path keeps its file (with conflict markers), unmarked, as git's merge
+    writes it (`record_conflicted_index_entries`). Deliberate difference: git's cherry-pick,
+    revert and rebase leave such a conflicted file unwritten (the conflict sits in the index
+    with no file to resolve); here it is written as for a merge. A marked file on disk anyway
+    (git drops its mark when it reads the index) that the operation changes ends marked and
+    removed, as with git. A refused operation is rolled back (`OutsideCone::roll_back`). Only
+    with readable patterns (`Sparse` not `Off`): without them git applies no sparse checkout.
+    Abort of a merge, cherry-pick or revert (`apply_operation_reset`) leaves a touched marked
+    path whose file is missing out of its forced checkout: only its index entry goes back to
+    HEAD's, marked, as git's `reset --merge` leaves it. As for Reset (decision 2 of #1172), entries the operation doesn't change keep their mark as
+    they are; git's unpack-trees also re-applies the patterns to them (an unmarked clean file
+    outside the cone is marked and removed, a marked one inside is written), which matters only
+    when marks and patterns disagree. `branch::changes_in_the_way` (the files a refused switch
+    or pull names) skips a marked path whose only change is its missing file.
   - **Sparse patterns** (`git_core::sparse`, #1172), read as git reads them (`dir.c`):
     `core.sparseCheckout`, `core.sparseCheckoutCone` and the work tree's own
     `info/sparse-checkout` (`repo.path()`, so `.git/worktrees/<name>/` for a linked worktree;
@@ -958,11 +992,17 @@ configuration. A pull's merge and `post-merge` hook, commit hooks and signing ru
 so reads still wait for them. A long read delays the wait's next poll (progress, and giving up on
 a connecting or stalled transfer) by its own run time.
 
-**Stopping at exit (#965).** When the desktop app's last window closes or it quits (also before
-an update's restart), the process would end every worker thread wherever it is; one cut off in a
-libgit2 write leaves `.git/index.lock` (or a ref lock) behind, and every later git command in the
-repository fails on it. So `main.rs` handles `RunEvent::Exit` with `WorkerRegistry::stop_all`
-and `EXIT_GRACE` (5 s, like the extension's `SIDECAR_EXIT_GRACE_MS`, #961): each worker finishes
+**Stopping at exit (#965, #1131).** When the desktop app's last window closes, it quits or it
+restarts for an update, the process would end every worker thread wherever it is; one cut off in
+a libgit2 write leaves `.git/index.lock` (or a ref lock) behind, and every later git command in
+the repository fails on it. So `exit.rs` calls `WorkerRegistry::stop_all` with `EXIT_GRACE` (5 s,
+like the extension's `SIDECAR_EXIT_GRACE_MS`, #961) before every exit: from the `RunEvent::Exit`
+handler, and from the drop of a resource it keeps in the app's resource table, which
+`AppHandle::cleanup_before_exit` empties on every exit path. That second hook is the one that
+counts for "Restart to update" on Windows: `tauri-plugin-updater`'s install there runs only
+`cleanup_before_exit` and then `std::process::exit`, without a `RunEvent::Exit` (on macOS and
+Linux `relaunch` goes through `request_restart`, which delivers it). The wait runs once
+(`OnceLock`), whichever asks first. Each worker finishes
 the command it is running (a transfer included, with the reads its wait serves) and starts no
 other (`worker/lifecycle.rs`; the commands still queued are answered `WorkerStopped`), the
 registry opens no repository any more, and the exit waits until the workers are idle or the
@@ -1602,6 +1642,15 @@ certificate.
 
 ## Interactive rebase
 
+- Pull (`remote::pull_after_fetch`, #1152) refuses only what it would overwrite, as `git pull`:
+  no cleanliness check up front (it refused any change or untracked file, and in a sparse
+  checkout always, since libgit2's status lists the missing files as deleted). Up to date,
+  diverged and no-fast-forward come back whatever the local changes (the merge or rebase picked
+  next checks its own way). The fast-forward's safe checkout keeps every other change, staged
+  or not, and refuses a change to a file it writes or an untracked file in its way; that
+  refusal is `RemoteError::DirtyWorktree { paths }` (wire kind `DirtyWorktree`), naming the
+  files `branch::changes_in_the_way` finds, or `CheckoutConflict` when none is (an ignored file
+  in the way). Undo records the pull as a `Full` snapshot, so local changes come back with it.
 - `git-core::rebase` is Browsitory's own state machine; it does not use libgit2's `git2::Rebase`
   or write git's `.git/rebase-merge`. `start_rebase` first refuses any operation in progress,
   naming it (#265): a terminal rebase or `git am` (`RebaseError::TerminalRebase`, #263), a
@@ -3008,6 +3057,35 @@ User-defined commands (epic #897) are programs the user adds to menus and the pa
   same target's tracking ref, and the UI only offers "Force push (with lease)" after a rejected
   push whose target equals that resolution.
 
+## The settings file (`config.toml`)
+
+The `config` crate keeps the settings in one `config.toml` (`directories::ProjectDirs`, or
+`$BROWSITORY_CONFIG_DIR/config.toml`), which the desktop app and every VS Code window's sidecar
+share, and which two Browsitory versions regularly read and write: the extension updates through
+its marketplace, the desktop app through its own updater.
+
+- **One writer at a time (#1127).** Every setter goes through `update_config`, which reads the
+  file, changes it and writes it back under a process-wide `Mutex` and an OS lock on
+  `config.toml.lock` beside it (`write_lock.rs`; `File::try_lock`, with an explicit unlock like
+  the undo state's `state.lock`). A tab restore opens all tabs at once, each `open_repo` moving its
+  repository to the front of the recent list, and the sidecar runs each request on its own
+  thread; without the lock the later write undid the earlier one. Where the lock file can't be
+  created or locked, or another process holds it for 5 s, the write goes ahead with only the
+  in-process exclusion. Getters read without the lock: the write replaces the file atomically (a
+  temp file, synced, then renamed). A symlinked `config.toml` is resolved first, so the link
+  stays and the file it points to is replaced.
+- **What this version doesn't know stays (#1137).** `update_config` also reads the file as a
+  plain TOML table, and `compat::merge` writes that table back with only the change from the
+  struct as read to the struct after the setter: a key the setter dropped is removed, a changed
+  value replaced, a new one added; keys, tables and values this version doesn't know stay, and an
+  unchanged setting keeps the text it was read from. A changed list keeps each entry's unknown
+  keys wherever the entry moved (an entry matches the original one it is part of). `toml`'s
+  `preserve_order` keeps the file's key order.
+- **An unknown value costs one setting (#1137).** A closed setting (`word_wrap`, `algorithm`,
+  `ui_size`, `date_format`) reads an unknown value as its default (`compat::or_default`); a
+  remembered merge or pull choice or a user command target this version can't read is left out
+  (`compat::readable_entries`). A new enum-valued setting needs the same treatment.
+
 ## Desktop app folders and the bundle identifier
 
 The bundle identifier in `crates/tauri-app/tauri.conf.json` is `com.browsitory.desktop` (up to
@@ -3031,6 +3109,16 @@ resolves identifier folders under (data, local data, config, cache, and on macOS
 only when the new folder doesn't exist yet. A rename is atomic and deletes nothing; a failure is
 logged once the log plugin is up, and the app starts with fresh folders. Don't change the
 identifier again without extending this migration.
+
+**One process (#1136).** `single_instance.rs` registers `tauri-plugin-single-instance` before
+the migration and every other plugin: a second launch hands over to the running app by the
+identifier (a D-Bus name `<id>.SingleInstance` on Linux, a named mutex on Windows, a Unix socket
+in `/tmp` on macOS) and exits before any other plugin runs, and the running app unminimizes,
+shows and focuses its `main` window. Without a D-Bus session bus the launch goes ahead. A launch
+with `BROWSITORY_CONFIG_DIR` set skips the guard, as it shares no `config.toml` with the running
+app (the E2E suites, a dev build beside the installed app on Windows or macOS). On Linux the GTK
+application id (`enableGTKAppId`) also ends a second launch's event loop at once, after its
+plugins started; the plugin ends it before that.
 
 ## Operation log
 
@@ -3091,7 +3179,7 @@ reporting on the first `list_operations`, so a session that never opens the log 
 `repo_service::wire::ErrorDto` (`{ kind, message }`, #496), and decides its kind where the error
 is made (#527): the reply channels carry `Result<T, ErrorDto>`, and a handler turns a typed error
 into one with `ErrorDto::from_error`, which reads the kind from the error's type along its
-`source()` chain (`RemoteError::DirtyWorktree`, `MergeError::NotATextConflict`,
+`source()` chain (`RemoteError::DirtyWorktree { .. }`, `MergeError::NotATextConflict`,
 `SearchError::InvalidQuery`, a credential store failure, an OS permission error), or builds it
 with a constructor (`ErrorDto::worker_stopped`, `ErrorDto::pull_failed`). Every `WorkerHandle`
 method goes through `WorkerHandle::request`, so a stopped worker always answers `WorkerStopped`.

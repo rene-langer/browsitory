@@ -11,6 +11,7 @@ import { ReleaseNotesModal } from "./components/ReleaseNotesModal";
 import { ThirdPartyLicencesDialog } from "./components/ThirdPartyLicencesDialog";
 import { ToastRegion } from "./components/primitives/ToastRegion";
 import { useToasts } from "./state/useToasts";
+import { useRepoToasts } from "./state/useRepoToasts";
 import { useFileDrops } from "./state/useFileDrops";
 import { requestWorkspace } from "./lib/workspaceRequests";
 import { InlineError } from "./components/primitives/InlineError";
@@ -105,7 +106,7 @@ export default function App(props: {
           <RenderErrorFallback
             title="Browsitory couldn't show this window"
             caught={caught}
-            hint="Reload to open your repositories again. If it happens again, copy the details into a bug report."
+            hint="Reload to open your repositories again. Your commit message drafts are kept. If it happens again, copy the details into a bug report."
             reloadLabel="Reload"
             onReload={reset}
             getAppVersion={() => props.client.getAppVersion()}
@@ -219,6 +220,19 @@ function AppContent({
   const [cloning, setCloning] = useState(false);
   const [existingRepoPrompt, setExistingRepoPrompt] = useState<string | null>(null);
   const { push: pushAppToast } = appToasts;
+  const tabName = useCallback(
+    (path: string) => openRepos.aliases.get(path) ?? repoNameOf(path),
+    [openRepos.aliases],
+  );
+  const repoToasts = useRepoToasts({
+    toasts: appToasts.toasts,
+    push: pushAppToast,
+    dismiss: appToasts.dismiss,
+    activePath,
+    mountedTabs,
+    tabName,
+    switchTo: openRepos.switchTo,
+  });
   const startClone = useCallback(() => {
     setPickingRepo(false);
     setCloning(true);
@@ -702,7 +716,7 @@ function AppContent({
           />
         )}
         {/* The update notice shares the toasts' region, so the two stack (#1000). */}
-        <ToastRegion toasts={appToasts.toasts} onDismiss={appToasts.dismiss} onPauseChange={appToasts.setPaused}>
+        <ToastRegion toasts={repoToasts.toasts} onDismiss={appToasts.dismiss} onPauseChange={appToasts.setPaused}>
           <UpdateCheckContext.Provider value={updateCheckRegistry}>{updateBanner}</UpdateCheckContext.Provider>
         </ToastRegion>
         {openRepos.openRepos.length === 0 ? (
@@ -771,7 +785,7 @@ function AppContent({
                   getCommitDraft={getCommitDraft}
                   onCommitDraftChange={onCommitDraftChange}
                   appCommands={appCommands}
-                  pushToast={pushAppToast}
+                  pushToast={repoToasts.pushToastFor(repo.path)}
                   onStatusChange={tabChangeMarkers.onLiveStatus}
                 />
               </RenderErrorBoundary>

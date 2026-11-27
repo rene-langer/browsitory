@@ -24,8 +24,9 @@ The menus offer:
   branch name**. Delete goes at once when every commit of the branch is on another branch
   (local or remote-tracking) or a tag too; otherwise it asks first, saying how many commits would
   be on no branch ("feature has 1 commit on no other branch. Delete it anyway?", **Delete
-  branch**). While it counts those commits, that branch's **Delete** is unavailable. **Undo**
-  brings it back;
+  branch**). While it counts those commits, that branch's **Delete** is unavailable. The
+  current branch's **Delete** is unavailable too and says "Switch to another branch first."
+  **Undo** brings it back;
 - a remote branch: **Switch to** (to a local branch tracking it), **Set as upstream for current
   branch**, **Rebase current branch onto ⟨remote⟩/⟨branch⟩…**, **Isolate branch** (as for a
   local branch), **Show all branches** (as for a local branch), **Copy branch name** (as
@@ -34,6 +35,9 @@ The menus offer:
 - a remote: **Fetch**, **Push current branch to ⟨remote⟩**, **Edit remote…**, **Manage
   credentials…**, **Copy fetch URL** (and **Copy push URL** when pushes go to a different URL),
   or **Remove remote…**.
+
+On a detached HEAD there is no current branch: **Set as upstream for current branch** and
+**Push current branch to ⟨remote⟩** are unavailable and say "Check out a branch first."
 
 ??? note "Details"
     The copy items put plain text on the clipboard and work even while another operation runs;
@@ -104,6 +108,20 @@ then. **Undo** reverts a squash.
     The dialog remembers your last choice per repository; until then it follows your git
     `merge.ff` (`false` = always a merge commit, `only` = fast-forward only). A pull that merges
     (see [Pulling](#pulling)) always allows a fast-forward and does not ask.
+
+??? note "Details: sparse checkouts"
+    In a sparse checkout (`git sparse-checkout`), switching branches, checking out a commit,
+    merging, pulling, cherry-picking, reverting and rebasing leave the files outside the chosen
+    folders out, as git does: a file there that the other branch or commit changes gets its new
+    version in the index without being written to disk, a file it adds there isn't written
+    either, and neither is listed as a change. A conflict in such a file is written to disk with
+    its conflict markers, so you can resolve it, and stays there like any file of the chosen
+    folders. git's merge does the same; its cherry-pick, revert and rebase leave that file off
+    the disk. **Abort** puts the earlier versions back the same way, without writing them. A file outside the folders that is on disk anyway and that the operation changes
+    is taken off the disk again, as git does; other files keep their state (git would take off
+    every unchanged file outside the folders too; `git sparse-checkout reapply` does that).
+    With patterns set by `git sparse-checkout set --no-cone`, which Browsitory doesn't match,
+    a file the operation adds counts as outside when it isn't on disk.
 
 **Dragging a branch onto a branch.** Drag a branch onto the current branch, or the current
 branch onto another branch, to merge or rebase. On release a small menu lets you choose, with
@@ -248,6 +266,14 @@ repository and pulls at once. Until you choose, a diverged pull asks in a dialog
 branches and counts the commits each has: **Pull with merge**, **Pull with rebase** or
 **Cancel**, with **Always do this for ⟨repository⟩**, which you can change later in the Pull
 menu. A merge, or a rebase that finished, can be undone with **Undo**.
+
+Your local changes don't stop a pull unless it would overwrite them, as with `git pull`: a
+fast-forward keeps your edits, staged changes and untracked files in the files it doesn't
+change. When a file the pull changes has edits of yours, or an untracked file stands where it
+writes one, it stops after fetching, names the files ("the pull would overwrite your local
+changes to notes.txt") and changes nothing: commit or stash them, then pull again. A pull that
+merges or rebases leaves that check to the merge or the rebase (which, like `git rebase`, doesn't
+start while tracked files have changes). **Undo** of a pull keeps your local changes.
 
 ??? note "Details"
     Until you choose a strategy, Browsitory follows your git config like `git pull`:
