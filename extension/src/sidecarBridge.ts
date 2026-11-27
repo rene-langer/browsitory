@@ -149,6 +149,8 @@ export interface SidecarBridgeDependencies {
   readonly executeCommand: (command: string, ...args: unknown[]) => PromiseLike<unknown>;
   /** `vscode.workspace.isTrusted`, read on each request: trust can be granted while open. */
   readonly isWorkspaceTrusted: () => boolean;
+  /** Called with each notification the sidecar sends (`repoWatch`, `operationLog`, ...). */
+  readonly onSidecarNotification?: (method: string, params: unknown) => void;
 }
 
 class InvalidParamsError extends Error {}
@@ -554,6 +556,8 @@ export class SidecarBridge {
           return;
         }
         this.pendingRequestIds.delete(message["id"]);
+      } else if (typeof message["method"] === "string") {
+        this.dependencies.onSidecarNotification?.(message["method"], message["params"]);
       }
       this.dependencies.postToWebview(message);
     } catch (error) {
