@@ -1898,4 +1898,31 @@ mod tests {
             .collect();
         assert_eq!(stages, [1, 2, 3]);
     }
+
+    #[test]
+    fn a_folder_named_like_a_glob_with_an_untracked_file_is_not_clean() {
+        // `[ab]/` read as a glob matches `a/…` and `b/…`, not the folder's own files (#1148).
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        for path in ["[ab]/f", "a/f"] {
+            std::fs::create_dir_all(dir.path().join(path).parent().unwrap()).unwrap();
+            std::fs::write(dir.path().join(path), "f\n").unwrap();
+        }
+        let mut index = repo.index().unwrap();
+        index
+            .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+            .unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let sig = git2::Signature::now("t", "t@example.com").unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "c", &tree, &[])
+            .unwrap();
+        std::fs::write(dir.path().join("[ab]/new"), "new\n").unwrap();
+
+        let folder = std::path::Path::new("[ab]");
+        assert!(!is_clean_tracked_folder(&repo, &tree, folder).unwrap());
+        std::fs::remove_file(dir.path().join("[ab]/new")).unwrap();
+        std::fs::write(dir.path().join("a/new"), "new\n").unwrap();
+        assert!(is_clean_tracked_folder(&repo, &tree, folder).unwrap());
+    }
 }
