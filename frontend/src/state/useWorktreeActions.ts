@@ -39,7 +39,8 @@ export function useWorktreeActions(
       // label, not a taken name.
       if (worktreesRef.current.some((worktree) => !worktree.isMain && worktree.name === name)) {
         const message = takenNameMessage("worktree", name, name);
-        setState((prev) => ({ ...prev, error: message }));
+        // `NewWorktreeDialog` shows the failure itself (#1124).
+        setState((prev) => ({ ...prev, error: message, errorSource: { error: message, source: "dialog" } }));
         return message;
       }
       // A taken path is left to the backend, which refuses any existing folder and knows how the
@@ -60,6 +61,7 @@ export function useWorktreeActions(
               },
         () => client.createWorktree(repoPath, name, path, branch, startPoint),
         failedOperation.createWorktree(name),
+        { inDialog: true },
       );
     },
     [client, runOptimisticMutationWithMessage, repoPath, setState],

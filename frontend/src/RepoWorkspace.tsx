@@ -591,7 +591,8 @@ export function RepoWorkspace({
   useOutcomeToasts(appState.state, pushToast, undoToastAction, pullFromToast, pushFromToast);
   // No banner while a dialog handles the same error (#996): the identity dialog, the hook
   // failure's output, the force push confirm. Closing the last two brings it back. A dialog that
-  // shows its own failure (Rename branch, Connect, New pull request) keeps it, Cancel too.
+  // shows its own failure (Rename branch, Create tag, New worktree, Connect, New pull request)
+  // keeps it, Cancel too.
   const { error, errorSource } = appState.state;
   const errorFrom = (source: "dialog" | "read") =>
     error !== null && errorSource?.source === source && errorSource.error === error;
@@ -671,10 +672,8 @@ export function RepoWorkspace({
             const failure = await announce(`Switched to ${branchName}, tracking ${remoteName}/${branchName}`, appState.createBranch, {
               undoable: true,
             })(branchName, `${remoteName}/${branchName}`, true);
-            if (failure !== null) {
-              pushToast(failure);
-              return;
-            }
+            // The banner shows the failure (#1124).
+            if (failure !== null) return;
             await appState.setCurrentUpstream(remoteName, branchName);
             recordRecentBranch(repoPath, branchName);
           })(),
@@ -684,10 +683,7 @@ export function RepoWorkspace({
             const failure = await announce(`Created and switched to ${name}`, appState.createBranch, {
               undoable: true,
             })(name, "HEAD", true);
-            if (failure !== null) {
-              pushToast(failure);
-              return;
-            }
+            if (failure !== null) return;
             recordRecentBranch(repoPath, name);
           })(),
       },

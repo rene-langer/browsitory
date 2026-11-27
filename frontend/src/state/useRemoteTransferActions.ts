@@ -219,12 +219,17 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
   // in `state.error`); returns the message, or `null` when the name is free. `folders` also
   // refuses a name that is a folder of a listed one or the other way round (`v1` and `v1/rc`),
   // which git refuses for refs; remote names aren't refs, so remotes compare exactly.
+  // `inDialog`: the caller's dialog shows the message, so the banner leaves it out (#1124).
   const refuseTakenName = useCallback(
-    (kind: string, existing: string[], name: string, folders: boolean): string | null => {
+    (kind: string, existing: string[], name: string, folders: boolean, inDialog = false): string | null => {
       const clash = folders ? refNameClash(existing, name) : existing.includes(name) ? name : null;
       if (clash === null) return null;
       const message = takenNameMessage(kind, name, clash);
-      setState((prev) => ({ ...prev, error: message }));
+      setState((prev) => ({
+        ...prev,
+        error: message,
+        ...(inDialog ? { errorSource: { error: message, source: "dialog" as const } } : {}),
+      }));
       return message;
     },
     [setState],
@@ -379,7 +384,8 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
   const createTag = useCallback(
     async (name: string, message: string | null, target: string | null) => {
       // A taken tag name would show twice in `TagPanel` (keyed by name) until refused (#413).
-      const refused = refuseTakenName("tag", latest.current.tags.map((tag) => tag.name), name, true);
+      // `CreateTagDialog` shows the failure itself (#1124).
+      const refused = refuseTakenName("tag", latest.current.tags.map((tag) => tag.name), name, true, true);
       if (refused !== null) return refused;
       return runOptimisticMutationWithMessage(
         (prev) =>
@@ -394,6 +400,7 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
               },
         () => client.createTag(repoPath, name, message, target),
         failedOperation.createTag(name),
+        { inDialog: true },
       );
     },
     [client, refuseTakenName, runOptimisticMutationWithMessage, repoPath],
