@@ -2008,10 +2008,10 @@ describe("CommitGraph lines-changed badges (#620)", () => {
   });
 
   it("looks the same as without badges until the numbers arrive", () => {
-    const { container: without } = render(<CommitGraph {...baseProps} />);
-    const plain = without.innerHTML;
-    cleanup();
-    const { container } = render(<CommitGraph {...baseProps} lineStats={new Map()} />);
+    // One graph, rerendered: its row ids come from `useId` (#1139), which a second graph wouldn't share.
+    const { container, rerender } = render(<CommitGraph {...baseProps} />);
+    const plain = container.innerHTML;
+    rerender(<CommitGraph {...baseProps} lineStats={new Map()} />);
     expect(container.innerHTML).toBe(plain);
   });
 
