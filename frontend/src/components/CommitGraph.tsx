@@ -786,9 +786,9 @@ function CommitGraphContent({
       });
       return [
         blocked("Interactive rebase…"),
-        blocked(`Squash ${count} commits`),
-        blocked(`Fixup ${count} commits`),
-        { ...blocked(`Drop ${count} commits`), group: "drop" },
+        blocked(`Squash ${count} commits…`),
+        blocked(`Fixup ${count} commits…`),
+        { ...blocked(`Drop ${count} commits…`), group: "drop" },
       ];
     }
     const { selection: plan } = rebasePlan;
@@ -803,21 +803,21 @@ function CommitGraphContent({
         group: "rebase",
       },
       {
-        label: `Squash ${count} commits`,
+        label: `Squash ${count} commits…`,
         onSelect: act("Squash"),
         disabled: operationsBlocked || !plan.contiguous,
         title: plan.contiguous ? undefined : needsRun,
         group: "rebase",
       },
       {
-        label: `Fixup ${count} commits`,
+        label: `Fixup ${count} commits…`,
         onSelect: act("Fixup"),
         disabled: operationsBlocked || !plan.contiguous,
         title: plan.contiguous ? undefined : needsRun,
         group: "rebase",
       },
       {
-        label: `Drop ${count} commits`,
+        label: `Drop ${count} commits…`,
         onSelect: act("Drop"),
         disabled: operationsBlocked,
         destructive: true,
