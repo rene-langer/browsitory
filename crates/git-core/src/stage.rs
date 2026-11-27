@@ -145,7 +145,7 @@ fn stage_file_unguarded(repo: &git2::Repository, path: &str) -> Result<(), Stage
         // Not in the index (staging the link already took it out): nothing left to stage.
         if index.get_path(rel, 0).is_some() {
             index.remove_path(rel)?;
-            index.write()?;
+            write_index(&mut index)?;
         }
         return Ok(());
     }
@@ -157,7 +157,7 @@ fn stage_file_unguarded(repo: &git2::Repository, path: &str) -> Result<(), Stage
             // add -A`); the folder's files stage on their own (#157).
             if index.get_path(rel, 0).is_some() || has_conflict_entries(&index, path) {
                 index.remove_path(rel)?;
-                index.write()?;
+                write_index(&mut index)?;
             }
             return Ok(());
         }
@@ -172,7 +172,7 @@ fn stage_file_unguarded(repo: &git2::Repository, path: &str) -> Result<(), Stage
     } else {
         index.remove_path(Path::new(path))?;
     }
-    index.write()?;
+    write_index(&mut index)?;
     Ok(())
 }
 
@@ -199,7 +199,7 @@ fn stage_untracked_folder(repo: &git2::Repository, folder: &str) -> Result<(), S
     for file in files.iter().filter(|file| !file.path.ends_with('/')) {
         index.add_path(Path::new(&file.path))?;
     }
-    index.write()?;
+    write_index(&mut index)?;
     Ok(())
 }
 
@@ -351,13 +351,12 @@ pub fn discard_file(repo: &git2::Repository, path: &str) -> Result<(), StageErro
         checkout.force().path(rel).disable_pathspec_match(true);
         let filters = crate::hardlink::on_checkout(repo, &mut checkout);
         // A file another program holds open: say so, not libgit2's raw error (#268).
-        repo.checkout_index(None, Some(&mut checkout))
-            .map_err(|error| {
-                match crate::worktree_guard::held_open_after_checkout(workdir, &error, [path]) {
-                    Some(path) => StageError::FileInUse(path.to_string()),
-                    None => error.into(),
-                }
-            })?;
+        count_checkout(repo.checkout_index(None, Some(&mut checkout))).map_err(|error| {
+            match crate::worktree_guard::held_open_after_checkout(workdir, &error, [path]) {
+                Some(path) => StageError::FileInUse(path.to_string()),
+                None => error.into(),
+            }
+        })?;
         filters.check()?;
     } else {
         // Through the held-folder walker, so a folder swapped for a link after the checks above
@@ -480,7 +479,7 @@ const MAX_NAMED_FAILURES: usize = 3;
 /// `DiscardIncomplete`.
 pub fn discard_all_unstaged(repo: &git2::Repository, paths: &[String]) -> Result<(), StageError> {
     crate::valueless_setting::refuse_for_checkout::<StageError>(repo)?;
-    let conflicted: std::collections::HashSet<String> = crate::status::status(repo)
+    let conflicted: std::collections::HashSet<String> = scan_status(repo)
         .map_err(|e| StageError::Status(e.to_string()))?
         .into_iter()
         .filter(|e| e.kind == crate::status::StatusKind::Conflicted)
@@ -774,7 +773,7 @@ fn reset_entries(
             index.add(&entry)?;
         }
     }
-    index.write()
+    write_index(index)
 }
 
 /// True when the index has a conflict entry (stage 1–3) at `path` or below the folder `path`.
@@ -841,7 +840,7 @@ fn staged_rename_sources(
     repo: &git2::Repository,
     matches: impl Fn(&str) -> bool,
 ) -> Result<Vec<String>, StageError> {
-    let entries = crate::status::status(repo).map_err(|e| StageError::Status(e.to_string()))?;
+    let entries = scan_status(repo).map_err(|e| StageError::Status(e.to_string()))?;
     Ok(entries
         .into_iter()
         .filter(|entry| {
@@ -1213,4 +1212,48 @@ pub fn discard_lines(
         },
         Target::Discard,
     )
+}
+
+/// Writes `index` to its file, counted in tests (#1155: a multi-path call writes it once).
+fn write_index(index: &mut git2::Index) -> Result<(), git2::Error> {
+    #[cfg(test)]
+    work::INDEX_WRITES.with(|count| count.set(count.get() + 1));
+    index.write()
+}
+
+/// A full status scan, counted in tests (#1155: a multi-path call scans once).
+fn scan_status(
+    repo: &git2::Repository,
+) -> Result<Vec<crate::status::StatusEntry>, crate::status::StatusError> {
+    #[cfg(test)]
+    work::STATUS_SCANS.with(|count| count.set(count.get() + 1));
+    crate::status::status(repo)
+}
+
+/// A checkout's result, the checkout counted in tests (#1155).
+fn count_checkout<T>(result: T) -> T {
+    #[cfg(test)]
+    work::CHECKOUTS.with(|count| count.set(count.get() + 1));
+    result
+}
+
+/// What the staging commands did, counted per test thread (#1155).
+#[cfg(test)]
+pub(crate) mod work {
+    use std::cell::Cell;
+
+    thread_local! {
+        pub(crate) static INDEX_WRITES: Cell<usize> = const { Cell::new(0) };
+        pub(crate) static STATUS_SCANS: Cell<usize> = const { Cell::new(0) };
+        pub(crate) static CHECKOUTS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    /// (index writes, status scans, checkouts) since the last call.
+    pub(crate) fn take() -> (usize, usize, usize) {
+        (
+            INDEX_WRITES.with(|count| count.replace(0)),
+            STATUS_SCANS.with(|count| count.replace(0)),
+            CHECKOUTS.with(|count| count.replace(0)),
+        )
+    }
 }
