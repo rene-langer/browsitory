@@ -21,6 +21,12 @@ export interface StatusEntry {
    * Absent on every other entry.
    */
   externalFilter?: string;
+  /**
+   * The custom merge driver (`merge.<name>.driver`, such as `ours`) Browsitory doesn't run
+   * (#1165), on a conflicted file whose `merge` attribute names one: the file is left conflicted
+   * for you to resolve. Absent on every other entry.
+   */
+  mergeDriver?: string;
 }
 
 export type DiffLineOrigin = "Add" | "Remove" | "Context";

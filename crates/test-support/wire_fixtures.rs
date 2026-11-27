@@ -288,6 +288,7 @@ pub fn status_entries() -> Cases<git_core::status::StatusEntry> {
                     kind,
                     untracked_folder: false,
                     external_filter: None,
+                    merge_driver: None,
                 },
             )
         })
@@ -301,6 +302,7 @@ pub fn status_entries() -> Cases<git_core::status::StatusEntry> {
             kind: StatusKind::Renamed,
             untracked_folder: false,
             external_filter: None,
+            merge_driver: None,
         },
     ));
     cases.push(case(
@@ -312,6 +314,7 @@ pub fn status_entries() -> Cases<git_core::status::StatusEntry> {
             kind: StatusKind::New,
             untracked_folder: true,
             external_filter: None,
+            merge_driver: None,
         },
     ));
     // A file under a filter driver Browsitory can't run (#1087).
@@ -324,6 +327,20 @@ pub fn status_entries() -> Cases<git_core::status::StatusEntry> {
             kind: StatusKind::Modified,
             untracked_folder: false,
             external_filter: some("crypt"),
+            merge_driver: None,
+        },
+    ));
+    // A conflicted file under a merge driver Browsitory doesn't run (#1165).
+    cases.push(case(
+        "merge-driver",
+        git_core::status::StatusEntry {
+            path: "version.txt".to_string(),
+            old_path: None,
+            staged: false,
+            kind: StatusKind::Conflicted,
+            untracked_folder: false,
+            external_filter: None,
+            merge_driver: some("ours"),
         },
     ));
     cases
@@ -1902,6 +1919,7 @@ pub fn statuses_with_stamps() -> Cases<git_core::change_stamp::StatusWithStamp> 
                 kind: git_core::status::StatusKind::Modified,
                 untracked_folder: false,
                 external_filter: None,
+                merge_driver: None,
             }],
             stamp: git_core::change_stamp::ChangeStamp {
                 refs: "0123456789abcdef".to_string(),

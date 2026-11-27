@@ -23,6 +23,7 @@ fn entry(path: &str, staged: bool, kind: StatusKind) -> StatusEntry {
         kind,
         untracked_folder: false,
         external_filter: None,
+        merge_driver: None,
     }
 }
 
