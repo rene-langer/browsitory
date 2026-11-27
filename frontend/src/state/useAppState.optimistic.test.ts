@@ -27,8 +27,8 @@ describe("useAppState", () => {
       outcome = await result.current.addRemote("bad", "not-a-url", null);
     });
     // No leaked `"Error: "` prefix — this string is rendered to the user verbatim.
-    expect(outcome).toBe("invalid fetch URL");
-    expect(result.current.state.error).toBe("invalid fetch URL");
+    expect(outcome).toBe("Couldn't add remote bad: invalid fetch URL");
+    expect(result.current.state.error).toBe("Couldn't add remote bad: invalid fetch URL");
     expect(result.current.state.pending).toBe(false);
   });
 
@@ -102,7 +102,7 @@ describe("useAppState", () => {
       rejectAdd?.(new Error("invalid fetch URL"));
       outcome = await addPromise;
     });
-    expect(outcome).toBe("invalid fetch URL");
+    expect(outcome).toBe("Couldn't add remote upstream: invalid fetch URL");
     expect(result.current.state.remotes).toEqual([origin]);
     expect(result.current.state.pending).toBe(false);
   });
@@ -121,7 +121,7 @@ describe("useAppState", () => {
     await act(() => result.current.removeRemote("upstream", false));
 
     expect(result.current.state.remotes).toEqual([remoteA]);
-    expect(result.current.state.error).toBe("remove failed");
+    expect(result.current.state.error).toBe("Couldn't remove remote upstream: remove failed");
   });
 
   it("renameRemote renames the remote in state before the backend call resolves, resolves true on success", async () => {
