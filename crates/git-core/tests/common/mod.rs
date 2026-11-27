@@ -18,6 +18,10 @@ pub fn init_repo() -> (TempDir, Repository) {
         config.set_bool("core.safecrlf", false).unwrap();
         config.set_str("user.email", "test@example.com").unwrap();
         config.set_bool("commit.gpgSign", false).unwrap();
+        // A `git commit` in a test otherwise leaves a detached `git maintenance run --auto`
+        // holding `objects/maintenance.lock` after it returns; `twin` copying the git dir then
+        // lists the lock and fails when it is gone a moment later.
+        config.set_bool("maintenance.auto", false).unwrap();
         // Pin the hooks dir (to git's default) so a developer's global `core.hooksPath` never
         // runs real hooks in the test suite.
         let hooks = repo.path().join("hooks");
