@@ -1632,7 +1632,8 @@ export interface RepoClient {
   initSubmodule(repoPath: string, path: string): Promise<void>;
   updateSubmodule(repoPath: string, path: string, recursive: boolean): Promise<void>;
   listReflogRefs(repoPath: string): Promise<string[]>;
-  getReflog(repoPath: string, reference: string): Promise<ReflogEntry[]>;
+  /** The newest `limit` entries of `reference`'s reflog, newest first (#1161). */
+  getReflog(repoPath: string, reference: string, limit: number): Promise<ReflogEntry[]>;
   restoreReflogEntry(repoPath: string, reference: string, newId: string): Promise<void>;
   listRemotes(repoPath: string): Promise<RemoteInfo[]>;
   listRemoteBranches(repoPath: string, remoteName: string): Promise<string[]>;

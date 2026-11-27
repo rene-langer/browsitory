@@ -74,6 +74,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
           summary: null,
         },
       ],
+      reflogHasMore: false,
       remotes: [{ name: "origin", fetchUrl: "https://example.com/repo.git", pushUrl: null, authMode: null, authUsername: null }],
       tags: [{ name: "v1.0", targetId: "aaa", commitId: "aaa", annotated: false, message: null, taggerName: null, timestamp: null }],
       upstream: { localBranch: "main", remoteName: "origin", remoteBranch: "main" },
@@ -148,6 +149,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     initSubmodule: vi.fn(),
     updateSubmodule: vi.fn(),
     selectReflogReference: vi.fn(),
+    loadMoreReflog: vi.fn(),
     restoreReflogEntry: vi.fn(),
     addRemote: vi.fn(),
     renameRemote: vi.fn(),
@@ -887,8 +889,8 @@ describe("buildCommands", () => {
   });
 
   it("emits no per-entry restore-reflog commands, regardless of reflog size", () => {
-    // state.reflog is an unbounded read of the whole reflog for the selected
-    // reference — a per-entry command would grow without bound. Restoring is
+    // state.reflog holds as many entries of the selected reference's reflog as
+    // its pages loaded (#1161) — a per-entry command would grow with them. Restoring is
     // reachable only via the single "Go to Reflog" navigate command.
     const manyEntries = Array.from({ length: 500 }, (_, i) => ({
       reference: "HEAD@{0}",

@@ -482,7 +482,8 @@ pub(super) fn table() -> Vec<((&'static str, Command), &'static str)> {
         (cmd!(ListReflogRefs), "read"),
         (
             cmd!(GetReflog {
-                reference: s("HEAD")
+                reference: s("HEAD"),
+                limit: 10
             }),
             "read",
         ),

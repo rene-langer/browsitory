@@ -14,6 +14,8 @@ export function ReflogPanel({
   references,
   selectedReference,
   entries,
+  hasMore = false,
+  onLoadMore,
   onSelectReference,
   onRestore,
   operationDisabled,
@@ -21,7 +23,11 @@ export function ReflogPanel({
 }: {
   references: string[];
   selectedReference: string | null;
+  /** The newest entries of the selected reference's reflog (#1161). */
   entries: ReflogEntry[];
+  /** Older entries follow; `onLoadMore` reads them. */
+  hasMore?: boolean;
+  onLoadMore?: () => void;
   onSelectReference: (reference: string) => Promise<void>;
   onRestore: (reference: string, newId: string) => Promise<void>;
   operationDisabled: boolean;
@@ -111,6 +117,16 @@ export function ReflogPanel({
             );
           })}
         </ul>
+      )}
+      {selectedReference !== null && hasMore && (
+        <div className={styles.loadMore}>
+          <span>
+            Showing the latest {entries.length} {entries.length === 1 ? "entry" : "entries"}
+          </span>
+          <button type="button" onClick={onLoadMore}>
+            Load more
+          </button>
+        </div>
       )}
       {restoreConfirmation !== null && (
         // The shared confirmation (#987): the title, what moves and what doesn't, and Undo.

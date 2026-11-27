@@ -18,10 +18,11 @@ pub async fn list_reflog_refs(
 pub async fn get_reflog(
     repo_path: String,
     reference: String,
+    limit: usize,
     state: State<'_, AppState>,
 ) -> Result<Vec<ReflogEntryDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .read(move |w| w.get_reflog(reference))
+        .read(move |w| w.get_reflog(reference, limit))
         .await?
         .into_iter()
         .map(ReflogEntryDto::from)

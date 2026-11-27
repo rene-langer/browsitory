@@ -15,11 +15,13 @@ pub(super) fn list_reflog_refs(params: RepoPathParams, repos: &Repos) -> Result<
 pub(super) struct GetReflogParams {
     repo_path: String,
     reference: String,
+    /// The newest entries to read (#1161).
+    limit: usize,
 }
 
 pub(super) fn get_reflog(params: GetReflogParams, repos: &Repos) -> Result<Value, ErrorDto> {
     let entries: Vec<ReflogEntryDto> = worker_handle(repos, &params.repo_path)?
-        .get_reflog(params.reference)?
+        .get_reflog(params.reference, params.limit)?
         .into_iter()
         .map(ReflogEntryDto::from)
         .collect();

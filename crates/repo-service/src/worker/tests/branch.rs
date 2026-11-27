@@ -149,7 +149,9 @@ fn lists_and_restores_head_reflog_entries_through_the_worker() {
         .expect("list reflog references")
         .iter()
         .any(|reference| reference == "HEAD"));
-    let entries = handle.get_reflog("HEAD".into()).expect("read HEAD reflog");
+    let entries = handle
+        .get_reflog("HEAD".into(), 10)
+        .expect("read HEAD reflog");
     assert_eq!(entries[0].summary.as_deref(), Some("second commit"));
     let first_commit = entries[1].new_id.clone();
 

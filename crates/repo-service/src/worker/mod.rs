@@ -462,6 +462,8 @@ pub(crate) enum Command {
     },
     GetReflog {
         reference: String,
+        /// The newest entries to read (#1161).
+        limit: usize,
         reply: Sender<Result<Vec<ReflogEntry>, ErrorDto>>,
     },
     RestoreReflogEntry {

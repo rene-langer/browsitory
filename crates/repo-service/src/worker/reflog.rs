@@ -13,9 +13,11 @@ pub(super) fn list_refs(repo: &git2::Repository, reply: Sender<Result<Vec<String
 pub(super) fn get(
     repo: &git2::Repository,
     reference: String,
+    limit: usize,
     reply: Sender<Result<Vec<ReflogEntry>, ErrorDto>>,
 ) {
-    let result = git_core::reflog::read_reflog(repo, &reference).map_err(ErrorDto::from_error);
+    let result =
+        git_core::reflog::read_reflog_newest(repo, &reference, limit).map_err(ErrorDto::from_error);
     let _ = reply.send(result);
 }
 
@@ -45,9 +47,15 @@ impl ReadHandle {
         self.read(|reply_tx| Command::ListReflogRefs { reply: reply_tx })
     }
 
-    pub fn get_reflog(&self, reference: String) -> Result<Vec<ReflogEntry>, ErrorDto> {
+    /// The newest `limit` entries of `reference`'s reflog (#1161).
+    pub fn get_reflog(
+        &self,
+        reference: String,
+        limit: usize,
+    ) -> Result<Vec<ReflogEntry>, ErrorDto> {
         self.read(|reply_tx| Command::GetReflog {
             reference,
+            limit,
             reply: reply_tx,
         })
     }

@@ -58,3 +58,14 @@
   min-width: 0;
   max-width: 100%;
 }
+
+/* Older entries follow the ones shown (#1161). */
+.loadMore {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}

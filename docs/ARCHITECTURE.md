@@ -290,7 +290,14 @@ references, the stash list, the configuration, the operation files and the linke
 expanded merges, branches with ahead/behind, tags, the current and every remote's upstreams) when
 their key, the `refs` part plus the graph selection, "Collapse merges" and the limit, equals the
 one they were read with, so staging, unstaging, discarding or editing a file re-reads only the
-status, the stashes, the worktree, submodule and remote lists, HEAD and undo state. The Refresh
+status, the stashes, the worktree, submodule and remote lists, HEAD and undo state. The selected
+reflog goes with the history reads (#1161): it is kept when they are and it was read for the same
+reference and number of entries. It is read in pages, newest first (`get_reflog(reference,
+limit)`, `git_core::reflog::read_reflog_newest`: only the entries sent get their commit's
+summary looked up); the frontend asks for one entry more than it shows to know whether older
+ones follow, and **Load more** reads `REFLOG_PAGE_SIZE` (200) more. A reflog that changes
+without a ref moving (`git reflog expire` in a terminal) shows on the next Refresh command or
+ref change. The Refresh
 command (`refresh({ full: true })`), a failed refresh and a missing stamp read everything. When the
 history reads do run, the worker keeps each branch's ahead/behind count by its pair of tips
 (`git_core::ahead_behind::AheadBehindCache`, #112): only a branch or upstream that moved is
