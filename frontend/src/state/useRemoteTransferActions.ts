@@ -251,6 +251,7 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
                 remotes: [...prev.remotes, { name, fetchUrl, pushUrl, authMode: null, authUsername: null }],
               },
         () => client.addRemote(repoPath, name, fetchUrl, pushUrl),
+        failedOperation.addRemote(name),
       );
     },
     [client, refuseTakenName, runOptimisticMutationWithMessage, repoPath],
@@ -269,6 +270,7 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
                 remotes: prev.remotes.map((remote) => (remote.name === oldName ? { ...remote, name: newName } : remote)),
               },
         () => client.renameRemote(repoPath, oldName, newName),
+        failedOperation.renameRemote(oldName, newName),
       );
     },
     [client, refuseTakenName, runOptimisticMutationWithOutcome, repoPath],
@@ -281,6 +283,7 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
           remotes: prev.remotes.map((remote) => (remote.name === name ? { ...remote, fetchUrl, pushUrl } : remote)),
         }),
         () => client.updateRemoteUrls(repoPath, name, fetchUrl, pushUrl),
+        failedOperation.editRemote(name),
       ),
     [client, runOptimisticMutation, repoPath],
   );
@@ -289,21 +292,29 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
       runOptimisticMutation(
         (prev) => ({ ...prev, remotes: prev.remotes.filter((remote) => remote.name !== name) }),
         () => client.removeRemote(repoPath, name, clearUpstreams),
+        failedOperation.removeRemote(name),
       ),
     [client, runOptimisticMutation, repoPath],
   );
   const saveHttpsCredential = useCallback(
     (remoteName: string, username: string, token: string) =>
-      runMutation(() => client.saveHttpsCredential(repoPath, remoteName, username, token)),
+      runMutation(
+        () => client.saveHttpsCredential(repoPath, remoteName, username, token),
+        failedOperation.saveCredential(remoteName),
+      ),
     [client, runMutation, repoPath],
   );
   const forgetHttpsCredential = useCallback(
-    (remoteName: string) => runMutation(() => client.forgetHttpsCredential(repoPath, remoteName)),
+    (remoteName: string) =>
+      runMutation(() => client.forgetHttpsCredential(repoPath, remoteName), failedOperation.forgetCredential(remoteName)),
     [client, runMutation, repoPath],
   );
   const setRemoteAuthMode = useCallback(
     (remoteName: string, mode: RemoteAuthMode, username: string | null) =>
-      runMutationWithOutcome(() => client.setRemoteAuthMode(repoPath, remoteName, mode, username)),
+      runMutationWithOutcome(
+        () => client.setRemoteAuthMode(repoPath, remoteName, mode, username),
+        failedOperation.remoteAuthMode(remoteName),
+      ),
     [client, runMutationWithOutcome, repoPath],
   );
   const setCurrentUpstream = useCallback(
@@ -315,6 +326,7 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
           return { ...prev, upstream: { localBranch, remoteName, remoteBranch }, pullOutcome: null };
         },
         () => client.setCurrentUpstream(repoPath, remoteName, remoteBranch),
+        failedOperation.setUpstream(remoteName, remoteBranch),
       ),
     [client, runOptimisticMutation, repoPath],
   );
@@ -323,6 +335,7 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
       runOptimisticMutation(
         (prev) => ({ ...prev, upstream: null, pullOutcome: null }),
         () => client.clearCurrentUpstream(repoPath),
+        failedOperation.clearUpstream(),
       ),
     [client, runOptimisticMutation, repoPath],
   );

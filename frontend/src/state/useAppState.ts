@@ -27,6 +27,7 @@ import type {
 import { type SavedGraphSelection, toGraphSelection } from "./graphSelection";
 import { failureError, useMutationRunner, withoutStaleErrorHint, withoutStaleErrorSource } from "./useMutationRunner";
 import { errorAfterOwnSuccess, forgettingStaleOwnErrors, useOwnError } from "./ownError";
+import { failedOperation } from "../lib/operationErrors";
 import { readFetchPrune } from "../lib/fetchPrune";
 import { MERGE_PAGE_SIZE, type MergeExpansion, withExpandedMerges } from "../lib/mergeExpansion";
 import { applyGraphRefresh } from "../lib/graphRefresh";
@@ -820,7 +821,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     mutationRunner;
 
   const setCollapseMerges = useCallback(
-    (collapse: boolean) => runMutation(() => client.setGraphCollapseMerges(repoPath, collapse)),
+    (collapse: boolean) =>
+      runMutation(() => client.setGraphCollapseMerges(repoPath, collapse), failedOperation.collapseMerges(collapse)),
     [client, repoPath, runMutation],
   );
 
