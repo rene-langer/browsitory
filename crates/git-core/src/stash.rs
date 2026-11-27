@@ -356,6 +356,33 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
                 StashError::Git(error)
             }
         })?;
+    if message.is_none() {
+        reencode_default_message(repo)?;
+    }
+    Ok(())
+}
+
+/// libgit2 names a stash after HEAD's subject as stored, in any encoding; git re-encodes it to
+/// UTF-8 (#1203). When the two differ, the stash just saved gets git's message in the stash
+/// list (`refs/stash`'s reflog).
+fn reencode_default_message(repo: &Repository) -> Result<(), StashError> {
+    let base = StashBase::of(repo)?;
+    if crate::message_text::summary(&base.commit).as_bytes()
+        == base.commit.summary_bytes().unwrap_or_default()
+    {
+        return Ok(());
+    }
+    let mut reflog = repo.reflog("refs/stash")?;
+    let Some(stash) = reflog.get(0).map(|entry| entry.id_new()) else {
+        return Ok(());
+    };
+    reflog.remove(0, false)?;
+    reflog.append(
+        stash,
+        &base.signature,
+        Some(&format!("WIP on {}", base.message)),
+    )?;
+    reflog.write()?;
     Ok(())
 }
 
@@ -558,7 +585,7 @@ impl<'r> StashBase<'r> {
             .to_string();
         let message = format!(
             "{branch}: {short_id} {}",
-            commit.summary().ok().flatten().unwrap_or_default()
+            crate::message_text::summary(&commit)
         );
         Ok(StashBase {
             signature,
@@ -1760,13 +1787,7 @@ pub fn list_stashes_cached(
     cache: &mut StashCountCache,
 ) -> Result<Vec<StashEntry>, StashError> {
     let mut entries = Vec::new();
-    // `stash_foreach` requires `&mut self` despite being read-only — a libgit2 API constraint,
-    // not a design choice (see the design spec's "&mut Repository wrinkle" note).
-    let mut listed = Vec::new();
-    repo.stash_foreach(|index, message, oid| {
-        listed.push((index, message.to_string(), *oid));
-        true
-    })?;
+    let listed = stash_reflog(repo)?;
     cache
         .counts
         .retain(|id, _| listed.iter().any(|(_, _, listed)| listed == id));
@@ -1791,6 +1812,25 @@ pub fn list_stashes_cached(
         });
     }
     Ok(entries)
+}
+
+/// The stash list as libgit2's `stash_foreach` reads it (`refs/stash`'s reflog, newest first),
+/// each message read as UTF-8 with any other byte as Latin-1: libgit2 names a stash after HEAD's
+/// subject as stored, in any encoding, and git2's `stash_foreach` panics on that (#1203).
+fn stash_reflog(repo: &Repository) -> Result<Vec<(usize, String, git2::Oid)>, StashError> {
+    match repo.find_reference("refs/stash") {
+        Err(error) if error.code() == ErrorCode::NotFound => return Ok(Vec::new()),
+        result => result?,
+    };
+    Ok(repo
+        .reflog("refs/stash")?
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            let message = crate::message_text::text(entry.message_bytes().unwrap_or_default());
+            (index, message, entry.id_new())
+        })
+        .collect())
 }
 
 /// A stash's file count (tracked changes against its base, plus untracked files) and whether its
@@ -2042,6 +2082,7 @@ fn apply_routes(
             ),
         }
     })?;
+    crate::merge_driver::keep_ours(repo);
     let mut files = Vec::new();
     let repo_index = repo.index()?;
     if repo_index.has_conflicts() {
@@ -2533,6 +2574,7 @@ fn apply_in_order(
     }
     repo_index.write()?;
     if conflicted {
+        crate::merge_driver::keep_ours(repo);
         Ok(StashApplyOutcome::Conflicted {
             files: crate::file_folder::conflicted_files(&repo_index)?,
         })

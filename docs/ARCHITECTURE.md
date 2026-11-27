@@ -1737,7 +1737,15 @@ certificate.
   iconv). After a paused cherry-pick or rebase step, libgit2's `MERGE_MSG` (the raw message) is
   rewritten in UTF-8, as git writes it, for the commit box and `git commit`; `merge_message`
   reads the file's bytes, since git2's `Repository::message` panics on a byte that isn't UTF-8.
-  Twinned with git in `tests/message_encoding.rs`.
+  Every subject and message shown or written from a commit reads it the same way (#1203): the
+  graph, the commit header, the rebase planner, the reflog, a stopped or terminal sequence, a
+  path-limited stash's message, a squash merge's `SQUASH_MSG`, a file/folder conflict's label
+  and Export as patch. A reflog message holds whatever bytes its writer gave (git writes the
+  subject as committed), so the reflog and the stash list read it as UTF-8 with the Latin-1
+  fallback; the stash list reads `refs/stash`'s reflog itself, since git2's `stash_foreach`
+  panics on such a message. libgit2's own stash names HEAD's subject as stored, so a stash on
+  such a HEAD gets git's UTF-8 message in its reflog entry afterwards (the stash commit keeps
+  libgit2's). Twinned with git in `tests/message_encoding.rs`.
 - To git a paused Browsitory rebase is a cherry-pick on a detached HEAD: an edit or conflict
   stop is `CherryPick` with `CHERRY_PICK_HEAD` = the step (plus `MERGE_MSG` and, for a conflict,
   the conflicted index); an error stop (a step refused, e.g. a local edit in the way) is `Clean`.
@@ -2674,15 +2682,28 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   config level, any value; a config it can't read or a panic counts too) and `GIT_PASSTHROUGH`
   otherwise, so an unconfigured name merges as text, as in git. So every merge libgit2 makes
   for the app sees it: merge (a pull's too), squash, cherry-pick, revert, rebase step, stash
-  apply and pop, and the merges in memory the checks compute. The work tree gets libgit2's
-  text merge of the file (conflict markers where the sides overlap; git's `binary` driver would
-  leave ours), the index the three stages. A driver configured under a built-in name
+  apply and pop, and the merges in memory the checks compute. The index gets the three
+  stages; the work tree our side (see `keep_ours` below). A driver configured under a built-in name
   (`merge.text.driver`) isn't caught: libgit2 uses its own, where git would run the command.
   `merge_driver::annotate`, in the app's status reads (`status_refreshing_index`,
   `status_with_stamp`), sets `StatusEntry.merge_driver` (wire `mergeDriver`) on a conflicted
   entry whose driver is configured; the Changes pane marks the row ("'ours' merge driver") and
   says above the conflict that the driver wasn't run (`lib/mergeDrivers`). Twinned with `git
   merge` for the built-in drivers in `tests/merge_driver.rs`.
+- Our side for a file that isn't merged as text (#1204, `merge_driver::keep_ours`): libgit2's
+  checkout writes every conflicted file as a text merge (`checkout_write_merge`), whatever its
+  driver, so a `-merge` or `merge=binary` file whose sides didn't overlap looked merged and
+  Mark resolved staged the text merge. git's binary driver leaves ours. After each operation
+  stops with conflicts (`merge_outside_cone` for merge, squash and pull, `pick::apply_step_here`,
+  `rebase::pick_step`, both stash apply routes, and `file_folder::check_out_as_conflicts` for the
+  file/folder routes), `keep_ours` checks out stage 2 (`use_ours`, forced, only those paths,
+  with `hardlink::on_checkout`'s callbacks, so through the filters) for each conflict with a
+  regular file on both our and their side whose driver (`driver`: the attribute, else
+  `merge.default`) is unset, `binary` or configured. The index keeps the three stages. Best
+  effort: a failed checkout leaves libgit2's text merge, still conflicted. Attributes are read
+  after the operation's checkout, as `annotate` reads them; git reads them before, which
+  differs only when the merge changes the file's own attribute. Twinned with git in
+  `tests/merge_driver.rs`.
 - Folder/link pairs in the index (#157): `stage_file` of `d/f` below a symlinked `d` removes
   `d/f`'s stage-0 entry (stages its deletion; git sees no file there) and reads nothing through
   the link; conflict entries there are still refused (`BeyondSymlink`), as are hunk and line

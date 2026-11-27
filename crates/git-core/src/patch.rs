@@ -303,7 +303,7 @@ pub fn commits_patch(
         let mut diff =
             repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut opts))?;
         crate::diff::detect_renames(&mut diff)?;
-        let message = String::from_utf8_lossy(commit.message_bytes()).into_owned();
+        let message = crate::message_text::message(&commit);
         let (summary, body) = split_message(&message);
         let author = commit.author();
         let mut email_opts = git2::EmailCreateOptions::new();

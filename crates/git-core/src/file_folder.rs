@@ -203,6 +203,7 @@ where
         }
     }
     index.write()?;
+    crate::merge_driver::keep_ours(repo);
     Ok(index)
 }
 
@@ -223,7 +224,7 @@ pub(crate) fn conflicted_files(index: &git2::Index) -> Result<Vec<String>, git2:
 /// (a revert's is `parent of ` and that).
 pub(crate) fn commit_label(commit: &git2::Commit<'_>) -> Result<String, git2::Error> {
     let short = commit.as_object().short_id()?;
-    let summary = commit.summary().ok().flatten().unwrap_or("");
+    let summary = crate::message_text::summary(commit);
     Ok(format!(
         "{} ({summary})",
         short.as_str().unwrap_or_default()

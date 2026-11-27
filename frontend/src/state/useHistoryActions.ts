@@ -3,6 +3,7 @@ import {
   errorKind,
   type AmendOptions,
   type ConfirmedAbort,
+  type HeadInfo,
   type PickOutcome,
   type RepoClient,
   type ResetMode,
@@ -13,7 +14,7 @@ import {
 import type { AppState } from "./useAppState";
 import type { RunMutation, RunMutationWithOutcome } from "./useMutationRunner";
 import { hookFailedMessage, type HookRetry } from "../lib/hookFailure";
-import { failedOperation, FailureWithNextStep, hookNextStep } from "../lib/operationErrors";
+import { failedOperation, FailureWithNextStep, hookNextStep, type FailedOperation } from "../lib/operationErrors";
 import { failureError } from "./useMutationRunner";
 
 const NO_AMEND_OPTIONS: AmendOptions = { author: null, trailers: [] };
@@ -58,19 +59,25 @@ export function useHistoryActions(
   setState: (updater: (prev: AppState) => AppState) => void,
   /** HEAD as last read, to tell whether a failed pick changed anything. */
   headId: string | null,
+  /** The stored and the terminal sequence as last read: a failed Abort names its kind (#1205). */
+  sequences: Pick<HeadInfo, "sequence" | "terminalSequence">,
 ): HistoryActions {
   const headBefore = useRef(headId);
   useEffect(() => {
     headBefore.current = headId;
   }, [headId]);
+  const sequencesNow = useRef(sequences);
+  useEffect(() => {
+    sequencesNow.current = sequences;
+  }, [sequences]);
   // Runs `call` as a mutation and hands back its result; `null` when it threw (runMutation has
-  // put the error into `state.error`).
+  // put the error into `state.error`, after `operation` when given).
   const withOutcome = useCallback(
-    async <T,>(call: () => Promise<T>): Promise<T | null> => {
+    async <T,>(call: () => Promise<T>, operation?: FailedOperation): Promise<T | null> => {
       let result: T | null = null;
       await runMutation(async () => {
         result = await call();
-      });
+      }, operation);
       return result;
     },
     [runMutation],
@@ -186,10 +193,15 @@ export function useHistoryActions(
     [client, runRepoChanging, repoPath, setState],
   );
   const abortSequence = useCallback(
-    (confirmed?: ConfirmedAbort) =>
-      withOutcome(() =>
-        confirmed === undefined ? client.abortSequence(repoPath) : client.abortSequence(repoPath, confirmed),
-      ),
+    (confirmed?: ConfirmedAbort) => {
+      // `confirmed` comes with a terminal sequence's Abort; the stored one is aborted otherwise.
+      const { sequence, terminalSequence } = sequencesNow.current;
+      const kind = (confirmed === undefined ? sequence?.kind : terminalSequence?.kind) ?? null;
+      return withOutcome(
+        () => (confirmed === undefined ? client.abortSequence(repoPath) : client.abortSequence(repoPath, confirmed)),
+        failedOperation.abortSequence(kind),
+      );
+    },
     [client, withOutcome, repoPath],
   );
   const resetToCommit = useCallback(

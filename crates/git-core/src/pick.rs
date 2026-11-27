@@ -372,7 +372,7 @@ pub fn terminal_sequence(repo: &Repository) -> Option<TerminalSequence> {
         started_at: started.map(|oid| oid.to_string()).unwrap_or_default(),
         started_at_summary: started_commit
             .as_ref()
-            .and_then(|commit| commit.summary().ok().flatten().map(str::to_string))
+            .map(crate::message_text::summary)
             .unwrap_or_default(),
         rewinds,
         commits_to_remove,
@@ -703,6 +703,7 @@ fn apply_step_here(
             error,
         ));
     }
+    crate::merge_driver::keep_ours(repo);
     if matches!(kind, Kind::CherryPick) {
         // A paused pick's `MERGE_MSG` in UTF-8, as git writes it (#1149): the commit box offers
         // it. Left as libgit2 wrote it if that fails.
@@ -960,7 +961,7 @@ fn run(repo: &Repository, mut state: SequenceState, hooks: &mut HookOptions<'_>)
             let kept = match repo.head().and_then(|head| head.peel_to_commit()) {
                 Ok(head) => {
                     state.expected_head = head.id().to_string();
-                    head.summary().ok().flatten().unwrap_or("").to_string()
+                    crate::message_text::summary(&head)
                 }
                 Err(error) => return SequenceRun::stopped(error, state),
             };

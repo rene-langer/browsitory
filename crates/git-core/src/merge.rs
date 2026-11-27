@@ -427,8 +427,10 @@ fn merge_outside_cone(
         let mut checkout = git2::build::CheckoutBuilder::new();
         let filters = crate::hardlink::on_checkout(repo, &mut checkout);
         repo.merge(&[their_annotated], None, Some(&mut checkout))?;
-        Ok(filters.check()?)
-    })
+        Ok::<(), MergeError>(filters.check()?)
+    })?;
+    crate::merge_driver::keep_ours(repo);
+    Ok(())
 }
 
 /// `git merge --squash`: merge into the index and worktree, write `SQUASH_MSG`, and leave no
@@ -480,7 +482,7 @@ fn build_squash_message(repo: &Repository, their_id: git2::Oid) -> Result<String
             String::from_utf8_lossy(author.name_bytes()),
             String::from_utf8_lossy(author.email_bytes()),
         ));
-        let body = String::from_utf8_lossy(commit.message_bytes()).into_owned();
+        let body = crate::message_text::message(&commit);
         for line in body.trim_end_matches('\n').lines() {
             message.push_str("    ");
             message.push_str(line);

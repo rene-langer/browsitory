@@ -41,6 +41,23 @@ fn list_stashes_reports_the_most_recently_saved_stash_first() {
     assert_ne!(stashes[0].commit_id, stashes[1].commit_id);
 }
 
+/// An unreadable `refs/stash` fails the stash list, as libgit2's `stash_foreach` failed it
+/// before the list read the reflog itself (#1203). git lists nothing then, which would hide
+/// the stashes without saying why.
+#[test]
+fn list_stashes_fails_on_an_unreadable_stash_ref() {
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "initial commit");
+    write_file(dir.path(), "file.txt", "v2");
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+    std::fs::write(repo.path().join("refs").join("stash"), "garbage\n").unwrap();
+
+    let listed = git_core::stash::list_stashes(&mut repo);
+
+    assert!(listed.is_err(), "{listed:?}");
+}
+
 #[test]
 fn list_stashes_reports_branch_time_file_count_and_staged_changes() {
     // #657: "On main · 2 days ago · 3 files", and whether "Apply as unstaged" differs.

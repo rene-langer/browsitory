@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { RepoError, type HeadInfo, type RepoClient, type StashEntry } from "../ipc/RepoClient";
+import { RepoError, type ConfirmedAbort, type HeadInfo, type RepoClient, type StashEntry, type TerminalSequence } from "../ipc/RepoClient";
 import { fakeRepoClient } from "../test/fakeRepoClient";
 import { useAppState, type UseAppStateResult } from "./useAppState";
 import { TEST_REPO_PATH, transferClient } from "./useAppStateTestClient";
@@ -26,6 +26,22 @@ function rejects(): () => Promise<never> {
     throw new RepoError("Other", RAW);
   };
 }
+
+/** `getHeadInfo` answering the empty repository's head with `extra` on top. */
+function headWith(extra: Partial<HeadInfo>): RepoClient["getHeadInfo"] {
+  return async () => ({ ...(await fakeRepoClient({}, "empty").getHeadInfo(TEST_REPO_PATH)), ...extra });
+}
+
+const terminalRevert: TerminalSequence = {
+  kind: "Revert",
+  pausedOnConflict: true,
+  startedAt: ID,
+  startedAtSummary: "start",
+  rewinds: false,
+  commitsToRemove: 0,
+};
+
+const confirmedAbort: ConfirmedAbort = { headId: ID, startedAt: ID, rewinds: false, commitsToRemove: 0, pausedOnConflict: true };
 
 async function failed(overrides: Partial<RepoClient>, run: (app: UseAppStateResult) => Promise<unknown>) {
   const { result } = renderHook(() => useAppState(transferClient({ listStashes: async () => [stash], ...overrides }), TEST_REPO_PATH));
@@ -153,6 +169,28 @@ describe("a failed operation's banner (#1032)", () => {
     ],
     ["abort a rebase", { abortRebase: rejects() }, (app) => app.abortRebase(), "Couldn't abort the rebase", `${LOCKED}, then abort again.`],
     ["abort a merge", { abortMerge: rejects() }, (app) => app.abortMerge(), "Couldn't abort the merge", `${LOCKED}, then abort again.`],
+    // #1205: the kind comes from the stored sequence, or for a terminal one from that.
+    [
+      "abort a cherry-pick",
+      { abortSequence: rejects(), getHeadInfo: headWith({ sequence: { kind: "CherryPick", currentStep: 1, totalSteps: 2, currentCommit: ID } }) },
+      (app) => app.abortSequence(),
+      "Couldn't abort the cherry-pick",
+      `${LOCKED}, then abort again.`,
+    ],
+    [
+      "abort a revert",
+      { abortSequence: rejects(), getHeadInfo: headWith({ sequence: { kind: "Revert", currentStep: 1, totalSteps: 2, currentCommit: ID } }) },
+      (app) => app.abortSequence(),
+      "Couldn't abort the revert",
+      `${LOCKED}, then abort again.`,
+    ],
+    [
+      "abort a revert started in a terminal",
+      { abortSequence: rejects(), getHeadInfo: headWith({ terminalSequence: terminalRevert }) },
+      (app) => app.abortSequence(confirmedAbort),
+      "Couldn't abort the revert",
+      `${LOCKED}, then abort again.`,
+    ],
     [
       "cherry-pick several commits",
       { cherryPickMany: rejects() },

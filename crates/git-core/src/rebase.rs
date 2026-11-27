@@ -249,12 +249,7 @@ pub fn commits_since(repo: &Repository, onto: &str) -> Result<Vec<RebasePlanComm
         commits.push(RebasePlanCommit {
             short_id: id[..7].to_string(),
             id,
-            summary: commit
-                .summary()
-                .ok()
-                .flatten()
-                .unwrap_or_default()
-                .to_string(),
+            summary: crate::message_text::summary(&commit),
             author_name: commit.author().name().ok().unwrap_or_default().to_string(),
             timestamp: commit.time().seconds(),
             merge: commit.parent_count() > 1,
@@ -1186,6 +1181,7 @@ fn pick_step(
             error,
         ));
     }
+    crate::merge_driver::keep_ours(repo);
     Ok(())
 }
 
