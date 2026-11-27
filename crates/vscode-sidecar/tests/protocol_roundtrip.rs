@@ -579,6 +579,51 @@ fn opening_a_repo_adds_it_to_recent_repos() {
     assert!(paths.iter().any(|p| p == &repo_path));
 }
 
+/// #1128: `config.toml`'s open tabs belong to the desktop app. The VSCode extension host keeps
+/// each window's tabs itself, so the sidecar neither answers nor writes them.
+#[test]
+fn the_sidecar_leaves_the_desktop_apps_open_tabs_alone() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let config_file = config_dir.join("config.toml");
+    let desktop = vec![config::OpenRepoEntry {
+        path: "/repos/desktop".into(),
+        workspace_id: None,
+    }];
+    config::set_open_repos_at(
+        &config_file,
+        &desktop,
+        Some(std::path::Path::new("/repos/desktop")),
+    )
+    .unwrap();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+
+    let persist = sidecar.call(
+        1,
+        "persist_open_repos",
+        serde_json::json!({
+            "entries": [{"path": "/repos/vscode", "workspaceId": null}],
+            "activePath": "/repos/vscode",
+        }),
+    );
+    assert_eq!(
+        persist["error"]["message"],
+        "unknown method: persist_open_repos"
+    );
+    let listed = sidecar.call(2, "list_open_repos", serde_json::json!({}));
+    assert_eq!(
+        listed["error"]["message"],
+        "unknown method: list_open_repos"
+    );
+
+    let (entries, active) = config::list_open_repos_at(&config_file).unwrap();
+    let paths: Vec<_> = entries.iter().map(|entry| entry.path.clone()).collect();
+    assert_eq!(paths, vec![std::path::PathBuf::from("/repos/desktop")]);
+    assert_eq!(
+        active.as_deref(),
+        Some(std::path::Path::new("/repos/desktop"))
+    );
+}
+
 #[test]
 fn user_commands_round_trip_app_wide_and_per_repository() {
     let (_guard, config_dir) = ConfigDirGuard::new();

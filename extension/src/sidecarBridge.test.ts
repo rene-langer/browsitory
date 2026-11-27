@@ -1172,3 +1172,93 @@ describe("SidecarBridge stdout framing", () => {
     expect(postToWebview).toHaveBeenNthCalledWith(3, small2);
   });
 });
+
+// #1128 (owner decision): each VSCode window keeps its own tabs, in its workspaceState; the
+// desktop app keeps its tabs in config.toml, which the extension neither reads nor writes.
+describe("SidecarBridge open tabs per window (#1128)", () => {
+  const tabs = {
+    entries: [
+      { path: "/repos/a", workspaceId: null },
+      { path: "/repos/b", workspaceId: "ws-1" },
+    ],
+    activePath: "/repos/b",
+  };
+
+  it("keeps the window's open tabs in its workspaceState, without the sidecar", async () => {
+    const { bridge, spawn, postToWebview, workspaceUpdate, update } = createBridge();
+
+    await bridge.handleWebviewMessage({ jsonrpc: "2.0", id: 1, method: "persist_open_repos", params: tabs });
+    await bridge.handleWebviewMessage({ jsonrpc: "2.0", id: 2, method: "list_open_repos", params: {} });
+
+    expect(spawn).not.toHaveBeenCalled();
+    expect(workspaceUpdate).toHaveBeenCalledWith("openRepos", tabs);
+    expect(update).not.toHaveBeenCalledWith("openRepos", expect.anything());
+    expect(postToWebview.mock.calls.map(([message]) => message)).toEqual([
+      { jsonrpc: "2.0", id: 1, result: null },
+      { jsonrpc: "2.0", id: 2, result: tabs },
+    ]);
+  });
+
+  it("answers no tabs in a window that saved none, without asking the sidecar", async () => {
+    const { bridge, spawn, postToWebview } = createBridge();
+
+    await bridge.handleWebviewMessage({ jsonrpc: "2.0", id: 3, method: "list_open_repos", params: {} });
+
+    expect(spawn).not.toHaveBeenCalled();
+    expect(postToWebview).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 3,
+      result: { entries: [], activePath: null },
+    });
+  });
+
+  it("answers no tabs when the stored state is malformed", async () => {
+    const { bridge, postToWebview, workspaceUpdate } = createBridge();
+    await workspaceUpdate("openRepos", { entries: [{ path: 7 }], activePath: null });
+
+    await bridge.handleWebviewMessage({ jsonrpc: "2.0", id: 4, method: "list_open_repos", params: {} });
+
+    expect(postToWebview).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 4,
+      result: { entries: [], activePath: null },
+    });
+  });
+
+  it.each([
+    ["entries that aren't a list", { entries: "x", activePath: null }],
+    ["an entry without workspaceId", { entries: [{ path: "/repos/a" }], activePath: null }],
+    ["an entry with another key", { entries: [{ path: "/repos/a", workspaceId: null, x: 1 }], activePath: null }],
+    ["a path that isn't a string", { entries: [{ path: 1, workspaceId: null }], activePath: null }],
+    ["an activePath that isn't a string or null", { entries: [], activePath: 3 }],
+    ["a missing activePath", { entries: [] }],
+  ])("refuses persist_open_repos with %s and keeps the stored tabs", async (_name, params) => {
+    const { bridge, postToWebview, workspaceUpdate } = createBridge({ openRepos: ["/repos/kept"] });
+
+    await bridge.handleWebviewMessage({ jsonrpc: "2.0", id: 5, method: "persist_open_repos", params });
+
+    expect(workspaceUpdate).not.toHaveBeenCalled();
+    expect(postToWebview).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 5,
+      error: { code: -32602, message: expect.stringContaining("persist_open_repos") },
+    });
+  });
+
+  it("reopens the tabs this window saved after the sidecar restarts", async () => {
+    const first = new FakeSidecar();
+    const replacement = new FakeSidecar();
+    const { bridge } = createBridge({ spawnResults: [first, replacement] });
+    await bridge.handleWebviewMessage({ jsonrpc: "2.0", id: 6, method: "get_status", params: { repoPath: "/repos/a" } });
+    await bridge.handleWebviewMessage({ jsonrpc: "2.0", id: 7, method: "persist_open_repos", params: tabs });
+    first.emit("exit", 1, null);
+
+    const handling = bridge.handleWebviewMessage({
+      jsonrpc: "2.0", id: 8, method: "get_status", params: { repoPath: "/repos/a" },
+    });
+    await completePersistedRepositoryRestore(replacement, ["/repos/a", "/repos/b"]);
+    await handling;
+
+    expect(writtenRequest(replacement, 2)).toMatchObject({ id: 8, method: "get_status" });
+  });
+});
