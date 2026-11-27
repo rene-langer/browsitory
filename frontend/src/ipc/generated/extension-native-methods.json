@@ -1,6 +1,7 @@
 [
   "get_app_version",
   "get_last_seen_version",
+  "list_open_repos",
   "log_frontend_error",
   "open_diff_tool",
   "open_external_url",
@@ -9,6 +10,7 @@
   "open_patch_file",
   "open_terminal",
   "open_vscode_keybindings",
+  "persist_open_repos",
   "pick_repo_folder",
   "reveal_in_file_manager",
   "run_vscode_git_command",

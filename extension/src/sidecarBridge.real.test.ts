@@ -80,11 +80,19 @@ describe.skipIf(sidecarMissing)("SidecarBridge with the real vscode-sidecar", ()
     const children: ChildProcessWithoutNullStreams[] = [];
     const messages: JsonRpcMessage[] = [];
     const diagnostics: string[] = [];
+    // The window's state, where `persist_open_repos` keeps the open tabs (#1128).
+    const windowState = new Map<string, unknown>();
     const context = {
       extension: { packageJSON: { version: "1.2.3" } },
       globalState: {
         get: () => undefined,
         update: async () => undefined,
+      },
+      workspaceState: {
+        get: (key: string) => windowState.get(key),
+        update: async (key: string, value: unknown) => {
+          windowState.set(key, value);
+        },
       },
     } as unknown as ExtensionContext;
     const bridge = new SidecarBridge({

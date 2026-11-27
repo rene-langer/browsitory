@@ -151,11 +151,11 @@
         },
         {
           "command": "browsitory.showFileHistory",
-          "when": "resourceScheme == file"
+          "when": "resourceScheme =~ /^(file|vscode-remote)$/"
         },
         {
           "command": "browsitory.showLineHistory",
-          "when": "editorTextFocus && resourceScheme == file"
+          "when": "editorTextFocus && resourceScheme =~ /^(file|vscode-remote)$/"
         },
         {
           "command": "browsitory.showCommit",
@@ -224,31 +224,31 @@
       "explorer/context": [
         {
           "command": "browsitory.openRepository",
-          "when": "explorerResourceIsFolder && resourceScheme == file",
+          "when": "explorerResourceIsFolder && resourceScheme =~ /^(file|vscode-remote)$/",
           "group": "browsitory@1"
         },
         {
           "command": "browsitory.showFileHistory",
-          "when": "!explorerResourceIsFolder && resourceScheme == file",
+          "when": "!explorerResourceIsFolder && resourceScheme =~ /^(file|vscode-remote)$/",
           "group": "browsitory@2"
         }
       ],
       "editor/title/context": [
         {
           "command": "browsitory.showFileHistory",
-          "when": "resourceScheme == file",
+          "when": "resourceScheme =~ /^(file|vscode-remote)$/",
           "group": "browsitory@1"
         }
       ],
       "editor/context": [
         {
           "command": "browsitory.showFileHistory",
-          "when": "resourceScheme == file",
+          "when": "resourceScheme =~ /^(file|vscode-remote)$/",
           "group": "browsitory@1"
         },
         {
           "command": "browsitory.showLineHistory",
-          "when": "resourceScheme == file",
+          "when": "resourceScheme =~ /^(file|vscode-remote)$/",
           "group": "browsitory@2"
         }
       ],
