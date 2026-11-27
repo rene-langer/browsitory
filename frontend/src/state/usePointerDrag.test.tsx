@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { useLayoutEffect } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dropTargetProps, usePointerDrag, type PointerDragOptions } from "./usePointerDrag";
 
@@ -162,6 +163,35 @@ describe("usePointerDrag", () => {
     act(() => {
       fireEvent.pointerUp(window, { clientX: 10, clientY: 100 });
     });
+  });
+
+  // #1207: a pointer event can arrive right after a render is committed, before React runs that
+  // render's passive effects (on a loaded machine a test's `findByText` resolved in that gap).
+  // It must already see that render's callbacks: the RebasePlanner's `onStart` looked up the
+  // dragged row in the rows of the render before they loaded and announced nothing.
+  it("calls the callbacks of the render just committed, before its effects run", () => {
+    const started: string[] = [];
+    function Latest({ label }: { label: string }) {
+      const { startDrag } = usePointerDrag<string>({
+        scope: "test",
+        onDrop: vi.fn(),
+        onStart: () => started.push(label),
+      });
+      useLayoutEffect(() => {
+        // Between the commit and the passive effects; layout effects run in that window.
+        if (label === "new") window.dispatchEvent(new MouseEvent("pointermove", { clientX: 10, clientY: 60 }));
+      }, [label]);
+      return (
+        <button type="button" onPointerDown={(event) => startDrag(event, "payload")}>
+          source
+        </button>
+      );
+    }
+    const { rerender } = render(<Latest label="old" />);
+    fireEvent.pointerDown(screen.getByText("source"), { clientX: 10, clientY: 10, button: 0 });
+    rerender(<Latest label="new" />);
+    expect(started).toEqual(["new"]);
+    fireEvent.pointerUp(window, { clientX: 10, clientY: 60 });
   });
 
   it("stops listening when the component unmounts mid-drag", () => {
