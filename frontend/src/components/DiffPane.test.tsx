@@ -3221,6 +3221,21 @@ describe("DiffPane multi-select (#449)", () => {
     expect(onIgnorePaths).toHaveBeenCalledWith(["/b.txt"]);
   });
 
+  it("escapes glob characters in the selection's ignore patterns (#1168)", () => {
+    const onIgnorePaths = vi.fn();
+    const named: StatusEntry[] = [
+      { path: "pages/[id].tsx", oldPath: null, staged: false, kind: "New" },
+      { path: "pages/i.tsx", oldPath: null, staged: false, kind: "New" },
+    ];
+    renderUncommitted(client(), named, { onIgnorePaths });
+    fireEvent.click(header("pages/[id].tsx"));
+    fireEvent.click(header("pages/i.tsx"), { ctrlKey: true });
+
+    fireEvent.click(within(selectionBar()).getByRole("button", { name: "Ignore 2 untracked files" }));
+
+    expect(onIgnorePaths).toHaveBeenCalledWith(["/pages/\\[id].tsx", "/pages/i.tsx"]);
+  });
+
   it("stashes the selection through the stash dialog, unless stashing is blocked", () => {
     const onOpenStashDialog = vi.fn();
     const { unmount } = renderUncommitted(client(), files, { onOpenStashDialog });

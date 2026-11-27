@@ -47,6 +47,33 @@ describe("FileActionsMenu", () => {
     expect(ignorePatterns("Makefile")).toEqual([{ label: "Ignore file", pattern: "/Makefile" }]);
   });
 
+  it("escapes what .gitignore reads as a pattern, so the line names exactly the picked file (#1168)", () => {
+    expect(ignorePatterns("pages/[id].tsx")).toEqual([
+      { label: "Ignore file", pattern: "/pages/\\[id].tsx" },
+      { label: "Ignore all *.tsx", pattern: "*.tsx" },
+      { label: "Ignore folder pages/", pattern: "/pages/" },
+    ]);
+    expect(ignorePatterns("src/[slug]/report*?.t[s]")).toEqual([
+      { label: "Ignore file", pattern: "/src/\\[slug]/report\\*\\?.t\\[s]" },
+      { label: "Ignore all *.t[s]", pattern: "*.t\\[s]" },
+      { label: "Ignore folder src/[slug]/", pattern: "/src/\\[slug]/" },
+    ]);
+    expect(ignorePatterns("a\\b")).toEqual([{ label: "Ignore file", pattern: "/a\\\\b" }]);
+    // git drops trailing spaces unless escaped; a leading `#` or `!` is covered by the `/`.
+    expect(ignorePatterns("trail  ")).toEqual([{ label: "Ignore file", pattern: "/trail\\ \\ " }]);
+    expect(ignorePatterns("#notes")).toEqual([{ label: "Ignore file", pattern: "/#notes" }]);
+    expect(ignorePatterns("!keep")).toEqual([{ label: "Ignore file", pattern: "/!keep" }]);
+  });
+
+  it("escapes an untracked folder's Ignore folder pattern (#1168)", () => {
+    const onPick = vi.fn();
+    const folder = { path: "[id]/", oldPath: null, staged: false, kind: "New" as const, untrackedFolder: true };
+    fileMenuItems(folder, onPick)
+      .find((i) => i.label === "Ignore folder")!
+      .onSelect();
+    expect(onPick).toHaveBeenCalledWith({ kind: "ignore", pattern: "/\\[id]/" });
+  });
+
   it("marks discard destructive and reports the picked action", () => {
     const onPick = vi.fn();
     const items = fileMenuItems(untracked, onPick);

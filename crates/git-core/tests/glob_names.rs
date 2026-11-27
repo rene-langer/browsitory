@@ -149,3 +149,88 @@ fn staging_and_discarding_a_glob_named_file_touch_only_that_file() {
     git_core::stage::discard_all_unstaged(&repo, &["b".into()]).unwrap();
     assert_eq!(status(dir.path()), "M  a\n");
 }
+
+/// Which of `paths` git (`check-ignore`) ignores, asserting that libgit2 (`is_path_ignored`)
+/// agrees on each.
+fn ignored(dir: &Path, repo: &git2::Repository, paths: &[&str]) -> Vec<String> {
+    paths
+        .iter()
+        .filter(|path| {
+            // check-ignore takes each path as it is (it refuses `--literal-pathspecs`).
+            let by_git = test_support::git(dir, &["check-ignore", "-q", "--", path])
+                .status
+                .success();
+            let by_libgit2 = repo.is_path_ignored(path).unwrap();
+            assert_eq!(by_git, by_libgit2, "{path:?}: git, libgit2");
+            by_git
+        })
+        .map(|path| path.to_string())
+        .collect()
+}
+
+#[test]
+fn ignoring_escaped_patterns_ignores_exactly_the_named_files() {
+    let (dir, repo) = init_repo();
+    let d = dir.path();
+    let files = [
+        "pages/[id].tsx",
+        "pages/i.tsx",
+        "pages/d.tsx",
+        "#hash",
+        "!bang",
+        "hash",
+        "bang",
+    ];
+    for file in files {
+        write(d, file, "x\n");
+    }
+
+    git_core::stage::ignore_paths(
+        &repo,
+        &["/pages/\\[id].tsx".into(), "/#hash".into(), "/!bang".into()],
+    )
+    .unwrap();
+
+    assert_eq!(
+        ignored(d, &repo, &files),
+        ["pages/[id].tsx", "#hash", "!bang"]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn ignoring_an_escaped_star_question_mark_or_trailing_space_ignores_exactly_that_file() {
+    let (dir, repo) = init_repo();
+    let d = dir.path();
+    let files = ["report*.txt", "report1.txt", "a?", "ab", "trail ", "trail"];
+    for file in files {
+        write(d, file, "x\n");
+    }
+
+    git_core::stage::ignore_paths(
+        &repo,
+        &["/report\\*.txt".into(), "/a\\?".into(), "/trail\\ ".into()],
+    )
+    .unwrap();
+
+    assert_eq!(ignored(d, &repo, &files), ["report*.txt", "a?", "trail "]);
+    // Listed once: the escaped space belongs to the pattern.
+    git_core::stage::ignore_paths(&repo, &["/trail\\ ".into()]).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(d.join(".gitignore")).unwrap(),
+        "/report\\*.txt\n/a\\?\n/trail\\ \n"
+    );
+}
+
+#[test]
+fn an_unescaped_trailing_space_is_still_refused() {
+    let (dir, repo) = init_repo();
+    for bad in ["/trail ", "/trail\\  ", "/trail\\\\ "] {
+        let result = git_core::stage::ignore_paths(&repo, &[bad.to_string()]);
+        assert!(
+            matches!(result, Err(git_core::stage::StageError::InvalidPattern)),
+            "{bad:?}: {result:?}"
+        );
+    }
+    assert!(!dir.path().join(".gitignore").exists());
+}
