@@ -121,6 +121,25 @@ export function withoutStaleErrorSource(prev: AppState, next: AppState): AppStat
 const inDialogSource = (error: string, options: WithMessageOptions | undefined): Pick<AppState, "errorSource"> =>
   options?.inDialog === true ? { errorSource: { error, source: "dialog" } } : {};
 
+/**
+ * Applies `optimisticUpdate` to `prev`. `rollback` puts the fields it changed back to their values
+ * in `prev` (#1115), except a field something else changed since, such as a refresh that read it
+ * again: that value is newer than both.
+ */
+function applyOptimistic(
+  prev: AppState,
+  optimisticUpdate: OptimisticUpdate,
+): { next: AppState; rollback: (current: AppState) => AppState } {
+  const next = optimisticUpdate(prev);
+  const changed = (Object.keys(next) as (keyof AppState)[]).filter((key) => next[key] !== prev[key]);
+  const rollback = (current: AppState): AppState => {
+    const restored: Record<string, unknown> = { ...current };
+    for (const key of changed) if (current[key] === next[key]) restored[key] = prev[key];
+    return restored as unknown as AppState;
+  };
+  return { next, rollback };
+}
+
 // Builds the `runMutation*` variants that every domain action hook composed inside
 // `useAppState` uses to wrap its mutations. All share the same pending/refresh/error bookkeeping
 // against the top-level `AppState`; they differ only in what they resolve to (see each type
@@ -184,24 +203,24 @@ export function useMutationRunner(
 
   // Optimistic counterparts of the three variants above: apply `optimisticUpdate` to `AppState`
   // immediately (before awaiting `mutate`), so the UI reflects the predicted result with no
-  // visible round-trip. On failure, restore the *exact* pre-call snapshot rather than computing
-  // a per-mutation inverse — cheap (one object) and trivially correct: failure always means
-  // "exactly what it looked like before this call touched anything." The `pending`-driven global
-  // lock (still set here) already rules out two overlapping optimistic mutations racing each
-  // other's snapshot/restore.
+  // visible round-trip. On failure, only the fields the update changed go back to their values
+  // from before the call (#1115): `pending` locks neither transfers nor the selection, so
+  // whatever else changed while the request was out (a fetch that finished, a selected row, a
+  // refresh) stays as it is now.
   const runOptimisticMutation = useCallback<RunOptimisticMutation>(
     async (optimisticUpdate, mutate, operation) => {
-      let snapshot: AppState | null = null;
+      let rollback = (current: AppState) => current;
       setState((prev) => {
-        snapshot = prev;
-        return { ...optimisticUpdate(prev), pending: true, error: null };
+        const applied = applyOptimistic(prev, optimisticUpdate);
+        rollback = applied.rollback;
+        return { ...applied.next, pending: true, error: null };
       });
       try {
         await mutate();
         await refresh();
         setState((prev) => ({ ...prev, pending: false }));
       } catch (err) {
-        setState(() => ({ ...(snapshot as AppState), ...failureError(err, operation), pending: false }));
+        setState((current) => ({ ...rollback(current), ...failureError(err, operation), pending: false }));
       }
     },
     [refresh, setState],
@@ -209,10 +228,11 @@ export function useMutationRunner(
 
   const runOptimisticMutationWithMessage = useCallback<RunOptimisticMutationWithMessage>(
     async (optimisticUpdate, mutate, operation, options) => {
-      let snapshot: AppState | null = null;
+      let rollback = (current: AppState) => current;
       setState((prev) => {
-        snapshot = prev;
-        return { ...optimisticUpdate(prev), pending: true, error: null };
+        const applied = applyOptimistic(prev, optimisticUpdate);
+        rollback = applied.rollback;
+        return { ...applied.next, pending: true, error: null };
       });
       try {
         await mutate();
@@ -221,7 +241,7 @@ export function useMutationRunner(
         return null;
       } catch (err) {
         const failure = failureError(err, operation);
-        setState(() => ({ ...(snapshot as AppState), ...failure, ...inDialogSource(failure.error, options), pending: false }));
+        setState((current) => ({ ...rollback(current), ...failure, ...inDialogSource(failure.error, options), pending: false }));
         return failure.error;
       }
     },
@@ -230,10 +250,11 @@ export function useMutationRunner(
 
   const runOptimisticMutationWithOutcome = useCallback<RunOptimisticMutationWithOutcome>(
     async (optimisticUpdate, mutate, operation) => {
-      let snapshot: AppState | null = null;
+      let rollback = (current: AppState) => current;
       setState((prev) => {
-        snapshot = prev;
-        return { ...optimisticUpdate(prev), pending: true, error: null };
+        const applied = applyOptimistic(prev, optimisticUpdate);
+        rollback = applied.rollback;
+        return { ...applied.next, pending: true, error: null };
       });
       try {
         await mutate();
@@ -241,7 +262,7 @@ export function useMutationRunner(
         setState((prev) => ({ ...prev, pending: false }));
         return true;
       } catch (err) {
-        setState(() => ({ ...(snapshot as AppState), ...failureError(err, operation), pending: false }));
+        setState((current) => ({ ...rollback(current), ...failureError(err, operation), pending: false }));
         return false;
       }
     },

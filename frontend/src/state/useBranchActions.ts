@@ -271,17 +271,18 @@ export function useBranchActions(
   }, [setState]);
 
   const setGraphBranchSelection = useCallback(
-    (local: string[]) => runMutation(() => client.setGraphBranchSelection(repoPath, local)),
+    (local: string[]) => runMutation(() => client.setGraphBranchSelection(repoPath, local), failedOperation.graphBranches()),
     [client, runMutation, repoPath],
   );
 
   const setGraphRemoteBranchSelection = useCallback(
-    (remote: string[]) => runMutation(() => client.setGraphRemoteBranchSelection(repoPath, remote)),
+    (remote: string[]) =>
+      runMutation(() => client.setGraphRemoteBranchSelection(repoPath, remote), failedOperation.graphBranches()),
     [client, runMutation, repoPath],
   );
 
   const clearGraphBranchSelection = useCallback(
-    () => runMutation(() => client.clearGraphBranchSelection(repoPath)),
+    () => runMutation(() => client.clearGraphBranchSelection(repoPath), failedOperation.graphBranches()),
     [client, runMutation, repoPath],
   );
 
@@ -290,7 +291,7 @@ export function useBranchActions(
       runMutation(async () => {
         await client.clearGraphBranchSelection(repoPath);
         await client.clearGraphRemoteBranchSelection(repoPath);
-      }),
+      }, failedOperation.graphBranches()),
     [client, runMutation, repoPath],
   );
 
@@ -307,7 +308,7 @@ export function useBranchActions(
           await client.setGraphBranchSelection(repoPath, []);
           await client.setGraphRemoteBranchSelection(repoPath, [name]);
         }
-      }),
+      }, failedOperation.isolateBranch(name)),
     [client, runMutation, repoPath],
   );
 

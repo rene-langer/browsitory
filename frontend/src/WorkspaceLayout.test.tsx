@@ -326,6 +326,36 @@ describe("the current-branch switcher (#638)", () => {
     expect(switchBranch).not.toHaveBeenCalled();
   });
 
+  // #1124: the banner shows the failure; a toast would show it twice, and with the success look.
+  it("shows a branch it can't create in the banner only", async () => {
+    const createBranch = vi.fn(async () => {
+      throw new RepoError("Other", "cannot lock ref 'refs/heads/topic'");
+    });
+    await renderApp(layoutClient({ createBranch }));
+    fireEvent.click(await within(toolbar()).findByRole("button", { name: /^Current branch main/ }));
+    fireEvent.change(await screen.findByRole("combobox", { name: "Switch branch" }), { target: { value: "topic" } });
+    fireEvent.click(screen.getByRole("option", { name: "Create branch topic from main" }));
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent("Couldn't create branch topic: cannot lock ref 'refs/heads/topic'"),
+    );
+    const notifications = screen.getByRole("status", { name: "Notifications" });
+    expect(notifications).not.toHaveTextContent("cannot lock ref");
+  });
+
+  it("shows a remote branch it can't check out in the banner only", async () => {
+    const createBranch = vi.fn(async () => {
+      throw new RepoError("Other", "cannot lock ref 'refs/heads/spike'");
+    });
+    const setCurrentUpstream = vi.fn(async () => {});
+    await renderApp(layoutClient({ createBranch, setCurrentUpstream, listRemoteBranches: async () => ["main", "spike"] }));
+    fireEvent.click(await within(toolbar()).findByRole("button", { name: /^Current branch main/ }));
+    fireEvent.click(await screen.findByRole("option", { name: "origin/spike" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("cannot lock ref 'refs/heads/spike'"));
+    const notifications = screen.getByRole("status", { name: "Notifications" });
+    expect(notifications).not.toHaveTextContent("cannot lock ref");
+    expect(setCurrentUpstream).not.toHaveBeenCalled();
+  });
+
   it("lists a remote-only branch and checks it out as a tracking branch (#726)", async () => {
     const createBranch = vi.fn(async () => {});
     const setCurrentUpstream = vi.fn(async () => {});

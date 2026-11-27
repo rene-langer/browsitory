@@ -1,9 +1,9 @@
 import type { OperationBlockers } from "../operationStatus";
-import { gate, type PaletteAction } from "./action";
+import { gate, NO_BRANCH, type PaletteAction } from "./action";
 
 export interface RemoteActions {
   fetch: PaletteAction;
-  /** Pushes the current branch to this remote. */
+  /** Pushes the current branch to this remote; refused on a detached HEAD (#1119). */
   pushCurrentBranch: PaletteAction;
   /** Opens the Edit remote dialog (rename, URLs). */
   edit: PaletteAction;
@@ -19,13 +19,13 @@ export interface RemoteActions {
  * (`operationBlockers`). The edit and credentials dialogs, and the remove confirmation, check it
  * again while open and before saving (`RemoteDialogs`, #561).
  */
-export function remoteActions(blockers: OperationBlockers, remoteName: string): RemoteActions {
+export function remoteActions(blockers: OperationBlockers, remoteName: string, currentBranch: string | null): RemoteActions {
   return {
     fetch: { label: "Fetch", paletteLabel: `Fetch ${remoteName}`, ...gate(blockers) },
     pushCurrentBranch: {
       label: `Push current branch to ${remoteName}`,
       paletteLabel: `Push current branch to ${remoteName}`,
-      ...gate(blockers),
+      ...gate(blockers, currentBranch === null ? NO_BRANCH : undefined),
     },
     // Each opens a dialog or a confirmation, so each ends in "…" (#990).
     edit: { label: "Edit remote…", paletteLabel: `Edit remote ${remoteName}…`, ...gate(blockers) },

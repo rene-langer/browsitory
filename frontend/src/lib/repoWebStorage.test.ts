@@ -34,7 +34,7 @@ describe("repository web storage (#1096)", () => {
     expect(remembered("C:\\work\\kept")).toEqual(SOMETHING);
     expect(remembered("/repo/gone")).toEqual(NOTHING);
     expect(remembered("C:\\work\\gone")).toEqual(NOTHING);
-    expect(localStorage.length).toBe(3 + 2 * 5);
+    expect(localStorage.length).toBe(3 + 2 * 6);
     expect(localStorage.getItem("sidebar-width")).toBe("300");
     expect(localStorage.getItem("forge-account.GitHub")).toBe("rene");
     expect(localStorage.getItem("branchtree.folder.feature")).toBe("closed");

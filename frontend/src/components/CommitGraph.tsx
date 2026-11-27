@@ -24,9 +24,11 @@ import {
   presetForAction,
   presetPickAll,
   type PresetAction,
+  type RebaseSelectionResult,
 } from "../lib/rebaseSelection";
 import { foldStagedCheck, historyEditChecks, type HistoryEditCheck, type HistoryEditRequest } from "../lib/historyEdits";
 import { commitActions } from "../lib/actions/commitActions";
+import { NO_BRANCH } from "../lib/actions/action";
 import type { VisitKind } from "../lib/navigationHistory";
 import type { SelectedRow } from "../state/useAppState";
 import { useCopyToClipboard } from "../state/useCopyToClipboard";
@@ -779,9 +781,12 @@ function CommitGraphContent({
         : [commit];
     commitDrag.startDrag(event, { commits: dragged, headId: headInfo.headId });
   };
-  const rebasePlan = multiSelected
-    ? planRebaseSelection(commits, effectiveSelection.ids)
-    : null;
+  // Every one of them rewrites the current branch: none on a detached HEAD (#1119).
+  const rebasePlan: RebaseSelectionResult | null = !multiSelected
+    ? null
+    : currentBranch === null
+      ? { ok: false, reason: NO_BRANCH }
+      : planRebaseSelection(commits, effectiveSelection.ids);
 
   // The same actions back the context menu and the toolbar under the list.
   const rebaseItems: ContextMenuItem[] = (() => {

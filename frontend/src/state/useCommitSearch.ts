@@ -47,7 +47,8 @@ function rowKey(row: SelectedRow): string {
 export function useCommitSearch(
   client: RepoClient,
   repoPath: string,
-  refreshGeneration: number,
+  /** `AppState.historyGeneration` (#1118): the matches change only with the history. */
+  historyGeneration: number,
   // The graph's saved selection, so search walks the graph's commits.
   selection: SavedGraphSelection,
   selectedRow: SelectedRow,
@@ -119,10 +120,12 @@ export function useCommitSearch(
   };
 
   const runRound = useCallback(
-    async (gen: number, q: string, from: string | null, selectFirst: boolean) => {
+    async (gen: number, q: string, from: string | null, selectFirst: boolean, replace = false) => {
       inFlight.current = true;
       let cursor = from;
       let found = 0;
+      // `replace` (a re-run, #1118): the matches shown stay until this round's are all in.
+      const round: GraphCommit[] = [];
       let selectFirstPending = selectFirst;
       // A row picked by the user (or file history) after the round started wins over the
       // auto-selected first match.
@@ -135,16 +138,20 @@ export function useCommitSearch(
           if (from === null && cursor === null) recordSearch(q);
           found += page.commits.length;
           cursor = page.nextCursor;
-          matches.current = [...matches.current, ...page.commits];
-          setResults(
-            (prev) =>
-              prev && {
-                ...prev,
-                commits: [...prev.commits, ...page.commits],
-                nextCursor: page.nextCursor,
-                scanned: page.scanned,
-              },
-          );
+          if (replace) {
+            round.push(...page.commits);
+          } else {
+            matches.current = [...matches.current, ...page.commits];
+            setResults(
+              (prev) =>
+                prev && {
+                  ...prev,
+                  commits: [...prev.commits, ...page.commits],
+                  nextCursor: page.nextCursor,
+                  scanned: page.scanned,
+                },
+            );
+          }
           if (selectFirstPending && page.commits.length > 0) {
             selectFirstPending = false;
             if (rowKey(selectedRowRef.current) === rowAtStart) {
@@ -153,6 +160,12 @@ export function useCommitSearch(
           }
         } while (found < SEARCH_ROUND_SIZE && cursor !== null);
         inFlight.current = false;
+        if (replace) {
+          matches.current = round;
+          const nextCursor = cursor;
+          setResults((prev) => prev && { ...prev, commits: round, nextCursor, loading: false });
+          return;
+        }
         setResults((prev) => prev && { ...prev, loading: false });
       } catch (err: unknown) {
         if (gen !== generation.current) return;
@@ -231,8 +244,19 @@ export function useCommitSearch(
     if (activeQuery.current !== null) start(activeQuery.current, { selectFirst: false });
   }, [start]);
 
-  // A repo refresh (commit, fetch…) or a different graph branch selection can change the
-  // matches: re-run from the first page, keeping the selection.
+  // Runs the open search again from its first page; the matches shown stay until the new ones
+  // are in (#1118).
+  const rerun = useCallback(
+    (q: string) => {
+      const gen = ++generation.current;
+      setResults((prev) => prev && { ...prev, loading: true, error: null, queryError: null });
+      void runRound(gen, q, null, false, true);
+    },
+    [runRound],
+  );
+
+  // A refresh that read the history again (commit, fetch…) or a different graph branch selection
+  // can change the matches: re-run from the first page, keeping the selection.
   const selectionKey = JSON.stringify(selection);
   const mounted = useRef(false);
   useEffect(() => {
@@ -240,9 +264,9 @@ export function useCommitSearch(
       mounted.current = true;
       return;
     }
-    if (activeQuery.current !== null) start(activeQuery.current, { selectFirst: false });
+    if (activeQuery.current !== null) rerun(activeQuery.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshGeneration, selectionKey]);
+  }, [historyGeneration, selectionKey]);
 
   useEffect(
     () => () => {
