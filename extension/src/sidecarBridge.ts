@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { ExtensionContext, OpenDialogOptions, Uri } from "vscode";
+import { NO_OPEN_REPOS, OPEN_REPOS_KEY, parseOpenRepos, type OpenRepos } from "./openRepos";
 import {
   diffSides,
   isSafeRelativePath,
@@ -37,6 +38,9 @@ export const NATIVE_METHODS: ReadonlySet<string> = new Set([
   "open_vscode_keybindings",
   // User commands (#896): why they can't run here (an untrusted workspace), or `null`.
   "user_commands_blocked",
+  // The panel's open tabs, kept per window in its workspaceState (#1128, `openRepos.ts`).
+  "list_open_repos",
+  "persist_open_repos",
 ]);
 
 /** Why user commands don't run in an untrusted workspace (#896, owner decision). */
@@ -319,9 +323,13 @@ export class SidecarBridge {
     return sidecar;
   }
 
+  /** The window's saved tabs (#1128); none when it saved none or the state is malformed. */
+  private openRepos(): OpenRepos {
+    return parseOpenRepos(this.dependencies.context.workspaceState.get(OPEN_REPOS_KEY)) ?? NO_OPEN_REPOS;
+  }
+
   private async restorePersistedRepositories(sidecar: SidecarProcess): Promise<void> {
-    const listed = await this.callSidecar(sidecar, "list_open_repos", {});
-    for (const repoPath of persistedRepositoryPaths(listed)) {
+    for (const { path: repoPath } of this.openRepos().entries) {
       try {
         await this.callSidecar(sidecar, "open_repo", { path: repoPath });
       } catch (error) {
@@ -763,6 +771,21 @@ export class SidecarBridge {
         case "user_commands_blocked":
           result = this.dependencies.isWorkspaceTrusted() ? null : UNTRUSTED_USER_COMMANDS;
           break;
+        case "list_open_repos":
+          requireEmptyParams(request);
+          result = this.openRepos();
+          break;
+        case "persist_open_repos": {
+          const openRepos = parseOpenRepos(request.params);
+          if (openRepos === undefined) {
+            throw new InvalidParamsError(
+              "persist_open_repos requires { entries: { path: string, workspaceId: string|null }[], activePath: string|null }",
+            );
+          }
+          await this.dependencies.context.workspaceState.update(OPEN_REPOS_KEY, openRepos);
+          result = null;
+          break;
+        }
         case "open_vscode_keybindings":
           // Filtered to the commands the shortcut keybindings run (#900).
           await this.dependencies.executeCommand("workbench.action.openGlobalKeybindings", "browsitory.shortcut.");
@@ -993,18 +1016,6 @@ function requireDiffSource(value: unknown): DiffSource {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function persistedRepositoryPaths(value: unknown): string[] {
-  if (!isRecord(value) || !Array.isArray(value["entries"])) {
-    throw new Error("list_open_repos returned an invalid result");
-  }
-  return value["entries"].map((entry) => {
-    if (!isRecord(entry) || typeof entry["path"] !== "string") {
-      throw new Error("list_open_repos returned an invalid repository entry");
-    }
-    return entry["path"];
-  });
 }
 
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
