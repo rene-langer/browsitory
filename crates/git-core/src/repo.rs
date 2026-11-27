@@ -795,7 +795,7 @@ pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
                 terminal_rebase: terminal_rebase(repo),
                 unborn_branch: unborn_branch(repo),
                 external_filters: crate::external_filter::named_drivers(repo),
-                working_tree_encodings: Vec::new(),
+                working_tree_encodings: crate::external_filter::named_encodings(repo),
             });
         }
         Err(error) => return Err(error.into()),
@@ -819,7 +819,7 @@ pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
         terminal_rebase: terminal_rebase(repo),
         unborn_branch: None,
         external_filters: crate::external_filter::named_drivers(repo),
-        working_tree_encodings: Vec::new(),
+        working_tree_encodings: crate::external_filter::named_encodings(repo),
     })
 }
 
