@@ -1891,7 +1891,7 @@ pub fn apply_stash(
             .collect();
         crate::worktree_guard::refuse_linked_folders::<StashError>(repo, &incoming)?;
     }
-    let Some(outside) = OutsideCone::prepare(repo, index, restore_index)? else {
+    let Some(outside) = outside_cone(repo, index, restore_index)? else {
         return apply_routes(repo, index, restore_index);
     };
     match apply_routes(repo, index, restore_index) {
@@ -1909,9 +1909,10 @@ pub fn apply_stash(
 }
 
 /// What applying a stash does to the skip-worktree entries (every file outside a sparse
-/// checkout), as `git stash apply` does it (#1184). libgit2 knows nothing of the mark: it left
-/// out a stashed change to a missing marked file (and Pop then dropped the stash), and it writes
-/// a file the restored staged changes add, unmarked.
+/// checkout), as `git stash apply` does it (#1184), with [`crate::outside_cone::OutsideCone`].
+/// libgit2 knows nothing of the mark: it left out a stashed change to a missing marked file
+/// (and Pop then dropped the stash), and it writes a file the restored staged changes add,
+/// unmarked.
 ///
 /// - A marked path the stash changes (its work-tree tree differs from its base there) leaves
 ///   the sparse checkout before the
@@ -1923,170 +1924,65 @@ pub fn apply_stash(
 ///   path out then (the file stays marked and missing, the edit is lost); it is kept here,
 ///   written and unmarked, as without the staged changes.
 /// - Every other marked path keeps its mark.
-struct OutsideCone {
-    /// The marked paths the stash changes: unmarked before the apply.
-    changed: Vec<Vec<u8>>,
-    /// Those of `changed` whose missing file was written before the apply.
-    written: Vec<Vec<u8>>,
-    /// The other marked paths: marked again afterwards.
-    kept: Vec<Vec<u8>>,
-    /// With the staged changes restored: the paths outside the sparse patterns (of `changed`,
-    /// and new to the index), each with its work-tree version in the stash.
-    restaged: Vec<(Vec<u8>, Version)>,
-}
-
-/// A path's blob and mode in a tree; `None` when the tree doesn't have it.
-type Version = Option<(git2::Oid, u32)>;
-
-impl OutsideCone {
-    /// Unmarks and writes the marked paths `stash@{index}` changes; `None` (nothing done) when
-    /// the index has no marked entry.
-    fn prepare(
-        repo: &Repository,
-        index: usize,
-        restore_index: bool,
-    ) -> Result<Option<Self>, StashError> {
-        let mut repo_index = repo.index()?;
-        repo_index.read(false)?;
-        let marked = crate::index_marks::skip_worktree_paths(&repo_index);
-        let Some(workdir) = repo.workdir().filter(|_| !marked.is_empty()) else {
-            return Ok(None);
-        };
-        // No such stash: the apply reports it.
-        let Some(id) = repo
-            .reflog("refs/stash")?
-            .get(index)
-            .map(|entry| entry.id_new())
-        else {
-            return Ok(None);
-        };
-        let stash = repo.find_commit(id)?;
-        let base = stash.parent(0)?.tree()?;
-        let worktree = stash.tree()?;
-        let staged = match stash.parent(1) {
-            Ok(commit) if restore_index && commit.tree_id() != base.id() => Some(commit.tree()?),
-            _ => None,
-        };
-        let version = |tree: &git2::Tree<'_>, path: &[u8]| -> Version {
-            tree.get_path(&crate::worktree_guard::path_from_bytes(path))
-                .ok()
-                .map(|entry| (entry.id(), entry.filemode() as u32))
-        };
-        // Only the work-tree tree counts: a path whose staged change alone differs from the base
-        // stays marked, as git restores it into the index only.
-        let (changed, kept): (Vec<_>, Vec<_>) = marked
-            .into_iter()
-            .partition(|path| version(&worktree, path) != version(&base, path));
-        let mut outside = OutsideCone {
-            written: Vec::new(),
-            kept,
-            restaged: Vec::new(),
-            changed,
-        };
-        if let Some(staged) = &staged {
-            let sparse = crate::sparse::Sparse::read(repo)?;
-            let present: std::collections::HashSet<Vec<u8>> =
-                repo_index.iter().map(|entry| entry.path).collect();
-            let mut flat = git2::Index::new()?;
-            flat.read_tree(staged)?;
-            for entry in flat.iter() {
-                let new = !present.contains(&entry.path);
-                if (new || outside.changed.contains(&entry.path))
-                    && sparse.excludes(Some(workdir), &entry.path)
-                {
-                    let in_worktree = version(&worktree, &entry.path);
-                    outside.restaged.push((entry.path, in_worktree));
-                }
+///
+/// Unmarks and writes the marked paths `stash@{index}` changes; `None` (nothing done) when the
+/// index has no marked entry.
+fn outside_cone(
+    repo: &Repository,
+    index: usize,
+    restore_index: bool,
+) -> Result<Option<crate::outside_cone::OutsideCone>, StashError> {
+    use crate::outside_cone::Version;
+    let mut repo_index = repo.index()?;
+    repo_index.read(false)?;
+    let marked = crate::index_marks::skip_worktree_paths(&repo_index);
+    let Some(workdir) = repo.workdir().filter(|_| !marked.is_empty()) else {
+        return Ok(None);
+    };
+    // No such stash: the apply reports it.
+    let Some(id) = repo
+        .reflog("refs/stash")?
+        .get(index)
+        .map(|entry| entry.id_new())
+    else {
+        return Ok(None);
+    };
+    let stash = repo.find_commit(id)?;
+    let base = stash.parent(0)?.tree()?;
+    let worktree = stash.tree()?;
+    let staged = match stash.parent(1) {
+        Ok(commit) if restore_index && commit.tree_id() != base.id() => Some(commit.tree()?),
+        _ => None,
+    };
+    let version = |tree: &git2::Tree<'_>, path: &[u8]| -> Version {
+        tree.get_path(&crate::worktree_guard::path_from_bytes(path))
+            .ok()
+            .map(|entry| (entry.id(), entry.filemode() as u32))
+    };
+    // Only the work-tree tree counts: a path whose staged change alone differs from the base
+    // stays marked, as git restores it into the index only.
+    let (changed, kept): (Vec<_>, Vec<_>) = marked
+        .into_iter()
+        .partition(|path| version(&worktree, path) != version(&base, path));
+    let mut restaged = Vec::new();
+    if let Some(staged) = &staged {
+        let sparse = crate::sparse::Sparse::read(repo)?;
+        let present: std::collections::HashSet<Vec<u8>> =
+            repo_index.iter().map(|entry| entry.path).collect();
+        let mut flat = git2::Index::new()?;
+        flat.read_tree(staged)?;
+        for entry in flat.iter() {
+            let new = !present.contains(&entry.path);
+            if (new || changed.contains(&entry.path)) && sparse.excludes(Some(workdir), &entry.path)
+            {
+                let in_worktree = version(&worktree, &entry.path);
+                restaged.push((entry.path, in_worktree));
             }
         }
-        if outside.changed.is_empty() {
-            return Ok(Some(outside));
-        }
-        for path in &outside.changed {
-            let rel = crate::worktree_guard::path_from_bytes(path);
-            if let Some(mut entry) = repo_index.get_path(&rel, 0) {
-                entry.flags_extended &= !crate::index_marks::SKIP_WORKTREE;
-                repo_index.add(&entry)?;
-            }
-            if workdir.join(&rel).symlink_metadata().is_err() {
-                outside.written.push(path.clone());
-            }
-        }
-        repo_index.write()?;
-        if !outside.written.is_empty() {
-            let mut checkout = git2::build::CheckoutBuilder::new();
-            checkout
-                .safe()
-                .recreate_missing(true)
-                .disable_pathspec_match(true);
-            for path in &outside.written {
-                checkout.path(crate::worktree_guard::path_from_bytes(path));
-            }
-            if let Err(error) = repo.checkout_index(Some(&mut repo_index), Some(&mut checkout)) {
-                outside.roll_back(repo)?;
-                return Err(error.into());
-            }
-        }
-        Ok(Some(outside))
     }
-
-    /// After the apply: the marks back on `kept`, and on the paths of `restaged` whose staged
-    /// version is their work-tree version, their files removed.
-    fn finish(&self, repo: &Repository) -> Result<(), StashError> {
-        let mut index = repo.index()?;
-        index.read(true)?;
-        let workdir = repo
-            .workdir()
-            .ok_or_else(|| git2::Error::from_str("cannot apply a stash in a bare repository"))?;
-        let mut mark = self.kept.clone();
-        let mut remove = Vec::new();
-        for (path, in_worktree) in &self.restaged {
-            let rel = crate::worktree_guard::path_from_bytes(path);
-            let Some(entry) = index.get_path(&rel, 0) else {
-                continue;
-            };
-            if *in_worktree != Some((entry.id, entry.mode)) {
-                continue;
-            }
-            // The apply wrote the file from that blob: a file already there with other content
-            // made it refuse (the path was unmarked, or new to the index).
-            if workdir.join(&rel).symlink_metadata().is_ok() {
-                remove.push(rel);
-            }
-            mark.push(path.clone());
-        }
-        crate::index_marks::mark_skip_worktree(&mut index, &mark)?;
-        index.write()?;
-        for rel in remove {
-            crate::worktree_guard::remove_and_prune_beneath(workdir, &rel)?;
-        }
-        Ok(())
-    }
-
-    /// After a refused apply: the files written before it removed (while they still hold the
-    /// index's version) and the marks back.
-    fn roll_back(&self, repo: &Repository) -> Result<(), StashError> {
-        let mut index = repo.index()?;
-        index.read(true)?;
-        if let Some(workdir) = repo.workdir() {
-            let config = crate::undo::worktree_config(repo).map_err(undo_error)?;
-            for path in &self.written {
-                let rel = crate::worktree_guard::path_from_bytes(path);
-                let Some(entry) = index.get_path(&rel, 0) else {
-                    continue;
-                };
-                let name = String::from_utf8_lossy(path).into_owned();
-                if worktree_blob(repo, workdir, &name, &config, Some(entry.mode))?
-                    == Some((entry.id, entry.mode))
-                {
-                    crate::worktree_guard::remove_and_prune_beneath(workdir, &rel)?;
-                }
-            }
-        }
-        crate::index_marks::mark_skip_worktree(&mut index, &self.changed)?;
-        index.write()?;
-        Ok(())
-    }
+    Ok(Some(crate::outside_cone::OutsideCone::prepare(
+        repo, changed, kept, restaged,
+    )?))
 }
 
 /// [`apply_stash`]'s routes, once its refusals are through.

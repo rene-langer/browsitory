@@ -148,11 +148,11 @@ impl NotStagedReason {
 }
 
 /// Refuses while a symlink stands where HEAD, the index or the merge's outcome has a folder: a
-/// fast-forward checks out `theirs`' tree, any other merge writes the merged index. A merged
-/// index that holds a file and a folder of the same name libgit2 didn't see as a conflict is
-/// returned (#410, #416: `merge_with_file_folder_conflict` writes it), and an outcome (merged
-/// index or fast-forward tree) holding a case pair HEAD doesn't is refused while
-/// `core.ignorecase` is on (#522).
+/// fast-forward checks out `theirs`' tree, any other merge writes the merged index, which is
+/// returned (`None` for a fast-forward). One that holds a file and a folder of the same name
+/// libgit2 didn't see as a conflict is written by `merge_with_file_folder_conflict` (#410,
+/// #416), and an outcome (merged index or fast-forward tree) holding a case pair HEAD doesn't
+/// is refused while `core.ignorecase` is on (#522).
 fn refuse_unsafe_merge(
     repo: &Repository,
     theirs: &git2::Commit,
@@ -191,7 +191,7 @@ fn refuse_unsafe_merge(
         &GuardSource::Index(&merged),
         Some(&our_tree),
     )?;
-    Ok(crate::file_folder::find_file_folder_conflict(&merged).map(|_| merged))
+    Ok(Some(merged))
 }
 
 /// A merge (or squash, when `merge_head` is `None`) whose result holds a file and a folder of
@@ -323,7 +323,7 @@ pub fn start_merge(
 
     // Safe checkouts create files through a symlinked folder (#114); libgit2 can miss a
     // file/folder conflict (#410).
-    let colliding = refuse_unsafe_merge(
+    let merged = refuse_unsafe_merge(
         repo,
         &their_commit,
         analysis.is_fast_forward() && !opts.squash && opts.fast_forward != FastForward::Never,
@@ -333,7 +333,7 @@ pub fn start_merge(
             repo,
             &their_annotated,
             their_commit.id(),
-            colliding,
+            merged,
             short_ref_name(target),
         );
     }
@@ -343,14 +343,19 @@ pub fn start_merge(
         // (modified/untracked files in the way) leaves the repo exactly as it was, matching
         // `branch::switch_branch`'s own ordering for the same reason.
         // A file another program holds open: say so, not libgit2's raw error (#303).
-        let mut checkout = git2::build::CheckoutBuilder::new();
-        let filters = crate::hardlink::on_checkout(repo, &mut checkout);
-        repo.checkout_tree(their_commit.as_object(), Some(&mut checkout))
-            .map_err(crate::worktree_guard::held_open::<MergeError>(
-                repo.workdir(),
-                crate::HeldDuring::FastForward,
-            ))?;
-        filters.check()?;
+        // A sparse checkout's files outside the cone stay out (#1185).
+        let their_tree = their_commit.tree()?;
+        let outcome = crate::outside_cone::Outcome::Tree(&their_tree);
+        crate::outside_cone::around(repo, outcome, || {
+            let mut checkout = git2::build::CheckoutBuilder::new();
+            let filters = crate::hardlink::on_checkout(repo, &mut checkout);
+            repo.checkout_tree(their_commit.as_object(), Some(&mut checkout))
+                .map_err(crate::worktree_guard::held_open::<MergeError>(
+                    repo.workdir(),
+                    crate::HeldDuring::FastForward,
+                ))?;
+            Ok::<_, MergeError>(filters.check()?)
+        })?;
         let mut head_ref = repo.head()?;
         head_ref.set_target(their_commit.id(), "merge: Fast-forward")?;
         return Ok(MergeOutcome::FastForwarded);
@@ -363,7 +368,8 @@ pub fn start_merge(
     }
 
     refuse_case_pair_held(repo)?;
-    if let Some(merged) = colliding {
+    let merged = merged.ok_or_else(|| git2::Error::from_str("the merge has no merged index"))?;
+    if crate::file_folder::find_file_folder_conflict(&merged).is_some() {
         let label = merge_subject(target);
         let files = merge_with_file_folder_conflict(
             repo,
@@ -375,12 +381,7 @@ pub fn start_merge(
         return Ok(MergeOutcome::Conflicted { files });
     }
 
-    // libgit2's default strategy for a merge (safe); with our callbacks (#420). The files it
-    // writes were checked for external filters with the merged index (`refuse_unsafe_merge`).
-    let mut checkout = git2::build::CheckoutBuilder::new();
-    let filters = crate::hardlink::on_checkout(repo, &mut checkout);
-    repo.merge(&[&their_annotated], None, Some(&mut checkout))?;
-    filters.check()?;
+    merge_outside_cone(repo, &merged, &their_annotated)?;
     record_merge_mode(repo, opts.fast_forward)?;
 
     let files = conflicted_files(&repo.index()?)?;
@@ -412,6 +413,24 @@ fn record_merge_mode(repo: &Repository, fast_forward: FastForward) -> Result<(),
     Ok(())
 }
 
+/// libgit2's merge of `their_annotated` into HEAD, whose result is `merged`, with the files
+/// outside a sparse checkout kept out as git keeps them (#1185, `outside_cone`). libgit2's
+/// default strategy for a merge (safe); with our callbacks (#420). The files it writes were
+/// checked for external filters with the merged index (`refuse_unsafe_merge`).
+fn merge_outside_cone(
+    repo: &Repository,
+    merged: &git2::Index,
+    their_annotated: &git2::AnnotatedCommit<'_>,
+) -> Result<(), MergeError> {
+    let outcome = crate::outside_cone::Outcome::Index(merged);
+    crate::outside_cone::around(repo, outcome, || {
+        let mut checkout = git2::build::CheckoutBuilder::new();
+        let filters = crate::hardlink::on_checkout(repo, &mut checkout);
+        repo.merge(&[their_annotated], None, Some(&mut checkout))?;
+        Ok(filters.check()?)
+    })
+}
+
 /// `git merge --squash`: merge into the index and worktree, write `SQUASH_MSG`, and leave no
 /// merge state (`commit::clear_commit_state`, which keeps a terminal cherry-pick's todo, #241),
 /// so the next commit has HEAD as its only parent. HEAD never moves, even when a fast-forward
@@ -420,21 +439,18 @@ fn squash_merge(
     repo: &Repository,
     their_annotated: &git2::AnnotatedCommit<'_>,
     their_id: git2::Oid,
-    colliding: Option<git2::Index>,
+    merged: Option<git2::Index>,
     their_label: &str,
 ) -> Result<MergeOutcome, MergeError> {
     refuse_case_pair_held(repo)?;
     // Built before `repo.merge` so a failure here leaves the repository untouched.
     let message = build_squash_message(repo, their_id)?;
-    let files = match colliding {
-        Some(merged) => merge_with_file_folder_conflict(repo, merged, None, their_label)?,
-        None => {
-            let mut checkout = git2::build::CheckoutBuilder::new();
-            let filters = crate::hardlink::on_checkout(repo, &mut checkout);
-            repo.merge(&[their_annotated], None, Some(&mut checkout))?;
-            filters.check()?;
-            conflicted_files(&repo.index()?)?
-        }
+    let merged = merged.ok_or_else(|| git2::Error::from_str("the merge has no merged index"))?;
+    let files = if crate::file_folder::find_file_folder_conflict(&merged).is_some() {
+        merge_with_file_folder_conflict(repo, merged, None, their_label)?
+    } else {
+        merge_outside_cone(repo, &merged, their_annotated)?;
+        conflicted_files(&repo.index()?)?
     };
     std::fs::write(repo.path().join("SQUASH_MSG"), message)?;
     crate::commit::clear_commit_state(repo)?;
