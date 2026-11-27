@@ -234,3 +234,40 @@ fn continuing_after_a_conflict_resolved_to_nothing_drops_the_step_as_git_rebase_
         "{ours}"
     );
 }
+
+#[test]
+fn a_merge_upstream_has_no_patch_id_as_in_git() {
+    let (dir, repo) = topic_a_b();
+    // A side branch reaches A's content in two steps; master merges it (its first-parent change
+    // is A's patch) and changes t.txt again, so picking A conflicts.
+    git_ok(dir.path(), &["checkout", "-q", "-b", "side", "master"]);
+    write_file(dir.path(), "t.txt", "x\n");
+    commit_all(&repo, "S1");
+    write_file(dir.path(), "t.txt", "t\n");
+    commit_all(&repo, "S2");
+    git_ok(dir.path(), &["checkout", "-q", "master"]);
+    git_ok(
+        dir.path(),
+        &["merge", "-q", "--no-ff", "-m", "merge side", "side"],
+    );
+    git_ok(dir.path(), &["checkout", "-q", "topic"]);
+    commit_on_master(
+        dir.path(),
+        &repo,
+        "t.txt",
+        "t changed upstream\n",
+        "change t",
+    );
+    let (twin_dir, _twin_repo) = twin(dir.path());
+    let gits = test_support::git(twin_dir.path(), &["rebase", "-q", "master"]);
+    assert!(!gits.status.success(), "git's rebase should stop at A");
+
+    let (_, result) = git_core::rebase::start_rebase(&repo, "master", picks(&repo)).unwrap();
+
+    assert_eq!(
+        result,
+        RebaseStepResult::Conflicted {
+            files: vec!["t.txt".to_string()]
+        }
+    );
+}
