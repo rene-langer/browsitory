@@ -1,8 +1,8 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { RemoteInfo, TagInfo, WorktreeInfo } from "../ipc/RepoClient";
+import type { RemoteInfo, StatusEntry, TagInfo, TransferProgress, WorktreeInfo } from "../ipc/RepoClient";
 import { useAppState } from "./useAppState";
-import { TEST_REPO_PATH, transferClient } from "./useAppStateTestClient";
+import { progress, TEST_REPO_PATH, transferClient } from "./useAppStateTestClient";
 
 describe("useAppState", () => {
   // `RemotePanel` renders the failure inline next to the Fetch URL field and keeps the typed
@@ -355,5 +355,53 @@ describe("useAppState", () => {
     act(() => result.current.dismissError());
 
     expect(result.current.state.error).toBeNull();
+  });
+});
+
+// #1115: a failed stage restores the file list it changed, not the whole state of when it
+// started: a fetch that completed while the stage was out stays completed, and a commit
+// selected meanwhile stays selected.
+describe("useAppState's failed optimistic action", () => {
+  it("keeps a fetch that finished and a row selected while a stage was out", async () => {
+    let listener: ((progress: TransferProgress) => void) | null = null;
+    let rejectStage: ((err: Error) => void) | null = null;
+    const entry: StatusEntry = { path: "a.txt", oldPath: null, staged: false, kind: "Modified" };
+    const client = transferClient({
+      subscribeTransferProgress: (next) => {
+        listener = next;
+        return () => {};
+      },
+      getStatus: async () => [entry],
+      fetchAllRemotes: async () => "fetch-all-1",
+      stageFile: () => new Promise<void>((_resolve, reject) => { rejectStage = reject; }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    await act(() => result.current.fetchAllRemotes());
+    await act(async () => listener?.(progress("fetch-all-1", "FetchAll", "Receiving")));
+    expect(result.current.state.transfer).toMatchObject({ phase: "Receiving" });
+
+    let stage!: Promise<void>;
+    act(() => {
+      stage = result.current.stageFile("a.txt");
+    });
+    expect(result.current.state.status).toEqual([{ ...entry, staged: true }]);
+    act(() => result.current.selectRow({ commitId: "abc" }));
+    await act(async () => listener?.(progress("fetch-all-1", "FetchAll", "Completed")));
+    expect(result.current.state.transfer).toBeNull();
+    const generation = result.current.state.refreshGeneration;
+
+    await act(async () => {
+      rejectStage?.(new Error("index.lock exists"));
+      await stage;
+    });
+
+    expect(result.current.state.transfer).toBeNull();
+    expect(result.current.state.transferSubject).toBeNull();
+    expect(result.current.state.selectedRow).toEqual({ commitId: "abc" });
+    expect(result.current.state.refreshGeneration).toBeGreaterThanOrEqual(generation);
+    expect(result.current.state.status).toEqual([entry]);
+    expect(result.current.state.error).toContain("index.lock exists");
+    expect(result.current.state.pending).toBe(false);
   });
 });
