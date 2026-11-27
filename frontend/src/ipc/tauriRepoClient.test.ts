@@ -990,3 +990,15 @@ describe("tauriRepoClient file drops (#649)", () => {
     expect(invoke).toHaveBeenLastCalledWith("read_patch_file", { path: "/tmp/fix.patch" });
   });
 });
+
+describe("tauriRepoClient after a failed update install", () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+  });
+
+  it("recovers from a failed update install through recover_from_failed_update (#1194)", async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(true);
+    await expect(tauriRepoClient.recoverFromFailedUpdate()).resolves.toBe(true);
+    expect(invoke).toHaveBeenLastCalledWith("recover_from_failed_update", undefined);
+  });
+});

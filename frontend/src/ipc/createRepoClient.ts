@@ -118,6 +118,7 @@ export type BackendCall = <T>(method: string, params?: Record<string, unknown>) 
  *   desktop, JSON-RPC notifications in VSCode.
  * - file drops (#649): the desktop webview's drag and drop events and `readPatchFile`; none in
  *   VSCode, which handles drops on its windows itself.
+ * - `recoverFromFailedUpdate` (#1194): only the desktop app updates itself.
  * - `logFrontendError`: the desktop app writes through its log plugin and has no command for it.
  * - `subscribeHostRequests` (#677): the VSCode extension host's notifications; none on the desktop.
  */
@@ -137,6 +138,7 @@ export type TransportSpecific =
   | "subscribeOperationLog"
   | "subscribeFileDrops"
   | "readPatchFile"
+  | "recoverFromFailedUpdate"
   | "subscribeHostRequests"
   | "logFrontendError";
 

@@ -267,6 +267,9 @@ jobs:
       # The mutants job's comment and summary (#798); files only, no network.
       - name: report-mutants.py unit tests
         run: python3 scripts/test_report_mutants.py
+      # The Linux jobs' apt installs (#353, #1211); sudo and apt-get faked, no network.
+      - name: ci-apt-install.sh unit tests
+        run: python3 scripts/test_ci_apt_install.py
       # Never fails (#458): when frontend/pnpm-lock.yaml (e.g. a Renovate Tauri group PR) locks
       # another @tauri-apps/cli than the script's tool list was copied from, this adds a warning
       # annotation and a job summary line, so the PR shows that the list needs updating. See

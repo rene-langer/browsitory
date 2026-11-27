@@ -68,6 +68,8 @@ use commands::list_operations;
 use commands::{list_missing_recent_repos, remove_recent_repo};
 // Pinned recent repositories (#766).
 use commands::{list_pinned_repos, pin_recent_repo, unpin_recent_repo};
+// Show the window again after a failed Restart to update (#1194).
+use commands::recover_from_failed_update;
 // Open or create .gitignore and .gitattributes (#624).
 use commands::{create_root_file, get_root_files};
 // Collapse merges in the commit graph (#617).
@@ -298,6 +300,7 @@ commands![
     list_font_families,
     get_update_settings,
     set_update_settings,
+    recover_from_failed_update,
     background_fetch,
 ];
 

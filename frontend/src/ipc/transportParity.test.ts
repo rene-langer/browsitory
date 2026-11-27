@@ -59,12 +59,15 @@ const SUBSCRIPTIONS = [
  * Desktop only. VSCode has its own Git: Clone and Git: Initialize Repository commands, so the
  * extension reports `supportsCloneAndInit: false` and these reject without calling anything.
  * `readPatchFile` reads a file dropped on the window (#649); VSCode handles drops itself.
+ * `recoverFromFailedUpdate` follows a failed "Restart to update" (#1194); the extension updates
+ * through VSCode.
  */
 const VSCODE_UNSUPPORTED = [
   "cloneRepo",
   "cancelClone",
   "initRepo",
   "readPatchFile",
+  "recoverFromFailedUpdate",
 ] as const satisfies readonly Method[];
 
 /**

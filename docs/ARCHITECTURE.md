@@ -456,7 +456,9 @@ Windows delivers no HTML5 drag events inside the page; pointer events work the s
 WebKitGTK and in the VSCode webview. A press turns into a drag after 4 px. The listeners sit on
 `window`, so a source row that a windowed list unmounts mid-drag doesn't end it. The target is
 the element under the pointer (`elementFromPoint`) carrying `dropTargetProps(scope, key)`, so
-each drag sees only its own targets. Escape or `pointercancel` cancels, and the click that ends a
+each drag sees only its own targets. The window listeners call the callbacks of the latest
+render through a ref set in a layout effect: an event between a commit and its passive effects
+must not reach the render before (#1207). Escape or `pointercancel` cancels, and the click that ends a
 drag is swallowed. A drag is never the only way: the rebase planner's rows also move with
 **Move up**/**Move down** and Alt+Up/Down, and every move is announced in a status region.
 
@@ -1024,7 +1026,12 @@ handler, and from the drop of a resource it keeps in the app's resource table, w
 counts for "Restart to update" on Windows: `tauri-plugin-updater`'s install there runs only
 `cleanup_before_exit` and then `std::process::exit`, without a `RunEvent::Exit` (on macOS and
 Linux `relaunch` goes through `request_restart`, which delivers it). The wait runs once
-(`OnceLock`), whichever asks first. Each worker finishes
+(`OnceLock`), whichever asks first. When `ShellExecuteW` then fails to start the installer
+(a declined UAC prompt), `install` returns the error and the process keeps running, its window
+hidden, its workers stopped and its resource tables empty, the downloaded update included
+(#1194). The banner then calls `recover_from_failed_update`, which shows the window again when
+that `OnceLock` is set and answers whether it was; if so, the banner offers only "Restart
+Browsitory" (the process plugin's `relaunch`), as retrying the install can't work any more. Each worker finishes
 the command it is running (a transfer included, with the reads its wait serves) and starts no
 other (`worker/lifecycle.rs`; the commands still queued are answered `WorkerStopped`), the
 registry opens no repository any more, and the exit waits until the workers are idle or the
@@ -2770,6 +2777,10 @@ work to a `HighlightTransport` (`highlightWorkerProtocol.ts`):
   event loop a turn between chunks. A caller that moves on (another file, an unmounted view)
   aborts its `AbortSignal`; `highlightLines` shares one request between callers asking for the
   same text and cancels it once none wants it, and the worker drops it after its current chunk.
+  Shiki's per-line time limit (500 ms, then the rest of the line is one plain token) stays on,
+  so a pathological line can't hold up the worker for long; the cold first line of a grammar
+  (its patterns compile while it is tokenized, about 230 ms in V8) can run over it on a busy
+  machine. `TokenizeOptions.timeLimitMs: 0` turns it off for tests that compare two runs (#1210).
 - The entry points pick the transport. The desktop app (`main.tsx`) starts a module worker with
   `new Worker(new URL("./lib/highlight.worker.ts", import.meta.url), { type: "module" })`; its
   grammars stay separate chunks that load on first use (`vite.config.ts`'s `worker` options,
@@ -3170,8 +3181,12 @@ its marketplace, the desktop app through its own updater.
   the undo state's `state.lock`). A tab restore opens all tabs at once, each `open_repo` moving its
   repository to the front of the recent list, and the sidecar runs each request on its own
   thread; without the lock the later write undid the earlier one. Where the lock file can't be
-  created or locked, or another process holds it for 5 s, the write goes ahead with only the
-  in-process exclusion. Getters read without the lock: the write replaces the file atomically (a
+  created or locked, or other processes hold it for 5 s without finishing a write, the write
+  goes ahead with only the in-process exclusion. Each writer that gets the lock moves the lock
+  file's length on by one (1 to 64 bytes, round and round), and a waiter that sees it move starts
+  its 5 s again (#1212): on the Windows runner a write takes about 200 ms, so one process's run
+  of 25 writes kept the lock past 5 s, and the waiters then wrote unlocked and undid writes.
+  Getters read without the lock: the write replaces the file atomically (a
   temp file, synced, then renamed). A symlinked `config.toml` is resolved first, so the link
   stays and the file it points to is replaced.
 - **What this version doesn't know stays (#1137).** `update_config` also reads the file as a
@@ -3587,7 +3602,9 @@ only `error`.
   steps never fail it. It posts the counts and the missed and timed-out mutants as one sticky
   PR comment (marked `<!-- mutants-report -->`, updated on re-runs; not for fork PRs or
   dispatched runs), repeats them in the run summary, and uploads the full `mutants.out` as an
-  artifact. Agents triage that comment (see `AGENTS.md`'s "Testing conventions"). To
+  artifact. When the changed lines hold no mutants (only test code, for instance), cargo-mutants
+  exits 0 without a `mutants.out` and the comment says no mutants were generated (#1201).
+  Agents triage that comment (see `AGENTS.md`'s "Testing conventions"). To
   reproduce locally: `git diff origin/main...HEAD > pr.diff && cargo mutants --in-diff pr.diff
   --package git-core --package repo-service`. Frontend and extension code are not covered.
 - Removed assertions (`ci.yml`'s `removed-assertions` job, pull requests and dispatched runs

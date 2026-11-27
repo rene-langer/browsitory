@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 
 /** How far (in CSS pixels) a press has to move before it becomes a drag; less is a click. */
 export const DRAG_THRESHOLD = 4;
@@ -89,7 +96,9 @@ export function usePointerDrag<P>(options: PointerDragOptions<P>): {
 } {
   const [drag, setDrag] = useState<PointerDragState<P> | null>(null);
   const optionsRef = useRef(options);
-  useEffect(() => {
+  // A layout effect, not a passive one: a pointer event can arrive between a render's commit and
+  // its passive effects, and must already call that render's callbacks (#1207).
+  useLayoutEffect(() => {
     optionsRef.current = options;
   });
   // Ends the press in progress (drag or not); `null` while there is none.

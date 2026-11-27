@@ -507,6 +507,12 @@ pub fn get_app_version(app: tauri::AppHandle) -> String {
     app.package_info().version.to_string()
 }
 
+/// See `exit::recover_from_failed_update` (#1194).
+#[tauri::command]
+pub async fn recover_from_failed_update(app: tauri::AppHandle) -> bool {
+    crate::exit::recover_from_failed_update(&app)
+}
+
 /// A repository's worker as commands reach it (#125). Every round trip runs on Tokio's blocking
 /// pool (`call` → `off_runtime`), so a busy worker (a hook, a signer, a transfer, or a queue of
 /// commands behind one) never holds one of the async runtime's few threads. With those held,

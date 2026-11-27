@@ -56,7 +56,16 @@ export interface TokenizeOptions {
   chunkLines?: number;
   /** Gives the event loop a turn between chunks (a macrotask by default). */
   yieldToEventLoop?: () => Promise<void>;
+  /**
+   * Milliseconds Shiki spends on one line before it leaves the rest of the line one plain token;
+   * `0` for no limit. Shiki's 500 by default: a pathological line can't hold up the worker for
+   * long, at the price of a cut line when the machine is slow (#1210).
+   */
+  timeLimitMs?: number;
 }
+
+/** Shiki's own default `tokenizeTimeLimit`. */
+const TIME_LIMIT_MS = 500;
 
 export interface Tokenizer {
   tokenize(lang: HighlightLanguage, code: string, options?: TokenizeOptions): Promise<Token[][]>;
@@ -121,7 +130,12 @@ export function createTokenizer(): Tokenizer {
 
   return {
     async tokenize(lang, code, options = {}) {
-      const { signal, chunkLines = HIGHLIGHT_CHUNK_LINES, yieldToEventLoop = nextTask } = options;
+      const {
+        signal,
+        chunkLines = HIGHLIGHT_CHUNK_LINES,
+        yieldToEventLoop = nextTask,
+        timeLimitMs = TIME_LIMIT_MS,
+      } = options;
       throwIfAborted(signal);
       const h = await getHighlighter();
       await ensureLanguage(h, lang);
@@ -136,7 +150,12 @@ export function createTokenizer(): Tokenizer {
           throwIfAborted(signal);
         }
         const chunk = lines.slice(start, start + chunkLines).join("\n");
-        const tokens = h.codeToTokens(chunk, { lang, theme: "browsitory", grammarState });
+        const tokens = h.codeToTokens(chunk, {
+          lang,
+          theme: "browsitory",
+          grammarState,
+          tokenizeTimeLimit: timeLimitMs,
+        });
         grammarState = tokens.grammarState;
         for (const line of tokens.tokens) result.push(line.map((t) => ({ content: t.content, color: t.color })));
       }

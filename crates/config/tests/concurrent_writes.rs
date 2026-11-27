@@ -81,13 +81,23 @@ fn processes_writing_at_once_lose_no_change() {
             std::process::Command::new(&exe)
                 .args(["--exact", "writer_child", "--test-threads", "1"])
                 .env(CHILD_ENV, format!("{}|{writer}", file.display()))
-                .stdout(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
                 .spawn()
                 .unwrap()
         })
         .collect();
-    for mut child in children {
-        assert!(child.wait().unwrap().success(), "a writer process failed");
+    for (writer, child) in children.into_iter().enumerate() {
+        let output = child.wait_with_output().unwrap();
+        // Its panic message (libtest prints it on stdout) tells a lock timeout or a sharing
+        // violation from a lost write (#1212).
+        assert!(
+            output.status.success(),
+            "writer process {writer} failed ({}):\n{}{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
     let mut stored: Vec<PathBuf> = list_repo_aliases_at(&file)
         .unwrap()
