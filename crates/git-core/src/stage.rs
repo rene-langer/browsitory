@@ -115,7 +115,7 @@ impl From<LinePatchError> for StageError {
 /// index object (the worker keeps its `Repository` open), and a later write elsewhere would
 /// otherwise save a stage that failed (#1166).
 pub fn stage_file(repo: &git2::Repository, path: &str) -> Result<(), StageError> {
-    let Err(error) = stage_file_unguarded(repo, path) else {
+    let Err(error) = stage_unguarded(repo, &[path]) else {
         return Ok(());
     };
     match repo.index().and_then(|mut index| index.read(true)) {
@@ -126,61 +126,104 @@ pub fn stage_file(repo: &git2::Repository, path: &str) -> Result<(), StageError>
     }
 }
 
-fn stage_file_unguarded(repo: &git2::Repository, path: &str) -> Result<(), StageError> {
-    if path.ends_with('/') {
-        return stage_untracked_folder(repo, path);
-    }
-    let rel = checked_relative(path)?;
-    let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
+/// Stages each of `paths` as [`stage_file`] does into the repository's index in memory, then
+/// writes the index once, when anything changed (#1155: Stage all wrote it once per file).
+fn stage_unguarded<S: AsRef<str>>(repo: &git2::Repository, paths: &[S]) -> Result<(), StageError> {
     let mut index = repo.index()?;
     // As git, from the index file as it is now: a mark set outside counts.
     index.read(false)?;
-    if crate::index_marks::is_skip_worktree(&index, rel) {
+    let mut drivers = Filters::default();
+    let mut changed = false;
+    for path in paths {
+        changed |= stage_into(repo, &mut index, &mut drivers, path.as_ref())?;
+    }
+    if changed {
+        write_index(&mut index)?;
+    }
+    Ok(())
+}
+
+/// The external filter drivers, loaded once per call and only when a file needs them.
+#[derive(Default)]
+struct Filters(Option<crate::external_filter::Drivers>);
+
+impl Filters {
+    /// Refuses the first of `paths` that goes through a driver Browsitory can't run (#1063).
+    fn refuse<P: AsRef<Path>>(
+        &mut self,
+        repo: &git2::Repository,
+        paths: impl IntoIterator<Item = P>,
+    ) -> Result<(), StageError> {
+        let drivers = match &mut self.0 {
+            Some(drivers) => drivers,
+            empty => empty.insert(crate::external_filter::Drivers::load(repo)?),
+        };
+        crate::external_filter::refuse_with(drivers, paths)
+    }
+}
+
+/// Stages `path` into `index` without writing it; true when the index changed.
+fn stage_into(
+    repo: &git2::Repository,
+    index: &mut git2::Index,
+    drivers: &mut Filters,
+    path: &str,
+) -> Result<bool, StageError> {
+    if path.ends_with('/') {
+        return stage_untracked_folder(repo, index, drivers, path);
+    }
+    let rel = checked_relative(path)?;
+    let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
+    if crate::index_marks::is_skip_worktree(index, rel) {
         return Err(StageError::SkipWorktree(path.to_string()));
     }
     if crate::worktree_guard::has_symlinked_ancestor(workdir, path) {
-        if has_conflict_entries(&index, path) {
+        if has_conflict_entries(index, path) {
             return Err(StageError::BeyondSymlink(path.to_string()));
         }
         // Not in the index (staging the link already took it out): nothing left to stage.
-        if index.get_path(rel, 0).is_some() {
-            index.remove_path(rel)?;
-            write_index(&mut index)?;
+        if index.get_path(rel, 0).is_none() {
+            return Ok(false);
         }
-        return Ok(());
+        index.remove_path(rel)?;
+        return Ok(true);
     }
     let full = workdir.join(rel);
     if let Ok(meta) = full.symlink_metadata() {
-        if meta.is_dir() && folder_replaced_a_file(repo, &index, rel)? {
+        if meta.is_dir() && folder_replaced_a_file(repo, index, rel)? {
             // A folder where HEAD or the index has a file or link: git sees that file deleted.
             // Its deletion is what stages here (a conflict there resolves as deleted, as `git
             // add -A`); the folder's files stage on their own (#157).
-            if index.get_path(rel, 0).is_some() || has_conflict_entries(&index, path) {
-                index.remove_path(rel)?;
-                write_index(&mut index)?;
+            if index.get_path(rel, 0).is_none() && !has_conflict_entries(index, path) {
+                return Ok(false);
             }
-            return Ok(());
+            index.remove_path(rel)?;
+            return Ok(true);
         }
         if meta.file_type().is_symlink() {
             // A link that replaced a tracked folder takes the folder's place, like `git add`.
             index.remove_dir(rel, 0)?;
         } else {
             // git doesn't filter a link; a file goes through the clean filters (#1063).
-            crate::external_filter::refuse_paths::<StageError, _>(repo, [rel])?;
+            drivers.refuse(repo, [rel])?;
         }
         index.add_path(Path::new(path))?;
     } else {
         index.remove_path(Path::new(path))?;
     }
-    write_index(&mut index)?;
-    Ok(())
+    Ok(true)
 }
 
-/// Stages the files of the untracked folder `folder` (`dir/`, #845), as `git add dir/`: not its
-/// ignored files, and not a nested repository in it.
-fn stage_untracked_folder(repo: &git2::Repository, folder: &str) -> Result<(), StageError> {
+/// Stages the files of the untracked folder `folder` (`dir/`, #845) into `index`, as `git add
+/// dir/`: not its ignored files, and not a nested repository in it.
+fn stage_untracked_folder(
+    repo: &git2::Repository,
+    index: &mut git2::Index,
+    drivers: &mut Filters,
+    folder: &str,
+) -> Result<bool, StageError> {
     let files = untracked_folder_files(repo, folder)?;
-    crate::external_filter::refuse_paths::<StageError, _>(
+    drivers.refuse(
         repo,
         files
             .iter()
@@ -195,12 +238,10 @@ fn stage_untracked_folder(repo: &git2::Repository, folder: &str) -> Result<(), S
             })
             .map(|file| Path::new(&file.path)),
     )?;
-    let mut index = repo.index()?;
     for file in files.iter().filter(|file| !file.path.ends_with('/')) {
         index.add_path(Path::new(&file.path))?;
     }
-    write_index(&mut index)?;
-    Ok(())
+    Ok(true)
 }
 
 /// Deletes the files of the untracked folder `folder` (`dir/`, #845), as `git clean dir/`: not
@@ -321,44 +362,26 @@ pub fn discard_file(repo: &git2::Repository, path: &str) -> Result<(), StageErro
         return delete_untracked_folder(repo, path);
     }
     crate::valueless_setting::refuse_for_checkout::<StageError>(repo)?;
-    let rel = checked_relative(path)?;
+    discard_one(repo, path)
+}
+
+/// [`discard_file`] after its check of the settings.
+fn discard_one(repo: &git2::Repository, path: &str) -> Result<(), StageError> {
+    if path.ends_with('/') {
+        return delete_untracked_folder(repo, path);
+    }
     let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
-    refuse_beyond_symlink(workdir, path)?;
-    ensure_no_symlinked_parent(workdir, rel)?;
-    let index = repo.index()?;
-    if index.get_path(rel, 0).is_some() {
-        // libgit2 can't put the folder back over a file ("directory exists"), and git would
-        // delete that file, which the user didn't pick. Say what's in the way instead (#154).
-        if let Some(parent) = crate::worktree_guard::file_in_place_of_folder(workdir, path)? {
-            return Err(StageError::FolderIsNowAFile {
-                path: path.to_string(),
-                parent,
-            });
-        }
+    if is_tracked(repo, path)? {
+        check_tracked(workdir, path)?;
         if let Some(inner) = unrestorable_inside(repo, workdir, path)? {
             return Err(StageError::FolderHoldsUnrestorable {
                 path: path.to_string(),
                 inner,
             });
         }
-        // A forced checkout writes through a symlink that replaced the file (#114).
-        crate::worktree_guard::prepare_forced_checkout::<StageError, _>(
-            repo,
-            Some(&crate::worktree_guard::GuardSource::Index(&index)),
-            Some(&[path.to_string()]),
-        )?;
-        let mut checkout = git2::build::CheckoutBuilder::new();
-        checkout.force().path(rel).disable_pathspec_match(true);
-        let filters = crate::hardlink::on_checkout(repo, &mut checkout);
-        // A file another program holds open: say so, not libgit2's raw error (#268).
-        count_checkout(repo.checkout_index(None, Some(&mut checkout))).map_err(|error| {
-            match crate::worktree_guard::held_open_after_checkout(workdir, &error, [path]) {
-                Some(path) => StageError::FileInUse(path.to_string()),
-                None => error.into(),
-            }
-        })?;
-        filters.check()?;
+        checkout_tracked(repo, workdir, &[path])?;
     } else {
+        check_path(workdir, path)?;
         // Through the held-folder walker, so a folder swapped for a link after the checks above
         // can't redirect the delete outside the repository (#149).
         if !crate::worktree_guard::remove_beneath(workdir, path)? {
@@ -368,6 +391,67 @@ pub fn discard_file(repo: &git2::Repository, path: &str) -> Result<(), StageErro
             return Err(StageError::IsFolder(path.to_string()));
         }
     }
+    Ok(())
+}
+
+/// Whether the index has a stage-0 entry at `path`: its discard is a checkout, not a delete.
+fn is_tracked(repo: &git2::Repository, path: &str) -> Result<bool, StageError> {
+    Ok(repo.index()?.get_path(checked_relative(path)?, 0).is_some())
+}
+
+/// A discard's checks of `path` itself: inside the repository, not through a symlinked folder.
+fn check_path(workdir: &Path, path: &str) -> Result<(), StageError> {
+    let rel = checked_relative(path)?;
+    refuse_beyond_symlink(workdir, path)?;
+    ensure_no_symlinked_parent(workdir, rel)
+}
+
+/// [`check_path`], and for a tracked file whose folder is now a file, that file named: libgit2
+/// can't put the folder back over it ("directory exists"), and git would delete that file,
+/// which the user didn't pick (#154).
+fn check_tracked(workdir: &Path, path: &str) -> Result<(), StageError> {
+    check_path(workdir, path)?;
+    match crate::worktree_guard::file_in_place_of_folder(workdir, path)? {
+        Some(parent) => Err(StageError::FolderIsNowAFile {
+            path: path.to_string(),
+            parent,
+        }),
+        None => Ok(()),
+    }
+}
+
+/// Writes the index's version of each tracked file of `paths` to the work tree, in one checkout
+/// (#1155).
+fn checkout_tracked(
+    repo: &git2::Repository,
+    workdir: &Path,
+    paths: &[&str],
+) -> Result<(), StageError> {
+    let index = repo.index()?;
+    // A forced checkout writes through a symlink that replaced the file (#114).
+    crate::worktree_guard::prepare_forced_checkout::<StageError, _>(
+        repo,
+        Some(&crate::worktree_guard::GuardSource::Index(&index)),
+        Some(paths),
+    )?;
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.force().disable_pathspec_match(true);
+    for path in paths {
+        checkout.path(*path);
+    }
+    let filters = crate::hardlink::on_checkout(repo, &mut checkout);
+    // A file another program holds open: say so, not libgit2's raw error (#268).
+    count_checkout(repo.checkout_index(None, Some(&mut checkout))).map_err(|error| {
+        match crate::worktree_guard::held_open_after_checkout(
+            workdir,
+            &error,
+            paths.iter().copied(),
+        ) {
+            Some(path) => StageError::FileInUse(path.to_string()),
+            None => error.into(),
+        }
+    })?;
+    filters.check()?;
     Ok(())
 }
 
@@ -511,7 +595,26 @@ pub fn discard_all_unstaged(repo: &git2::Repository, paths: &[String]) -> Result
             refused.push(format!("{path}/"));
         }
     }
-    for path in untracked.into_iter().chain(tracked) {
+    let record = |failed: &mut Vec<String>,
+                  any_folder: &mut bool,
+                  reasons: &mut Vec<(String, usize)>,
+                  path: &String,
+                  result: Result<(), StageError>| match result {
+        Ok(()) => {}
+        Err(StageError::IsFolder(_)) => {
+            *any_folder = true;
+            failed.push(path.clone());
+        }
+        Err(StageError::FolderIsNowAFile { parent, .. }) => {
+            reasons.push((format!(" '{parent}' is now a file, not a folder."), 1));
+            failed.push(path.clone());
+        }
+        Err(_) => failed.push(path.clone()),
+    };
+    let untracked_count = untracked.len();
+    // The tracked files that passed their checks, written back in one checkout (#1155).
+    let mut checkout: Vec<&String> = Vec::new();
+    for (position, path) in untracked.into_iter().chain(tracked).enumerate() {
         if failed.contains(path) {
             continue;
         }
@@ -523,17 +626,35 @@ pub fn discard_all_unstaged(repo: &git2::Repository, paths: &[String]) -> Result
             reasons[position].1 += 1;
             continue;
         }
-        match discard_file(repo, path) {
-            Ok(()) => {}
-            Err(StageError::IsFolder(_)) => {
-                any_folder = true;
-                failed.push(path.clone());
+        if position < untracked_count {
+            record(
+                &mut failed,
+                &mut any_folder,
+                &mut reasons,
+                path,
+                discard_one(repo, path),
+            );
+        } else {
+            match check_tracked(workdir, path) {
+                Ok(()) => checkout.push(path),
+                Err(error) => record(&mut failed, &mut any_folder, &mut reasons, path, Err(error)),
             }
-            Err(StageError::FolderIsNowAFile { parent, .. }) => {
-                reasons.push((format!(" '{parent}' is now a file, not a folder."), 1));
-                failed.push(path.clone());
+        }
+    }
+    if !checkout.is_empty() {
+        let batch: Vec<&str> = checkout.iter().map(|path| path.as_str()).collect();
+        if checkout_tracked(repo, workdir, &batch).is_err() {
+            // One file that can't be written stops the whole checkout: each on its own, so
+            // the others are still discarded and the failures named.
+            for path in checkout {
+                record(
+                    &mut failed,
+                    &mut any_folder,
+                    &mut reasons,
+                    path,
+                    discard_one(repo, path),
+                );
             }
-            Err(_) => failed.push(path.clone()),
         }
     }
     if failed.is_empty() {
@@ -564,14 +685,12 @@ pub fn stage_paths(repo: &git2::Repository, paths: &[String]) -> Result<(), Stag
     for path in paths {
         checked_relative(path)?;
     }
-    with_index_kept_on_error(repo, || paths.iter().try_for_each(|p| stage_file(repo, p)))
+    with_index_kept_on_error(repo, || stage_unguarded(repo, paths))
 }
 
 /// Unstages every one of `paths` as [`unstage_file`] does, all or nothing (#528).
 pub fn unstage_paths(repo: &git2::Repository, paths: &[String]) -> Result<(), StageError> {
-    with_index_kept_on_error(repo, || {
-        paths.iter().try_for_each(|p| unstage_file(repo, p))
-    })
+    with_index_kept_on_error(repo, || unstage_all(repo, paths))
 }
 
 /// Runs `change`; when it fails, writes back the index file as it was before and re-reads the
@@ -685,36 +804,66 @@ pub fn ignore_path(repo: &git2::Repository, pattern: &str) -> Result<(), StageEr
 /// A staged rename unstages with its source (#137), except a source inside another staged pair:
 /// its deletion belongs to that pair, which stays staged (as `git restore --staged` leaves it).
 pub fn unstage_file(repo: &git2::Repository, path: &str) -> Result<(), StageError> {
+    unstage_all(repo, &[path])
+}
+
+/// Unstages each of `paths` as [`unstage_file`] does, with one status scan (for the staged
+/// renames) and one index write for all of them (#1155: Unstage all scanned the whole work
+/// tree once per file).
+fn unstage_all<S: AsRef<str>>(repo: &git2::Repository, paths: &[S]) -> Result<(), StageError> {
     let head_commit = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
     let head_tree = head_commit.as_ref().map(|c| c.tree()).transpose()?;
     let mut index = repo.index()?;
-    let root = pair_root(&index, head_tree.as_ref(), path)?;
-    let unit = root.clone().unwrap_or_else(|| path.to_string());
-    let below = format!("{unit}/");
-    let in_unit = |new: &str| new == unit || (root.is_some() && new.starts_with(&below));
-    let mut paths = vec![unit.clone()];
-    for source in staged_rename_sources(repo, in_unit)? {
-        let inside_unit = source == unit || source.starts_with(&below);
-        if !inside_unit && pair_root(&index, head_tree.as_ref(), &source)?.is_none() {
-            paths.push(source);
+    // Each unit to reset, mapped to whether it is the root of a folder/link pair.
+    let mut units: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+    let mut reset: Vec<String> = Vec::new();
+    for path in paths {
+        let path = path.as_ref();
+        let root = pair_root(&index, head_tree.as_ref(), path)?;
+        let pair = root.is_some();
+        let unit = root.unwrap_or_else(|| path.to_string());
+        // A merge's conflict entries at or below the pair can't be reset ("invalid entry mode")
+        // and dropping them would lose a side of the conflict: refuse before changing anything.
+        if pair && has_conflict_entries_at_or_below(&index, &unit) {
+            return Err(StageError::ConflictsBelow(unit));
+        }
+        if units.insert(unit.clone(), pair).is_none() {
+            reset.push(unit);
         }
     }
-    // A merge's conflict entries at or below the pair can't be reset ("invalid entry mode") and
-    // dropping them would lose a side of the conflict: refuse before changing anything.
-    if root.is_some() && has_conflict_entries_at_or_below(&index, &unit) {
-        return Err(StageError::ConflictsBelow(unit));
+    let mut sources = std::collections::HashSet::new();
+    for (new, source) in staged_renames(repo)? {
+        // The unit the rename's new path is in: the path itself, or a pair it is below.
+        let unit = if units.contains_key(&new) {
+            Some(new.as_str())
+        } else {
+            new.match_indices('/')
+                .map(|(at, _)| &new[..at])
+                .find(|ancestor| units.get(*ancestor) == Some(&true))
+        };
+        let Some(unit) = unit else {
+            continue;
+        };
+        let inside_unit = source == unit || source.starts_with(&format!("{unit}/"));
+        if !inside_unit
+            && !units.contains_key(&source)
+            && pair_root(&index, head_tree.as_ref(), &source)?.is_none()
+            && sources.insert(source.clone())
+        {
+            reset.push(source);
+        }
     }
     let mut remove_and_reset = || -> Result<(), git2::Error> {
-        if root.is_some() {
+        for (unit, _) in units.iter().filter(|(_, pair)| **pair) {
             // libgit2 can't reset a root whose index entries sit on the other side of the
             // file/folder swap (re-adding `l` silently drops `l/a`, then "index does not contain
             // l/a"), so the pair's entries go first and the reset only adds HEAD's back. The
-            // removals stay in memory: `reset_default` works on this same repository index and
-            // writes it once, so a failed reset leaves `.git/index` as it was.
-            let _ = index.remove_path(Path::new(&unit));
-            index.remove_dir(Path::new(&unit), 0)?;
+            // removals stay in memory and the reset writes the index once, so a failed reset
+            // leaves `.git/index` as it was.
+            let _ = index.remove_path(Path::new(unit));
+            index.remove_dir(Path::new(unit), 0)?;
         }
-        reset_entries(repo, &mut index, head_tree.as_ref(), &paths)
+        reset_entries(repo, &mut index, head_tree.as_ref(), &reset)
     };
     if let Err(error) = remove_and_reset() {
         // Drop the in-memory removals: the repository's index object is shared (the worker keeps
@@ -835,18 +984,13 @@ fn index_has_entries_below(index: &git2::Index, path: &str) -> Result<bool, Stag
     }
 }
 
-/// The old paths of the staged renames whose new path `matches`.
-fn staged_rename_sources(
-    repo: &git2::Repository,
-    matches: impl Fn(&str) -> bool,
-) -> Result<Vec<String>, StageError> {
+/// The staged renames, as (new path, old path).
+fn staged_renames(repo: &git2::Repository) -> Result<Vec<(String, String)>, StageError> {
     let entries = scan_status(repo).map_err(|e| StageError::Status(e.to_string()))?;
     Ok(entries
         .into_iter()
-        .filter(|entry| {
-            entry.staged && entry.kind == crate::status::StatusKind::Renamed && matches(&entry.path)
-        })
-        .filter_map(|entry| entry.old_path)
+        .filter(|entry| entry.staged && entry.kind == crate::status::StatusKind::Renamed)
+        .filter_map(|entry| Some((entry.path, entry.old_path?)))
         .collect())
 }
 

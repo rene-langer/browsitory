@@ -213,7 +213,10 @@ where
     refuse_paths(repo, written_paths(diff))
 }
 
-fn refuse_with<E, S>(drivers: &Drivers, paths: impl IntoIterator<Item = S>) -> Result<(), E>
+pub(crate) fn refuse_with<E, S>(
+    drivers: &Drivers,
+    paths: impl IntoIterator<Item = S>,
+) -> Result<(), E>
 where
     E: From<ExternalFilter> + From<git2::Error>,
     S: AsRef<Path>,
