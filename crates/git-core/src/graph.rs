@@ -105,12 +105,7 @@ impl RefDecorations {
         let id = oid.to_string();
         GraphCommit {
             short_id: id[..7].to_string(),
-            summary: commit
-                .summary()
-                .ok()
-                .flatten()
-                .unwrap_or_default()
-                .to_string(),
+            summary: crate::message_text::summary(commit),
             author_name: commit.author().name().ok().unwrap_or_default().to_string(),
             author_email: commit.author().email().ok().unwrap_or_default().to_string(),
             timestamp: commit.time().seconds(),
@@ -770,5 +765,5 @@ pub(crate) fn merged_walk<'r>(
 /// Full raw message (subject plus body) of `commit_id`, for the commit header.
 pub fn commit_message(repo: &Repository, commit_id: &str) -> Result<String, GraphError> {
     let commit = repo.find_commit(Oid::from_str(commit_id)?)?;
-    Ok(String::from_utf8_lossy(commit.message_bytes()).into_owned())
+    Ok(crate::message_text::message(&commit))
 }

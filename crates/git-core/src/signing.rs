@@ -314,7 +314,7 @@ fn reflog_message(operation: &str, commit: &Commit<'_>) -> String {
     };
     format!(
         "{operation}{kind}: {}",
-        commit.summary().ok().flatten().unwrap_or_default()
+        crate::message_text::summary(commit)
     )
 }
 

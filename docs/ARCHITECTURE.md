@@ -1730,7 +1730,15 @@ certificate.
   iconv). After a paused cherry-pick or rebase step, libgit2's `MERGE_MSG` (the raw message) is
   rewritten in UTF-8, as git writes it, for the commit box and `git commit`; `merge_message`
   reads the file's bytes, since git2's `Repository::message` panics on a byte that isn't UTF-8.
-  Twinned with git in `tests/message_encoding.rs`.
+  Every subject and message shown or written from a commit reads it the same way (#1203): the
+  graph, the commit header, the rebase planner, the reflog, a stopped or terminal sequence, a
+  path-limited stash's message, a squash merge's `SQUASH_MSG`, a file/folder conflict's label
+  and Export as patch. A reflog message holds whatever bytes its writer gave (git writes the
+  subject as committed), so the reflog and the stash list read it as UTF-8 with the Latin-1
+  fallback; the stash list reads `refs/stash`'s reflog itself, since git2's `stash_foreach`
+  panics on such a message. libgit2's own stash names HEAD's subject as stored, so a stash on
+  such a HEAD gets git's UTF-8 message in its reflog entry afterwards (the stash commit keeps
+  libgit2's). Twinned with git in `tests/message_encoding.rs`.
 - To git a paused Browsitory rebase is a cherry-pick on a detached HEAD: an edit or conflict
   stop is `CherryPick` with `CHERRY_PICK_HEAD` = the step (plus `MERGE_MSG` and, for a conflict,
   the conflicted index); an error stop (a step refused, e.g. a local edit in the way) is `Clean`.

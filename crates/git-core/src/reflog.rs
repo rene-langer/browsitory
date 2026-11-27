@@ -79,27 +79,30 @@ pub fn read_reflog_newest(
         return Ok(Vec::new());
     }
 
-    repo.reflog(reference)?
+    Ok(repo
+        .reflog(reference)?
         .iter()
         .take(limit)
         .map(|entry| {
             let committer = entry.committer();
             let new_id = entry.id_new();
-            Ok(ReflogEntry {
+            ReflogEntry {
                 reference: reference.to_string(),
                 old_id: entry.id_old().to_string(),
                 new_id: new_id.to_string(),
                 committer_name: committer.name().ok().unwrap_or_default().to_string(),
                 committer_email: committer.email().ok().unwrap_or_default().to_string(),
                 timestamp: committer.when().seconds(),
-                message: entry.message()?.unwrap_or_default().to_string(),
-                summary: repo
-                    .find_commit(new_id)
-                    .ok()
-                    .and_then(|commit| commit.summary().ok().flatten().map(str::to_string)),
-            })
+                // git writes the subject's bytes as committed, in any encoding.
+                message: crate::message_text::text(entry.message_bytes().unwrap_or_default()),
+                summary: repo.find_commit(new_id).ok().and_then(|commit| {
+                    commit
+                        .summary_bytes()
+                        .map(|_| crate::message_text::summary(&commit))
+                }),
+            }
         })
-        .collect()
+        .collect())
 }
 
 pub fn restore_reflog_entry(
