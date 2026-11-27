@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use git_core::process::CommandStyle;
 use serde::{Deserialize, Serialize};
 
-use super::{config_file_path, generate_workspace_id, read_config, write_config, ConfigError};
+use super::{config_file_path, generate_workspace_id, read_config, update_config, ConfigError};
 
 /// Where a command appears besides the command palette.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -157,8 +157,7 @@ pub fn set_user_commands_at(
             seen.insert(command.id.clone());
         }
     }
-    let mut config = read_config(config_file)?;
-    match repo_path {
+    update_config(config_file, |config| match repo_path {
         None => config.user_commands = cleaned.clone(),
         Some(path) => {
             config
@@ -171,7 +170,6 @@ pub fn set_user_commands_at(
                 });
             }
         }
-    }
-    write_config(config_file, &config)?;
+    })?;
     Ok(cleaned)
 }

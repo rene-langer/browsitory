@@ -27,6 +27,7 @@ pub enum ConfigError {
 }
 
 mod user_commands;
+mod write_lock;
 pub use user_commands::*;
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -394,7 +395,7 @@ impl Default for UpdateSettings {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
-struct ConfigFile {
+pub(crate) struct ConfigFile {
     // Recent repositories, newest first, at most `MAX_RECENT_REPOS`; never a pinned one.
     #[serde(default)]
     recent_repos: Vec<PathBuf>,
@@ -543,21 +544,21 @@ pub fn list_recent_repos_at(config_file: &Path) -> Result<Vec<PathBuf>, ConfigEr
 }
 
 pub fn add_recent_repo_at(config_file: &Path, path: &Path) -> Result<(), ConfigError> {
-    let mut config = read_config(config_file)?;
-    if config.pinned_repos.iter().any(|p| p == path) {
-        return Ok(());
-    }
-    config.recent_repos.retain(|p| p != path);
-    config.recent_repos.insert(0, path.to_path_buf());
-    config.recent_repos.truncate(MAX_RECENT_REPOS);
-    write_config(config_file, &config)
+    update_config(config_file, |config| {
+        if config.pinned_repos.iter().any(|p| p == path) {
+            return;
+        }
+        config.recent_repos.retain(|p| p != path);
+        config.recent_repos.insert(0, path.to_path_buf());
+        config.recent_repos.truncate(MAX_RECENT_REPOS);
+    })
 }
 
 pub fn remove_recent_repo_at(config_file: &Path, path: &Path) -> Result<(), ConfigError> {
-    let mut config = read_config(config_file)?;
-    config.recent_repos.retain(|p| p != path);
-    config.pinned_repos.retain(|p| p != path);
-    write_config(config_file, &config)
+    update_config(config_file, |config| {
+        config.recent_repos.retain(|p| p != path);
+        config.pinned_repos.retain(|p| p != path);
+    })
 }
 
 pub fn list_pinned_repos_at(config_file: &Path) -> Result<Vec<PathBuf>, ConfigError> {
@@ -565,25 +566,25 @@ pub fn list_pinned_repos_at(config_file: &Path) -> Result<Vec<PathBuf>, ConfigEr
 }
 
 pub fn pin_recent_repo_at(config_file: &Path, path: &Path) -> Result<(), ConfigError> {
-    let mut config = read_config(config_file)?;
-    if config.pinned_repos.iter().any(|p| p == path) {
-        return Ok(());
-    }
-    config.recent_repos.retain(|p| p != path);
-    config.pinned_repos.push(path.to_path_buf());
-    write_config(config_file, &config)
+    update_config(config_file, |config| {
+        if config.pinned_repos.iter().any(|p| p == path) {
+            return;
+        }
+        config.recent_repos.retain(|p| p != path);
+        config.pinned_repos.push(path.to_path_buf());
+    })
 }
 
 pub fn unpin_recent_repo_at(config_file: &Path, path: &Path) -> Result<(), ConfigError> {
-    let mut config = read_config(config_file)?;
-    if !config.pinned_repos.iter().any(|p| p == path) {
-        return Ok(());
-    }
-    config.pinned_repos.retain(|p| p != path);
-    config.recent_repos.retain(|p| p != path);
-    config.recent_repos.insert(0, path.to_path_buf());
-    config.recent_repos.truncate(MAX_RECENT_REPOS);
-    write_config(config_file, &config)
+    update_config(config_file, |config| {
+        if !config.pinned_repos.iter().any(|p| p == path) {
+            return;
+        }
+        config.pinned_repos.retain(|p| p != path);
+        config.recent_repos.retain(|p| p != path);
+        config.recent_repos.insert(0, path.to_path_buf());
+        config.recent_repos.truncate(MAX_RECENT_REPOS);
+    })
 }
 
 pub fn list_missing_recent_repos_at(config_file: &Path) -> Result<Vec<PathBuf>, ConfigError> {
@@ -604,9 +605,9 @@ pub fn get_last_seen_version_at(config_file: &Path) -> Result<Option<String>, Co
 }
 
 pub fn set_last_seen_version_at(config_file: &Path, version: &str) -> Result<(), ConfigError> {
-    let mut config = read_config(config_file)?;
-    config.last_seen_version = Some(version.to_string());
-    write_config(config_file, &config)
+    update_config(config_file, |config| {
+        config.last_seen_version = Some(version.to_string());
+    })
 }
 
 pub fn get_diff_settings() -> Result<DiffSettings, ConfigError> {
@@ -626,12 +627,12 @@ pub fn set_diff_settings_at(
     config_file: &Path,
     settings: &DiffSettings,
 ) -> Result<(), ConfigError> {
-    let mut config = read_config(config_file)?;
-    config.diff = DiffSettings {
-        context_lines: settings.context_lines.min(MAX_CONTEXT_LINES),
-        ..*settings
-    };
-    write_config(config_file, &config)
+    update_config(config_file, |config| {
+        config.diff = DiffSettings {
+            context_lines: settings.context_lines.min(MAX_CONTEXT_LINES),
+            ..*settings
+        };
+    })
 }
 
 pub fn get_commit_message_settings() -> Result<CommitMessageSettings, ConfigError> {
@@ -659,13 +660,13 @@ pub fn set_commit_message_settings_at(
             *COMMIT_MESSAGE_COLUMNS.end(),
         )
     };
-    let mut config = read_config(config_file)?;
-    config.commit_message = CommitMessageSettings {
-        summary_limit: clamp(settings.summary_limit),
-        body_ruler: clamp(settings.body_ruler),
-        show_ruler: settings.show_ruler,
-    };
-    write_config(config_file, &config)
+    update_config(config_file, |config| {
+        config.commit_message = CommitMessageSettings {
+            summary_limit: clamp(settings.summary_limit),
+            body_ruler: clamp(settings.body_ruler),
+            show_ruler: settings.show_ruler,
+        };
+    })
 }
 
 pub fn get_fetch_settings() -> Result<FetchSettings, ConfigError> {
@@ -685,11 +686,11 @@ pub fn set_fetch_settings_at(
     config_file: &Path,
     settings: &FetchSettings,
 ) -> Result<(), ConfigError> {
-    let mut config = read_config(config_file)?;
-    config.fetch = FetchSettings {
-        auto_fetch_minutes: settings.auto_fetch_minutes.min(MAX_AUTO_FETCH_MINUTES),
-    };
-    write_config(config_file, &config)
+    update_config(config_file, |config| {
+        config.fetch = FetchSettings {
+            auto_fetch_minutes: settings.auto_fetch_minutes.min(MAX_AUTO_FETCH_MINUTES),
+        };
+    })
 }
 
 pub fn get_appearance_settings() -> Result<AppearanceSettings, ConfigError> {
@@ -710,9 +711,9 @@ pub fn set_appearance_settings_at(
     config_file: &Path,
     settings: &AppearanceSettings,
 ) -> Result<(), ConfigError> {
-    let mut config = read_config(config_file)?;
-    config.appearance = settings.clamped();
-    write_config(config_file, &config)
+    update_config(config_file, |config| {
+        config.appearance = settings.clamped();
+    })
 }
 
 pub fn get_update_settings() -> Result<UpdateSettings, ConfigError> {
@@ -731,9 +732,9 @@ pub fn set_update_settings_at(
     config_file: &Path,
     settings: &UpdateSettings,
 ) -> Result<(), ConfigError> {
-    let mut config = read_config(config_file)?;
-    config.updates = *settings;
-    write_config(config_file, &config)
+    update_config(config_file, |config| {
+        config.updates = *settings;
+    })
 }
 
 pub fn get_external_tool_settings() -> Result<ExternalToolSettings, ConfigError> {
@@ -762,12 +763,12 @@ pub fn set_external_tool_settings_at(
             .filter(|v| !v.is_empty())
             .map(str::to_string)
     };
-    let mut config = read_config(config_file)?;
-    config.tools = ExternalToolSettings {
-        editor: clean(&settings.editor),
-        terminal: clean(&settings.terminal),
-    };
-    write_config(config_file, &config)
+    update_config(config_file, |config| {
+        config.tools = ExternalToolSettings {
+            editor: clean(&settings.editor),
+            terminal: clean(&settings.terminal),
+        };
+    })
 }
 
 pub fn list_workspaces() -> Result<Vec<Workspace>, ConfigError> {
@@ -788,17 +789,17 @@ pub fn save_workspace_at(
     root: &Path,
     members: &[PathBuf],
 ) -> Result<String, ConfigError> {
-    let mut config = read_config(config_file)?;
-    let id = generate_workspace_id();
-    let deduped_name = dedupe_workspace_name(&config.workspaces, name, None);
-    config.workspaces.push(Workspace {
-        id: id.clone(),
-        name: deduped_name,
-        root_path: root.to_path_buf(),
-        member_paths: members.to_vec(),
-    });
-    write_config(config_file, &config)?;
-    Ok(id)
+    update_config(config_file, |config| {
+        let id = generate_workspace_id();
+        let deduped_name = dedupe_workspace_name(&config.workspaces, name, None);
+        config.workspaces.push(Workspace {
+            id: id.clone(),
+            name: deduped_name,
+            root_path: root.to_path_buf(),
+            member_paths: members.to_vec(),
+        });
+        id
+    })
 }
 
 pub fn update_workspace(id: &str, name: &str, members: &[PathBuf]) -> Result<(), ConfigError> {
@@ -811,13 +812,13 @@ pub fn update_workspace_at(
     name: &str,
     members: &[PathBuf],
 ) -> Result<(), ConfigError> {
-    let mut config = read_config(config_file)?;
-    let deduped_name = dedupe_workspace_name(&config.workspaces, name, Some(id));
-    if let Some(workspace) = config.workspaces.iter_mut().find(|w| w.id == id) {
-        workspace.name = deduped_name;
-        workspace.member_paths = members.to_vec();
-    }
-    write_config(config_file, &config)
+    update_config(config_file, |config| {
+        let deduped_name = dedupe_workspace_name(&config.workspaces, name, Some(id));
+        if let Some(workspace) = config.workspaces.iter_mut().find(|w| w.id == id) {
+            workspace.name = deduped_name;
+            workspace.member_paths = members.to_vec();
+        }
+    })
 }
 
 pub fn delete_workspace(id: &str) -> Result<(), ConfigError> {
@@ -825,9 +826,9 @@ pub fn delete_workspace(id: &str) -> Result<(), ConfigError> {
 }
 
 pub fn delete_workspace_at(config_file: &Path, id: &str) -> Result<(), ConfigError> {
-    let mut config = read_config(config_file)?;
-    config.workspaces.retain(|w| w.id != id);
-    write_config(config_file, &config)
+    update_config(config_file, |config| {
+        config.workspaces.retain(|w| w.id != id);
+    })
 }
 
 pub fn list_open_repos() -> Result<(Vec<OpenRepoEntry>, Option<PathBuf>), ConfigError> {
@@ -850,10 +851,10 @@ pub fn set_open_repos_at(
     entries: &[OpenRepoEntry],
     active: Option<&Path>,
 ) -> Result<(), ConfigError> {
-    let mut config = read_config(config_file)?;
-    config.open_repos = entries.to_vec();
-    config.active_repo = active.map(|p| p.to_path_buf());
-    write_config(config_file, &config)
+    update_config(config_file, |config| {
+        config.open_repos = entries.to_vec();
+        config.active_repo = active.map(|p| p.to_path_buf());
+    })
 }
 
 pub fn get_graph_branch_selection(repo_path: &Path) -> Result<Option<Vec<String>>, ConfigError> {
@@ -881,15 +882,15 @@ pub fn set_graph_branch_selection_at(
     repo_path: &Path,
     local: &[String],
 ) -> Result<(), ConfigError> {
-    let mut config = read_config(config_file)?;
-    config
-        .graph_branch_selections
-        .retain(|s| s.repo_path != repo_path);
-    config.graph_branch_selections.push(GraphBranchSelection {
-        repo_path: repo_path.to_path_buf(),
-        selected_branches: local.to_vec(),
-    });
-    write_config(config_file, &config)
+    update_config(config_file, |config| {
+        config
+            .graph_branch_selections
+            .retain(|s| s.repo_path != repo_path);
+        config.graph_branch_selections.push(GraphBranchSelection {
+            repo_path: repo_path.to_path_buf(),
+            selected_branches: local.to_vec(),
+        });
+    })
 }
 
 /// Forgets the saved graph branch selection of `repo_path`, so the graph shows every local
@@ -903,11 +904,11 @@ pub fn clear_graph_branch_selection_at(
     config_file: &Path,
     repo_path: &Path,
 ) -> Result<(), ConfigError> {
-    let mut config = read_config(config_file)?;
-    config
-        .graph_branch_selections
-        .retain(|s| s.repo_path != repo_path);
-    write_config(config_file, &config)
+    update_config(config_file, |config| {
+        config
+            .graph_branch_selections
+            .retain(|s| s.repo_path != repo_path);
+    })
 }
 
 pub fn get_graph_remote_branch_selection(
@@ -940,17 +941,17 @@ pub fn set_graph_remote_branch_selection_at(
     repo_path: &Path,
     remote: &[String],
 ) -> Result<(), ConfigError> {
-    let mut config = read_config(config_file)?;
-    config
-        .graph_remote_branch_selections
-        .retain(|s| s.repo_path != repo_path);
-    config
-        .graph_remote_branch_selections
-        .push(GraphRemoteBranchSelection {
-            repo_path: repo_path.to_path_buf(),
-            selected_branches: remote.to_vec(),
-        });
-    write_config(config_file, &config)
+    update_config(config_file, |config| {
+        config
+            .graph_remote_branch_selections
+            .retain(|s| s.repo_path != repo_path);
+        config
+            .graph_remote_branch_selections
+            .push(GraphRemoteBranchSelection {
+                repo_path: repo_path.to_path_buf(),
+                selected_branches: remote.to_vec(),
+            });
+    })
 }
 
 /// Forgets the saved remote graph branch selection of `repo_path`: the graph walks no remote
@@ -963,11 +964,11 @@ pub fn clear_graph_remote_branch_selection_at(
     config_file: &Path,
     repo_path: &Path,
 ) -> Result<(), ConfigError> {
-    let mut config = read_config(config_file)?;
-    config
-        .graph_remote_branch_selections
-        .retain(|s| s.repo_path != repo_path);
-    write_config(config_file, &config)
+    update_config(config_file, |config| {
+        config
+            .graph_remote_branch_selections
+            .retain(|s| s.repo_path != repo_path);
+    })
 }
 
 /// Whether the commit graph of `repo_path` collapses merges ("Collapse merges", #617). Off until
@@ -993,12 +994,12 @@ pub fn set_graph_collapse_merges_at(
     repo_path: &Path,
     collapse: bool,
 ) -> Result<(), ConfigError> {
-    let mut config = read_config(config_file)?;
-    config.graph_collapse_merges.retain(|p| p != repo_path);
-    if collapse {
-        config.graph_collapse_merges.push(repo_path.to_path_buf());
-    }
-    write_config(config_file, &config)
+    update_config(config_file, |config| {
+        config.graph_collapse_merges.retain(|p| p != repo_path);
+        if collapse {
+            config.graph_collapse_merges.push(repo_path.to_path_buf());
+        }
+    })
 }
 
 fn read_config(path: &Path) -> Result<ConfigFile, ConfigError> {
@@ -1009,12 +1010,30 @@ fn read_config(path: &Path) -> Result<ConfigFile, ConfigError> {
     Ok(toml::from_str(&contents)?)
 }
 
+/// Reads the file, lets `change` edit it and writes it back, as one step against every other
+/// writer of the file, in this process or another (#1127). Every setter goes through here.
+pub(crate) fn update_config<T>(
+    path: &Path,
+    change: impl FnOnce(&mut ConfigFile) -> T,
+) -> Result<T, ConfigError> {
+    let _guard = write_lock::lock(path);
+    let mut config = read_config(path)?;
+    let result = change(&mut config);
+    write_config(path, &config)?;
+    Ok(result)
+}
+
 fn write_config(path: &Path, config: &ConfigFile) -> Result<(), ConfigError> {
+    // A `config.toml` that links into a dotfiles folder stays a link: the file it points to is
+    // replaced, not the link.
+    let path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)?;
     let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
     std::io::Write::write_all(&mut tmp, toml::to_string_pretty(config)?.as_bytes())?;
-    tmp.persist(path).map_err(|e| e.error)?;
+    // On disk before the rename, so a power loss can't leave an empty or cut-off file.
+    tmp.as_file().sync_all()?;
+    tmp.persist(&path).map_err(|e| e.error)?;
     Ok(())
 }
 
@@ -1047,16 +1066,16 @@ pub fn set_merge_preference_at(
     fast_forward: MergeFastForward,
     squash: bool,
 ) -> Result<(), ConfigError> {
-    let mut config = read_config(config_file)?;
-    config
-        .merge_preferences
-        .retain(|p| p.repo_path != repo_path);
-    config.merge_preferences.push(MergePreference {
-        repo_path: repo_path.to_path_buf(),
-        fast_forward,
-        squash,
-    });
-    write_config(config_file, &config)
+    update_config(config_file, |config| {
+        config
+            .merge_preferences
+            .retain(|p| p.repo_path != repo_path);
+        config.merge_preferences.push(MergePreference {
+            repo_path: repo_path.to_path_buf(),
+            fast_forward,
+            squash,
+        });
+    })
 }
 
 pub fn get_pull_preference(
@@ -1088,13 +1107,13 @@ pub fn set_pull_preference_at(
     repo_path: &Path,
     strategy: PullStrategyPreference,
 ) -> Result<(), ConfigError> {
-    let mut config = read_config(config_file)?;
-    config.pull_preferences.retain(|p| p.repo_path != repo_path);
-    config.pull_preferences.push(PullPreference {
-        repo_path: repo_path.to_path_buf(),
-        strategy,
-    });
-    write_config(config_file, &config)
+    update_config(config_file, |config| {
+        config.pull_preferences.retain(|p| p.repo_path != repo_path);
+        config.pull_preferences.push(PullPreference {
+            repo_path: repo_path.to_path_buf(),
+            strategy,
+        });
+    })
 }
 
 pub fn list_repo_aliases() -> Result<Vec<RepoAlias>, ConfigError> {
@@ -1116,15 +1135,15 @@ pub fn set_repo_alias_at(
     repo_path: &Path,
     alias: Option<&str>,
 ) -> Result<(), ConfigError> {
-    let mut config = read_config(config_file)?;
-    config.repo_aliases.retain(|a| a.repo_path != repo_path);
-    if let Some(alias) = alias.map(str::trim).filter(|a| !a.is_empty()) {
-        config.repo_aliases.push(RepoAlias {
-            repo_path: repo_path.to_path_buf(),
-            alias: alias.to_string(),
-        });
-    }
-    write_config(config_file, &config)
+    update_config(config_file, |config| {
+        config.repo_aliases.retain(|a| a.repo_path != repo_path);
+        if let Some(alias) = alias.map(str::trim).filter(|a| !a.is_empty()) {
+            config.repo_aliases.push(RepoAlias {
+                repo_path: repo_path.to_path_buf(),
+                alias: alias.to_string(),
+            });
+        }
+    })
 }
 
 pub fn get_keybinding_settings() -> Result<KeybindingSettings, ConfigError> {
@@ -1144,7 +1163,7 @@ pub fn set_keybinding_settings_at(
     config_file: &Path,
     settings: &KeybindingSettings,
 ) -> Result<(), ConfigError> {
-    let mut config = read_config(config_file)?;
-    config.keybindings = settings.clone();
-    write_config(config_file, &config)
+    update_config(config_file, |config| {
+        config.keybindings = settings.clone();
+    })
 }
