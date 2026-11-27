@@ -188,19 +188,22 @@ pub fn switch_branch(repo: &Repository, name: &str) -> Result<(), BranchError> {
     let mut checkout = git2::build::CheckoutBuilder::new();
     let filters = crate::hardlink::on_checkout(repo, &mut checkout);
     // A file another program holds open: say so, not libgit2's raw error (#303). Local changes
-    // in the way are their own error, so the app can offer to stash them (#653).
-    repo.checkout_tree(target.as_object(), Some(&mut checkout))
-        .map_err(|error| {
-            if error.code() == git2::ErrorCode::Conflict {
-                BranchError::LocalChanges(name.to_string())
-            } else {
-                crate::worktree_guard::held_open::<BranchError>(
-                    repo.workdir(),
-                    crate::HeldDuring::Switch,
-                )(error)
-            }
-        })?;
-    filters.check()?;
+    // in the way are their own error, so the app can offer to stash them (#653). A sparse
+    // checkout's files outside the cone stay out (#1191).
+    crate::outside_cone::around(repo, crate::outside_cone::Outcome::Tree(&tree), || {
+        repo.checkout_tree(target.as_object(), Some(&mut checkout))
+            .map_err(|error| {
+                if error.code() == git2::ErrorCode::Conflict {
+                    BranchError::LocalChanges(name.to_string())
+                } else {
+                    crate::worktree_guard::held_open::<BranchError>(
+                        repo.workdir(),
+                        crate::HeldDuring::Switch,
+                    )(error)
+                }
+            })?;
+        Ok::<_, BranchError>(filters.check()?)
+    })?;
     repo.set_head(&branch_ref)?;
     Ok(())
 }
@@ -213,8 +216,19 @@ pub fn switch_conflicts(repo: &Repository, name: &str) -> Result<Vec<String>, Br
     let target = repo
         .find_reference(&format!("refs/heads/{name}"))?
         .peel_to_tree()?;
+    Ok(changes_in_the_way(repo, &target)?)
+}
+
+/// Every changed, staged or untracked path that a checkout of `target` from HEAD would change
+/// too (HEAD's tree and `target` differ there), sorted: what a safe checkout refuses to
+/// overwrite. A sparse checkout's missing file (marked skip-worktree) isn't a change: the
+/// checkout leaves it out (#1191). Reads only.
+pub(crate) fn changes_in_the_way(
+    repo: &Repository,
+    target: &git2::Tree<'_>,
+) -> Result<Vec<String>, git2::Error> {
     let head = repo.head().and_then(|head| head.peel_to_tree()).ok();
-    let diff = repo.diff_tree_to_tree(head.as_ref(), Some(&target), None)?;
+    let diff = repo.diff_tree_to_tree(head.as_ref(), Some(target), None)?;
     let mut switched = std::collections::BTreeSet::new();
     for delta in diff.deltas() {
         for path in [delta.old_file().path(), delta.new_file().path()]
@@ -224,6 +238,12 @@ pub fn switch_conflicts(repo: &Repository, name: &str) -> Result<Vec<String>, Br
             switched.insert(path.to_string_lossy().replace('\\', "/"));
         }
     }
+    let mut index = repo.index()?;
+    index.read(false)?;
+    let skip_worktree: std::collections::HashSet<Vec<u8>> =
+        crate::index_marks::skip_worktree_paths(&index)
+            .into_iter()
+            .collect();
     let mut options = git2::StatusOptions::new();
     options
         .include_untracked(true)
@@ -232,7 +252,9 @@ pub fn switch_conflicts(repo: &Repository, name: &str) -> Result<Vec<String>, Br
     let mut paths = Vec::new();
     for entry in repo.statuses(Some(&mut options))?.iter() {
         let Ok(path) = entry.path() else { continue };
-        if switched.contains(path) {
+        let missing_outside = entry.status() == git2::Status::WT_DELETED
+            && skip_worktree.contains(entry.path_bytes());
+        if switched.contains(path) && !missing_outside {
             paths.push(path.to_string());
         }
     }
@@ -339,13 +361,16 @@ pub fn checkout_commit(repo: &Repository, commit_id: &str) -> Result<(), BranchE
     // A file with other hard links gets a name of its own before it is written (#420).
     let mut checkout = git2::build::CheckoutBuilder::new();
     let filters = crate::hardlink::on_checkout(repo, &mut checkout);
-    // A file another program holds open: say so, not libgit2's raw error (#303).
-    repo.checkout_tree(target.as_object(), Some(&mut checkout))
-        .map_err(crate::worktree_guard::held_open::<BranchError>(
-            repo.workdir(),
-            crate::HeldDuring::Switch,
-        ))?;
-    filters.check()?;
+    // A file another program holds open: say so, not libgit2's raw error (#303). A sparse
+    // checkout's files outside the cone stay out (#1191).
+    crate::outside_cone::around(repo, crate::outside_cone::Outcome::Tree(&tree), || {
+        repo.checkout_tree(target.as_object(), Some(&mut checkout))
+            .map_err(crate::worktree_guard::held_open::<BranchError>(
+                repo.workdir(),
+                crate::HeldDuring::Switch,
+            ))?;
+        Ok::<_, BranchError>(filters.check()?)
+    })?;
     repo.set_head_detached(target.id())?;
     Ok(())
 }

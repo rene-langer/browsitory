@@ -24,6 +24,7 @@ mod line_patch;
 pub mod locate;
 pub mod merge;
 pub mod os_error;
+mod outside_cone;
 mod partial_checkout;
 pub mod patch;
 mod patch_mail;

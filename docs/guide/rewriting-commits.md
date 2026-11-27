@@ -52,7 +52,9 @@ cherry-pick** and **Abort cherry-pick** (or revert) in the status strip.
     same for the files **Abort** of a merge, cherry-pick, revert or rebase, and **Undo**, put
     back. With patterns set by `git sparse-checkout set --no-cone`, which Browsitory doesn't
     match, each such file that isn't on disk counts as outside; `git sparse-checkout reapply`
-    brings in the ones your patterns hold.
+    brings in the ones your patterns hold. Cherry-pick, revert and rebase leave the files outside
+    a sparse checkout out too, as merging does (see
+    [Branches and remotes](branches-and-remotes.md#merging)).
 
     Cherry-pick, revert, check out, reset and **Create tag at…** also work for a commit selected
     in the search results or a file history that is older than the history loaded in the graph;

@@ -147,7 +147,9 @@ pub fn errors() -> Cases<repo_service::wire::ErrorDto> {
         ),
         case(
             "DirtyWorktree",
-            ErrorDto::from_error(RemoteError::DirtyWorktree),
+            ErrorDto::from_error(RemoteError::DirtyWorktree {
+                paths: vec!["notes.txt".into()],
+            }),
         ),
         case("PullFailed", ErrorDto::pull_failed()),
         case("Cancelled", ErrorDto::from_error(RemoteError::Cancelled)),

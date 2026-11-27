@@ -3922,7 +3922,7 @@ impl ErrorKind {
             Some(Self::BlameUnavailable)
         } else if let Some(error) = error.downcast_ref::<RemoteError>() {
             match error {
-                RemoteError::DirtyWorktree => Some(Self::DirtyWorktree),
+                RemoteError::DirtyWorktree { .. } => Some(Self::DirtyWorktree),
                 RemoteError::Cancelled => Some(Self::Cancelled),
                 _ => None,
             }
@@ -4414,7 +4414,9 @@ mod error_kinds {
             ),
             (ErrorDto::pull_failed(), ErrorKind::PullFailed),
             (
-                ErrorDto::from_error(RemoteError::DirtyWorktree),
+                ErrorDto::from_error(RemoteError::DirtyWorktree {
+                    paths: vec!["notes.txt".into()],
+                }),
                 ErrorKind::DirtyWorktree,
             ),
             (
@@ -4462,7 +4464,10 @@ mod error_kinds {
         let texts = [
             WORKER_STOPPED.to_string(),
             PULL_FAILED.to_string(),
-            RemoteError::DirtyWorktree.to_string(),
+            RemoteError::DirtyWorktree {
+                paths: vec!["notes.txt".into()],
+            }
+            .to_string(),
             RemoteError::Cancelled.to_string(),
             credential_store_failure_message("locked"),
             MergeError::NotATextConflict("a.bin".into()).to_string(),
