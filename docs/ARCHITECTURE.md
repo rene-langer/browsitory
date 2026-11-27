@@ -975,11 +975,17 @@ configuration. A pull's merge and `post-merge` hook, commit hooks and signing ru
 so reads still wait for them. A long read delays the wait's next poll (progress, and giving up on
 a connecting or stalled transfer) by its own run time.
 
-**Stopping at exit (#965).** When the desktop app's last window closes or it quits (also before
-an update's restart), the process would end every worker thread wherever it is; one cut off in a
-libgit2 write leaves `.git/index.lock` (or a ref lock) behind, and every later git command in the
-repository fails on it. So `main.rs` handles `RunEvent::Exit` with `WorkerRegistry::stop_all`
-and `EXIT_GRACE` (5 s, like the extension's `SIDECAR_EXIT_GRACE_MS`, #961): each worker finishes
+**Stopping at exit (#965, #1131).** When the desktop app's last window closes, it quits or it
+restarts for an update, the process would end every worker thread wherever it is; one cut off in
+a libgit2 write leaves `.git/index.lock` (or a ref lock) behind, and every later git command in
+the repository fails on it. So `exit.rs` calls `WorkerRegistry::stop_all` with `EXIT_GRACE` (5 s,
+like the extension's `SIDECAR_EXIT_GRACE_MS`, #961) before every exit: from the `RunEvent::Exit`
+handler, and from the drop of a resource it keeps in the app's resource table, which
+`AppHandle::cleanup_before_exit` empties on every exit path. That second hook is the one that
+counts for "Restart to update" on Windows: `tauri-plugin-updater`'s install there runs only
+`cleanup_before_exit` and then `std::process::exit`, without a `RunEvent::Exit` (on macOS and
+Linux `relaunch` goes through `request_restart`, which delivers it). The wait runs once
+(`OnceLock`), whichever asks first. Each worker finishes
 the command it is running (a transfer included, with the reads its wait serves) and starts no
 other (`worker/lifecycle.rs`; the commands still queued are answered `WorkerStopped`), the
 registry opens no repository any more, and the exit waits until the workers are idle or the
@@ -3000,6 +3006,35 @@ User-defined commands (epic #897) are programs the user adds to menus and the pa
   same target's tracking ref, and the UI only offers "Force push (with lease)" after a rejected
   push whose target equals that resolution.
 
+## The settings file (`config.toml`)
+
+The `config` crate keeps the settings in one `config.toml` (`directories::ProjectDirs`, or
+`$BROWSITORY_CONFIG_DIR/config.toml`), which the desktop app and every VS Code window's sidecar
+share, and which two Browsitory versions regularly read and write: the extension updates through
+its marketplace, the desktop app through its own updater.
+
+- **One writer at a time (#1127).** Every setter goes through `update_config`, which reads the
+  file, changes it and writes it back under a process-wide `Mutex` and an OS lock on
+  `config.toml.lock` beside it (`write_lock.rs`; `File::try_lock`, with an explicit unlock like
+  the undo state's `state.lock`). A tab restore opens all tabs at once, each `open_repo` moving its
+  repository to the front of the recent list, and the sidecar runs each request on its own
+  thread; without the lock the later write undid the earlier one. Where the lock file can't be
+  created or locked, or another process holds it for 5 s, the write goes ahead with only the
+  in-process exclusion. Getters read without the lock: the write replaces the file atomically (a
+  temp file, synced, then renamed). A symlinked `config.toml` is resolved first, so the link
+  stays and the file it points to is replaced.
+- **What this version doesn't know stays (#1137).** `update_config` also reads the file as a
+  plain TOML table, and `compat::merge` writes that table back with only the change from the
+  struct as read to the struct after the setter: a key the setter dropped is removed, a changed
+  value replaced, a new one added; keys, tables and values this version doesn't know stay, and an
+  unchanged setting keeps the text it was read from. A changed list keeps each entry's unknown
+  keys wherever the entry moved (an entry matches the original one it is part of). `toml`'s
+  `preserve_order` keeps the file's key order.
+- **An unknown value costs one setting (#1137).** A closed setting (`word_wrap`, `algorithm`,
+  `ui_size`, `date_format`) reads an unknown value as its default (`compat::or_default`); a
+  remembered merge or pull choice or a user command target this version can't read is left out
+  (`compat::readable_entries`). A new enum-valued setting needs the same treatment.
+
 ## Desktop app folders and the bundle identifier
 
 The bundle identifier in `crates/tauri-app/tauri.conf.json` is `com.browsitory.desktop` (up to
@@ -3023,6 +3058,16 @@ resolves identifier folders under (data, local data, config, cache, and on macOS
 only when the new folder doesn't exist yet. A rename is atomic and deletes nothing; a failure is
 logged once the log plugin is up, and the app starts with fresh folders. Don't change the
 identifier again without extending this migration.
+
+**One process (#1136).** `single_instance.rs` registers `tauri-plugin-single-instance` before
+the migration and every other plugin: a second launch hands over to the running app by the
+identifier (a D-Bus name `<id>.SingleInstance` on Linux, a named mutex on Windows, a Unix socket
+in `/tmp` on macOS) and exits before any other plugin runs, and the running app unminimizes,
+shows and focuses its `main` window. Without a D-Bus session bus the launch goes ahead. A launch
+with `BROWSITORY_CONFIG_DIR` set skips the guard, as it shares no `config.toml` with the running
+app (the E2E suites, a dev build beside the installed app on Windows or macOS). On Linux the GTK
+application id (`enableGTKAppId`) also ends a second launch's event loop at once, after its
+plugins started; the plugin ends it before that.
 
 ## Operation log
 
