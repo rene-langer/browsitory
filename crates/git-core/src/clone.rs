@@ -64,6 +64,18 @@ pub enum CloneError {
     /// Windows: a checkout stopped at a file another program holds open (#303).
     #[error(transparent)]
     HeldOpen(#[from] crate::HeldOpen),
+    /// The user's or the system's config has a conflict style written without a value, which
+    /// libgit2's checkout of the new repository would crash on (#1189); nothing was made.
+    #[error(transparent)]
+    ValuelessSetting(#[from] crate::ValuelessSetting),
+}
+
+impl From<git2::Error> for CloneError {
+    fn from(error: git2::Error) -> Self {
+        let message = error.message().to_string();
+        let kind = RemoteError::Git(error).transfer_error_kind();
+        CloneError::Transfer { kind, message }
+    }
 }
 
 /// User-typed clone URLs may point at a local repository, so unlike submodule URLs `file://`
@@ -168,6 +180,7 @@ pub(crate) fn clone_repo_with(
     if cancel() {
         return Err(CloneError::Cancelled);
     }
+    crate::valueless_setting::refuse_for_new_checkout::<CloneError>()?;
     let state = prepare_dest(&opts.dest)?;
 
     let credentials = RefCell::new(credentials);

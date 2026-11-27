@@ -693,6 +693,8 @@ export type CloneErrorKind =
   | "CasePair"
   | "CaseConfig"
   | "FileInUse"
+  // A conflict style written without a value in the user's or the system's Git config (#1189).
+  | "ValuelessSetting"
   | TransferErrorKind;
 
 /** Clone/init failure; the backend sends `{ kind, message }` so callers can branch on `kind`. */

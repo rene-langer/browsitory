@@ -80,6 +80,7 @@ impl From<CloneError> for CloneErrorDto {
             CloneError::CasePair(_) => "CasePair".to_string(),
             CloneError::CaseConfig(_) => "CaseConfig".to_string(),
             CloneError::HeldOpen(_) => "FileInUse".to_string(),
+            CloneError::ValuelessSetting(_) => "ValuelessSetting".to_string(),
         };
         Self {
             kind,
@@ -193,6 +194,12 @@ mod tests {
                     during: git_core::HeldDuring::Clone,
                 }),
                 "FileInUse",
+            ),
+            (
+                CloneError::ValuelessSetting(git_core::ValuelessSetting::MissingInUserConfig(
+                    "merge.conflictstyle".into(),
+                )),
+                "ValuelessSetting",
             ),
             (
                 CloneError::Transfer {

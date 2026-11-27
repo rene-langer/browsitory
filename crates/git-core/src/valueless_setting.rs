@@ -24,6 +24,20 @@ pub enum ValuelessSetting {
          Give it a value or remove it (git config --edit), then try again."
     )]
     Missing(String),
+    /// [`Self::Missing`], in the user's own config (`~/.gitconfig` or the XDG one, #1189).
+    #[error(
+        "The setting '{0}' is written without a value in your global Git config; git rejects it \
+         as a bad config variable. Give it a value or remove it (git config --global --edit), \
+         then try again."
+    )]
+    MissingInUserConfig(String),
+    /// [`Self::Missing`], in the system's config.
+    #[error(
+        "The setting '{0}' is written without a value in the system's Git config; git rejects it \
+         as a bad config variable. Give it a value or remove it (git config --system --edit), \
+         then try again."
+    )]
+    MissingInSystemConfig(String),
 }
 
 /// The pattern libgit2's remote rename and delete match `branch.<name>.remote` with.
@@ -67,6 +81,18 @@ where
     refuse_valueless(repo, CONFLICT_STYLE)
 }
 
+/// Before a command that checks out in a repository it is about to create (a clone, a
+/// submodule's first clone, #1189): refuses a conflict style written without a value in the
+/// user's or the system's config, the only config such a repository has.
+pub(crate) fn refuse_for_new_checkout<E>() -> Result<(), E>
+where
+    E: From<git2::Error> + From<ValuelessSetting>,
+{
+    let config = git2::Config::open_default()?;
+    let mut entries = config.multivar(CONFLICT_STYLE, None)?;
+    refuse_missing(&mut entries)
+}
+
 /// Whether a merge in memory can run: false when the merge driver is written without a value
 /// (or the config can't be read).
 pub(crate) fn can_merge_in_memory(repo: &Repository) -> bool {
@@ -106,7 +132,17 @@ where
         let entry = entry?;
         if !entry.has_value() {
             let name = String::from_utf8_lossy(entry.name_bytes()).into_owned();
-            return Err(ValuelessSetting::Missing(name).into());
+            // Named where `git config` edits it.
+            let refusal = match entry.level() {
+                git2::ConfigLevel::Global | git2::ConfigLevel::XDG => {
+                    ValuelessSetting::MissingInUserConfig(name)
+                }
+                git2::ConfigLevel::System | git2::ConfigLevel::ProgramData => {
+                    ValuelessSetting::MissingInSystemConfig(name)
+                }
+                _ => ValuelessSetting::Missing(name),
+            };
+            return Err(refusal.into());
         }
     }
     Ok(())

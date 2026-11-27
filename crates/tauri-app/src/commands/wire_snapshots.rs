@@ -194,6 +194,12 @@ fn clone_errors() -> Vec<(String, CloneErrorDto)> {
                 during: git_core::HeldDuring::Clone,
             }),
         ),
+        (
+            "ValuelessSetting".into(),
+            CloneError::ValuelessSetting(git_core::ValuelessSetting::MissingInUserConfig(
+                "merge.conflictstyle".to_string(),
+            )),
+        ),
     ];
     clone_errors.extend(fixtures::transfer_error_kinds().into_iter().map(|kind| {
         (
@@ -217,6 +223,7 @@ fn clone_errors() -> Vec<(String, CloneErrorDto)> {
         CloneError::CasePair(_),
         CloneError::CaseConfig(_),
         CloneError::HeldOpen(_),
+        CloneError::ValuelessSetting(_),
     );
     let init_errors: Vec<(String, RepoError)> = vec![
         (

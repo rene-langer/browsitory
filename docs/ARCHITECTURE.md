@@ -854,8 +854,13 @@ menu's choice runs back through the session: the pick, the parent picker or a se
   `merge.conflictstyle` (`refuse_for_checkout`) at the start of every command that merges or
   checks out. The leftover check that compares HEAD with an in-memory pick or revert
   (`head_info`, Commit) counts the operation as still paused instead (`can_merge_in_memory`).
-  Clone and Update submodule read only the new or the submodule's repository and the user's
-  config there, and aren't guarded yet (#1189).
+  Clone and Update submodule check out in another repository (#1189): a clone, and a
+  submodule's first clone, refuse a valueless conflict style in the user's and the system's
+  config (`Config::open_default`, all the new repository has; `refuse_for_new_checkout`, before
+  the destination is made); Update submodule of a checked-out one refuses it in the submodule's
+  own repository (`refuse_for_checkout` on it). A clone's refusal crosses IPC as the
+  `CloneError` kind `ValuelessSetting`. The refusal names the level the setting is in, with the
+  `git config` flag that edits it (`--global` for the global and XDG files, `--system`).
 - **Branch and remote sections**: libgit2's `git_config_rename_section` picks a section's
   settings with the unanchored pattern `<section>\..+`, in every config file: deleting branch
   `a` removed branch `a.b`'s settings, renaming remote `origin` garbled
