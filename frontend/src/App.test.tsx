@@ -863,6 +863,30 @@ describe("App", () => {
     expect(screen.getByRole("textbox", { name: "Commit message" })).toHaveValue("wip: half-typed");
   });
 
+  // #1143: the draft outlives the app (a quit, a closed VSCode panel, the window's Reload).
+  it("brings back a half-typed commit message after the app is closed and opened again", async () => {
+    localStorage.clear();
+    const client = () =>
+      fakeClient({
+        listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+        openRepo: async () => {},
+        persistOpenRepos: async () => {},
+        getStatus: async () => [],
+        getCommitGraph: async () => graphPage([]),
+        listBranches: async () => [],
+        listStashes: async () => [],
+      });
+    const first = render(<App client={client()} />);
+    fireEvent.change(await screen.findByRole("textbox", { name: "Commit message" }), {
+      target: { value: "feat: half-typed\n\nWith a body" },
+    });
+    first.unmount();
+
+    render(<App client={client()} />);
+    expect(await screen.findByRole("textbox", { name: "Commit message" })).toHaveValue("feat: half-typed\n\nWith a body");
+    localStorage.clear();
+  });
+
   it("keeps a background tab's close button disabled while its action runs, until it unloads (#642)", async () => {
     const paths = ["a", "b", "c", "d", "e"];
     const client = fakeClient({
