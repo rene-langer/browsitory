@@ -529,6 +529,56 @@ mod tests {
         assert!(matches!(result, Err(CloneError::Cancelled)), "{result:?}");
     }
 
+    /// #1159: a clone whose server went silent after its ref advertisement calls none of
+    /// libgit2's callbacks, so the cancel flag alone never reaches it. Cancel still ends it
+    /// within a few seconds; the abandoned clone removes what it made once its connection fails.
+    #[test]
+    fn cancel_ends_a_clone_that_stalled_after_connecting() {
+        use std::time::{Duration, Instant};
+
+        let server = test_support::StalledServer::start();
+        let target = tempfile::TempDir::new().unwrap();
+        let dest = target.path().join("c");
+        let service = Arc::new(CloneService::with_store_factory(SharedStore::default));
+        let (done_tx, done) = mpsc::channel();
+        {
+            let service = Arc::clone(&service);
+            let options = options(&server.url, dest.clone());
+            std::thread::spawn(move || {
+                let result = service.clone_repo("clone-stalled", options, None, mpsc::channel().0);
+                let _ = done_tx.send(result);
+            });
+        }
+        server
+            .stalled
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the clone connects and then waits for the server");
+
+        let cancelled = Instant::now();
+        service.cancel("clone-stalled");
+        let result = done
+            .recv_timeout(Duration::from_secs(15))
+            .unwrap_or_else(|_| {
+                panic!(
+                    "the clone was still running {:?} after Cancel",
+                    cancelled.elapsed()
+                )
+            });
+
+        assert!(matches!(result, Err(CloneError::Cancelled)), "{result:?}");
+        assert!(service.is_idle());
+        drop(server);
+        let removed = Instant::now();
+        while dest.exists() {
+            assert!(
+                removed.elapsed() < Duration::from_secs(30),
+                "the abandoned clone left {}",
+                dest.display()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     #[test]
     fn late_cancels_for_finished_clones_are_capped() {
         let service = CloneService::with_store_factory(SharedStore::default);
