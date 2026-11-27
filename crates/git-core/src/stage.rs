@@ -1257,3 +1257,91 @@ pub(crate) mod work {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A repository with `tracked` committed files `t00`…, each then edited, and `new`
+    /// untracked files `n00`….
+    fn changed(tracked: usize, new: usize) -> (tempfile::TempDir, git2::Repository) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        for i in 0..tracked {
+            std::fs::write(dir.path().join(format!("t{i:02}")), "one\n").unwrap();
+        }
+        {
+            let mut index = repo.index().unwrap();
+            index
+                .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+                .unwrap();
+            index.write().unwrap();
+            let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+            let sig = git2::Signature::now("t", "t@example.com").unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "base", &tree, &[])
+                .unwrap();
+        }
+        for i in 0..tracked {
+            std::fs::write(dir.path().join(format!("t{i:02}")), "two\n").unwrap();
+        }
+        for i in 0..new {
+            std::fs::write(dir.path().join(format!("n{i:02}")), "new\n").unwrap();
+        }
+        (dir, repo)
+    }
+
+    fn all_paths(tracked: usize, new: usize) -> Vec<String> {
+        (0..tracked)
+            .map(|i| format!("t{i:02}"))
+            .chain((0..new).map(|i| format!("n{i:02}")))
+            .collect()
+    }
+
+    /// (staged, unstaged) entries.
+    fn counts(repo: &git2::Repository) -> (usize, usize) {
+        let entries = crate::status::status(repo).unwrap();
+        let staged = entries.iter().filter(|entry| entry.staged).count();
+        (staged, entries.len() - staged)
+    }
+
+    #[test]
+    fn staging_many_paths_writes_the_index_once() {
+        let (_dir, repo) = changed(30, 30);
+        work::take();
+
+        stage_paths(&repo, &all_paths(30, 30)).unwrap();
+
+        let (writes, scans, _) = work::take();
+        assert_eq!((writes, scans), (1, 0), "(index writes, status scans)");
+        assert_eq!(counts(&repo), (60, 0), "(staged, unstaged)");
+    }
+
+    #[test]
+    fn unstaging_many_paths_scans_the_status_once_and_writes_the_index_once() {
+        let (_dir, repo) = changed(30, 30);
+        stage_paths(&repo, &all_paths(30, 30)).unwrap();
+        work::take();
+
+        unstage_paths(&repo, &all_paths(30, 30)).unwrap();
+
+        let (writes, scans, _) = work::take();
+        assert_eq!((writes, scans), (1, 1), "(index writes, status scans)");
+        assert_eq!(counts(&repo), (0, 60), "(staged, unstaged)");
+    }
+
+    #[test]
+    fn discarding_many_paths_scans_the_status_once_and_checks_out_once() {
+        let (_dir, repo) = changed(30, 30);
+        work::take();
+
+        discard_all_unstaged(&repo, &all_paths(30, 30)).unwrap();
+
+        let (writes, scans, checkouts) = work::take();
+        assert_eq!(
+            (writes, scans, checkouts),
+            (0, 1, 1),
+            "(index writes, status scans, checkouts)"
+        );
+        assert_eq!(counts(&repo), (0, 0), "(staged, unstaged)");
+    }
+}
