@@ -3,7 +3,7 @@ use std::path::Path;
 use super::*;
 use git_core::remote::{TransferErrorKind, TransferOperation, TransferPhase, TransferProgress};
 use repo_service::wire::{
-    transfer_progress_dto, OpenRepoEntryDto, PickOutcomeDto, PullOutcomeDto, SequenceOutcomeDto,
+    transfer_progress_dto, PickOutcomeDto, PullOutcomeDto, SequenceOutcomeDto,
 };
 use repo_service::worker::{HookSource, TransferEvent};
 
@@ -24,9 +24,7 @@ fn dto_bindings_are_current() {
         "// Generated from the VSCode sidecar's own wire DTOs (crates/vscode-sidecar/src/dispatch.rs) by ts-rs.\n\
          // The shared ones are in wire-dto.ts.\n\
          // Do not edit. Regenerate: UPDATE_TRANSPORT_METHODS=1 cargo test -p vscode-sidecar dto_bindings_are_current\n";
-        import "./wire-dto" { OpenRepoEntryDto };
         FileVersionDto,
-        OpenReposDto,
     );
     test_support::assert_generated_file(
         &test_support::repo_root().join("frontend/src/ipc/generated/sidecar-dto.ts"),

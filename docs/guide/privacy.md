@@ -176,7 +176,10 @@ The extension works the same way, with these differences:
   Eclipse Foundation in Europe
   ([its privacy policy](https://www.eclipse.org/legal/privacy/)).
 - It sends no telemetry, so VSCode's `telemetry.telemetryLevel` setting has nothing to turn off.
-- It shares the settings file and the credential store with the desktop app.
+- It shares the settings file and the credential store with the desktop app, except for the
+  open tabs: each VSCode window keeps its own (the paths of its open repositories, their
+  workspaces and the active tab) in VSCode's storage for that window, and never reads or
+  writes the desktop app's.
 - Its web storage, the last version whose release notes you saw, and the messages in its
   "Browsitory" output channel are kept by VSCode, in VSCode's own folders. The extension writes
   no log file of its own.
