@@ -23,6 +23,7 @@ pub mod line_history;
 mod line_patch;
 pub mod locate;
 pub mod merge;
+mod message_text;
 pub mod os_error;
 mod partial_checkout;
 pub mod patch;

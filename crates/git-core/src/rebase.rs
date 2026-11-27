@@ -892,10 +892,11 @@ fn is_step_committed_by_hand(repo: &Repository, state: &RebaseState) -> Result<b
     }
     let head = repo.head()?.peel_to_commit()?;
     let picked = repo.find_commit(Oid::from_str(&entry.commit_id)?)?;
-    // git keeps the picked commit's message during the pause; a Reword step may also have been
-    // committed with its planned message.
+    // git keeps the picked commit's message during the pause (in UTF-8 from `MERGE_MSG`, #1149,
+    // or as stored); a Reword step may also have been committed with its planned message.
     let original = String::from_utf8_lossy(picked.message_bytes()).into_owned();
-    let mut messages = vec![original.as_str()];
+    let decoded = crate::message_text::message(&picked);
+    let mut messages = vec![original.as_str(), decoded.as_str()];
     if let RebaseAction::Reword { message } = &entry.action {
         messages.push(message);
     }
@@ -1045,6 +1046,10 @@ fn advance(
                 error,
             ));
         }
+        // A commit made from the pause's `MERGE_MSG` (`git commit` in a terminal) gets the
+        // message in UTF-8, as after git's pick (#1149). Left as libgit2 wrote it if that fails:
+        // the step itself lands with the decoded message.
+        let _ = crate::message_text::reencode_merge_msg(repo, &commit);
 
         if repo.index()?.has_conflicts() {
             state.stop = RebaseStop::Conflict;
@@ -1085,7 +1090,7 @@ fn stop_at_file_folder_conflict(
     };
     let index = crate::file_folder::check_out_as_conflicts::<RebaseError>(repo, merged, how)?;
     let files = crate::file_folder::conflicted_files(&index)?;
-    let message = String::from_utf8_lossy(commit.message_bytes());
+    let message = crate::message_text::message(commit);
     crate::file_folder::write_step_state(repo, "CHERRY_PICK_HEAD", commit.id(), &message, &files)?;
     state.stop = RebaseStop::Conflict;
     Ok(RebaseStepResult::Conflicted { files })
@@ -1141,11 +1146,8 @@ fn land_current_step(
     let message = match (message, &entry.action) {
         (Some(message), _) => message.to_string(),
         (None, RebaseAction::Reword { message }) => message.clone(),
-        (None, _) => original_commit
-            .message()
-            .ok()
-            .unwrap_or_default()
-            .to_string(),
+        // In UTF-8, as git replays it (#1149).
+        (None, _) => crate::message_text::message(&original_commit),
     };
 
     // Re-read the index from disk: a terminal `git add` during the pause must be seen.
@@ -1217,7 +1219,7 @@ fn after_landed(
                 // A `Reword`ed leader's new message is what the user asked this commit to say,
                 // so it wins over the leader's original message as the implicit fallback.
                 RebaseAction::Reword { message } => message.clone(),
-                _ => leader_commit.message().ok().unwrap_or_default().to_string(),
+                _ => crate::message_text::message(&leader_commit),
             });
 
         let final_tree = repo.head()?.peel_to_commit()?.tree()?;
