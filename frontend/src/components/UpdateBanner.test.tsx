@@ -12,6 +12,9 @@ vi.mock("../ipc/updater", () => ({
   relaunchApp: vi.fn(),
 }));
 
+/** A backend whose failed install left the window and the repositories as they were. */
+const stillRunning = () => fakeRepoClient({ recoverFromFailedUpdate: async () => false });
+
 describe("UpdateBanner", () => {
   beforeEach(() => {
     vi.mocked(updater.checkForUpdate).mockReset();
@@ -26,7 +29,7 @@ describe("UpdateBanner", () => {
     vi.stubEnv("VITE_E2E_REPO_PATH", undefined);
     vi.mocked(updater.checkForUpdate).mockResolvedValue(null);
 
-    render(<UpdateBanner />);
+    render(<UpdateBanner client={stillRunning()} />);
 
     await waitFor(() => expect(updater.checkForUpdate).toHaveBeenCalledTimes(1));
   });
@@ -39,7 +42,7 @@ describe("UpdateBanner", () => {
       installAndRelaunch: vi.fn().mockResolvedValue(undefined),
     });
 
-    render(<UpdateBanner />);
+    render(<UpdateBanner client={stillRunning()} />);
 
     await act(async () => {
       await Promise.resolve();
@@ -51,7 +54,7 @@ describe("UpdateBanner", () => {
   it("renders nothing when no update is found", async () => {
     vi.mocked(updater.checkForUpdate).mockResolvedValue(null);
 
-    render(<UpdateBanner />);
+    render(<UpdateBanner client={stillRunning()} />);
 
     await waitFor(() => expect(updater.checkForUpdate).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole("button", { name: /restart/i })).toBeNull();
@@ -66,7 +69,7 @@ describe("UpdateBanner", () => {
       installAndRelaunch,
     });
 
-    render(<UpdateBanner />);
+    render(<UpdateBanner client={stillRunning()} />);
 
     await waitFor(() => expect(download).toHaveBeenCalledTimes(1));
     expect(await screen.findByText(/1\.2\.3/)).toBeInTheDocument();
@@ -80,7 +83,7 @@ describe("UpdateBanner", () => {
       installAndRelaunch: vi.fn().mockResolvedValue(undefined),
     });
 
-    render(<UpdateBanner />);
+    render(<UpdateBanner client={stillRunning()} />);
 
     const notice = await screen.findByText("Update v1.2.3 ready");
     expect(notice.closest('[role="status"], [aria-live]')).toBeNull();
@@ -95,7 +98,7 @@ describe("UpdateBanner", () => {
       installAndRelaunch,
     });
 
-    render(<UpdateBanner />);
+    render(<UpdateBanner client={stillRunning()} />);
 
     const button = await screen.findByRole("button", { name: /restart/i });
     await act(async () => {
@@ -114,7 +117,7 @@ describe("UpdateBanner", () => {
       installAndRelaunch,
     });
 
-    render(<UpdateBanner />);
+    render(<UpdateBanner client={stillRunning()} />);
 
     const button = await screen.findByRole("button", { name: /restart/i });
     await act(async () => {
@@ -144,7 +147,7 @@ describe("UpdateBanner", () => {
         installAndRelaunch: vi.fn().mockRejectedValue(new Error("package verification failed: no signature")),
       });
 
-      render(<UpdateBanner />);
+      render(<UpdateBanner client={stillRunning()} />);
       await clickRestart();
 
       expect(
@@ -162,7 +165,7 @@ describe("UpdateBanner", () => {
         installAndRelaunch: vi.fn().mockRejectedValue("`rpm` exited with status 1"),
       });
 
-      render(<UpdateBanner />);
+      render(<UpdateBanner client={stillRunning()} />);
       await clickRestart();
 
       expect(await screen.findByText("Couldn't install update v1.2.3: `rpm` exited with status 1")).toBeInTheDocument();
@@ -178,7 +181,7 @@ describe("UpdateBanner", () => {
         installAndRelaunch: vi.fn().mockRejectedValue(failure),
       });
 
-      render(<UpdateBanner />);
+      render(<UpdateBanner client={stillRunning()} />);
       await clickRestart();
 
       await waitFor(() => expect(logFrontendError).toHaveBeenCalledWith("Installing update v1.2.3 failed", failure));
@@ -198,7 +201,7 @@ describe("UpdateBanner", () => {
         installAndRelaunch,
       });
 
-      render(<UpdateBanner />);
+      render(<UpdateBanner client={stillRunning()} />);
       await clickRestart();
       expect(await screen.findByText("Couldn't install update v1.2.3: authentication cancelled")).toBeInTheDocument();
 
@@ -213,6 +216,80 @@ describe("UpdateBanner", () => {
     });
   });
 
+  // On Windows the updater hides the window and stops the repositories before it starts the
+  // installer; when the installer doesn't start, the app keeps running that way (#1194).
+  describe("when the installer can't start after the app got ready to exit (#1194)", () => {
+    let uninstallLogging: (() => void) | undefined;
+    afterEach(() => uninstallLogging?.());
+
+    async function failInstall(recoverFromFailedUpdate: () => Promise<boolean>) {
+      uninstallLogging = installGlobalErrorLogging(fakeRepoClient({ logFrontendError: vi.fn(async () => {}) }));
+      vi.mocked(updater.checkForUpdate).mockResolvedValue({
+        version: "1.2.3",
+        download: vi.fn().mockResolvedValue(undefined),
+        installAndRelaunch: vi.fn().mockRejectedValue("Access is denied. (os error 5)"),
+      });
+      const client = fakeRepoClient({ recoverFromFailedUpdate: vi.fn(recoverFromFailedUpdate) });
+      render(<UpdateBanner client={client} />);
+      const button = await screen.findByRole("button", { name: "Restart to update" });
+      await act(async () => {
+        button.click();
+      });
+      return client;
+    }
+
+    it("asks the backend to show the window again", async () => {
+      const client = await failInstall(async () => true);
+
+      await waitFor(() => expect(client.recoverFromFailedUpdate).toHaveBeenCalledTimes(1));
+    });
+
+    it("says why and that a restart is needed, instead of offering the same install again", async () => {
+      await failInstall(async () => true);
+
+      expect(
+        await screen.findByText(
+          "Couldn't start the installer for update v1.2.3: Access is denied. (os error 5). " +
+            "Restart Browsitory to keep working, then try the update again.",
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Restart to update" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Restart Browsitory" })).toBeInTheDocument();
+    });
+
+    it("restarts the app from its button", async () => {
+      vi.mocked(updater.relaunchApp).mockResolvedValue(undefined);
+      await failInstall(async () => true);
+
+      const restart = await screen.findByRole("button", { name: "Restart Browsitory" });
+      await act(async () => {
+        restart.click();
+      });
+
+      expect(updater.relaunchApp).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps offering the install when the app still runs as before", async () => {
+      await failInstall(async () => false);
+
+      expect(
+        await screen.findByText("Couldn't install update v1.2.3: Access is denied. (os error 5)"),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Restart to update" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Restart Browsitory" })).toBeNull();
+    });
+
+    it("still shows the install error when the backend can't be asked", async () => {
+      await failInstall(async () => {
+        throw new Error("command recover_from_failed_update not found");
+      });
+
+      expect(
+        await screen.findByText("Couldn't install update v1.2.3: Access is denied. (os error 5)"),
+      ).toBeInTheDocument();
+    });
+  });
+
   it("stays hidden when download fails", async () => {
     const download = vi.fn().mockRejectedValue(new Error("download failed"));
     const installAndRelaunch = vi.fn().mockResolvedValue(undefined);
@@ -222,7 +299,7 @@ describe("UpdateBanner", () => {
       installAndRelaunch,
     });
 
-    render(<UpdateBanner />);
+    render(<UpdateBanner client={stillRunning()} />);
 
     await waitFor(() => expect(download).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole("button", { name: /restart/i })).toBeNull();
@@ -260,7 +337,7 @@ describe("UpdateBanner check schedule (#477)", () => {
   it("checks again only after 6 hours while no update is found", async () => {
     vi.mocked(updater.checkForUpdate).mockResolvedValue(null);
 
-    render(<UpdateBanner />);
+    render(<UpdateBanner client={stillRunning()} />);
     await advance(0);
     expect(checks()).toBe(1);
 
@@ -275,7 +352,7 @@ describe("UpdateBanner check schedule (#477)", () => {
       .mockRejectedValueOnce(new Error("504"))
       .mockResolvedValue(foundUpdate());
 
-    render(<UpdateBanner />);
+    render(<UpdateBanner client={stillRunning()} />);
     await advance(0);
     expect(checks()).toBe(1);
     expect(screen.queryByRole("button", { name: /restart/i })).toBeNull();
@@ -290,7 +367,7 @@ describe("UpdateBanner check schedule (#477)", () => {
   it("doubles the retry delay after each failure in a row, up to 3 hours", async () => {
     vi.mocked(updater.checkForUpdate).mockRejectedValue(new Error("504"));
 
-    render(<UpdateBanner />);
+    render(<UpdateBanner client={stillRunning()} />);
     await advance(0);
     expect(checks()).toBe(1);
 
@@ -312,7 +389,7 @@ describe("UpdateBanner check schedule (#477)", () => {
       .mockRejectedValueOnce(new Error("504"))
       .mockResolvedValue(null);
 
-    render(<UpdateBanner />);
+    render(<UpdateBanner client={stillRunning()} />);
     await advance(0);
     await advance(10 * MINUTE);
     await advance(20 * MINUTE);
@@ -334,7 +411,7 @@ describe("UpdateBanner check schedule (#477)", () => {
       .mockResolvedValue(undefined);
     vi.mocked(updater.checkForUpdate).mockResolvedValue(foundUpdate(download));
 
-    render(<UpdateBanner />);
+    render(<UpdateBanner client={stillRunning()} />);
     await advance(0);
     expect(download).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("button", { name: /restart/i })).toBeNull();
@@ -347,7 +424,7 @@ describe("UpdateBanner check schedule (#477)", () => {
   it("stops checking once an update is ready", async () => {
     vi.mocked(updater.checkForUpdate).mockResolvedValue(foundUpdate());
 
-    render(<UpdateBanner />);
+    render(<UpdateBanner client={stillRunning()} />);
     await advance(0);
     expect(screen.getByRole("button", { name: /restart/i })).toBeInTheDocument();
 
@@ -358,7 +435,7 @@ describe("UpdateBanner check schedule (#477)", () => {
   it("schedules no more checks after unmounting", async () => {
     vi.mocked(updater.checkForUpdate).mockRejectedValue(new Error("504"));
 
-    const { unmount } = render(<UpdateBanner />);
+    const { unmount } = render(<UpdateBanner client={stillRunning()} />);
     await advance(0);
     unmount();
 
@@ -409,7 +486,7 @@ describe("UpdateBanner with the update settings (#630)", () => {
     const ui = (api: UpdateSettingsApi) => (
       <UpdateSettingsContext.Provider value={api}>
         <UpdateCheckContext.Provider value={registry}>
-          <UpdateBanner />
+          <UpdateBanner client={stillRunning()} />
         </UpdateCheckContext.Provider>
       </UpdateSettingsContext.Provider>
     );
