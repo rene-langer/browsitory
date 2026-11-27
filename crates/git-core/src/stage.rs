@@ -439,6 +439,15 @@ fn checkout_tracked(
     for path in paths {
         checkout.path(*path);
     }
+    // libgit2 rewrites the entries it writes the stat data of without their intent-to-add mark,
+    // which would stage the emptied file as new; git keeps the mark (#1173). The index then
+    // stays as it is, and the next status read refreshes the stat data (#841).
+    let intent_to_add = paths.iter().any(|path| {
+        crate::index_marks::marks(&index, path) & crate::index_marks::INTENT_TO_ADD != 0
+    });
+    if intent_to_add {
+        checkout.update_index(false);
+    }
     let filters = crate::hardlink::on_checkout(repo, &mut checkout);
     // A file another program holds open: say so, not libgit2's raw error (#268).
     count_checkout(repo.checkout_index(None, Some(&mut checkout))).map_err(|error| {

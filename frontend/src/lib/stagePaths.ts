@@ -1,5 +1,6 @@
 import type { StatusEntry } from "../ipc/RepoClient";
 import { unconvertible } from "./externalFilters";
+import { isUntracked } from "./statusLetter";
 
 // `git-core::status` reports conflicted entries with `staged: false`, so they sit in the
 // "Changes" group, but staging a conflicted path is what *marks the conflict resolved*, with
@@ -24,11 +25,11 @@ export function stageAllPaths(status: StatusEntry[]): string[] {
 
 /**
  * The paths "Stage modified" stages (#621): the unstaged changes of tracked files (modified,
- * deleted, type changes, renames), leaving untracked files, conflicts and files Browsitory can't
- * filter or convert alone.
+ * deleted, type changes, renames, and a file added with `git add -N`, as `git add -u` stages it,
+ * #1173), leaving untracked files, conflicts and files Browsitory can't filter or convert alone.
  */
 export function stageModifiedPaths(status: StatusEntry[]): string[] {
-  return status.filter((entry) => stageable(entry) && entry.kind !== "New").map((entry) => entry.path);
+  return status.filter((entry) => stageable(entry) && !isUntracked(entry)).map((entry) => entry.path);
 }
 
 /**
@@ -38,5 +39,5 @@ export function stageModifiedPaths(status: StatusEntry[]): string[] {
  * refused by `discard_all_unstaged` and named in its error, as the per-file "Delete file" does.
  */
 export function untrackedPaths(status: StatusEntry[]): string[] {
-  return status.filter((entry) => !entry.staged && entry.kind === "New").map((entry) => entry.path);
+  return status.filter(isUntracked).map((entry) => entry.path);
 }

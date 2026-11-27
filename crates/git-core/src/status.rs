@@ -175,6 +175,7 @@ pub(crate) fn entries(
             };
             entries.push(StatusEntry {
                 kind,
+                intent_to_add: true,
                 ..new_file(path.to_string())
             });
             continue;

@@ -261,6 +261,13 @@ export function discardConfirmMessage(entry: StatusEntry): string {
   if (entry.untrackedFolder === true) {
     return `Delete the untracked folder ${entry.path} (more than 500 files)? Undo can bring it back.`;
   }
+  if (entry.intentToAdd === true && entry.kind === "New") {
+    // Its index entry is empty: discarding writes that, as `git restore` does (#1173).
+    return (
+      `Discard changes to ${entry.path}? It was added with "git add -N", so this empties it, as git restore does. ` +
+      "Undo can bring them back."
+    );
+  }
   return isUntracked(entry)
     ? `Delete untracked file ${entry.path}? Undo can bring it back.`
     : `Discard changes to ${entry.path}? Undo can bring them back.`;
