@@ -3570,7 +3570,9 @@ only `error`.
   steps never fail it. It posts the counts and the missed and timed-out mutants as one sticky
   PR comment (marked `<!-- mutants-report -->`, updated on re-runs; not for fork PRs or
   dispatched runs), repeats them in the run summary, and uploads the full `mutants.out` as an
-  artifact. Agents triage that comment (see `AGENTS.md`'s "Testing conventions"). To
+  artifact. When the changed lines hold no mutants (only test code, for instance), cargo-mutants
+  exits 0 without a `mutants.out` and the comment says no mutants were generated (#1201).
+  Agents triage that comment (see `AGENTS.md`'s "Testing conventions"). To
   reproduce locally: `git diff origin/main...HEAD > pr.diff && cargo mutants --in-diff pr.diff
   --package git-core --package repo-service`. Frontend and extension code are not covered.
 - Removed assertions (`ci.yml`'s `removed-assertions` job, pull requests and dispatched runs
