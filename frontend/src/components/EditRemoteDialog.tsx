@@ -36,6 +36,7 @@ export function EditRemoteDialog({
   const reasonId = useId();
   const fetchHiddenId = useId();
   const pushHiddenId = useId();
+  const problemId = useId();
   const fetchHidesUserInfo = hidesUserInfo(remote.fetchUrl);
   const pushHidesUserInfo = remote.pushUrl !== null && hidesUserInfo(remote.pushUrl);
   const [name, setName] = useState(remote.name);
@@ -69,12 +70,12 @@ export function EditRemoteDialog({
           <input
             value={name}
             aria-invalid={nameProblem !== null}
-            aria-describedby={nameProblem !== null ? "edit-remote-name-problem" : undefined}
+            aria-describedby={nameProblem !== null ? problemId : undefined}
             onChange={(event) => setName(event.target.value)}
           />
         </label>
         {nameProblem !== null && (
-          <p id="edit-remote-name-problem" className={styles.draftProblem}>
+          <p id={problemId} className={styles.draftProblem}>
             {nameProblem}
           </p>
         )}

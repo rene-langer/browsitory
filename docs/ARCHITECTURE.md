@@ -259,7 +259,9 @@ leave the page inert.
 (`frontend/src/state/useMountedTabs.ts`, #642); an inactive one is hidden with `display: none`.
 Everything in a workspace that listens globally (shortcuts, palette and drop requests, the focus
 checks below, automatic fetch) is gated by its `active` prop, so a hidden workspace never reacts.
-A hidden element has no width, so `useNarrowLayout` and `SplitView` ignore a zero width instead of
+Element ids in a workspace come from `useId()`, never a fixed string: an id reference resolves to
+the first match in the document, and `aria-describedby` reads a hidden target, so a fixed id would
+borrow a hidden tab's label or reason (`MountedTabIds.test.tsx`, #1135). A hidden element has no width, so `useNarrowLayout` and `SplitView` ignore a zero width instead of
 collapsing the sidebar, and `useScrollMemory` puts the lists' scroll positions back when the tab is
 shown again. An older tab unmounts (PERF-001's reason: one visible view shouldn't cost N tabs' DOM
 and IPC) and reads the repository again when it mounts. The tab strip activates manually: arrow
