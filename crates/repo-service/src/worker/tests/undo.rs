@@ -1193,3 +1193,46 @@ fn clear_undo_history_refuses_a_history_written_by_a_newer_version() {
         r#"{"version":999,"undo":[],"redo":[]}"#
     );
 }
+
+/// #1152: a pull with local changes it doesn't touch fast-forwards; Undo takes the pull back
+/// and keeps them.
+#[test]
+fn undo_of_a_pull_with_local_changes_keeps_them() {
+    let (upstream_dir, upstream) = init_repo();
+    write_file(upstream_dir.path(), "a.txt", "a\n");
+    commit_all(&upstream, "first");
+    let first = upstream.head().unwrap().target().unwrap();
+    let local_dir = TempDir::new().unwrap();
+    let local =
+        Repository::clone(upstream_dir.path().to_str().unwrap(), local_dir.path()).expect("clone");
+    {
+        let mut config = local.config().unwrap();
+        config.set_str("user.name", "Test User").unwrap();
+        config.set_str("user.email", "test@example.com").unwrap();
+    }
+    write_file(upstream_dir.path(), "b.txt", "b\n");
+    commit_all(&upstream, "second");
+    write_file(local_dir.path(), "a.txt", "a, edited\n");
+    write_file(local_dir.path(), "notes.txt", "notes\n");
+    let worker = Worker::spawn(local_dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let (events, _received) = mpsc::channel();
+
+    let outcome = handle.pull_current_upstream(events).unwrap();
+
+    assert!(
+        matches!(outcome, git_core::remote::PullOutcome::FastForwarded { .. }),
+        "{outcome:?}"
+    );
+    assert_eq!(read(local_dir.path(), "b.txt"), "b\n");
+    assert_eq!(
+        handle.undo().unwrap(),
+        UndoOutcome::Done {
+            label: "Pull".into()
+        }
+    );
+    assert_eq!(local.head().unwrap().target(), Some(first));
+    assert!(!local_dir.path().join("b.txt").exists());
+    assert_eq!(read(local_dir.path(), "a.txt"), "a, edited\n");
+    assert_eq!(read(local_dir.path(), "notes.txt"), "notes\n");
+}

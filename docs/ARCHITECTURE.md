@@ -521,8 +521,37 @@ menu's choice runs back through the session: the pick, the parent picker or a se
     new to the index) whose staged version is its work-tree version then ends marked, its file
     removed, as git leaves it; every other marked path keeps its mark. Deliberate difference:
     restoring staged changes, git drops an unstaged edit of a marked path (the file stays
-    marked and missing); here it is written and unmarked, as git does without `--index`. This
-    is the stash part of the merge-family gap in sparse checkouts (#1185).
+    marked and missing); here it is written and unmarked, as git does without `--index`.
+    `OutsideCone` lives in `git_core::outside_cone` and serves the operations below too.
+  - **Merge, cherry-pick, revert, rebase, switch, check out commit and pull** (#1185, #1191):
+    libgit2's merge and checkout took a missing marked file they change for a local deletion
+    and refused ("1 uncommitted change would be overwritten by merge", `LocalChanges` for a
+    switch), and wrote a file they add outside the cone, unmarked. `outside_cone::around` wraps
+    the libgit2 call (`Repository::merge` for merge and squash, `cherrypick`/`revert` for a pick
+    step and each rebase step, the safe `checkout_tree` of a fast-forward, switch, checkout
+    commit, rebase onto, pull fast-forward and the rewind of an aborted cherry-pick/revert
+    sequence), given what it leaves: the merged index (`merge_commits`, `cherrypick_commit`,
+    `revert_commit`, which the callers compute for their guards anyway) or the target tree.
+    Before it, every marked stage-0 path whose version that outcome changes is unmarked and its
+    missing file written from the index (`OutsideCone::prepare`), so libgit2 merges or checks
+    it out as any file. Afterwards each such path whose stage-0 entry is the outcome's version,
+    and each path new to the index outside the sparse patterns, is marked and its file removed;
+    every other marked path keeps its mark. That is git's result: unpack-trees keeps a changed
+    marked file marked and unwritten with the new blob, and marks a new path outside the
+    patterns. A conflicted path keeps its file (with conflict markers), unmarked, as git's merge
+    writes it (`record_conflicted_index_entries`). Deliberate difference: git's cherry-pick,
+    revert and rebase leave such a conflicted file unwritten (the conflict sits in the index
+    with no file to resolve); here it is written as for a merge. A marked file on disk anyway
+    (git drops its mark when it reads the index) that the operation changes ends marked and
+    removed, as with git. A refused operation is rolled back (`OutsideCone::roll_back`). Only
+    with readable patterns (`Sparse` not `Off`): without them git applies no sparse checkout.
+    Abort of a merge, cherry-pick or revert (`apply_operation_reset`) leaves a touched marked
+    path whose file is missing out of its forced checkout: only its index entry goes back to
+    HEAD's, marked, as git's `reset --merge` leaves it. As for Reset (decision 2 of #1172), entries the operation doesn't change keep their mark as
+    they are; git's unpack-trees also re-applies the patterns to them (an unmarked clean file
+    outside the cone is marked and removed, a marked one inside is written), which matters only
+    when marks and patterns disagree. `branch::changes_in_the_way` (the files a refused switch
+    or pull names) skips a marked path whose only change is its missing file.
   - **Sparse patterns** (`git_core::sparse`, #1172), read as git reads them (`dir.c`):
     `core.sparseCheckout`, `core.sparseCheckoutCone` and the work tree's own
     `info/sparse-checkout` (`repo.path()`, so `.git/worktrees/<name>/` for a linked worktree;
@@ -1639,6 +1668,15 @@ certificate.
 
 ## Interactive rebase
 
+- Pull (`remote::pull_after_fetch`, #1152) refuses only what it would overwrite, as `git pull`:
+  no cleanliness check up front (it refused any change or untracked file, and in a sparse
+  checkout always, since libgit2's status lists the missing files as deleted). Up to date,
+  diverged and no-fast-forward come back whatever the local changes (the merge or rebase picked
+  next checks its own way). The fast-forward's safe checkout keeps every other change, staged
+  or not, and refuses a change to a file it writes or an untracked file in its way; that
+  refusal is `RemoteError::DirtyWorktree { paths }` (wire kind `DirtyWorktree`), naming the
+  files `branch::changes_in_the_way` finds, or `CheckoutConflict` when none is (an ignored file
+  in the way). Undo records the pull as a `Full` snapshot, so local changes come back with it.
 - `git-core::rebase` is Browsitory's own state machine; it does not use libgit2's `git2::Rebase`
   or write git's `.git/rebase-merge`. `start_rebase` first refuses any operation in progress,
   naming it (#265): a terminal rebase or `git am` (`RebaseError::TerminalRebase`, #263), a
@@ -3128,7 +3166,7 @@ reporting on the first `list_operations`, so a session that never opens the log 
 `repo_service::wire::ErrorDto` (`{ kind, message }`, #496), and decides its kind where the error
 is made (#527): the reply channels carry `Result<T, ErrorDto>`, and a handler turns a typed error
 into one with `ErrorDto::from_error`, which reads the kind from the error's type along its
-`source()` chain (`RemoteError::DirtyWorktree`, `MergeError::NotATextConflict`,
+`source()` chain (`RemoteError::DirtyWorktree { .. }`, `MergeError::NotATextConflict`,
 `SearchError::InvalidQuery`, a credential store failure, an OS permission error), or builds it
 with a constructor (`ErrorDto::worker_stopped`, `ErrorDto::pull_failed`). Every `WorkerHandle`
 method goes through `WorkerHandle::request`, so a stopped worker always answers `WorkerStopped`.

@@ -433,7 +433,7 @@ pub(super) fn pull_defaults(
 /// transport error may quote a URL with credentials).
 fn pull_error(error: git_core::remote::RemoteError) -> ErrorDto {
     match error {
-        git_core::remote::RemoteError::DirtyWorktree
+        git_core::remote::RemoteError::DirtyWorktree { .. }
         | git_core::remote::RemoteError::NoUpstream
         | git_core::remote::RemoteError::CheckoutConflict
         | git_core::remote::RemoteError::LinkedFolder(_)
@@ -1036,7 +1036,10 @@ mod tests {
             ErrorKind::Cancelled
         );
         assert_eq!(
-            pull_error(RemoteError::DirtyWorktree).kind,
+            pull_error(RemoteError::DirtyWorktree {
+                paths: vec!["notes.txt".into()]
+            })
+            .kind,
             ErrorKind::DirtyWorktree
         );
         assert_eq!(pull_error(RemoteError::NoUpstream).kind, ErrorKind::Other);
