@@ -102,6 +102,11 @@ pub struct StatusEntryDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(any(test, feature = "ts"), ts(optional))]
     pub external_filter: Option<String>,
+    /// The custom merge driver Browsitory doesn't run, on a conflicted file whose `merge`
+    /// attribute names one (#1165); absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(any(test, feature = "ts"), ts(optional))]
+    pub merge_driver: Option<String>,
 }
 
 impl From<git_core::status::StatusEntry> for StatusEntryDto {
@@ -113,6 +118,7 @@ impl From<git_core::status::StatusEntry> for StatusEntryDto {
             kind: entry.kind,
             untracked_folder: entry.untracked_folder.then_some(true),
             external_filter: entry.external_filter,
+            merge_driver: entry.merge_driver,
         }
     }
 }

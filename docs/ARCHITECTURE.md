@@ -1695,6 +1695,32 @@ certificate.
   step is `repo.cherrypick` on the detached HEAD, committed by `land_current_step` (which then
   clears `CHERRY_PICK_HEAD`); squash/fixup groups collapse when the group ends; `finish` moves
   the branch and reattaches HEAD. The branch ref is untouched until `finish`.
+- **Commits already upstream** (#1150), as `git rebase` leaves them out: `start_rebase` turns
+  each `Pick` entry whose patch id (libgit2's `git_diff_patchid` of the commit against its first
+  parent) equals that of a commit reachable from `onto` but not from the branch tip into `Drop`
+  (`leave_out_upstream`, git's `--no-reapply-cherry-picks`), so a commit cherry-picked to the
+  main branch or rebased there by a "Rebase and merge" pull request is left out before it can
+  conflict with later upstream changes. A `Pick` leading a squash/fixup group keeps its pick;
+  merge commits and empty commits have no patch id, as in git. Only upstream commits touching
+  exactly the paths of one of the plan's get their patch id computed (the tree comparison is
+  cheap, the patch id reads every blob). Then a step whose applied result adds nothing to HEAD
+  is left out (`adds_nothing`, git's `--empty=drop`), also on Continue after a conflict
+  resolved to nothing, as `git rebase --continue` drops it; a commit empty from the start is
+  kept, as git keeps it, and an Edit step still stops (nothing staged on Continue ends it,
+  #884). A squash/fixup group whose steps all added nothing leaves no commit. Pull with rebase
+  is such a rebase, so commits that reached the upstream in another form (a squash merge makes
+  them empty) no longer come back as empty duplicates to push. Twinned with `git rebase` in
+  `tests/rebase_upstream.rs`.
+- **Messages that aren't UTF-8** (#1149, `message_text`): a rebase step's message, a group
+  leader's, a cherry-pick's, a revert's subject and a fold's are read as git reads a message for
+  a new commit: decoded by the commit's `encoding` header (ISO-8859-1 and Windows-1252; UTF-8
+  without one), then any byte that still isn't UTF-8 read as Latin-1 (git's `verify_utf8`). The
+  new commit is written in UTF-8 without the header, as git does with the default
+  `i18n.commitEncoding`. Another encoding gets the Latin-1 reading (git converts it with
+  iconv). After a paused cherry-pick or rebase step, libgit2's `MERGE_MSG` (the raw message) is
+  rewritten in UTF-8, as git writes it, for the commit box and `git commit`; `merge_message`
+  reads the file's bytes, since git2's `Repository::message` panics on a byte that isn't UTF-8.
+  Twinned with git in `tests/message_encoding.rs`.
 - To git a paused Browsitory rebase is a cherry-pick on a detached HEAD: an edit or conflict
   stop is `CherryPick` with `CHERRY_PICK_HEAD` = the step (plus `MERGE_MSG` and, for a conflict,
   the conflicted index); an error stop (a step refused, e.g. a local edit in the way) is `Clean`.
@@ -2604,6 +2630,29 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   default global attribute files aren't read). The Changes pane shows a dismissible notice for
   them, marks the rows, disables their Stage button and leaves them out of Stage all
   (`lib/stagePaths`); the refusals above are unchanged.
+- Custom merge drivers (#1165, `merge_driver`): a path's `merge` attribute (or `merge.default`
+  without one) can name a driver configured as `merge.<name>.driver`, a command. libgit2 knows
+  only its built-in `text`, `binary` and `union` and merged every other file as text, so
+  `merge=ours` silently took the other side's changes. Owner decision: Browsitory never runs the
+  command; when both sides changed such a file it is a conflict for the user to resolve. The
+  module registers a driver under libgit2's `*` wildcard in its process-wide registry
+  (`git_merge_driver_register`, which git2 doesn't wrap, declared `extern "C"`), once per
+  process, from `valueless_setting::refuse_for_merge` and `can_merge_in_memory` (which every
+  merging command and in-memory merge calls first) and `repo::configure_libgit2`. libgit2
+  calls it only for a file both sides changed differently whose driver name it doesn't know,
+  as git calls a driver; it answers `GIT_EMERGECONFLICT` when `merge.<name>.driver` is set (any
+  config level, any value; a config it can't read or a panic counts too) and `GIT_PASSTHROUGH`
+  otherwise, so an unconfigured name merges as text, as in git. So every merge libgit2 makes
+  for the app sees it: merge (a pull's too), squash, cherry-pick, revert, rebase step, stash
+  apply and pop, and the merges in memory the checks compute. The work tree gets libgit2's
+  text merge of the file (conflict markers where the sides overlap; git's `binary` driver would
+  leave ours), the index the three stages. A driver configured under a built-in name
+  (`merge.text.driver`) isn't caught: libgit2 uses its own, where git would run the command.
+  `merge_driver::annotate`, in the app's status reads (`status_refreshing_index`,
+  `status_with_stamp`), sets `StatusEntry.merge_driver` (wire `mergeDriver`) on a conflicted
+  entry whose driver is configured; the Changes pane marks the row ("'ours' merge driver") and
+  says above the conflict that the driver wasn't run (`lib/mergeDrivers`). Twinned with `git
+  merge` for the built-in drivers in `tests/merge_driver.rs`.
 - Folder/link pairs in the index (#157): `stage_file` of `d/f` below a symlinked `d` removes
   `d/f`'s stage-0 entry (stages its deletion; git sees no file there) and reads nothing through
   the link; conflict entries there are still refused (`BeyondSymlink`), as are hunk and line

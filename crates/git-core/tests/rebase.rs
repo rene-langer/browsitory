@@ -882,6 +882,43 @@ fn a_squash_group_without_an_explicit_combined_message_falls_back_to_the_leaders
 }
 
 #[test]
+fn a_fixup_group_without_a_combined_message_keeps_a_reworded_leaders_new_message() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "leader message");
+    write_file(dir.path(), "b.txt", "b\n");
+    commit_all(&repo, "fixup message");
+
+    let commits = git_core::rebase::commits_since(&repo, &onto).unwrap();
+    let plan = vec![
+        RebasePlanEntry {
+            commit_id: commits[0].id.clone(),
+            action: RebaseAction::Reword {
+                message: "reworded leader\n".to_string(),
+            },
+            combined_message: None,
+        },
+        RebasePlanEntry {
+            commit_id: commits[1].id.clone(),
+            action: RebaseAction::Fixup,
+            combined_message: None,
+        },
+    ];
+
+    let (_state, result) = git_core::rebase::start_rebase(&repo, &onto, plan).unwrap();
+
+    assert_eq!(result, RebaseStepResult::Done);
+    let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(
+        head_commit.message().ok().unwrap_or_default(),
+        "reworded leader\n"
+    );
+}
+
+#[test]
 fn current_step_is_one_indexed_at_the_first_pause() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "base.txt", "v1\n");

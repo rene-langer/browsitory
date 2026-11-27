@@ -135,6 +135,7 @@ StatusEntry/New key-order
 StatusEntry/Renamed key-order
 StatusEntry/TypeChange key-order
 StatusEntry/external-filter key-order
+StatusEntry/merge-driver key-order
 StatusEntry/staged-rename key-order
 StatusEntry/untracked-folder key-order
 StatusWithStamp/one-entry key-order

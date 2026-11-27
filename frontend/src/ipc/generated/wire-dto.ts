@@ -432,7 +432,12 @@ untrackedFolder?: boolean,
  * The external filter driver Browsitory can't run, on an unstaged file under it whose
  * change it can't compare (#1087); absent otherwise.
  */
-externalFilter?: string, };
+externalFilter?: string, 
+/**
+ * The custom merge driver Browsitory doesn't run, on a conflicted file whose `merge`
+ * attribute names one (#1165); absent otherwise.
+ */
+mergeDriver?: string, };
 
 export type StatusKind = "New" | "Modified" | "Deleted" | "Renamed" | "TypeChange" | "Conflicted";
 

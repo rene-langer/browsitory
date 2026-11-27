@@ -37,6 +37,7 @@ import { buildFileTree, type FileTreeNode } from "../lib/fileTree";
 import { ChevronDown, ChevronRight, Minus, Plus } from "lucide-react";
 import { GoToNotice } from "./GoToNotice";
 import { externalFiltersNotice } from "../lib/externalFilters";
+import { mergeDriverReason } from "../lib/mergeDrivers";
 
 // The change lists' keys (#449): arrows/j/k move (on to the other group past either end, #639),
 // Shift extends, Ctrl/Cmd+A selects the group, Escape keeps only the current file, `s` stages or
@@ -1205,6 +1206,11 @@ export function UncommittedDiffPane({
               Browsitory can&apos;t run the &apos;{currentEntry.externalFilter}&apos; filter, so this compares the file
               on disk with the version git stored: the difference may be only the filter&apos;s. Use git on the
               command line to stage or discard it.
+            </p>
+          )}
+          {currentEntry.mergeDriver !== undefined && (
+            <p className={styles.filterNote} role="note">
+              {mergeDriverReason(currentEntry.mergeDriver)}
             </p>
           )}
           <UncommittedFileViewer

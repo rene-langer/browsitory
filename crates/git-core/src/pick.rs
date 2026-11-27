@@ -703,6 +703,11 @@ fn apply_step_here(
             error,
         ));
     }
+    if matches!(kind, Kind::CherryPick) {
+        // A paused pick's `MERGE_MSG` in UTF-8, as git writes it (#1149): the commit box offers
+        // it. Left as libgit2 wrote it if that fails.
+        let _ = crate::message_text::reencode_merge_msg(repo, target);
+    }
     Ok(())
 }
 
@@ -733,9 +738,10 @@ fn commit_step(
     let tree = repo.find_tree(tree_id)?;
     let committer = repo.signature()?;
     let (author, message) = match kind {
+        // In UTF-8, as git writes it (#1149).
         Kind::CherryPick => (
             target.author().to_owned(),
-            String::from_utf8_lossy(target.message_bytes()).into_owned(),
+            crate::message_text::message(target),
         ),
         Kind::Revert => (committer.clone(), revert_message(target, mainline)),
     };
@@ -791,7 +797,7 @@ fn stop_at_file_folder_conflict(
     let (head_file, message, label) = match kind {
         Kind::CherryPick => (
             "CHERRY_PICK_HEAD",
-            String::from_utf8_lossy(target.message_bytes()).into_owned(),
+            crate::message_text::message(target),
             label,
         ),
         Kind::Revert => (
@@ -820,7 +826,7 @@ fn revert_message(target: &Commit<'_>, mainline: Option<u32>) -> String {
         .and_then(|m| target.parent_id(m as usize - 1).ok())
         .map(|parent| format!(", reversing\nchanges made to {parent}"))
         .unwrap_or_default();
-    let summary = target.summary().ok().flatten().unwrap_or("");
+    let summary = crate::message_text::summary(target);
     // git (2.43+): reverting `Revert "x"` says `Reapply "x"`, but never for `Revert "Revert ...`.
     let subject = match summary.strip_prefix("Revert \"") {
         Some(rest) if !rest.starts_with("Revert \"") => format!("Reapply \"{rest}"),
@@ -1180,15 +1186,13 @@ fn finish_paused(
     let committer = repo.signature()?;
     // libgit2's MERGE_MSG lists the conflicts as `#` comment lines; strip them like git's
     // default commit cleanup does.
-    let message = repo
-        .message()
-        .ok()
+    let message = crate::merge::merge_message(repo)
         .and_then(|message| git2::message_prettify(message, Some(b'#')).ok())
         .filter(|message| !message.trim().is_empty());
     let (author, message) = match state.kind {
         SequenceKind::CherryPick => (
             target.author().to_owned(),
-            message.unwrap_or_else(|| String::from_utf8_lossy(target.message_bytes()).into_owned()),
+            message.unwrap_or_else(|| crate::message_text::message(&target)),
         ),
         SequenceKind::Revert => (
             committer.clone(),
@@ -1280,7 +1284,10 @@ fn is_step_committed_by_hand(
             head,
             Oid::from_str(&state.expected_head)?,
             &target,
-            &[&String::from_utf8_lossy(target.message_bytes())],
+            &[
+                &String::from_utf8_lossy(target.message_bytes()),
+                &crate::message_text::message(&target),
+            ],
         )?,
         SequenceKind::Revert => String::from_utf8_lossy(head.message_bytes())
             .contains(&format!("This reverts commit {}", target.id())),

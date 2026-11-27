@@ -257,7 +257,8 @@ them the way your pull strategy says:
   resolve);
 - **Pull with rebase**: replays the branch's own commits onto the upstream, a plain rebase that
   pauses on a conflict like any other (see [Rebase](rebase.md)); the interactive planner doesn't
-  open;
+  open. Commits that already reached the upstream another way (cherry-picked, rebased or
+  squash-merged by a pull request) are left out, as `git pull --rebase` leaves them out;
 - **Pull, fast-forward only**: stops and asks, changing nothing.
 
 Choose one from the menu next to **Pull** (or in the command palette): it is remembered for this
