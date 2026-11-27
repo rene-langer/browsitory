@@ -28,19 +28,34 @@ class FakeSidecar extends EventEmitter implements SidecarProcess {
   readonly kill = vi.fn(() => true);
 }
 
-function fakeContext(version = "1.2.3") {
+function fakeContext(version = "1.2.3", openRepos: readonly string[] = []) {
   const values = new Map<string, unknown>([["lastSeenVersion", "0.9.0"]]);
   const get = vi.fn(<T>(key: string) => values.get(key) as T | undefined);
   const update = vi.fn(async (key: string, value: unknown) => {
     values.set(key, value);
   });
+  // The window's own state (#1128): the tabs its panel had open.
+  const windowValues = new Map<string, unknown>();
+  if (openRepos.length > 0) {
+    windowValues.set("openRepos", {
+      entries: openRepos.map((path) => ({ path, workspaceId: null })),
+      activePath: openRepos[0] ?? null,
+    });
+  }
+  const workspaceGet = vi.fn(<T>(key: string) => windowValues.get(key) as T | undefined);
+  const workspaceUpdate = vi.fn(async (key: string, value: unknown) => {
+    windowValues.set(key, value);
+  });
   return {
     context: {
       extension: { packageJSON: { version } },
       globalState: { get, update },
+      workspaceState: { get: workspaceGet, update: workspaceUpdate },
     } as unknown as ExtensionContext,
     get,
     update,
+    workspaceGet,
+    workspaceUpdate,
   };
 }
 
@@ -52,6 +67,8 @@ function createBridge(overrides: {
   savePath?: string | undefined;
   fileBytes?: Uint8Array;
   trusted?: boolean;
+  /** The repositories the window's state lists as open tabs (#1128). */
+  openRepos?: readonly string[];
 } = {}) {
   const child = new FakeSidecar();
   const spawnResults = overrides.spawnResults ?? [child];
@@ -77,7 +94,7 @@ function createBridge(overrides: {
       overrides.mergeEditorOpened ?? true,
   );
   const executeCommand = vi.fn(async (_command: string, ..._args: unknown[]) => undefined);
-  const state = fakeContext();
+  const state = fakeContext(undefined, overrides.openRepos);
   const bridge = new SidecarBridge({
     spawn,
     executablePath: "/workspace/target/debug/vscode-sidecar",
@@ -129,30 +146,15 @@ function writtenRequest(sidecar: FakeSidecar, index: number) {
   };
 }
 
+/**
+ * Answers the `open_repo` requests a replacement sidecar gets for the repositories the window's
+ * state lists (#1128); the bridge reads that list itself, so they are its first requests.
+ */
 async function completePersistedRepositoryRestore(
   sidecar: FakeSidecar,
   repoPaths: readonly string[] = [],
 ) {
-  await vi.waitFor(() => expect(sidecar.stdin.write).toHaveBeenCalledTimes(1));
-  const listRequest = writtenRequest(sidecar, 0);
-  expect(listRequest).toMatchObject({
-    jsonrpc: "2.0",
-    method: "list_open_repos",
-    params: {},
-  });
-  sidecar.stdout.push(
-    `${JSON.stringify({
-      jsonrpc: "2.0",
-      id: listRequest.id,
-      result: {
-        entries: repoPaths.map((path) => ({ path, workspaceId: null })),
-        activePath: repoPaths[0] ?? null,
-      },
-    })}\n`,
-  );
-
-  for (const [offset, repoPath] of repoPaths.entries()) {
-    const index = offset + 1;
+  for (const [index, repoPath] of repoPaths.entries()) {
     await vi.waitFor(() => expect(sidecar.stdin.write).toHaveBeenCalledTimes(index + 1));
     const openRequest = writtenRequest(sidecar, index);
     expect(openRequest).toMatchObject({
@@ -802,6 +804,7 @@ describe("SidecarBridge", () => {
     const replacement = new FakeSidecar();
     const { bridge, spawn, postToWebview } = createBridge({
       spawnResults: [first, replacement],
+      openRepos: ["/repo"],
     });
 
     await bridge.handleWebviewMessage({
@@ -846,7 +849,7 @@ describe("SidecarBridge", () => {
     await handling;
 
     expect(spawn).toHaveBeenCalledTimes(2);
-    expect(writtenRequest(replacement, 2)).toEqual(next);
+    expect(writtenRequest(replacement, 1)).toEqual(next);
     expect(first.stdin.write).not.toHaveBeenCalledWith(`${JSON.stringify(next)}\n`);
   });
 
@@ -896,7 +899,7 @@ describe("SidecarBridge", () => {
     await handling;
 
     expect(spawn).toHaveBeenCalledTimes(2);
-    expect(replacement.stdin.write).toHaveBeenCalledTimes(2);
+    expect(replacement.stdin.write).toHaveBeenCalledTimes(1);
     expect(replacement.stdin.write).toHaveBeenCalledWith(`${JSON.stringify(retry)}\n`);
     expect(first.stdin.write).toHaveBeenCalledTimes(2);
   });
@@ -907,6 +910,7 @@ describe("SidecarBridge", () => {
     const nextReplacement = new FakeSidecar();
     const { bridge, spawn, postToWebview } = createBridge({
       spawnResults: [first, replacement, nextReplacement],
+      openRepos: ["/repo-a", "/repo-b"],
     });
     await bridge.handleWebviewMessage({
       jsonrpc: "2.0", id: 54, method: "get_status", params: { repoPath: "/repo-a" },
@@ -922,25 +926,11 @@ describe("SidecarBridge", () => {
     };
     const handling = bridge.handleWebviewMessage(retry);
     await vi.waitFor(() => expect(replacement.stdin.write).toHaveBeenCalledTimes(1));
-    const listRequest = writtenRequest(replacement, 0);
-    replacement.stdout.push(
-      `${JSON.stringify({
-        jsonrpc: "2.0",
-        id: listRequest.id,
-        result: {
-          entries: [
-            { path: "/repo-a", workspaceId: null },
-            { path: "/repo-b", workspaceId: null },
-          ],
-          activePath: "/repo-a",
-        },
-      })}\n`,
-    );
-    await vi.waitFor(() => expect(replacement.stdin.write).toHaveBeenCalledTimes(2));
+    expect(writtenRequest(replacement, 0)).toMatchObject({ method: "open_repo", params: { path: "/repo-a" } });
     replacement.emit("exit", 9, null);
     await handling;
 
-    expect(replacement.stdin.write).toHaveBeenCalledTimes(2);
+    expect(replacement.stdin.write).toHaveBeenCalledTimes(1);
     expect(postToWebview).toHaveBeenCalledWith({
       jsonrpc: "2.0",
       id: 55,
@@ -950,7 +940,7 @@ describe("SidecarBridge", () => {
     const nextHandling = bridge.handleWebviewMessage({
       jsonrpc: "2.0", id: 56, method: "list_recent_repos", params: {},
     });
-    await completePersistedRepositoryRestore(nextReplacement);
+    await completePersistedRepositoryRestore(nextReplacement, ["/repo-a", "/repo-b"]);
     await nextHandling;
     expect(spawn).toHaveBeenCalledTimes(3);
   });
@@ -1180,5 +1170,95 @@ describe("SidecarBridge stdout framing", () => {
     expect(postToWebview).toHaveBeenNthCalledWith(1, big);
     expect(postToWebview).toHaveBeenNthCalledWith(2, small1);
     expect(postToWebview).toHaveBeenNthCalledWith(3, small2);
+  });
+});
+
+// #1128 (owner decision): each VSCode window keeps its own tabs, in its workspaceState; the
+// desktop app keeps its tabs in config.toml, which the extension neither reads nor writes.
+describe("SidecarBridge open tabs per window (#1128)", () => {
+  const tabs = {
+    entries: [
+      { path: "/repos/a", workspaceId: null },
+      { path: "/repos/b", workspaceId: "ws-1" },
+    ],
+    activePath: "/repos/b",
+  };
+
+  it("keeps the window's open tabs in its workspaceState, without the sidecar", async () => {
+    const { bridge, spawn, postToWebview, workspaceUpdate, update } = createBridge();
+
+    await bridge.handleWebviewMessage({ jsonrpc: "2.0", id: 1, method: "persist_open_repos", params: tabs });
+    await bridge.handleWebviewMessage({ jsonrpc: "2.0", id: 2, method: "list_open_repos", params: {} });
+
+    expect(spawn).not.toHaveBeenCalled();
+    expect(workspaceUpdate).toHaveBeenCalledWith("openRepos", tabs);
+    expect(update).not.toHaveBeenCalledWith("openRepos", expect.anything());
+    expect(postToWebview.mock.calls.map(([message]) => message)).toEqual([
+      { jsonrpc: "2.0", id: 1, result: null },
+      { jsonrpc: "2.0", id: 2, result: tabs },
+    ]);
+  });
+
+  it("answers no tabs in a window that saved none, without asking the sidecar", async () => {
+    const { bridge, spawn, postToWebview } = createBridge();
+
+    await bridge.handleWebviewMessage({ jsonrpc: "2.0", id: 3, method: "list_open_repos", params: {} });
+
+    expect(spawn).not.toHaveBeenCalled();
+    expect(postToWebview).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 3,
+      result: { entries: [], activePath: null },
+    });
+  });
+
+  it("answers no tabs when the stored state is malformed", async () => {
+    const { bridge, postToWebview, workspaceUpdate } = createBridge();
+    await workspaceUpdate("openRepos", { entries: [{ path: 7 }], activePath: null });
+
+    await bridge.handleWebviewMessage({ jsonrpc: "2.0", id: 4, method: "list_open_repos", params: {} });
+
+    expect(postToWebview).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 4,
+      result: { entries: [], activePath: null },
+    });
+  });
+
+  it.each([
+    ["entries that aren't a list", { entries: "x", activePath: null }],
+    ["an entry without workspaceId", { entries: [{ path: "/repos/a" }], activePath: null }],
+    ["an entry with another key", { entries: [{ path: "/repos/a", workspaceId: null, x: 1 }], activePath: null }],
+    ["a path that isn't a string", { entries: [{ path: 1, workspaceId: null }], activePath: null }],
+    ["an activePath that isn't a string or null", { entries: [], activePath: 3 }],
+    ["a missing activePath", { entries: [] }],
+  ])("refuses persist_open_repos with %s and keeps the stored tabs", async (_name, params) => {
+    const { bridge, postToWebview, workspaceUpdate } = createBridge({ openRepos: ["/repos/kept"] });
+
+    await bridge.handleWebviewMessage({ jsonrpc: "2.0", id: 5, method: "persist_open_repos", params });
+
+    expect(workspaceUpdate).not.toHaveBeenCalled();
+    expect(postToWebview).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 5,
+      error: { code: -32602, message: expect.stringContaining("persist_open_repos") },
+    });
+  });
+
+  it("reopens the tabs this window saved after the sidecar restarts", async () => {
+    const first = new FakeSidecar();
+    const replacement = new FakeSidecar();
+    const { bridge } = createBridge({ spawnResults: [first, replacement] });
+    await bridge.handleWebviewMessage({ jsonrpc: "2.0", id: 6, method: "get_status", params: { repoPath: "/repos/a" } });
+    await bridge.handleWebviewMessage({ jsonrpc: "2.0", id: 7, method: "persist_open_repos", params: tabs });
+    first.emit("exit", 1, null);
+
+    const handling = bridge.handleWebviewMessage({
+      jsonrpc: "2.0", id: 8, method: "get_status", params: { repoPath: "/repos/a" },
+    });
+    await completePersistedRepositoryRestore(replacement, ["/repos/a", "/repos/b"]);
+    await handling;
+
+    expect(writtenRequest(replacement, 2)).toMatchObject({ id: 8, method: "get_status" });
   });
 });

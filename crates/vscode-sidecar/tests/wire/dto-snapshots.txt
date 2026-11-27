@@ -270,9 +270,6 @@ PullRequest/plain {"author":"ada","id":"PR_1","number":42,"sourceBranch":"topic"
 PullRequestList/truncated {"pullRequests":[{"author":"ada","id":"PR_1","number":42,"sourceBranch":"topic","state":"open","targetBranch":"main","title":"Add the graph","url":"https://example.com/ada/app/pull/42"}],"truncated":true}
 PullRequestList/empty {"pullRequests":[],"truncated":false}
 SignatureInput/plain {"email":"ada@example.com","name":"Ada Lovelace"}
-OpenRepos/loose {"activePath":"/repos/app","entries":[{"path":"/repos/app","workspaceId":null}]}
-OpenRepos/in-workspace {"activePath":"/repos/lib","entries":[{"path":"/repos/lib","workspaceId":"ws-1"}]}
-OpenRepos/none {"activePath":null,"entries":[]}
 RepoErrorPayload/Other {"kind":"Other","message":"repo not open: /repo"}
 RepoErrorPayload/WorkerStopped {"kind":"WorkerStopped","message":"worker thread stopped"}
 RepoErrorPayload/WorkerStoppedBeforeReplying {"kind":"WorkerStopped","message":"worker thread stopped before replying"}

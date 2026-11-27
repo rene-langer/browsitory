@@ -61,6 +61,11 @@ export function resolveRepoFile(workdir: string, rel: string): string {
   return path.posix.join(workdir, ...rel.split("/"));
 }
 
+/** A version a repository change can change (#1132); a commit's versions never change. */
+export function isChangingVersion(version: FileVersion): boolean {
+  return version.kind === "Head" || version.kind === "Index" || version.kind === "Stage";
+}
+
 export function fileVersionUri(ref: FileVersionRef): string {
   const encodedPath = ref.path.split("/").map(encodeURIComponent).join("/");
   // base64url keeps the query free of `%` escapes, which VSCode's `Uri` would decode once more.
