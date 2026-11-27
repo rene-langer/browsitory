@@ -64,6 +64,7 @@ const BASE_STATE: AppState = {
   addRemoteDraftOpen: false,
   dialog: null,
   refreshGeneration: 0,
+  historyGeneration: 0,
   transferSubject: null,
   transferOutcome: null,
   loaded: true,

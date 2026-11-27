@@ -146,7 +146,7 @@ export function RepoWorkspace({
   const fileHistory = useFileHistory(
     client,
     repoPath,
-    appState.state.refreshGeneration,
+    appState.state.historyGeneration,
     appState.state.selectedRow,
     appState.selectRow,
   );
@@ -173,12 +173,12 @@ export function RepoWorkspace({
   const commitSearch = useCommitSearch(
     client,
     repoPath,
-    appState.state.refreshGeneration,
+    appState.state.historyGeneration,
     appState.state.graphSelection,
     appState.state.selectedRow,
     selectSearchRow,
   );
-  const compare = useCompare(client, repoPath, appState.state.refreshGeneration, appState.state.selectedRow);
+  const compare = useCompare(client, repoPath, appState.state.historyGeneration, appState.state.selectedRow);
   // The graph's lanes, once for the commit list and the sidebar's branch swatches (#673).
   const graphLayout = useCommitGraphLayout(appState.state.commits, appState.state.expandedMerges);
   const conflictedPaths = useMemo(

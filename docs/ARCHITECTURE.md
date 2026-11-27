@@ -291,7 +291,12 @@ expanded merges, branches with ahead/behind, tags, the current and every remote'
 their key, the `refs` part plus the graph selection, "Collapse merges" and the limit, equals the
 one they were read with, so staging, unstaging, discarding or editing a file re-reads only the
 status, the stashes, the worktree, submodule and remote lists, HEAD and undo state. The Refresh
-command (`refresh({ full: true })`), a failed refresh and a missing stamp read everything. When the
+command (`refresh({ full: true })`), a failed refresh and a missing stamp read everything.
+`AppState.historyGeneration` advances only for a refresh that read the history again or failed
+(#1118), while `refreshGeneration` advances for every one: the open working-tree diffs follow the
+second, and what only the history changes follows the first (an open commit search, which keeps
+the matches on screen until its re-run's first round is in, a file or line history, the open
+remote folders' branch lists and a branch compare's range). When the
 history reads do run, the worker keeps each branch's ahead/behind count by its pair of tips
 (`git_core::ahead_behind::AheadBehindCache`, #112): only a branch or upstream that moved is
 counted again, the upstream reads after the branch list count nothing, the branch list drops the
