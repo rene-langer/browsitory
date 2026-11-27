@@ -271,3 +271,45 @@ fn a_merge_upstream_has_no_patch_id_as_in_git() {
         }
     );
 }
+
+#[test]
+fn a_single_commit_upstream_changed_again_is_left_out_as_git_rebase_does() {
+    let (dir, repo) = topic_a_b();
+    git_ok(dir.path(), &["reset", "-q", "--hard", "HEAD~1"]);
+    let a = repo.revparse_single("topic").unwrap().id().to_string();
+    cherry_pick_on_master(dir.path(), &repo, &[&a]);
+    commit_on_master(
+        dir.path(),
+        &repo,
+        "t.txt",
+        "t changed upstream\n",
+        "change t",
+    );
+
+    let (ours, gits) = rebase_both(dir.path(), &repo);
+
+    assert_eq!(ours, gits);
+    assert_eq!(ours, "");
+}
+
+#[test]
+fn a_group_whose_leader_is_upstream_keeps_the_leader() {
+    let (dir, repo) = topic_a_b();
+    let a = repo.revparse_single("topic~1").unwrap().id().to_string();
+    cherry_pick_on_master(dir.path(), &repo, &[&a]);
+    // Plan: A (already upstream) with B squashed into it: A leads the group, so it isn't left
+    // out; it adds nothing, and the group still lands B's change under A's message.
+    let mut plan = picks(&repo);
+    plan[1].action = RebaseAction::Squash;
+
+    let (_, result) = git_core::rebase::start_rebase(&repo, "master", plan).unwrap();
+
+    assert_eq!(result, RebaseStepResult::Done);
+    let topic = topic_commits(dir.path());
+    assert!(
+        topic.starts_with("A ") && topic.lines().count() == 1,
+        "{topic}"
+    );
+    let changed = test_support::git(dir.path(), &["diff", "--name-only", "master", "topic"]);
+    assert_eq!(String::from_utf8(changed.stdout).unwrap(), "u.txt\n");
+}
