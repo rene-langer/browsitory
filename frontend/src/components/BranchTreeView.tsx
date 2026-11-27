@@ -10,7 +10,7 @@ import type { OperationBlockers } from "../lib/operationStatus";
 import { loadPersistedOpen, persistOpen } from "../lib/persistedOpenState";
 import { dropTargetProps } from "../state/usePointerDrag";
 import { branchDropKey } from "../lib/branchDropKey";
-import type { RowContextMenu } from "./branchMenuItems";
+import { currentBranchName, type RowContextMenu } from "./branchMenuItems";
 import { ListRow } from "./primitives/ListRow";
 import type { RemoteBranchCache } from "./useRemoteBranchCache";
 import styles from "./BranchTree.module.css";
@@ -321,7 +321,7 @@ function RemoteBranchRow({
         ctx.onGoToBranch?.("remote", `${remoteName}/${branchName}`);
       }}
       onDoubleClick={() => {
-        if (remoteBranchActions(ctx.blockers, remoteName, branchName).checkout.enabled) {
+        if (remoteBranchActions(ctx.blockers, remoteName, branchName, currentBranchName(ctx.branches)).checkout.enabled) {
           ctx.onCheckoutRemoteBranch(remoteName, branchName);
         }
       }}

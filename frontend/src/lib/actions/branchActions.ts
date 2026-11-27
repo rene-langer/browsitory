@@ -1,6 +1,6 @@
 import type { BranchInfo, UpstreamInfo } from "../../ipc/RepoClient";
 import type { OperationBlockers } from "../operationStatus";
-import { gate, UNAVAILABLE_REASON, type MenuAction, type PaletteAction } from "./action";
+import { gate, NO_BRANCH, UNAVAILABLE_REASON, type MenuAction, type PaletteAction } from "./action";
 
 export interface BranchActionContext {
   /** `operationBlockers` of the current state. */
@@ -25,11 +25,13 @@ export interface BranchActions {
   clearUpstream: MenuAction | null;
   /** Opens the Push dialog; the palette offers it as "Push current branch to…". */
   pushTo: PaletteAction;
+  /** Refused on the current branch (#1120): the backend never deletes the checked-out branch. */
   delete: MenuAction;
 }
 
 export const CURRENT_BRANCH = "Already the current branch.";
 export const NO_REMOTE = "No remote configured.";
+export const DELETE_CURRENT_BRANCH = "Switch to another branch first.";
 
 /**
  * Availability, reason and labels of a local branch's actions (#509), shared by `BranchTree`'s
@@ -58,7 +60,7 @@ export function branchActions(context: BranchActionContext, branch: BranchInfo):
       paletteLabel: "Push current branch to…",
       ...gate(blockers, context.remoteCount === 0 ? NO_REMOTE : undefined),
     },
-    delete: { label: "Delete", ...gate(blockers) },
+    delete: { label: "Delete", ...gate(blockers, isCurrent ? DELETE_CURRENT_BRANCH : undefined) },
   };
 }
 
@@ -95,6 +97,7 @@ export function rebaseOntoAction(
 export interface RemoteBranchActions {
   /** Switches to the same-named local branch, or creates it tracking this one. */
   checkout: MenuAction;
+  /** Refused on a detached HEAD (#1119): there is no current branch to set it on. */
   setAsUpstream: MenuAction;
   delete: MenuAction;
 }
@@ -108,10 +111,14 @@ export function remoteBranchActions(
   blockers: OperationBlockers,
   remoteName: string,
   branchName: string,
+  currentBranch: string | null,
 ): RemoteBranchActions {
   return {
     checkout: { label: "Switch to", ...gate(blockers) },
-    setAsUpstream: { label: "Set as upstream for current branch", ...gate(blockers) },
+    setAsUpstream: {
+      label: "Set as upstream for current branch",
+      ...gate(blockers, currentBranch === null ? NO_BRANCH : undefined),
+    },
     delete: { label: `Delete ${remoteName}/${branchName}…`, ...gate(blockers) },
   };
 }

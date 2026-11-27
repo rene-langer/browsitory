@@ -657,6 +657,7 @@ function BranchTreeContent({
                   remoteName,
                   fetchUrl: remote.fetchUrl,
                   pushUrl: remote.pushUrl,
+                  branches,
                   blockers,
                   // The cache's `refreshGeneration` reload already refreshes the branch list after
                   // any fetch; this explicit drop-and-reload just makes the update immediate here.

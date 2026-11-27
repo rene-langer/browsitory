@@ -23,7 +23,8 @@ onto here…** (in the command palette **Rebase current branch onto ⟨commit⟩
 from here…** (in the command palette **Interactive rebase from ⟨commit⟩…**): the planner opens
 based on the commit's parent, so it lists that commit and every later one, to reword, reorder,
 squash or drop them. A merge commit or the first commit of the history can't be the start; the
-item is disabled and says why.
+item is disabled and says why. On a detached HEAD both commit items, and the rebase items of a
+selection of several commits, are disabled with "Check out a branch first."
 
 **The planner.** Its title names the branch and the target ("Rebase main onto 4c5beaf"), and a
 line under it says how many commits it rewrites. It lists the commits oldest first, in the order
