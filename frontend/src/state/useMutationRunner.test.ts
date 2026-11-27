@@ -276,6 +276,29 @@ describe("useMutationRunner's optimistic variants keep changes made while the re
   });
 });
 
+describe("useMutationRunner's optimistic rollback and a newer value", () => {
+  it("keeps a field its update changed when something else changed it again before the failure", async () => {
+    const { result } = setupRunner({ ...BASE_STATE, branches: [{ name: "main", isCurrent: true }] });
+    let rejectMutate: (err: Error) => void = () => {};
+    let done!: Promise<void>;
+    act(() => {
+      done = result.current.runOptimisticMutation(
+        (prev) => ({ ...prev, branches: [...prev.branches, { name: "feature", isCurrent: false }] }),
+        () => new Promise<void>((_resolve, reject) => { rejectMutate = reject; }),
+      );
+    });
+    // A refresh read the branches again while the request was out.
+    act(() => {
+      result.current.setState((prev) => ({ ...prev, branches: [{ name: "main", isCurrent: true }, { name: "other", isCurrent: false }] }));
+    });
+    await act(async () => {
+      rejectMutate(new Error("boom"));
+      await done;
+    });
+    expect(result.current.state.branches.map((b) => b.name)).toEqual(["main", "other"]);
+  });
+});
+
 // #177: an error stays on screen until it is dismissed or the next change starts — so every
 // variant clears it when it starts, not when its trailing refresh lands.
 describe("useMutationRunner clears a previous error when a mutation starts", () => {
