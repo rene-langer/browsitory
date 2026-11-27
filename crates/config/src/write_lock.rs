@@ -46,12 +46,12 @@ fn lock_file_path(config_file: &Path) -> PathBuf {
 pub(crate) fn lock(config_file: &Path) -> WriteGuard {
     let in_process = IN_PROCESS.lock().unwrap_or_else(PoisonError::into_inner);
     WriteGuard {
-        file: lock_across_processes(&lock_file_path(config_file)),
+        file: lock_across_processes(&lock_file_path(config_file), WAIT),
         _in_process: in_process,
     }
 }
 
-fn lock_across_processes(path: &Path) -> Option<File> {
+fn lock_across_processes(path: &Path, wait: Duration) -> Option<File> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).ok()?;
     }
@@ -61,7 +61,7 @@ fn lock_across_processes(path: &Path) -> Option<File> {
         .write(true)
         .open(path)
         .ok()?;
-    let deadline = Instant::now() + WAIT;
+    let deadline = Instant::now() + wait;
     let mut pause = Duration::from_millis(1);
     loop {
         match file.try_lock() {
