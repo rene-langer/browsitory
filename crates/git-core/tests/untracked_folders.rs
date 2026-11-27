@@ -67,6 +67,8 @@ fn folder_entry(path: &str) -> StatusEntry {
         kind: StatusKind::New,
         untracked_folder: true,
         external_filter: None,
+        working_tree_encoding: None,
+        intent_to_add: false,
         merge_driver: None,
     }
 }

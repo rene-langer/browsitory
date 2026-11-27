@@ -102,6 +102,15 @@ pub struct StatusEntryDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(any(test, feature = "ts"), ts(optional))]
     pub external_filter: Option<String>,
+    /// The working-tree-encoding Browsitory can't convert, on an unstaged file that uses it
+    /// (#1156); absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(any(test, feature = "ts"), ts(optional))]
+    pub working_tree_encoding: Option<String>,
+    /// Only on the unstaged entry of an intent-to-add file (`git add -N`, #1173): `true`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(any(test, feature = "ts"), ts(optional))]
+    pub intent_to_add: Option<bool>,
     /// The custom merge driver Browsitory doesn't run, on a conflicted file whose `merge`
     /// attribute names one (#1165); absent otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -118,6 +127,8 @@ impl From<git_core::status::StatusEntry> for StatusEntryDto {
             kind: entry.kind,
             untracked_folder: entry.untracked_folder.then_some(true),
             external_filter: entry.external_filter,
+            working_tree_encoding: entry.working_tree_encoding,
+            intent_to_add: entry.intent_to_add.then_some(true),
             merge_driver: entry.merge_driver,
         }
     }
@@ -1132,6 +1143,11 @@ pub struct HeadInfoDto {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(any(test, feature = "ts"), ts(as = "Option<Vec<String>>", optional))]
     pub external_filters: Vec<String>,
+    /// The working-tree-encodings the repository's attributes name, which Browsitory can't
+    /// convert (#1156); absent when there are none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(any(test, feature = "ts"), ts(as = "Option<Vec<String>>", optional))]
+    pub working_tree_encodings: Vec<String>,
 }
 
 /// `{ "kind": "Rebase" | "Am", "branch", "onto", "currentStep", "totalSteps" }`: `branch` and
@@ -1243,6 +1259,7 @@ impl From<git_core::repo::HeadInfo> for HeadInfoDto {
             terminal_rebase: info.terminal_rebase.map(TerminalRebaseDto::from),
             unborn_branch: info.unborn_branch,
             external_filters: info.external_filters,
+            working_tree_encodings: info.working_tree_encodings,
         }
     }
 }

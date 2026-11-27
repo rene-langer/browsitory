@@ -1,4 +1,6 @@
 import type { StatusEntry } from "../ipc/RepoClient";
+import { unconvertible } from "./externalFilters";
+import { isUntracked } from "./statusLetter";
 
 // `git-core::status` reports conflicted entries with `staged: false`, so they sit in the
 // "Changes" group, but staging a conflicted path is what *marks the conflict resolved*, with
@@ -6,31 +8,28 @@ import type { StatusEntry } from "../ipc/RepoClient";
 // outstanding conflict, so the bulk actions skip them. The per-row Stage control on a conflicted
 // file is left alone: that's a deliberate, one-file-at-a-time action.
 //
-// A file under a filter driver Browsitory can't run (`externalFilter`, #1087) is refused by the
-// backend; the bulk actions leave it out so they stage everything else.
+// A file under a filter driver Browsitory can't run (`externalFilter`, #1087) or with a
+// working-tree-encoding it can't convert (`workingTreeEncoding`, #1156) is refused by the backend;
+// the bulk actions leave it out so they stage everything else.
+
+const stageable = (entry: StatusEntry) =>
+  !entry.staged && entry.kind !== "Conflicted" && unconvertible(entry) === undefined;
 
 /**
- * The paths "Stage all" stages: every unstaged entry but conflicts and files under a filter
- * Browsitory can't run, untracked files included.
+ * The paths "Stage all" stages: every unstaged entry but conflicts and files Browsitory can't
+ * filter or convert, untracked files included.
  */
 export function stageAllPaths(status: StatusEntry[]): string[] {
-  return status
-    .filter((entry) => !entry.staged && entry.kind !== "Conflicted" && entry.externalFilter === undefined)
-    .map((entry) => entry.path);
+  return status.filter(stageable).map((entry) => entry.path);
 }
 
 /**
  * The paths "Stage modified" stages (#621): the unstaged changes of tracked files (modified,
- * deleted, type changes, renames), leaving untracked files, conflicts and files under a filter
- * Browsitory can't run alone.
+ * deleted, type changes, renames, and a file added with `git add -N`, as `git add -u` stages it,
+ * #1173), leaving untracked files, conflicts and files Browsitory can't filter or convert alone.
  */
 export function stageModifiedPaths(status: StatusEntry[]): string[] {
-  return status
-    .filter(
-      (entry) =>
-        !entry.staged && entry.kind !== "Conflicted" && entry.kind !== "New" && entry.externalFilter === undefined,
-    )
-    .map((entry) => entry.path);
+  return status.filter((entry) => stageable(entry) && !isUntracked(entry)).map((entry) => entry.path);
 }
 
 /**
@@ -40,5 +39,5 @@ export function stageModifiedPaths(status: StatusEntry[]): string[] {
  * refused by `discard_all_unstaged` and named in its error, as the per-file "Delete file" does.
  */
 export function untrackedPaths(status: StatusEntry[]): string[] {
-  return status.filter((entry) => !entry.staged && entry.kind === "New").map((entry) => entry.path);
+  return status.filter(isUntracked).map((entry) => entry.path);
 }

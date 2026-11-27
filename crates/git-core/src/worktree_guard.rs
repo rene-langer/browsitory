@@ -628,23 +628,65 @@ pub(crate) fn path_from_bytes(bytes: &[u8]) -> PathBuf {
 /// `path` (git's `/`-separated bytes) is one of `paths` or below one of them, the way a forced
 /// checkout with `CheckoutBuilder::path` + `disable_pathspec_match` selects it.
 /// With `ignore_case` (`core.ignorecase`, as libgit2's pathspec matching) ASCII case is ignored.
+#[cfg(test)]
 fn selected<P: AsRef<[u8]>>(path: &[u8], paths: &[P], ignore_case: bool) -> bool {
-    let same = |a: &[u8], b: &[u8]| {
-        if ignore_case {
-            a.eq_ignore_ascii_case(b)
+    Selection::new(paths, ignore_case).contains(path)
+}
+
+/// The paths of [`selected`], set up once for a walk over many entries: one lookup per folder
+/// of an entry's path instead of a comparison with each path (#1155: Discard all checks out
+/// every file in one checkout).
+struct Selection {
+    wanted: std::collections::HashSet<Vec<u8>>,
+    ignore_case: bool,
+}
+
+impl Selection {
+    fn new<P: AsRef<[u8]>>(paths: &[P], ignore_case: bool) -> Self {
+        let wanted = paths
+            .iter()
+            .map(|wanted| {
+                let mut wanted = wanted.as_ref();
+                while let Some(rest) = wanted.strip_suffix(b"/") {
+                    wanted = rest;
+                }
+                if ignore_case {
+                    wanted.to_ascii_lowercase()
+                } else {
+                    wanted.to_vec()
+                }
+            })
+            .collect();
+        Self {
+            wanted,
+            ignore_case,
+        }
+    }
+
+    /// `paths` as an `Option` of a [`Selection`]: `None` selects everything.
+    fn of<P: AsRef<[u8]>>(paths: Option<&[P]>, ignore_case: bool) -> Option<Self> {
+        paths.map(|paths| Self::new(paths, ignore_case))
+    }
+
+    fn contains(&self, path: &[u8]) -> bool {
+        let folded;
+        let path = if self.ignore_case {
+            folded = path.to_ascii_lowercase();
+            &folded[..]
         } else {
-            a == b
-        }
-    };
-    paths.iter().any(|wanted| {
-        let mut wanted = wanted.as_ref();
-        while let Some(rest) = wanted.strip_suffix(b"/") {
-            wanted = rest;
-        }
-        path.len() >= wanted.len()
-            && same(&path[..wanted.len()], wanted)
-            && (path.len() == wanted.len() || path[wanted.len()] == b'/')
-    })
+            path
+        };
+        self.wanted.contains(path)
+            || path
+                .iter()
+                .enumerate()
+                .any(|(at, &byte)| byte == b'/' && self.wanted.contains(&path[..at]))
+    }
+}
+
+/// Whether `selection` (`None`: everything) holds `path`.
+fn in_selection(selection: Option<&Selection>, path: &[u8]) -> bool {
+    selection.is_none_or(|selection| selection.contains(path))
 }
 
 /// Lists the hazards for a forced checkout of `source` (optionally limited to the literal
@@ -712,11 +754,12 @@ impl<'w> Scanner<'w> {
                 &owned
             }
         };
+        let selection = Selection::of(paths, ignore_case);
         for entry in index.iter() {
             if entry.mode == MODE_GITLINK {
                 continue;
             }
-            if paths.is_some_and(|paths| !selected(&entry.path, paths, ignore_case)) {
+            if !in_selection(selection.as_ref(), &entry.path) {
                 continue;
             }
             let rel = path_from_bytes(&entry.path);
@@ -1187,8 +1230,9 @@ where
     entries.extend(index.iter().map(|entry| entry.path));
     // Folded name -> (spelling -> whether a source holds it).
     let mut names = std::collections::BTreeMap::<Vec<u8>, HashMap<Vec<u8>, bool>>::new();
+    let selection = Selection::of(paths, true);
     for path in entries {
-        if paths.is_none_or(|paths| selected(&path, paths, true)) {
+        if in_selection(selection.as_ref(), &path) {
             names
                 .entry(path.to_ascii_lowercase())
                 .or_default()
@@ -1595,6 +1639,7 @@ fn find_case_collisions<P: AsRef<[u8]>>(
     source: &GuardSource,
     paths: Option<&[P]>,
 ) -> Result<Vec<CaseCollision>, git2::Error> {
+    let selection = Selection::of(paths, true);
     let owned;
     let index: &git2::Index = match source {
         GuardSource::Index(index) => index,
@@ -1608,7 +1653,7 @@ fn find_case_collisions<P: AsRef<[u8]>>(
     Ok(collisions_across(
         index
             .iter()
-            .filter(|entry| paths.is_none_or(|paths| selected(&entry.path, paths, true)))
+            .filter(|entry| in_selection(selection.as_ref(), &entry.path))
             .map(|entry| (entry.path, entry.mode, 0)),
         true,
     ))
@@ -1639,6 +1684,7 @@ fn collisions_in<P: AsRef<[u8]>>(
     all: bool,
 ) -> Result<Vec<CaseCollision>, git2::Error> {
     let mut entries = Vec::new();
+    let selection = Selection::of(paths, true);
     for (i, source) in sources.iter().enumerate() {
         let owned;
         let index: &git2::Index = match source {
@@ -1653,7 +1699,7 @@ fn collisions_in<P: AsRef<[u8]>>(
         entries.extend(
             index
                 .iter()
-                .filter(|entry| paths.is_none_or(|paths| selected(&entry.path, paths, true)))
+                .filter(|entry| in_selection(selection.as_ref(), &entry.path))
                 .map(|entry| (entry.path, entry.mode, i)),
         );
     }

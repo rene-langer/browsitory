@@ -78,6 +78,7 @@ HeadInfo/operation-CherryPick key-order
 HeadInfo/operation-Merge key-order
 HeadInfo/operation-Revert key-order
 HeadInfo/unborn key-order
+HeadInfo/working-tree-encodings key-order
 HookProgress/Finished-Commit key-order
 HookProgress/Started-Checkout key-order
 HookProgress/Started-Commit key-order
@@ -135,9 +136,11 @@ StatusEntry/New key-order
 StatusEntry/Renamed key-order
 StatusEntry/TypeChange key-order
 StatusEntry/external-filter key-order
+StatusEntry/intent-to-add key-order
 StatusEntry/merge-driver key-order
 StatusEntry/staged-rename key-order
 StatusEntry/untracked-folder key-order
+StatusEntry/working-tree-encoding key-order
 StatusWithStamp/one-entry key-order
 SubmoduleInfo/initialized key-order
 SubmoduleInfo/unknown key-order

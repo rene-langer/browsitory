@@ -25,25 +25,36 @@ use sha2::{Digest, Sha256};
 
 use crate::status::{StatusEntry, StatusKind};
 
-/// A path that uses an external filter driver, which Browsitory can't run (#1063).
+/// A path git converts on its way in and out of the repository with something Browsitory
+/// can't run, so it refuses the change: an external filter driver (#1063) or a
+/// `working-tree-encoding` (#1156).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error(
-    "'{path}' uses the '{driver}' filter (for example Git LFS or git-crypt), which Browsitory \
-     can't run, so it refused this change. Use git on the command line for it instead."
-)]
-pub struct ExternalFilter {
-    pub path: String,
-    pub driver: String,
+pub enum ExternalFilter {
+    #[error(
+        "'{path}' uses the '{driver}' filter (for example Git LFS or git-crypt), which \
+         Browsitory can't run, so it refused this change. Use git on the command line for it \
+         instead."
+    )]
+    Driver { path: String, driver: String },
+    #[error(
+        "'{path}' uses working-tree-encoding={encoding}, which Browsitory can't convert, so it \
+         refused this change. Use git on the command line for it instead."
+    )]
+    Encoding { path: String, encoding: String },
 }
 
 /// The configured driver names, as `filter=<name>` spells them (the config subsection,
-/// case-sensitive), and a handle of the repository's own to look attributes up with: a
-/// checkout's callbacks can't borrow the caller's (`stash_apply` takes it mutably).
+/// case-sensitive), whether the attribute files name a `working-tree-encoding` to convert to,
+/// and a handle of the repository's own to look attributes up with: a checkout's callbacks
+/// can't borrow the caller's (`stash_apply` takes it mutably).
 #[derive(Default)]
 pub(crate) struct Drivers {
     names: BTreeSet<Vec<u8>>,
     /// The drivers whose clean command is Git LFS's (see [`is_git_lfs`]).
     git_lfs: BTreeSet<Vec<u8>>,
+    /// The attribute files name an encoding other than UTF-8 (#1156); without one no path's
+    /// encoding is looked up.
+    encodings: bool,
     lookup: Option<Repository>,
 }
 
@@ -97,9 +108,10 @@ impl Drivers {
             }
         }
         // A bare repository has no work tree to filter into or from.
+        let encodings = repo.workdir().is_some() && !named_encodings(repo).is_empty();
         let lookup = match repo.workdir() {
             // The git folder when the work tree has no `.git` of its own (`core.worktree`).
-            Some(workdir) if !drivers.is_empty() => {
+            Some(workdir) if !drivers.is_empty() || encodings => {
                 Some(Repository::open(workdir).or_else(|_| Repository::open(repo.path()))?)
             }
             _ => None,
@@ -107,32 +119,65 @@ impl Drivers {
         Ok(Self {
             names: drivers,
             git_lfs,
+            encodings,
             lookup,
         })
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.names.is_empty()
+        self.names.is_empty() && !self.encodings
     }
 
     /// The refusal for `path` (relative, `/`-separated) when its `filter` attribute names one of
-    /// the drivers. The work tree's `.gitattributes` come first, then the index's, as `git add`
-    /// reads them.
+    /// the drivers, or else its `working-tree-encoding` is one git would convert to. The work
+    /// tree's `.gitattributes` come first, then the index's, as `git add` reads them.
     pub(crate) fn refusal(&self, path: &Path) -> Result<Option<ExternalFilter>, git2::Error> {
         let Some(repo) = &self.lookup else {
             return Ok(None);
         };
-        let value = repo.get_attr_bytes(path, "filter", AttrCheckFlags::FILE_THEN_INDEX)?;
-        let name = match AttrValue::from_bytes(value) {
-            AttrValue::String(name) => name.as_bytes(),
-            AttrValue::Bytes(name) => name,
-            _ => return Ok(None),
-        };
-        Ok(self.names.contains(name).then(|| ExternalFilter {
-            path: path.to_string_lossy().replace('\\', "/"),
-            driver: String::from_utf8_lossy(name).into_owned(),
-        }))
+        let shown = || path.to_string_lossy().replace('\\', "/");
+        if !self.names.is_empty() {
+            let value = repo.get_attr_bytes(path, "filter", AttrCheckFlags::FILE_THEN_INDEX)?;
+            if let Some(name) = attr_text(value).filter(|name| self.names.contains(*name)) {
+                return Ok(Some(ExternalFilter::Driver {
+                    path: shown(),
+                    driver: String::from_utf8_lossy(name).into_owned(),
+                }));
+            }
+        }
+        if self.encodings {
+            let value = repo.get_attr_bytes(
+                path,
+                "working-tree-encoding",
+                AttrCheckFlags::FILE_THEN_INDEX,
+            )?;
+            if let Some(encoding) = attr_text(value).filter(|value| converts_to(value)) {
+                return Ok(Some(ExternalFilter::Encoding {
+                    path: shown(),
+                    encoding: String::from_utf8_lossy(encoding).into_owned(),
+                }));
+            }
+        }
+        Ok(None)
     }
+}
+
+/// An attribute's value when it is set to one (not just set, unset or unspecified).
+fn attr_text(value: Option<&[u8]>) -> Option<&[u8]> {
+    match AttrValue::from_bytes(value) {
+        AttrValue::String(text) => Some(text.as_bytes()),
+        AttrValue::Bytes(text) => Some(text),
+        _ => None,
+    }
+}
+
+/// Whether git converts a file to the `working-tree-encoding` `value`: any but an empty one
+/// and UTF-8 (git's `is_encoding_utf8`: `UTF-8` or `UTF8`, any case). A bare
+/// `working-tree-encoding` without a value makes git fail; it isn't counted.
+fn converts_to(value: &[u8]) -> bool {
+    !value.is_empty()
+        && !value.eq_ignore_ascii_case(b"UTF-8")
+        && !value.eq_ignore_ascii_case(b"UTF8")
 }
 
 /// Whether a driver's clean (or `process`) command runs Git LFS: its first word is a
@@ -213,7 +258,10 @@ where
     refuse_paths(repo, written_paths(diff))
 }
 
-fn refuse_with<E, S>(drivers: &Drivers, paths: impl IntoIterator<Item = S>) -> Result<(), E>
+pub(crate) fn refuse_with<E, S>(
+    drivers: &Drivers,
+    paths: impl IntoIterator<Item = S>,
+) -> Result<(), E>
 where
     E: From<ExternalFilter> + From<git2::Error>,
     S: AsRef<Path>,
@@ -272,7 +320,9 @@ impl FilterGuard {
 /// A deletion reads no file and a symbolic link is never filtered, so neither is marked; staged
 /// entries compare two stored blobs. A modified Git LFS file whose content matches its stored
 /// pointer is dropped: the driver's clean output would be that pointer, so git sees no change
-/// ([`lfs_unchanged`]). Any error on the way leaves an entry as it is, never dropped.
+/// ([`lfs_unchanged`]). Any error on the way leaves an entry as it is, never dropped. An entry
+/// whose file git converts to a `working-tree-encoding` is marked with the encoding the same way
+/// (#1156).
 pub(crate) fn annotate(repo: &Repository, entries: &mut Vec<StatusEntry>) {
     let Ok(drivers) = Drivers::load(repo) else {
         return;
@@ -296,15 +346,22 @@ pub(crate) fn annotate(repo: &Repository, entries: &mut Vec<StatusEntry>) {
         if !is_file {
             return true;
         }
-        let unchanged = entry.kind == StatusKind::Modified
-            && drivers.git_lfs.contains(refusal.driver.as_bytes())
-            && index
-                .as_ref()
-                .is_some_and(|index| lfs_unchanged(repo, index, &entry.path, &on_disk));
-        if unchanged {
-            return false;
+        match refusal {
+            ExternalFilter::Driver { driver, .. } => {
+                let unchanged = entry.kind == StatusKind::Modified
+                    && drivers.git_lfs.contains(driver.as_bytes())
+                    && index
+                        .as_ref()
+                        .is_some_and(|index| lfs_unchanged(repo, index, &entry.path, &on_disk));
+                if unchanged {
+                    return false;
+                }
+                entry.external_filter = Some(driver);
+            }
+            ExternalFilter::Encoding { encoding, .. } => {
+                entry.working_tree_encoding = Some(encoding);
+            }
         }
-        entry.external_filter = Some(refusal.driver);
         true
     });
 }
@@ -387,15 +444,46 @@ fn canonical_pointer(content: &[u8]) -> Option<(String, u64)> {
 }
 
 /// The configured drivers that the repository's attribute files name in a `filter=<name>`
-/// (#1087), sorted, each once: every `.gitattributes` the index tracks (the work tree's file,
-/// else the stored one, as `FILE_THEN_INDEX` reads them), the work tree's top-level one even if
-/// untracked, `info/attributes` and `core.attributesFile`. Without a configured driver only the
-/// configuration is read. Unreadable files are skipped.
+/// (#1087), sorted, each once (see [`attribute_files`]). Without a configured driver no
+/// attribute file is read for it.
 pub(crate) fn named_drivers(repo: &Repository) -> Vec<String> {
     let Ok(drivers) = Drivers::load(repo) else {
         return Vec::new();
     };
-    let Some(workdir) = repo.workdir().filter(|_| !drivers.is_empty()) else {
+    if drivers.names.is_empty() {
+        return Vec::new();
+    }
+    let mut named = BTreeSet::new();
+    for text in &attribute_files(repo) {
+        for name in attribute_values(text, b"filter=") {
+            if drivers.names.contains(name) {
+                named.insert(String::from_utf8_lossy(name).into_owned());
+            }
+        }
+    }
+    named.into_iter().collect()
+}
+
+/// The `working-tree-encoding` values git converts to (not UTF-8) that the repository's
+/// attribute files name (#1156), sorted, each once (see [`attribute_files`]).
+pub(crate) fn named_encodings(repo: &Repository) -> Vec<String> {
+    let mut named = BTreeSet::new();
+    for text in &attribute_files(repo) {
+        for value in attribute_values(text, b"working-tree-encoding=") {
+            if converts_to(value) {
+                named.insert(String::from_utf8_lossy(value).into_owned());
+            }
+        }
+    }
+    named.into_iter().collect()
+}
+
+/// The contents of the repository's attribute files: every `.gitattributes` the index tracks
+/// (the work tree's file, else the stored one, as `FILE_THEN_INDEX` reads them), the work tree's
+/// top-level one even if untracked, `info/attributes` and `core.attributesFile`. None in a
+/// bare repository. Unreadable files are skipped.
+fn attribute_files(repo: &Repository) -> Vec<Vec<u8>> {
+    let Some(workdir) = repo.workdir() else {
         return Vec::new();
     };
     let mut files: Vec<Vec<u8>> = Vec::new();
@@ -439,20 +527,13 @@ pub(crate) fn named_drivers(repo: &Repository) -> Vec<String> {
             files.extend(std::fs::read(&path).ok());
         }
     }
-    let mut named = BTreeSet::new();
-    for text in &files {
-        for name in filter_names(text) {
-            if drivers.names.contains(name) {
-                named.insert(String::from_utf8_lossy(name).into_owned());
-            }
-        }
-    }
-    named.into_iter().collect()
+    files
 }
 
-/// The `<name>` of every `filter=<name>` in an attributes file: the words after each line's
-/// pattern (or `[attr]` macro name); `#` lines are comments.
-fn filter_names(text: &[u8]) -> Vec<&[u8]> {
+/// The `<value>` of every `<prefix><value>` (`filter=`, `working-tree-encoding=`) in an
+/// attributes file: the words after each line's pattern (or `[attr]` macro name); `#` lines are
+/// comments.
+fn attribute_values<'t>(text: &'t [u8], prefix: &[u8]) -> Vec<&'t [u8]> {
     let mut names = Vec::new();
     for line in text.split(|&byte| byte == b'\n') {
         let line = line.trim_ascii();
@@ -483,9 +564,35 @@ fn filter_names(text: &[u8]) -> Vec<&[u8]> {
         };
         names.extend(
             rest.split(u8::is_ascii_whitespace)
-                .filter_map(|word| word.strip_prefix(b"filter="))
+                .filter_map(|word| word.strip_prefix(prefix))
                 .filter(|name| !name.is_empty()),
         );
     }
     names
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_an_encoding_other_than_utf8_is_converted_to() {
+        for value in ["UTF-16LE-BOM", "ISO-8859-1", "UTF-16", "utf-32"] {
+            assert!(converts_to(value.as_bytes()), "{value}");
+        }
+        for value in ["", "UTF-8", "utf-8", "UTF8", "Utf8"] {
+            assert!(!converts_to(value.as_bytes()), "{value:?}");
+        }
+    }
+
+    #[test]
+    fn attribute_values_reads_the_words_after_each_pattern() {
+        let text = b"# working-tree-encoding=NO\n*.ps1 text working-tree-encoding=UTF-16\n\
+            [attr]sql working-tree-encoding=UTF-32 -text\n\"a b\" working-tree-encoding=X\n\
+            working-tree-encoding=pattern-only\n";
+        assert_eq!(
+            attribute_values(text, b"working-tree-encoding="),
+            [&b"UTF-16"[..], b"UTF-32", b"X"]
+        );
+    }
 }
