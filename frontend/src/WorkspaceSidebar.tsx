@@ -159,6 +159,7 @@ export function WorkspaceSidebar({
           onSelectReference={appState.selectReflogReference}
           onRestore={appState.restoreReflogEntry}
           operationDisabled={repositoryOperationDisabled}
+          operationDisabledReason={operationDisabledReason}
           revealRequest={sectionRevealRequest(revealRequest, "reflog")}
         />
       )}

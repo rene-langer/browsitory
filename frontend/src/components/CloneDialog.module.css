@@ -30,7 +30,7 @@
 .progress {
   margin: 0;
   font-size: var(--text-sm);
-  opacity: 0.8;
+  color: var(--color-text-muted);
   word-break: break-all;
 }
 

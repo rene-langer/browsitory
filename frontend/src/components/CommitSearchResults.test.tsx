@@ -165,4 +165,40 @@ describe("CommitSearchResults — windowed rows", () => {
       restore();
     }
   });
+
+  // #1139: a jump to a row the window doesn't hold yet is announced; once rendered, it is the
+  // list's active descendant.
+  it("announces a selected row that wasn't rendered, then makes it the active descendant", () => {
+    const { rerender, props, restore } = renderInPane();
+    try {
+      rerender(<CommitSearchResults {...props} selectedRow={{ commitId: "id700" }} />);
+      const announcement = screen.getByText("id700 commit id700, 701 of 1000");
+      expect(announcement.closest('[aria-live="polite"]')).not.toBeNull();
+      const list = screen.getByRole("listbox", { name: "Search results" });
+      expect(list).toHaveAttribute("aria-activedescendant", screen.getByText(/commit id700$/).closest("li")!.id);
+    } finally {
+      restore();
+    }
+  });
+});
+
+// #1139: the focus stays on the list, so the selected row is its active descendant.
+it("points the search results' active descendant at the selected row", () => {
+  const props = {
+    results: { ...base, commits: [c("a1"), c("b2")] },
+    selectedRow: { commitId: "a1" } as SelectedRow,
+    onSelectRow: vi.fn(),
+    onClose: vi.fn(),
+    onLoadMore: vi.fn(),
+    onRetry: vi.fn(),
+    onRequestSearch: vi.fn(),
+  };
+  const { rerender } = render(<CommitSearchResults {...props} />);
+  const list = screen.getByRole("listbox", { name: "Search results" });
+  const option = (id: string) => screen.getByText(`${id} commit ${id}`).closest("li")!;
+  expect(option("a1").id).not.toBe("");
+  expect(list).toHaveAttribute("aria-activedescendant", option("a1").id);
+  rerender(<CommitSearchResults {...props} selectedRow={{ commitId: "b2" }} />);
+  expect(list).toHaveAttribute("aria-activedescendant", option("b2").id);
+  expect(option("b2").id).not.toBe(option("a1").id);
 });

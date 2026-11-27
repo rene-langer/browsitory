@@ -1,7 +1,8 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderTree } from "../test/branchTreeProps";
 import { describedByText } from "../test/describedBy";
+import { AddRemoteForm } from "./AddRemoteForm";
 
 const oneRemote = [{ name: "origin", fetchUrl: "git@github.com:user/repo.git", pushUrl: null, authMode: null, authUsername: null }];
 
@@ -31,6 +32,33 @@ describe("AddRemoteForm (in BranchTree)", () => {
     expect(screen.getByText("Remote names can't contain spaces.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add remote" })).toBeDisabled();
     expect(onAddRemote).not.toHaveBeenCalled();
+  });
+
+  // #1135: every mounted tab has its own form.
+  it("ties each form's name field to its own problem when two forms are mounted", () => {
+    const form = (testId: string) => (
+      <div data-testid={testId}>
+        <AddRemoteForm
+          open
+          remotes={[]}
+          operationDisabled={false}
+          operationDisabledReason={null}
+          onAddRemote={vi.fn().mockResolvedValue(null)}
+          onClose={vi.fn()}
+        />
+      </div>
+    );
+    render(
+      <>
+        {form("first")}
+        {form("second")}
+      </>,
+    );
+    const nameIn = (id: string) => within(screen.getByTestId(id)).getByLabelText("Remote name");
+    fireEvent.change(nameIn("first"), { target: { value: "my fork" } });
+    fireEvent.change(nameIn("second"), { target: { value: "fork..x" } });
+    expect(nameIn("first")).toHaveAccessibleDescription("Remote names can't contain spaces.");
+    expect(nameIn("second")).toHaveAccessibleDescription("Remote names can't contain .. or @{.");
   });
 
   it("says why Add remote can't run while the repository is busy (#748)", () => {

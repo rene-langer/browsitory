@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { ExternalLink, GitMerge, GitPullRequest, GitPullRequestClosed, MoreHorizontal } from "lucide-react";
 import type {
   CreatePullRequest,
@@ -48,6 +48,8 @@ interface ForgeRepositorySectionProps {
   // Known local branches: offered as suggestions for the source/target fields and used to
   // default them (current branch, and main/master).
   branches: { name: string; isCurrent: boolean }[];
+  /** The id of the panel's branch `<datalist>`, unique per mounted tab (#1135). */
+  branchSuggestionsId: string;
 }
 
 /**
@@ -64,10 +66,6 @@ function ListWhenOpen({ account, onList }: { account: string; onList: (account: 
   }, [account]);
   return null;
 }
-
-// Rendered once outside the sections (see `PullRequestPanel`): WebKitWebDriver cannot compute the
-// text of an element that contains a `<datalist>`, which breaks the e2e `toHaveText` assertions.
-const BRANCH_SUGGESTIONS_ID = "pr-branch-suggestions";
 
 /**
  * One forge repository's card (#1012). Not connected, it offers "Connect to <provider>", a dialog
@@ -86,6 +84,7 @@ function ForgeRepositorySection({
   operationDisabled,
   operationDisabledReason,
   branches,
+  branchSuggestionsId,
 }: ForgeRepositorySectionProps) {
   const [account, setAccount] = useForgeAccount(repository.provider);
   // True while a listing is out; an open connected card starts one (`ListWhenOpen`).
@@ -261,7 +260,7 @@ function ForgeRepositorySection({
         <NewPullRequestDialog
           remoteName={repository.remoteName}
           branches={branches}
-          branchSuggestionsId={BRANCH_SUGGESTIONS_ID}
+          branchSuggestionsId={branchSuggestionsId}
           disabled={operationDisabled}
           disabledReason={operationDisabledReason}
           onCreate={async (pullRequest) => {
@@ -304,6 +303,9 @@ export function PullRequestPanel({
   /** Expands and scrolls to the section (`useSidebarReveal`, #494). */
   revealRequest?: number;
 }) {
+  // Rendered once outside the sections: WebKitWebDriver cannot compute the text of an element
+  // that contains a `<datalist>`, which breaks the e2e `toHaveText` assertions.
+  const branchSuggestionsId = useId();
   const [githubAccount] = useForgeAccount("GitHub");
   const [bitbucketAccount] = useForgeAccount("Bitbucket");
   if (forgeRepositories.length === 0) {
@@ -358,12 +360,13 @@ export function PullRequestPanel({
                 operationDisabled={operationDisabled}
                 operationDisabledReason={operationDisabledReason}
                 branches={branches}
+                branchSuggestionsId={branchSuggestionsId}
               />
             ))}
           </div>
         </AccordionGroup>
       </AccordionSection>
-      <datalist id={BRANCH_SUGGESTIONS_ID}>
+      <datalist id={branchSuggestionsId}>
         {branches.map((branch) => (
           <option key={branch.name} value={branch.name} />
         ))}

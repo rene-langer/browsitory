@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Archive, MoreHorizontal } from "lucide-react";
 import { rectAnchor } from "../lib/menuKeys";
 import type { StashEntry } from "../ipc/RepoClient";
@@ -9,6 +9,7 @@ import { DropStashMessage } from "./DropStashMessage";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { ListRow } from "./primitives/ListRow";
 import styles from "./StashPanel.module.css";
+import { useRefocusRemovedRow } from "./useRefocusRemovedRow";
 import { useVirtualRows } from "./useVirtualRows";
 import { menuItem } from "../lib/actions/action";
 import { stashActions, stashDetails, stashTitle, type StashBlockers } from "../lib/actions/stashActions";
@@ -60,49 +61,22 @@ export function StashPanel({
   const menuStash = menu === null ? undefined : stashes.find((stash) => stash.commitId === menu.stash.commitId);
   const dropStash = pendingDrop === null ? undefined : stashes.find((stash) => stash.commitId === pendingDrop.commitId);
 
-  // When a stash this panel had focus on leaves the list (its menu or drop confirmation was open,
-  // or its drop is still running and focus went back to its "…"), focus would drop to the page.
-  // Remember its place in the last list that held it, and move focus there after the commit.
-  // State is adjusted while rendering, as React recommends over an effect.
-  const [lastStashes, setLastStashes] = useState(stashes);
+  // A stash this panel acts on that leaves the list (its menu or drop confirmation is open, or its
+  // drop still runs and the focus went back to its "…"): the focus goes to the stash now in that
+  // place (`useRefocusRemovedRow`, as in the other sidebar lists).
   const [droppedCommitId, setDroppedCommitId] = useState<string | null>(null);
-  const [refocus, setRefocus] = useState<{ position: number } | null>(null);
-  if (stashes !== lastStashes) {
-    setLastStashes(stashes);
-    const watched = [menu?.stash.commitId, pendingDrop?.commitId, droppedCommitId];
-    const gone = watched.find(
-      (commitId) => commitId != null && !stashes.some((stash) => stash.commitId === commitId),
-    );
-    if (gone != null) {
-      // That place in the new list, else its last stash (-1: none left).
-      const place = Math.max(0, lastStashes.findIndex((stash) => stash.commitId === gone));
-      setRefocus({ position: Math.min(place, stashes.length - 1) });
-      if (gone === droppedCommitId) setDroppedCommitId(null);
-    }
+  if (droppedCommitId !== null && !stashes.some((stash) => stash.commitId === droppedCommitId)) {
+    setDroppedCommitId(null);
   }
   if (menu !== null && menuStash === undefined) setMenu(null);
   if (pendingDrop !== null && dropStash === undefined) setPendingDrop(null);
-  // The list, or the empty-state text when there is none.
-  const bodyRef = useRef<HTMLElement | null>(null);
   // Only the rows in view render (#775), as in the commit graph (#685).
   const [listElement, setListElement] = useState<HTMLUListElement | null>(null);
-  const attachList = useCallback((element: HTMLUListElement | null) => {
-    bodyRef.current = element;
-    setListElement(element);
-  }, []);
   const virtual = useVirtualRows(listElement, stashes.length);
-  useEffect(() => {
-    if (refocus === null) return;
-    const active = document.activeElement;
-    if (active !== null && active !== document.body && active.isConnected) return;
-    // The "…" of the stash now in that place, else the last one, else the section's header. The
-    // place was in view, so its row is rendered.
-    const next = bodyRef.current?.querySelector<HTMLElement>(
-      `:scope > li[data-row-index="${refocus.position}"] button[aria-haspopup="menu"]`,
-    );
-    const header = bodyRef.current?.closest("section")?.querySelector<HTMLElement>("button");
-    (next ?? header)?.focus({ preventScroll: true });
-  }, [refocus]);
+  useRefocusRemovedRow({
+    list: listElement,
+    watching: [menu?.stash.commitId, pendingDrop?.commitId, droppedCommitId],
+  });
   const dropDisabledReason = blockers.drop;
   const dropDisabled = dropDisabledReason !== null;
 
@@ -140,18 +114,11 @@ export function StashPanel({
       revealRequest={revealRequest}
     >
       {stashes.length === 0 ? (
-        <p
-          ref={(element) => {
-            bodyRef.current = element;
-          }}
-          className={styles.empty}
-        >
-          No stashes. Use Stash in the repository toolbar to set your changes aside.
-        </p>
+        <p className={styles.empty}>No stashes. Use Stash in the repository toolbar to set your changes aside.</p>
       ) : (
         <>
           <ul
-            ref={attachList}
+            ref={setListElement}
             className={styles.list}
             style={virtual.windowed ? { paddingTop: virtual.padTop, paddingBottom: virtual.padBottom } : undefined}
           >

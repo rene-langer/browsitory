@@ -190,7 +190,7 @@ export function CommandPalette({
   }
 
   return (
-    <div className={styles.palette}>
+    <div className={styles.palette} data-command-palette>
       <input
         type="text"
         className={styles.input}

@@ -42,6 +42,7 @@ export function AddRemoteForm({
   const [showPushUrl, setShowPushUrl] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const reasonId = useId();
+  const problemId = useId();
   const nameRef = useRef<HTMLInputElement>(null);
   // Escape anywhere in the form closes it, focus back where it came from (#1001).
   const { containerRef: escapeRef, onKeyDown: onEscapeKeyDown, close: closeAndRefocus } = useEscapeToClose<HTMLFormElement>({
@@ -98,7 +99,7 @@ export function AddRemoteForm({
           placeholder="origin"
           value={newRemoteName}
           aria-invalid={newRemoteProblem !== null}
-          aria-describedby={newRemoteProblem !== null ? "new-remote-name-problem" : undefined}
+          aria-describedby={newRemoteProblem !== null ? problemId : undefined}
           onChange={(event) => {
             setNameTouched(true);
             setNewRemoteName(event.target.value);
@@ -106,7 +107,7 @@ export function AddRemoteForm({
         />
       </label>
       {newRemoteProblem !== null && (
-        <p id="new-remote-name-problem" className={styles.draftProblem}>
+        <p id={problemId} className={styles.draftProblem}>
           {newRemoteProblem}
         </p>
       )}

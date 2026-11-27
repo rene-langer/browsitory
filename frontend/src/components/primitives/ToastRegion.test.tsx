@@ -118,3 +118,47 @@ describe("ToastRegion", () => {
     expect(onPauseChange).toHaveBeenLastCalledWith(false);
   });
 });
+
+// #1141: a toast's own button removes the toast; the focus goes back to where it came from.
+describe("ToastRegion — focus after a toast goes (#1141)", () => {
+  function setup(toasts: Toast[]) {
+    const view = render(
+      <>
+        <button type="button">Before</button>
+        <ToastRegion toasts={toasts} onDismiss={vi.fn()} onPauseChange={vi.fn()} />
+      </>,
+    );
+    const before = screen.getByRole("button", { name: "Before" });
+    before.focus();
+    return { ...view, before };
+  }
+
+  it("returns the focus to the element that had it before, after Dismiss", () => {
+    const { rerender, before } = setup([toast()]);
+    const dismiss = screen.getByRole("button", { name: "Dismiss notification" });
+    dismiss.focus();
+    fireEvent.click(dismiss);
+    rerender(
+      <>
+        <button type="button">Before</button>
+        <ToastRegion toasts={[]} onDismiss={vi.fn()} onPauseChange={vi.fn()} />
+      </>,
+    );
+    expect(before).toHaveFocus();
+  });
+
+  it("returns the focus there after an action, while another toast stays", () => {
+    const other = toast({ id: 8, message: "Fetched" });
+    const { rerender, before } = setup([toast({ id: 1, message: "Undid Stage a.txt", action: { label: "Redo", run: vi.fn() } }), other]);
+    const redo = screen.getByRole("button", { name: "Redo" });
+    redo.focus();
+    fireEvent.click(redo);
+    rerender(
+      <>
+        <button type="button">Before</button>
+        <ToastRegion toasts={[other]} onDismiss={vi.fn()} onPauseChange={vi.fn()} />
+      </>,
+    );
+    expect(before).toHaveFocus();
+  });
+});
