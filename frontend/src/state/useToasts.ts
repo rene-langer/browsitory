@@ -15,6 +15,8 @@ export interface ToastOptions {
   action?: ToastAction;
   /** Two buttons, in this order (Push and Undo after a commit, #733); like `action` otherwise. */
   actions?: ToastAction[];
+  /** The repository whose tab pushed it (`useRepoToasts`, #1116); none for the app's own. */
+  repoPath?: string;
 }
 
 export interface Toast {
@@ -23,6 +25,7 @@ export interface Toast {
   tone: ToastTone;
   action?: ToastAction;
   actions?: ToastAction[];
+  repoPath?: string;
 }
 
 /** A toast's buttons, in order: `actions`, else `action`, else none. */
@@ -100,6 +103,7 @@ export function useToasts() {
       const toast: Toast = { id, message, tone: options.tone ?? "success" };
       if (options.action !== undefined) toast.action = options.action;
       if (options.actions !== undefined) toast.actions = options.actions;
+      if (options.repoPath !== undefined) toast.repoPath = options.repoPath;
       // Ids only grow and a Map keeps insertion order, so the first clock is the oldest toast's.
       for (const [oldId, clock] of clocks.current) {
         if (clocks.current.size < MAX_TOASTS) break;

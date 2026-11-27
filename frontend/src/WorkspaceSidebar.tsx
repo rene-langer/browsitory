@@ -111,7 +111,7 @@ export function WorkspaceSidebar({
           onOpenDeleteRemoteBranch={(remoteName, branchName) => openDialog({ kind: "deleteRemoteBranch", remoteName, branchName })}
           onCompareBranch={compare.compareBranch}
           onGoToBranch={(kind, name) => void goTo.goToBranch(kind, name)}
-          refreshGeneration={appState.state.refreshGeneration}
+          refreshGeneration={appState.state.historyGeneration}
           onOpenRemoteDialog={openDialog}
           revealRequest={revealRequest?.section === "branches" ? revealRequest : undefined}
         />
@@ -161,6 +161,7 @@ export function WorkspaceSidebar({
           onSelectReference={appState.selectReflogReference}
           onRestore={appState.restoreReflogEntry}
           operationDisabled={repositoryOperationDisabled}
+          operationDisabledReason={operationDisabledReason}
           revealRequest={sectionRevealRequest(revealRequest, "reflog")}
         />
       )}

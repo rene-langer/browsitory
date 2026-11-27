@@ -61,6 +61,10 @@ cargo fmt --all -- --check
 cd frontend && pnpm test -- --run && pnpm lint
 ```
 
+Some Rust tests run the `git` CLI, `gpg` (Linux and macOS) or `ssh-keygen`, `ssh-agent` and
+`ssh-add`. Without one of them those tests are skipped with a `note: skipping …` line in the
+output; on CI they fail instead.
+
 Code under `#[cfg(windows)]` (in `crates/git-core`) only compiles for a Windows target. On Linux
 or macOS, `scripts/check-windows.sh` runs clippy on it for `x86_64-pc-windows-gnu`; it needs
 `rustup target add x86_64-pc-windows-gnu` and nothing else (no MinGW: a stub stands in for the C

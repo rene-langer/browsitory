@@ -1,14 +1,11 @@
 mod common;
 
-use common::{
-    commit_all, enable_ssh_signing, init_repo, program_available, ssh_key_fixture, write_file,
-};
+use common::{commit_all, enable_ssh_signing, init_repo, ssh_key_fixture, write_file};
 use git_core::signing::{create_commit, HeadUpdate};
 
 macro_rules! require {
     ($program:expr) => {
-        if !program_available($program) {
-            eprintln!("skipping: {} not on PATH", $program);
+        if !test_support::require_tool($program) {
             return;
         }
     };
@@ -243,8 +240,7 @@ fn signs_with_a_literal_ssh_public_key_through_the_agent() {
 use git_core::rebase::{RebaseAction, RebasePlanEntry, RebaseStepResult};
 
 fn signing_repo() -> Option<(tempfile::TempDir, tempfile::TempDir, git2::Repository)> {
-    if !program_available("ssh-keygen") {
-        eprintln!("skipping: ssh-keygen not on PATH");
+    if !test_support::require_tool("ssh-keygen") {
         return None;
     }
     let (dir, repo) = init_repo();

@@ -27,6 +27,7 @@ import type {
 import { type SavedGraphSelection, toGraphSelection } from "./graphSelection";
 import { failureError, useMutationRunner, withoutStaleErrorHint, withoutStaleErrorSource } from "./useMutationRunner";
 import { errorAfterOwnSuccess, forgettingStaleOwnErrors, useOwnError } from "./ownError";
+import { failedOperation } from "../lib/operationErrors";
 import { readFetchPrune } from "../lib/fetchPrune";
 import { MERGE_PAGE_SIZE, type MergeExpansion, withExpandedMerges } from "../lib/mergeExpansion";
 import { applyGraphRefresh } from "../lib/graphRefresh";
@@ -228,6 +229,11 @@ export interface AppState {
   // trailing refresh, the palette's Refresh, a stash apply, a pull — refetches the diffs on
   // screen, even when the new `status` looks identical (hunk-level edits don't change it).
   refreshGeneration: number;
+  // Advances once per refresh that read the history again (the change stamp's `refs` part, the
+  // graph selection or the limit changed, or the Refresh command, #685) or failed (#1118). What
+  // only the history changes keys on it instead of `refreshGeneration`: an open commit search,
+  // file history, remote branch list and branch compare don't start again for every saved file.
+  historyGeneration: number;
   // False until this tab's first `refresh()` has answered (or failed): the graph and the sidebar
   // show placeholder rows meanwhile instead of looking empty (#660).
   loaded: boolean;
@@ -383,6 +389,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     errorSource: null,
     pending: false,
     refreshGeneration: 0,
+    historyGeneration: 0,
     loaded: false,
     undoState: { undo: null, redo: null },
   });
@@ -563,7 +570,12 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       const order = readOrder.current;
       if (ticket < order.refreshApplied) {
         // A refresh that sent its reads later has already landed: these results are older.
-        setState((prev) => ({ ...prev, refreshGeneration: prev.refreshGeneration + 1, loaded: true }));
+        setState((prev) => ({
+          ...prev,
+          refreshGeneration: prev.refreshGeneration + 1,
+          historyGeneration: prev.historyGeneration + (history === null ? 0 : 1),
+          loaded: true,
+        }));
         return;
       }
       order.refreshApplied = ticket;
@@ -630,6 +642,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
           undoState: undoIsNewest ? undoState : prev.undoState,
           error: errorAfterOwnSuccess(prev.error, own),
           refreshGeneration: prev.refreshGeneration + 1,
+          historyGeneration: prev.historyGeneration + (history === null ? 0 : 1),
           loaded: true,
         };
       });
@@ -644,7 +657,12 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       // last fetched.
       if (ticket < readOrder.current.refreshApplied) {
         // Superseded as above: a later refresh already succeeded.
-        setState((prev) => ({ ...prev, refreshGeneration: prev.refreshGeneration + 1, loaded: true }));
+        setState((prev) => ({
+          ...prev,
+          refreshGeneration: prev.refreshGeneration + 1,
+          historyGeneration: prev.historyGeneration + 1,
+          loaded: true,
+        }));
         return;
       }
       const failure = failureError(err);
@@ -662,6 +680,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         ...failure,
         errorSource: { error: failure.error, source: "read" },
         refreshGeneration: prev.refreshGeneration + 1,
+        historyGeneration: prev.historyGeneration + 1,
         loaded: true,
       }));
     } finally {
@@ -845,7 +864,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     mutationRunner;
 
   const setCollapseMerges = useCallback(
-    (collapse: boolean) => runMutation(() => client.setGraphCollapseMerges(repoPath, collapse)),
+    (collapse: boolean) =>
+      runMutation(() => client.setGraphCollapseMerges(repoPath, collapse), failedOperation.collapseMerges(collapse)),
     [client, repoPath, runMutation],
   );
 

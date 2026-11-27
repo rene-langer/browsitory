@@ -17,6 +17,17 @@ const free = { blocked: false, reason: null };
 const busy = { blocked: true, reason: "A rebase started in a terminal is in progress." };
 
 describe("commitActions", () => {
+  // #1119: both open the rebase planner, which rewrites the current branch: none on a detached HEAD.
+  it("refuses the rebase actions on a detached HEAD, like Reset", () => {
+    const actions = commitActions({ blockers: free, headId: "head000", currentBranch: null }, commit("abc1234", ["p"]));
+    expect(actions.rebaseOnto).toMatchObject({ enabled: false, reason: "Check out a branch first." });
+    expect(actions.interactiveRebase).toMatchObject({ enabled: false, reason: "Check out a branch first." });
+    expect(actions.reset).toMatchObject({ enabled: false, reason: "Check out a branch first." });
+    for (const action of [actions.cherryPick, actions.revert, actions.checkout, actions.createTag]) {
+      expect(action.enabled).toBe(true);
+    }
+  });
+
   it("enables every action on an ordinary commit while nothing blocks", () => {
     const actions = commitActions({ blockers: free, headId: "head000", currentBranch: "main" }, commit("abc1234", ["p"]));
     for (const action of Object.values(actions)) {

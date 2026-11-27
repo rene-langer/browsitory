@@ -65,6 +65,7 @@ const BASE_STATE: AppState = {
   addRemoteDraftOpen: false,
   dialog: null,
   refreshGeneration: 0,
+  historyGeneration: 0,
   transferSubject: null,
   transferOutcome: null,
   loaded: true,
@@ -84,7 +85,7 @@ function setupRunner(initial: AppState = BASE_STATE) {
     const [state, setState] = useState<AppState>(initial);
     const refresh = async () => {};
     const runner = useMutationRunner(refresh, setState);
-    return { state, ...runner };
+    return { state, setState, ...runner };
   });
 }
 
@@ -215,6 +216,88 @@ describe("useMutationRunner's optimistic variants", () => {
     );
     expect(failed).toBe(false);
     expect(result.current.state.remotes[0].name).toBe("upstream");
+  });
+});
+
+// #1115: a failed optimistic action restores only what its own update changed. Whatever else
+// changed while the request was out (a transfer that finished, a row the user selected, a
+// refresh) stays as it is now.
+describe("useMutationRunner's optimistic variants keep changes made while the request was out", () => {
+  type Run = (
+    runner: ReturnType<typeof setupRunner>["result"]["current"],
+    update: (prev: AppState) => AppState,
+    mutate: () => Promise<void>,
+  ) => Promise<unknown>;
+  const variants: [string, Run][] = [
+    ["runOptimisticMutation", (r, u, m) => r.runOptimisticMutation(u, m)],
+    ["runOptimisticMutationWithMessage", (r, u, m) => r.runOptimisticMutationWithMessage(u, m)],
+    ["runOptimisticMutationWithOutcome", (r, u, m) => r.runOptimisticMutationWithOutcome(u, m)],
+  ];
+
+  it.each(variants)("%s restores only the fields its update changed", async (_name, run) => {
+    const fetching: AppState = {
+      ...BASE_STATE,
+      transfer: { operationId: "fetch-1", operation: "FetchAll", phase: "Receiving", errorKind: null, current: 1, total: 2, receivedBytes: 0, message: null, hookOutput: null },
+      transferSubject: { kind: "fetchAll", remoteCount: 1 },
+      branches: [{ name: "main", isCurrent: true }],
+    };
+    const { result } = setupRunner(fetching);
+    let rejectMutate: (err: Error) => void = () => {};
+    let done!: Promise<unknown>;
+    act(() => {
+      done = run(
+        result.current,
+        (prev) => ({ ...prev, branches: [...prev.branches, { name: "feature", isCurrent: false }] }),
+        () => new Promise<void>((_resolve, reject) => { rejectMutate = reject; }),
+      );
+    });
+    expect(result.current.state.branches.map((b) => b.name)).toEqual(["main", "feature"]);
+
+    act(() => {
+      result.current.setState((prev) => ({
+        ...prev,
+        transfer: null,
+        transferSubject: null,
+        selectedRow: { commitId: "abc" },
+        refreshGeneration: prev.refreshGeneration + 1,
+      }));
+    });
+
+    await act(async () => {
+      rejectMutate(new Error("index.lock exists"));
+      await done;
+    });
+
+    expect(result.current.state.branches.map((b) => b.name)).toEqual(["main"]);
+    expect(result.current.state.transfer).toBeNull();
+    expect(result.current.state.transferSubject).toBeNull();
+    expect(result.current.state.selectedRow).toEqual({ commitId: "abc" });
+    expect(result.current.state.refreshGeneration).toBe(1);
+    expect(result.current.state.error).toBe("index.lock exists");
+    expect(result.current.state.pending).toBe(false);
+  });
+});
+
+describe("useMutationRunner's optimistic rollback and a newer value", () => {
+  it("keeps a field its update changed when something else changed it again before the failure", async () => {
+    const { result } = setupRunner({ ...BASE_STATE, branches: [{ name: "main", isCurrent: true }] });
+    let rejectMutate: (err: Error) => void = () => {};
+    let done!: Promise<void>;
+    act(() => {
+      done = result.current.runOptimisticMutation(
+        (prev) => ({ ...prev, branches: [...prev.branches, { name: "feature", isCurrent: false }] }),
+        () => new Promise<void>((_resolve, reject) => { rejectMutate = reject; }),
+      );
+    });
+    // A refresh read the branches again while the request was out.
+    act(() => {
+      result.current.setState((prev) => ({ ...prev, branches: [{ name: "main", isCurrent: true }, { name: "other", isCurrent: false }] }));
+    });
+    await act(async () => {
+      rejectMutate(new Error("boom"));
+      await done;
+    });
+    expect(result.current.state.branches.map((b) => b.name)).toEqual(["main", "other"]);
   });
 });
 

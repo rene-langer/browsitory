@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent } from "react";
 import { X } from "lucide-react";
 import {
   DEFAULT_COMMIT_MESSAGE_SETTINGS,
@@ -156,6 +156,9 @@ export function CommitBox({
   };
 }) {
   useKeymap();
+  // Every mounted tab has a commit box (#1135).
+  const disabledReasonId = useId();
+  const messageHintId = useId();
   const [message, setMessage] = useState(initialDraft?.message ?? "");
   // Tracks the last `initialMessage` value that was auto-seeded into `message`, so we can tell
   // "user hasn't touched the field since it was seeded" (message === lastSeeded) apart from "user
@@ -406,7 +409,7 @@ export function CommitBox({
   const showDisabledReason = !amendOn && disabled && disabledReason !== undefined;
   // Without a message Commit is disabled too: say so, unless a stronger reason is shown (#651).
   const showEmptyHint = !amendOn && emptyMessage && !showDisabledReason;
-  const describedBy = showDisabledReason ? "commit-disabled-reason" : showEmptyHint ? "commit-message-hint" : undefined;
+  const describedBy = showDisabledReason ? disabledReasonId : showEmptyHint ? messageHintId : undefined;
   // The button's menu (#651, #1003): Commit and push, amend mode and co-authors. While amending,
   // the button amends and the menu keeps only co-authors.
   const coAuthorItem: ContextMenuItem[] = showCoAuthors
@@ -543,12 +546,12 @@ export function CommitBox({
       )}
       {/* Why Commit is disabled: muted, like the empty-message hint, not a warning (#1005). */}
       {showDisabledReason && (
-        <p id="commit-disabled-reason" className={styles.hint}>
+        <p id={disabledReasonId} className={styles.hint}>
           {disabledReason}
         </p>
       )}
       {showEmptyHint && (
-        <p id="commit-message-hint" className={styles.hint}>
+        <p id={messageHintId} className={styles.hint}>
           Write a commit message to commit.
         </p>
       )}

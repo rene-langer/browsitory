@@ -369,8 +369,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn a_failing_hook_runs_through_the_discovered_sh() {
-        if find_sh().is_none() {
-            eprintln!("no sh.exe found; skipping");
+        if !test_support::require("Git for Windows' sh.exe", find_sh().is_some()) {
             return;
         }
         let dir = tempfile::TempDir::new().unwrap();

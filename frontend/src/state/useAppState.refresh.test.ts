@@ -42,14 +42,16 @@ describe("useAppState", () => {
     });
 
     expect(configured).toBe(false);
-    expect(result.current.state.error).toBe("The operating-system credential store is unavailable. Unlock it and try again.");
+    expect(result.current.state.error).toBe(
+      "Couldn't save how to sign in to origin: The operating-system credential store is unavailable. Unlock it and try again.",
+    );
   });
 
   // #527: a forge token's keychain failure gets the same remediation as a remote's HTTPS token.
   it.each([
-    ["saving", (state: ReturnType<typeof useAppState>) => state.saveForgeToken("GitHub", "alice", "secret")],
-    ["forgetting", (state: ReturnType<typeof useAppState>) => state.forgetForgeToken("GitHub", "alice")],
-  ] as const)("shows the credential store remediation when %s a forge token fails", async (_, run) => {
+    ["saving", (state: ReturnType<typeof useAppState>) => state.saveForgeToken("GitHub", "alice", "secret"), "Couldn't connect to GitHub as alice"],
+    ["forgetting", (state: ReturnType<typeof useAppState>) => state.forgetForgeToken("GitHub", "alice"), "Couldn't disconnect alice from GitHub"],
+  ] as const)("shows the credential store remediation when %s a forge token fails", async (_, run, operation) => {
     const keychain = async () => {
       throw new RepoError("CredentialStoreFailure", "credential keychain failure: locked");
     };
@@ -60,7 +62,9 @@ describe("useAppState", () => {
       await run(result.current);
     });
 
-    expect(result.current.state.error).toBe("The operating-system credential store is unavailable. Unlock it and try again.");
+    expect(result.current.state.error).toBe(
+      `${operation}: The operating-system credential store is unavailable. Unlock it and try again.`,
+    );
   });
 
   // AUD-2026-09-05-CONC-002: the per-repo worker thread can die mid-session, and every
@@ -86,7 +90,7 @@ describe("useAppState", () => {
 
     expect(configured).toBe(false);
     expect(result.current.state.error).toBe(
-      "Connection to this repository was lost. Close and reopen the repository to reconnect.",
+      "Couldn't save how to sign in to origin: Connection to this repository was lost. Close and reopen the repository to reconnect.",
     );
     expect(result.current.state.error).not.toBe(workerError);
   });
@@ -104,7 +108,7 @@ describe("useAppState", () => {
       await result.current.setRemoteAuthMode("origin", "HttpsToken", "rene");
     });
 
-    expect(result.current.state.error).toBe("hook output: worker thread stopped");
+    expect(result.current.state.error).toBe("Couldn't save how to sign in to origin: hook output: worker thread stopped");
   });
 
   it("reports a worker-death failure hit during refresh as the same reconnect message", async () => {

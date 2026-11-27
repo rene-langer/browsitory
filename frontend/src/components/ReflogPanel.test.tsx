@@ -130,6 +130,31 @@ describe("ReflogPanel", () => {
     expect(onRestore).toHaveBeenCalledWith("refs/heads/main", entry.newId);
   });
 
+  // #1133: the repository can become busy while the confirmation is open.
+  it("says why the confirmation can't restore once the repository became busy", () => {
+    const onRestore = vi.fn().mockResolvedValue(undefined);
+    const { rerender } = renderPanel({ onRestore });
+    fireEvent.click(screen.getByRole("button", { name: `Restore main to ${entry.newId}` }));
+    rerender(
+      <ReflogPanel
+        references={["HEAD", "refs/heads/main", "refs/remotes/origin/main"]}
+        selectedReference="refs/heads/main"
+        entries={[entry]}
+        onSelectReference={vi.fn().mockResolvedValue(undefined)}
+        onRestore={onRestore}
+        operationDisabled
+        operationDisabledReason="A merge is in progress."
+      />,
+    );
+    const dialog = screen.getByRole("dialog", { name: "Restore main" });
+    expect(within(dialog).getByText("A merge is in progress.")).toBeInTheDocument();
+    const confirm = within(dialog).getByRole("button", { name: "Restore main" });
+    expect(confirm).toBeDisabled();
+    expect(confirm).toHaveAttribute("title", "A merge is in progress.");
+    fireEvent.click(confirm);
+    expect(onRestore).not.toHaveBeenCalled();
+  });
+
   it("disables restore controls while a repository mutation is pending", () => {
     renderPanel({ operationDisabled: true });
 

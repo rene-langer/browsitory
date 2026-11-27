@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DiffHunk } from "../ipc/RepoClient";
 import { GLSL_GRAMMAR } from "./grammars/glsl";
 import {
+  HIGHLIGHT_CACHE_TEXT_LIMIT,
   highlightLines,
   loadedLanguages,
   logHighlightError,
@@ -186,6 +187,70 @@ describe("highlightLines with a transport", () => {
     unmount();
 
     expect(requests.map((r) => r.signal?.aborted)).toEqual([true, true]);
+  });
+});
+
+// #1163: the cache is bounded by the size of what it holds, not by its number of entries.
+describe("highlightLines' cache", () => {
+  let restore: HighlightTransport | undefined;
+  afterEach(() => {
+    if (restore !== undefined) setHighlightTransport(restore);
+    restore = undefined;
+  });
+
+  function countingTransport() {
+    const transport: HighlightTransport = {
+      tokenize: vi.fn(async (_lang: string, code: string) => [[{ content: code.slice(0, 1), color: undefined }]]),
+      loadedLanguages: vi.fn().mockResolvedValue([]),
+    };
+    return transport;
+  }
+
+  it("is bounded by the length of the cached texts", () => {
+    expect(HIGHLIGHT_CACHE_TEXT_LIMIT).toBe(2_000_000);
+  });
+
+  it("drops the oldest blocks once the cached texts are longer than the limit", async () => {
+    const transport = countingTransport();
+    restore = setHighlightTransport(transport);
+    const block = (fill: string) => fill.repeat(800_000);
+
+    await highlightLines("rust", block("p"));
+    await highlightLines("rust", block("q"));
+    expect(transport.tokenize).toHaveBeenCalledTimes(2);
+    // Both fit: asking again tokenizes nothing.
+    await highlightLines("rust", block("p"));
+    expect(transport.tokenize).toHaveBeenCalledTimes(2);
+
+    // A third goes over the limit, so the oldest one goes.
+    await highlightLines("rust", block("r"));
+    expect(transport.tokenize).toHaveBeenCalledTimes(3);
+    await highlightLines("rust", block("q"));
+    await highlightLines("rust", block("r"));
+    expect(transport.tokenize).toHaveBeenCalledTimes(3);
+    await highlightLines("rust", block("p"));
+    expect(transport.tokenize).toHaveBeenCalledTimes(4);
+  });
+
+  it("keeps many small blocks", async () => {
+    const transport = countingTransport();
+    restore = setHighlightTransport(transport);
+    const blocks = Array.from({ length: 600 }, (_, index) => `fn small_${index}() {}`);
+    for (const code of blocks) await highlightLines("rust", code);
+    for (const code of blocks) await highlightLines("rust", code);
+    expect(transport.tokenize).toHaveBeenCalledTimes(600);
+  });
+
+  it("does not cache a block longer than the whole limit", async () => {
+    const transport = countingTransport();
+    restore = setHighlightTransport(transport);
+    const huge = "s".repeat(2_000_001);
+    await highlightLines("rust", "fn kept() {}");
+    await highlightLines("rust", huge);
+    await highlightLines("rust", huge);
+    expect(transport.tokenize).toHaveBeenCalledTimes(3);
+    await highlightLines("rust", "fn kept() {}");
+    expect(transport.tokenize).toHaveBeenCalledTimes(3);
   });
 });
 

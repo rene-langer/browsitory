@@ -166,16 +166,17 @@ export function useMergeRebaseActions(
   );
   const resolveConflict = useCallback(
     (path: string, resolvedContent: string) =>
-      runMutation(() => client.resolveConflict(repoPath, path, resolvedContent)),
+      runMutation(() => client.resolveConflict(repoPath, path, resolvedContent), failedOperation.resolveConflict(path)),
     [client, runMutation, repoPath],
   );
   const resolveAddDeleteConflict = useCallback(
     (path: string, choice: FileConflictChoice) =>
-      runMutation(() => client.resolveAddDeleteConflict(repoPath, path, choice)),
+      runMutation(() => client.resolveAddDeleteConflict(repoPath, path, choice), failedOperation.resolveConflict(path)),
     [client, runMutation, repoPath],
   );
   const resolveWholeFile = useCallback(
-    (path: string, side: ConflictSide) => runMutation(() => client.resolveWholeFile(repoPath, path, side)),
+    (path: string, side: ConflictSide) =>
+      runMutation(() => client.resolveWholeFile(repoPath, path, side), failedOperation.resolveConflict(path)),
     [client, runMutation, repoPath],
   );
   const markResolved = useCallback(
@@ -183,7 +184,7 @@ export function useMergeRebaseActions(
       let outcome: MarkResolvedOutcome | null = null;
       await runMutation(async () => {
         outcome = await client.markResolved(repoPath, path, force);
-      });
+      }, failedOperation.markResolved(path));
       return outcome;
     },
     [client, runMutation, repoPath],

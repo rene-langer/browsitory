@@ -48,7 +48,8 @@ export interface UseFileHistoryResult {
 export function useFileHistory(
   client: RepoClient,
   repoPath: string,
-  refreshGeneration: number,
+  /** `AppState.historyGeneration` (#1118): a file's history changes only with the refs. */
+  historyGeneration: number,
   selectedRow: SelectedRow,
   selectRow: (row: SelectedRow) => void,
 ): UseFileHistoryResult {
@@ -165,12 +166,12 @@ export function useFileHistory(
     if (open !== null) void load(open.target, open.limit);
   }, [load]);
 
-  // Any repo refresh (commit, checkout, fetch…) can change the file's history.
+  // A refresh that read the history again (commit, checkout, fetch…) can change the file's.
   useEffect(() => {
     const open = current.current;
     if (open !== null) void load(open.target, open.limit);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshGeneration]);
+  }, [historyGeneration]);
 
   return { history, open, openLines, close, loadMore, retry };
 }

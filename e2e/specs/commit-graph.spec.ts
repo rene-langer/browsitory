@@ -40,8 +40,8 @@ describe("Browsitory commit graph", () => {
     // wrote for exactly this "prime the refresh" commit.
     const stageButton = await $(`button[aria-label="Stage ${PRIME_FILE}"]`);
     await stageButton.waitForExist();
-    // `opacity: 0` until the row is hovered/focused — see `first-flow.spec.ts`'s note on why
-    // both the scroll and the click go through `browser.execute`.
+    // Both the scroll and the click go through `browser.execute`, as in `first-flow.spec.ts`
+    // (see its note).
     await browser.execute((el) => (el as HTMLElement).scrollIntoView({ block: "center" }), stageButton);
     await browser.execute((el) => (el as HTMLElement).click(), stageButton);
     // Wait for the row to move under Staged before committing (#697).

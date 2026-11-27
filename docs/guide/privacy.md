@@ -117,7 +117,7 @@ the one thing a Git command of yours can copy elsewhere: see below.
 | What | Where |
 |---|---|
 | Settings: recent, pinned and open repositories, workspaces, branch filters, merge choices, diff, commit message, tool, fetch, update and keyboard shortcut preferences, your own commands, the last version whose release notes you saw | `config.toml` in Browsitory's config folder (see below) |
-| Display choices: theme, panel sizes, which sidebar sections are shown and which are open, recent commands, the **Preferences** group you saw last, and view choices (**Split view**, **Show whole file**, the merge editor's layout, a flat or tree file list, **Show lines changed**, search results in the graph or as a list, whether a new branch is checked out). Per repository: recent searches, recent commit messages, the last 5 branches you switched to, and the **Fetch automatically** and **Prune** choices. The account name each pull request provider is connected with (not the token) | The app's web storage (`localStorage`) |
+| Display choices: theme, panel sizes, which sidebar sections are shown and which are open, recent commands, the **Preferences** group you saw last, and view choices (**Split view**, **Show whole file**, the merge editor's layout, a flat or tree file list, **Show lines changed**, search results in the graph or as a list, whether a new branch is checked out). Per repository: recent searches, recent commit messages, the commit message you are writing (with its co-authors, until you commit or clear it), the last 5 branches you switched to, and the **Fetch automatically** and **Prune** choices. The account name each pull request provider is connected with (not the token) | The app's web storage (`localStorage`) |
 | HTTPS tokens for Git remotes and pull request tokens | Your system's credential store: Keychain on macOS, Credential Manager on Windows, the Secret Service (for example GNOME Keyring or KWallet) on Linux, under the names `com.browsitory.git` and `com.browsitory.forge` |
 | Undo and redo history, a paused rebase, cherry-pick or revert | Inside each repository: the folder `.git/browsitory/` (in a linked worktree, `browsitory/` in that worktree's own Git folder, `.git/worktrees/<name>/`) and Git references under `refs/browsitory/`, shared by all worktrees |
 | How you sign in to each remote: HTTPS token or SSH agent, and the HTTPS user name (not the token) | The repository's Git config (`.git/config`), under `browsitory.remote.<remote name>` |
@@ -130,8 +130,9 @@ address, without the user name and password of any URL or the value of any `Auth
 header. Browsitory writes no other log files.
 
 The web storage holds the path of each repository it remembers something for, the text of
-your recent searches and commit messages, and the names of the branches you switched to
-recently (branch names can carry ticket numbers or customer names). When a repository leaves
+your recent searches and commit messages, the commit message you are writing with the names and
+email addresses of its co-authors, and the names of the branches you switched to recently
+(branch names can carry ticket numbers or customer names). When a repository leaves
 **Recent repositories**, these entries and its **Fetch automatically** and **Prune** choices
 are deleted: at once when you remove it from the list (or **Locate…** it elsewhere), and the
 next time the list is shown when it drops off the end of the list, unless it is open in a tab.

@@ -10,7 +10,6 @@ import styles from "./PushBranchDialog.module.css";
 
 // Rendered once outside the fields: a `<datalist>` inside a label's text breaks WebKitWebDriver's
 // text reads (see `PullRequestPanel`).
-const BRANCH_SUGGESTIONS_ID = "new-worktree-branches";
 
 /**
  * The Worktrees section's "+" (#1011): checks a branch out in a folder of its own. An existing
@@ -34,6 +33,7 @@ export function NewWorktreeDialog({
   onCancel: () => void;
 }) {
   const reasonId = useId();
+  const branchSuggestionsId = useId();
   const [branch, setBranch] = useState("");
   const [startPoint, setStartPoint] = useState("");
   const [path, setPath] = useState("");
@@ -71,7 +71,7 @@ export function NewWorktreeDialog({
             <input
               {...props}
               data-autofocus
-              list={BRANCH_SUGGESTIONS_ID}
+              list={branchSuggestionsId}
               value={branch}
               autoComplete="off"
               spellCheck={false}
@@ -132,7 +132,7 @@ export function NewWorktreeDialog({
           </button>
         </DialogActions>
       </form>
-      <datalist id={BRANCH_SUGGESTIONS_ID}>
+      <datalist id={branchSuggestionsId}>
         {branches.map((item) => (
           <option key={item.name} value={item.name} />
         ))}

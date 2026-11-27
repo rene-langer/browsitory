@@ -68,7 +68,7 @@ export function compareLabelFor(currentBranch: string | null): string {
 }
 
 /** The current branch's name, `null` on a detached HEAD. */
-function currentBranchName(branches: BranchInfo[]): string | null {
+export function currentBranchName(branches: BranchInfo[]): string | null {
   return branches.find((branch) => branch.isCurrent)?.name ?? null;
 }
 
@@ -193,6 +193,7 @@ export function remoteFolderMenuItems({
   remoteName,
   fetchUrl,
   pushUrl,
+  branches,
   blockers,
   onFetch,
   onPushCurrentBranch,
@@ -205,6 +206,7 @@ export function remoteFolderMenuItems({
   fetchUrl: string;
   /** `null`: pushes go to the fetch URL. */
   pushUrl: string | null;
+  branches: BranchInfo[];
   blockers: OperationBlockers;
   onFetch: () => void;
   onPushCurrentBranch: () => void;
@@ -213,7 +215,7 @@ export function remoteFolderMenuItems({
   onCopy: CopyToClipboard;
   onRemove: () => void;
 }): ContextMenuItem[] {
-  const actions = remoteActions(blockers, remoteName);
+  const actions = remoteActions(blockers, remoteName, currentBranchName(branches));
   return [
     { ...menuItem(actions.fetch, onFetch), group: "sync" },
     { ...menuItem(actions.pushCurrentBranch, onPushCurrentBranch), group: "sync" },
@@ -256,7 +258,7 @@ export function remoteBranchMenuItems({
   onCopy: CopyToClipboard;
   onOpenDeleteRemoteBranch: (remoteName: string, branchName: string) => void;
 }): ContextMenuItem[] {
-  const actions = remoteBranchActions(blockers, remoteName, branchName);
+  const actions = remoteBranchActions(blockers, remoteName, branchName, currentBranchName(branches));
   const rebase = rebaseOntoAction(blockers, currentBranchName(branches), { kind: "remote", remoteName, branchName });
   return [
     { ...menuItem(actions.checkout, onCheckout), group: "branch" },

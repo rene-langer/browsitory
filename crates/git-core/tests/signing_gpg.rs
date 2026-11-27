@@ -10,7 +10,7 @@ mod common;
 use std::path::Path;
 use std::sync::OnceLock;
 
-use common::{commit_all, init_repo, program_available, write_file};
+use common::{commit_all, init_repo, write_file};
 use git_core::signing::{verify_commit, SignatureFormat, SignatureStatus};
 
 const UID: &str = "Test User <test@example.com>";
@@ -63,12 +63,17 @@ extern "C" fn stop_process_keyring() {
 }
 
 /// Some(path) once a throwaway keyring with an ultimately trusted, passphrase-less key for `UID`
-/// is the process's GNUPGHOME; None when gpg is unavailable.
+/// is the process's GNUPGHOME; None on Windows, and locally when gpg is missing (CI fails then,
+/// see `test_support::require_tool`).
 fn gpg_home() -> Option<&'static Path> {
     HOME.get_or_init(|| {
         // Git-for-Windows' gpg is an MSYS binary: it reads `C:\...` as a relative path and
         // cannot start gpg-agent in CI, so these tests run on Unix only.
-        if cfg!(windows) || !program_available("gpg") {
+        if cfg!(windows) {
+            eprintln!("skipping: the gpg tests run on Unix only");
+            return None;
+        }
+        if !test_support::require_tool("gpg") {
             return None;
         }
         // Until it is stored in `HOME`, a panic below drops `home`, which stops its agent.
@@ -111,7 +116,6 @@ fn gpg_home() -> Option<&'static Path> {
 macro_rules! require_gpg {
     () => {
         if gpg_home().is_none() {
-            eprintln!("skipping: gpg not on PATH");
             return;
         }
     };

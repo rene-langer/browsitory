@@ -75,7 +75,7 @@ describe("useAppState", () => {
     await act(() => result.current.stageFile("a.txt"));
 
     expect(result.current.state.status).toEqual([entryA]);
-    expect(result.current.state.error).toBe("stage failed");
+    expect(result.current.state.error).toBe("Couldn't stage a.txt: stage failed");
   });
 
   it("stageFile merges a partially-staged file's two status rows into one staged row", async () => {
