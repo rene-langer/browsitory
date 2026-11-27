@@ -439,7 +439,6 @@ fn worktree_name(repo: &Repository) -> Option<String> {
 mod tests {
     use super::*;
     use git_core::undo::{capture, SnapshotScope};
-    use std::process::Command as Process;
     use tempfile::TempDir;
 
     fn repo_with_commit() -> (TempDir, Repository) {
@@ -774,8 +773,7 @@ mod tests {
 
     #[test]
     fn anchor_keeps_a_deleted_branch_commit_alive_across_gc() {
-        if Process::new("git").arg("--version").output().is_err() {
-            eprintln!("git CLI not found; skipping gc test");
+        if !test_support::require_tool("git") {
             return;
         }
         let (dir, repo) = repo_with_commit();
@@ -900,8 +898,7 @@ mod tests {
 
     #[test]
     fn gc_keeps_full_snapshot_trees_and_untracked_blobs() {
-        if Process::new("git").arg("--version").output().is_err() {
-            eprintln!("git CLI not found; skipping gc test");
+        if !test_support::require_tool("git") {
             return;
         }
         let (dir, repo) = repo_with_commit();
@@ -951,8 +948,7 @@ mod tests {
     /// absent from `undo.json` when there is none, and is pinned by the anchor across gc.
     #[test]
     fn saves_reloads_and_pins_the_unsaved_untracked_list() {
-        if Process::new("git").arg("--version").output().is_err() {
-            eprintln!("git CLI not found; skipping gc test");
+        if !test_support::require_tool("git") {
             return;
         }
         let (dir, repo) = repo_with_commit();
@@ -1070,8 +1066,7 @@ mod tests {
 
     #[test]
     fn gc_keeps_the_pending_snapshot_objects() {
-        if Process::new("git").arg("--version").output().is_err() {
-            eprintln!("git CLI not found; skipping gc test");
+        if !test_support::require_tool("git") {
             return;
         }
         let (dir, repo) = repo_with_commit();

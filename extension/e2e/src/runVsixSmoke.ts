@@ -19,6 +19,7 @@ import {
   PLATFORM_LAUNCH_ARGS,
   prepareLaunchEnvironment,
 } from "./support/launch";
+import { isolateHome } from "./support/isolatedHome";
 import { downloadVSCode } from "./support/vscodeDownload";
 
 const EXTENSION_ID = "browsitory.browsitory";
@@ -89,22 +90,12 @@ async function smokeTest({
   hostDir,
   repoPath,
 }: SmokePaths): Promise<void> {
-  // Keeps the developer's home, git config, gpg agent and Browsitory config out of the test,
-  // like crates/test-support does for the Rust tests. The same variables reach the VSCode CLI,
-  // VSCode, the extension host and the sidecar it spawns (whose libgit2 reads $HOME). The CI
-  // job runs on Linux; on Windows, USERPROFILE/APPDATA would be the matching variables.
-  const home = path.join(root, "home");
-  const isolatedEnv = {
-    HOME: home,
-    XDG_CONFIG_HOME: path.join(home, ".config"),
-    GIT_CONFIG_GLOBAL: path.join(root, "gitconfig"),
-    GIT_CONFIG_NOSYSTEM: "1",
-    GNUPGHOME: path.join(root, "gnupg"),
-    BROWSITORY_CONFIG_DIR: configDir,
-  };
-  fs.mkdirSync(isolatedEnv.XDG_CONFIG_HOME, { recursive: true });
-  fs.writeFileSync(isolatedEnv.GIT_CONFIG_GLOBAL, "");
-  fs.mkdirSync(isolatedEnv.GNUPGHOME, { mode: 0o700 });
+  // Keeps the developer's home, git config, gpg and SSH agents and Browsitory config out of the
+  // test, like crates/test-support does for the Rust tests (`isolatedHome.ts`, #1112). The
+  // same variables reach the VSCode CLI, VSCode, the extension host and the sidecar it spawns
+  // (whose libgit2 reads $HOME). The CI job runs on Linux; on Windows, USERPROFILE/APPDATA
+  // would be the matching variables.
+  const isolatedEnv = { ...isolateHome(path.join(root, "home")), BROWSITORY_CONFIG_DIR: configDir };
   createRepository(repoPath, { ...process.env, ...isolatedEnv });
 
   // VSCode opens the repository as the window's folder: "Browsitory: Open" opens it as a tab

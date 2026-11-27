@@ -13,6 +13,7 @@ import { ReasonButton } from "./primitives/ReasonButton";
 import { disabledReason } from "../lib/actions/action";
 import { NewWorktreeDialog } from "./NewWorktreeDialog";
 import styles from "./WorktreePanel.module.css";
+import { useRefocusRemovedRow } from "./useRefocusRemovedRow";
 import { pruneWorktreesAction, worktreeActions } from "../lib/actions/worktreeActions";
 import type { OperationBlockers } from "../lib/operationStatus";
 
@@ -62,6 +63,12 @@ function WorktreePanelContent({
   const [creating, setCreating] = useState(false);
   const [menu, setMenu] = useState<WorktreeMenu | null>(null);
   const [removeConfirmation, setRemoveConfirmation] = useState<WorktreeInfo | null>(null);
+  const [listElement, setListElement] = useState<HTMLUListElement | null>(null);
+  // A removed worktree (#1141), or one a refresh removed while its menu was open.
+  useRefocusRemovedRow({
+    list: listElement,
+    watching: [removeConfirmation === null ? null : rowKey(removeConfirmation), menu?.key],
+  });
   // The rows' and Prune's availability and labels, shared with the palette (#509).
   const blockers: OperationBlockers = { blocked: operationDisabled, reason: operationDisabledReason };
   const prune = pruneWorktreesAction(blockers);
@@ -103,7 +110,7 @@ function WorktreePanelContent({
       {worktrees.length === 0 ? (
         <p className={styles.empty}>No worktrees. Use + to check out another branch in a folder of its own.</p>
       ) : (
-        <ul className={styles.list}>
+        <ul ref={setListElement} className={styles.list}>
           {worktrees.map((worktree) => {
             const key = rowKey(worktree);
             const menuOpen = menu?.key === key;

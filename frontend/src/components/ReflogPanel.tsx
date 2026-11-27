@@ -17,6 +17,7 @@ export function ReflogPanel({
   onSelectReference,
   onRestore,
   operationDisabled,
+  operationDisabledReason = null,
   revealRequest,
 }: {
   references: string[];
@@ -25,6 +26,8 @@ export function ReflogPanel({
   onSelectReference: (reference: string) => Promise<void>;
   onRestore: (reference: string, newId: string) => Promise<void>;
   operationDisabled: boolean;
+  /** Why `operationDisabled`, which the Restore confirmation says (#1133). */
+  operationDisabledReason?: string | null;
   /** Expands and scrolls to the section (`useSidebarReveal`, #494). */
   revealRequest?: number;
 }) {
@@ -127,7 +130,10 @@ export function ReflogPanel({
           }
           confirmLabel={`Restore ${shortRefName(restoreConfirmation.reference)}`}
           confirmDisabled={operationDisabled}
+          // The repository can become busy while the confirmation is open.
+          confirmReason={operationDisabled ? (operationDisabledReason ?? "Another operation is in progress.") : null}
           onConfirm={() => {
+            if (operationDisabled) return;
             void onRestore(restoreConfirmation.reference, restoreConfirmation.newId).then(() =>
               setRestoreConfirmation(null),
             );

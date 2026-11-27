@@ -4,16 +4,18 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-// Side-effect-only imports: register webdriverio's and @wdio/types's `declare global {
+// These imports also register webdriverio's and @wdio/types's `declare global {
 // namespace WebdriverIO { ... } }` augmentations, which `WebdriverIO.Config` below (and the
 // element/browser globals `$`/`browser` used implicitly by the spec files) are typed against.
 // Listing "webdriverio"/"@wdio/types" in tsconfig's `types` array doesn't do this, since that
 // array only resolves entries under typeRoots (effectively `node_modules/@types/*`), and both
 // packages ship their own types rather than `@types/*` packages.
-import "webdriverio";
+import { SevereServiceError } from "webdriverio";
 import "@wdio/types";
-// Shared with the VSCode suite; see that file's header for why it lives there.
+// Shared with the VSCode suite; see fixtureRepo.ts's header for why they live there.
+import { acquireFixtureLock } from "../extension/e2e/src/support/fixtureLock";
 import { initFixtureRepo, setTestIdentity } from "../extension/e2e/src/support/fixtureRepo";
+import { isolateHome } from "../extension/e2e/src/support/isolatedHome";
 import { FAKE_TOOL_HOME, needsFakeToolHome, prepareFakeToolHome } from "./support/fakeTool";
 import { needsSigningHome, prepareSigningHome, SIGNING_HOME } from "./support/signingHome";
 import { closeSharedForgeFixtureServer, startSharedForgeFixtureServer } from "./support/forgeFixtureServer";
@@ -51,6 +53,11 @@ const CREDENTIAL_CERT_DIR = path.join(os.tmpdir(), "browsitory-e2e-credential-ce
 const E2E_PARENT_SOURCE_PATH = path.join(os.tmpdir(), "browsitory-e2e-parent-source");
 const E2E_SUBMODULE_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-submodule");
 const E2E_SUBMODULE_PATH = "deps/e2e-child";
+// The run's HOME, XDG dirs, git global config and GnuPG home (#1112), see `onPrepare`.
+const E2E_HOME = path.join(os.tmpdir(), "browsitory-e2e-home");
+// Held from `onPrepare` to `onComplete`, so a second run can't delete these fixtures (#1144).
+const E2E_FIXTURE_LOCK = path.join(os.tmpdir(), "browsitory-e2e.lock");
+let releaseFixtureLock: (() => void) | undefined;
 const CREDENTIAL_KEY_PATH = path.join(CREDENTIAL_CERT_DIR, "key.pem");
 const CREDENTIAL_CERT_PATH = path.join(CREDENTIAL_CERT_DIR, "cert.pem");
 
@@ -316,8 +323,8 @@ function waitForPort(port: number, host: string, timeoutMs: number): Promise<voi
 // WebKitWebDriver it starts accept connections. Logs each step's pid and port, so a session
 // start that hangs shows how far it got (#457).
 async function startTauriDriver(): Promise<void> {
-  // TAURI_DRIVER_PATH: set by wdio.screenshots.conf.ts, which points HOME at a temp dir
-  // before this runs (so `os.homedir()` no longer finds ~/.cargo/bin).
+  // TAURI_DRIVER_PATH: set by `onPrepare` before it points HOME at a temp dir (so
+  // `os.homedir()` no longer finds ~/.cargo/bin).
   const driverPath = process.env.TAURI_DRIVER_PATH ?? path.resolve(os.homedir(), ".cargo", "bin", "tauri-driver");
   reapLeftovers();
   await assertPortFree(DRIVER_PORT);
@@ -386,6 +393,20 @@ function onShutdown(fn: () => void) {
 }
 onShutdown(() => killTauriDriverNow());
 
+// WebdriverIO logs an error thrown by a launcher hook and starts the specs anyway, unless it is
+// a SevereServiceError (#1144): a run that couldn't take the fixture lock, or found the driver
+// ports taken or the app not built, must stop there.
+function stopRunOnError(hook: () => Promise<void>): () => Promise<void> {
+  return async () => {
+    try {
+      await hook();
+    } catch (error) {
+      if (error instanceof SevereServiceError) throw error;
+      throw new SevereServiceError(error instanceof Error ? error.message : String(error));
+    }
+  };
+}
+
 export const config: WebdriverIO.Config = {
   runner: "local",
   hostname: "127.0.0.1",
@@ -414,7 +435,7 @@ export const config: WebdriverIO.Config = {
     timeout: 60000,
   },
 
-  onPrepare: async () => {
+  onPrepare: stopRunOnError(async () => {
     if (!fs.existsSync(tauriAppBinary)) {
       throw new Error(
         `tauri-app binary not found at ${tauriAppBinary}. Run \`cargo build --workspace\` ` +
@@ -422,6 +443,21 @@ export const config: WebdriverIO.Config = {
           `VITE_E2E_REPO_PATH=${E2E_REPO_PATH} baked in).`,
       );
     }
+    // Before anything below deletes a fixture (#1144). WebdriverIO runs `beforeSession`, whose
+    // port check used to be the only guard, after this hook: by then a second run had already
+    // rebuilt the fixtures of the live one. The lock stops a run with the same temp folder; the
+    // port check stops one with another TMPDIR, whose fixtures don't collide but whose
+    // tauri-driver would (the ports are fixed). Leftovers of this worktree are reaped first.
+    releaseFixtureLock = acquireFixtureLock(E2E_FIXTURE_LOCK, "Wait for it to finish, or stop it.");
+    process.on("exit", releaseFixtureLock);
+    reapLeftovers();
+    await assertPortFree(DRIVER_PORT);
+    await assertPortFree(NATIVE_DRIVER_PORT);
+    // The fixture git commands, tauri-driver and the app get a throwaway HOME, git global config
+    // and GnuPG home, and no SSH agent (#1112). tauri-driver is found under the real HOME, so
+    // resolve it first (`startTauriDriver`).
+    process.env.TAURI_DRIVER_PATH ??= path.resolve(os.homedir(), ".cargo", "bin", "tauri-driver");
+    isolateHome(E2E_HOME);
     setupFixtureRepo(E2E_PARENT_SOURCE_PATH);
     setupSubmoduleFixture(E2E_PARENT_SOURCE_PATH);
     resetFixtureRepo();
@@ -477,11 +513,16 @@ export const config: WebdriverIO.Config = {
     const forgeFixtureServer = await startSharedForgeFixtureServer();
     process.env.BROWSITORY_FORGE_GITHUB_API_BASE_URL = forgeFixtureServer.url;
     process.env.BROWSITORY_FORGE_BITBUCKET_API_BASE_URL = forgeFixtureServer.url;
-  },
+  }),
 
   // Ensure `tauri-driver` is running before the session starts so we can proxy the WebDriver
   // requests to it (127.0.0.1:4444, matching `hostname`/`port` above).
   beforeSession: async (_config: unknown, _capabilities: unknown, specs: string[]) => {
+    // A driver port someone else holds stops this hook before it resets a fixture (#1144).
+    // WebdriverIO then still requests the session, which that driver refuses while it has one.
+    reapLeftovers();
+    await assertPortFree(DRIVER_PORT);
+    await assertPortFree(NATIVE_DRIVER_PORT);
     // Fresh webview storage per spec file (see E2E_DATA_HOME), wiped before the app launches.
     fs.rmSync(E2E_DATA_HOME, { recursive: true, force: true });
     fs.mkdirSync(E2E_DATA_HOME, { recursive: true });
@@ -499,6 +540,8 @@ export const config: WebdriverIO.Config = {
       prepareFakeToolHome();
       driverEnv.HOME = FAKE_TOOL_HOME;
       driverEnv.XDG_CONFIG_HOME = path.join(FAKE_TOOL_HOME, ".config");
+      // For a git CLI the app starts; libgit2 reads $HOME/.gitconfig.
+      driverEnv.GIT_CONFIG_GLOBAL = path.join(FAKE_TOOL_HOME, ".gitconfig");
     }
     // commit-signing.spec.ts (#1121): the allowed signers file counts only from the user's own
     // git config, so the app reads it from a HOME of its own (`support/signingHome.ts`).
@@ -506,6 +549,7 @@ export const config: WebdriverIO.Config = {
       prepareSigningHome();
       driverEnv.HOME = SIGNING_HOME;
       driverEnv.XDG_CONFIG_HOME = path.join(SIGNING_HOME, ".config");
+      driverEnv.GIT_CONFIG_GLOBAL = path.join(SIGNING_HOME, ".gitconfig");
     }
     resetFixtureRepo();
     await startTauriDriver();
@@ -534,5 +578,6 @@ export const config: WebdriverIO.Config = {
   onComplete: async () => {
     fs.rmSync(CREDENTIAL_CERT_DIR, { recursive: true, force: true });
     await closeSharedForgeFixtureServer();
+    releaseFixtureLock?.();
   },
 };

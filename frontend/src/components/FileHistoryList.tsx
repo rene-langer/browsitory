@@ -10,6 +10,7 @@ import type { FileHistoryState } from "../state/useFileHistory";
 import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
 import { RefBadges } from "./RefBadges";
+import { useActiveRow } from "./useActiveRow";
 import { useVirtualRows } from "./useVirtualRows";
 import graphStyles from "./CommitGraph.module.css";
 import styles from "./FileHistoryList.module.css";
@@ -39,6 +40,15 @@ export function FileHistoryList({
   // Only the rows in view render (#775), as in the commit graph (#685).
   const [listElement, setListElement] = useState<HTMLUListElement | null>(null);
   const virtual = useVirtualRows(listElement, history.entries.length);
+  const { rowId, activeDescendant, announcement } = useActiveRow({
+    index: selectedIndex,
+    start: virtual.start,
+    end: virtual.end,
+    label: (index) => {
+      const commit = history.entries[index].commit;
+      return `${commit.shortId} ${commit.summary}, ${index + 1} of ${history.entries.length}`;
+    },
+  });
 
   // Keep the keyboard-driven selection visible in a long history.
   const { scrollToIndex } = virtual;
@@ -86,11 +96,15 @@ export function FileHistoryList({
       {history.loading && history.entries.length === 0 && history.error === null && (
         <p className={styles.empty}>Loading history…</p>
       )}
+      <span aria-live="polite" className={graphStyles.srOnly}>
+        {announcement}
+      </span>
       <ul
         ref={setListElement}
         className={graphStyles.list}
         role="listbox"
         aria-label="File history commits"
+        aria-activedescendant={activeDescendant}
         tabIndex={0}
         onKeyDown={handleKeyDown}
         aria-keyshortcuts="ArrowUp ArrowDown Escape"
@@ -99,6 +113,7 @@ export function FileHistoryList({
         {history.entries.slice(virtual.start, virtual.end).map((entry, offset) => (
           <ListRow
             key={entry.commit.id}
+            id={rowId(virtual.start + offset)}
             rowIndex={virtual.start + offset}
             setSize={history.entries.length}
             className="commit-row"
