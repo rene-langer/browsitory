@@ -3238,7 +3238,26 @@ only `error`.
     use the same runner (#524): it lives in `extension/e2e/src/support/git.ts` (Node built-ins
     only, for the same `rootDir` reason as `fixtureRepo.ts` below), and `e2e/support/git.ts`
     re-exports it next to its WebDriver waits. The child inherits
-    the runner's environment, so the screenshot run's isolated HOME and git config reach it.
+    the runner's environment, so the run's isolated HOME and git config reach it.
+  - Isolated home (#1112): `extension/e2e/src/support/isolatedHome.ts`'s `isolateHome(root)`
+    empties `root` and points `HOME`, the XDG dirs, `GIT_CONFIG_GLOBAL` (an empty file) and
+    `GNUPGHOME` (mode 0700) into it, sets `GIT_CONFIG_NOSYSTEM=1`, and drops `SSH_AUTH_SOCK`,
+    `SSH_AGENT_PID` and every inherited `GIT_*` variable, for the process and all it starts.
+    `wdio.conf.ts`'s `onPrepare` (also the screenshot runs'), `runTests.ts` and
+    `runVsixSmoke.ts` call it before their first git command; `sidecarBridge.real.test.ts`
+    builds the same environment for its sidecar. It is the E2E counterpart of
+    `hermetic_git!`, except that the app's libgit2 still reads the system config. `wdio.conf.ts`
+    resolves `~/.cargo/bin/tauri-driver` into `TAURI_DRIVER_PATH` first.
+  - Fixture lock (#1144): both suites keep their fixtures at fixed paths under `os.tmpdir()`
+    (the Tauri suite's repository path is built into the frontend). Before anything is deleted,
+    `onPrepare` and `runTests.ts` take `extension/e2e/src/support/fixtureLock.ts`'s lock, a
+    folder in the temp dir that appears whole by `rename` and records the run's pid, folder and
+    start time; a live holder stops the new run with those, a dead one is taken over. The Tauri
+    suite also reaps this worktree's leftovers and checks ports 4444/4445 in `onPrepare`, so a
+    run with another `TMPDIR` stops there too, and `beforeSession` checks the ports before it
+    resets anything. WebdriverIO logs an error thrown by `onPrepare` and starts the specs
+    anyway unless it is a `SevereServiceError`, so `onPrepare` turns every error into one
+    (`stopRunOnError`); an error in `beforeSession` doesn't stop the session request either.
     `wdio.conf.ts` sets `waitforTimeout` to `UI_TIMEOUT` (`e2e/support/timeouts.ts`, 10 s), so
     a wait passes `timeout` only when it needs longer, as a named constant (`SLOW_UI_TIMEOUT`,
     `RESTART_TIMEOUT`, or a spec's own). `e2e/support/app.ts` holds `waitForAppReady` and the

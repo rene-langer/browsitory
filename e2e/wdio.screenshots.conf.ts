@@ -1,15 +1,13 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { config as e2eConfig } from "./wdio.conf";
-import { DEMO_REPO_PATH, buildDemoRepo, isolateHome } from "./screenshots/demoRepo";
+import { DEMO_REPO_PATH, buildDemoRepo, pinLocale } from "./screenshots/demoRepo";
 
 // Documentation screenshots (see screenshots/README.md). Reuses the E2E harness — the same
-// build, tauri-driver handling, temp config dir and temp webview data dir as wdio.conf.ts — and
-// adds:
+// build, tauri-driver handling, fixture lock, temp HOME (XDG dirs, git global config and GnuPG
+// home), temp config dir and temp webview data dir as wdio.conf.ts — and adds:
 // - a fixed demo repository (screenshots/demoRepo.ts) instead of the E2E fixtures;
-// - a temp HOME, XDG dirs, git global config and GnuPG home, so neither the run nor the app
-//   reads or writes the user's own config;
+// - English dates and a fixed time zone;
 // - no page reload between tests: a reload would make the E2E build reopen its fixture repo.
 
 type Hook = (...args: unknown[]) => unknown;
@@ -20,9 +18,7 @@ export const config: WebdriverIO.Config = {
   mochaOpts: { ...e2eConfig.mochaOpts, bail: true },
 
   onPrepare: async (...args: unknown[]) => {
-    // Resolve tauri-driver from the real HOME before `isolateHome` replaces it.
-    process.env.TAURI_DRIVER_PATH ??= path.resolve(os.homedir(), ".cargo", "bin", "tauri-driver");
-    isolateHome();
+    pinLocale();
     await (e2eConfig.onPrepare as Hook)(...args);
     buildDemoRepo();
     // Replace the E2E suite's seeded config: the only recent repository is the demo, so the
