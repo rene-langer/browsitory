@@ -133,8 +133,12 @@ answers the same commands, but the VSCode webview never connects, and the genera
 keybindings stay the built-in ones. `keybindings.ts` reads the effective keys wherever it
 reads a shortcut's (`chordsFor`, the labels, `matchShortcut`), and components that show keys
 re-render through `useKeymap`. Reserved keys (copy, paste, Esc, Tab, Enter, Space, plain arrows,
-F6, the OS quit/close keys) can't be taken; a shortcut keeps its own reserved built-in keys, and
-Ctrl/Cmd+1 … 9 stays fixed. A key that types a character never runs a shortcut from a text field.
+plain Backspace/Delete/Home/End/PageUp/PageDown, F6, the OS quit/close keys) can't be taken; a
+shortcut keeps its own reserved built-in keys, and Ctrl/Cmd+1 … 9 stays fixed. A key that types
+a character, and Backspace, Delete, Home, End, PageUp or PageDown with any modifier
+(`TEXT_FIELD_KEYS`, #1142), never runs a shortcut from a text field.
+No window shortcut runs while the focus is in a dialog, a menu or the palette
+(`useWorkspaceShortcuts`, #1117), except the palette's own key, which closes it.
 
 **VSCode's keys (#900).** In VSCode the keys are rebound in VSCode's own Keyboard Shortcuts
 (owner decision); Preferences → Keyboard links there (`open_vscode_keybindings` runs
@@ -281,7 +285,9 @@ leave the page inert.
 (`frontend/src/state/useMountedTabs.ts`, #642); an inactive one is hidden with `display: none`.
 Everything in a workspace that listens globally (shortcuts, palette and drop requests, the focus
 checks below, automatic fetch) is gated by its `active` prop, so a hidden workspace never reacts.
-A hidden element has no width, so `useNarrowLayout` and `SplitView` ignore a zero width instead of
+Element ids in a workspace come from `useId()`, never a fixed string: an id reference resolves to
+the first match in the document, and `aria-describedby` reads a hidden target, so a fixed id would
+borrow a hidden tab's label or reason (`MountedTabIds.test.tsx`, #1135). A hidden element has no width, so `useNarrowLayout` and `SplitView` ignore a zero width instead of
 collapsing the sidebar, and `useScrollMemory` puts the lists' scroll positions back when the tab is
 shown again. An older tab unmounts (PERF-001's reason: one visible view shouldn't cost N tabs' DOM
 and IPC) and reads the repository again when it mounts. The tab strip activates manually: arrow

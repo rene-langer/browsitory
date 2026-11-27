@@ -14,6 +14,7 @@ import type { UserCommand } from "../ipc/RepoClient";
 import { NO_SELECTION, userCommandMenuItems, type RunUserCommand } from "../lib/userCommands";
 import { useUserCommandsContext } from "../state/userCommandsContext";
 import { DeleteTagMessage } from "./DeleteTagMessage";
+import { useRefocusRemovedRow } from "./useRefocusRemovedRow";
 import { useVirtualRows } from "./useVirtualRows";
 
 // `returnFocusTo`: the row's "…" for a pointer (WebKit focuses neither the row nor the button);
@@ -93,6 +94,8 @@ export function TagPanel({
   const [menu, setMenu] = useState<TagMenu | null>(null);
   const [listElement, setListElement] = useState<HTMLUListElement | null>(null);
   const copyToClipboard = useCopyToClipboard();
+  // A deleted tag (#1141), or one a refresh removed while its menu was open.
+  useRefocusRemovedRow({ list: listElement, watching: [deleteConfirmation, menu?.name] });
 
   if (previousRemotes !== remotes) {
     setPreviousRemotes(remotes);

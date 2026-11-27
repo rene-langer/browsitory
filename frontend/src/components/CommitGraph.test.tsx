@@ -755,7 +755,7 @@ describe("CommitGraph", () => {
     const labels = within(toolbar)
       .getAllByRole("button")
       .map((button) => button.textContent);
-    expect(labels.slice(-3)).toEqual(["Cherry-pick 3 commits", "Revert 3 commits", "Drop 3 commits"]);
+    expect(labels.slice(-3)).toEqual(["Cherry-pick 3 commits", "Revert 3 commits", "Drop 3 commits…"]);
   });
 
   it("keeps multi-commit pick and revert next to Compare these commits", () => {
@@ -858,7 +858,7 @@ describe("CommitGraph", () => {
     fireEvent.click(row("B"), { shiftKey: true });
     fireEvent.contextMenu(row("B"));
 
-    expect(screen.getByRole("menuitem", { name: "Squash 2 commits" })).toBeEnabled();
+    expect(screen.getByRole("menuitem", { name: "Squash 2 commits…" })).toBeEnabled();
     expect(screen.getByRole("menuitem", { name: "Interactive rebase…" })).toBeEnabled();
     expect(screen.queryByText("Branch from here")).not.toBeInTheDocument();
   });
@@ -869,7 +869,7 @@ describe("CommitGraph", () => {
     fireEvent.click(row("C"));
     fireEvent.click(row("B"), { shiftKey: true });
     fireEvent.contextMenu(row("B"));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Squash 2 commits" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Squash 2 commits…" }));
 
     // C and B fold together onto B's parent A; B (oldest) stays the surviving Pick.
     expect(onRebaseSelection).toHaveBeenCalledWith("A", new Map([["C", "Squash"]]));
@@ -906,10 +906,10 @@ describe("CommitGraph", () => {
     fireEvent.click(row("D"));
     fireEvent.click(row("B"), { ctrlKey: true });
 
-    expect(screen.getByRole("button", { name: "Squash 2 commits" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Fixup 2 commits" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Squash 2 commits…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Fixup 2 commits…" })).toBeDisabled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Drop 2 commits" }));
+    fireEvent.click(screen.getByRole("button", { name: "Drop 2 commits…" }));
     expect(onRebaseSelection).toHaveBeenLastCalledWith(
       "A",
       new Map([
@@ -936,9 +936,9 @@ describe("CommitGraph", () => {
 
     for (const name of [
       "Interactive rebase…",
-      "Squash 2 commits",
-      "Fixup 2 commits",
-      "Drop 2 commits",
+      "Squash 2 commits…",
+      "Fixup 2 commits…",
+      "Drop 2 commits…",
     ]) {
       expect(screen.getByRole("button", { name })).toBeDisabled();
     }
@@ -954,7 +954,7 @@ describe("CommitGraph", () => {
     fireEvent.click(row("B"));
     fireEvent.click(row("A"), { shiftKey: true });
 
-    const drop = screen.getByRole("button", { name: "Drop 2 commits" });
+    const drop = screen.getByRole("button", { name: "Drop 2 commits…" });
     expect(drop).toBeDisabled();
     expect(drop).toHaveAttribute("title", "Merge and root commits can't be rebased.");
   });
@@ -1083,7 +1083,7 @@ describe("CommitGraph", () => {
     fireEvent.contextMenu(row("C"));
 
     expect(screen.getByRole("menuitem", { name: "Branch from here" })).toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: "Drop 2 commits" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Drop 2 commits…" })).not.toBeInTheDocument();
   });
 
   it("disables Squash across a fork point but still offers Interactive rebase", () => {
@@ -1098,7 +1098,7 @@ describe("CommitGraph", () => {
     fireEvent.click(row("M2"), { shiftKey: true });
     fireEvent.contextMenu(row("M2"));
 
-    expect(screen.getByRole("menuitem", { name: "Squash 2 commits" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Squash 2 commits…" })).toBeDisabled();
     expect(screen.getByRole("menuitem", { name: "Interactive rebase…" })).toBeEnabled();
   });
 
@@ -1169,6 +1169,26 @@ describe("CommitGraph — keyboard access", () => {
     expect(list.getAttribute("aria-keyshortcuts")).toContain("Enter");
   });
 
+  // #1139: the focus stays on the list, so the selected row is its active descendant.
+  it("points the list's active descendant at the selected row", () => {
+    const { list, rerender, onSelectRow, onBranchFromCommit, onRebaseFromCommit, onRebaseSelection } = setup("uncommitted");
+    const option = (text: RegExp) => screen.getByText(text).closest("li")!;
+    expect(list).toHaveAttribute("aria-activedescendant", option(/^Uncommitted changes/).id);
+    expect(option(/^Uncommitted changes/).id).not.toBe("");
+    rerender(
+      <CommitGraph
+        {...historyProps}
+        status={status}
+        commits={chain}
+        selectedRow={{ commitId: "B" }}
+        operationsBlocked={false}
+        {...{ onSelectRow, onBranchFromCommit, onRebaseFromCommit, onRebaseSelection }}
+      />,
+    );
+    expect(list).toHaveAttribute("aria-activedescendant", option(/^B /).id);
+    expect(option(/^B /).id).not.toBe(option(/^Uncommitted changes/).id);
+  });
+
   it("Enter opens the context menu for the selected commit and Branch from here uses its id", () => {
     const { list, onBranchFromCommit } = setup({ commitId: "B" });
     fireEvent.keyDown(list, { key: "Enter" });
@@ -1227,7 +1247,7 @@ describe("CommitGraph — keyboard access", () => {
       />,
     );
     fireEvent.keyDown(list, { key: "Enter" });
-    fireEvent.click(screen.getByRole("menuitem", { name: "Squash 2 commits" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Squash 2 commits…" }));
     expect(onRebaseSelection).toHaveBeenCalledWith("A", new Map([["C", "Squash"]]));
   });
 
@@ -1988,10 +2008,10 @@ describe("CommitGraph lines-changed badges (#620)", () => {
   });
 
   it("looks the same as without badges until the numbers arrive", () => {
-    const { container: without } = render(<CommitGraph {...baseProps} />);
-    const plain = without.innerHTML;
-    cleanup();
-    const { container } = render(<CommitGraph {...baseProps} lineStats={new Map()} />);
+    // One graph, rerendered: its row ids come from `useId` (#1139), which a second graph wouldn't share.
+    const { container, rerender } = render(<CommitGraph {...baseProps} />);
+    const plain = container.innerHTML;
+    rerender(<CommitGraph {...baseProps} lineStats={new Map()} />);
     expect(container.innerHTML).toBe(plain);
   });
 
@@ -2339,6 +2359,32 @@ describe("CommitGraph — windowed rows", () => {
       // Row 701 (after "Uncommitted changes") ends at the pane's bottom edge.
       expect(pane.scrollTop).toBe(702 * ROW - 260);
       expect(screen.getByText(/commit 700$/)).toBeInTheDocument();
+    } finally {
+      restore();
+    }
+  });
+
+  // #1139: a jump to a row the window doesn't hold yet is announced; once rendered, it is the
+  // list's active descendant.
+  it("announces a selected row that wasn't rendered, then makes it the active descendant", () => {
+    const { rerender, restore } = renderInPane();
+    try {
+      rerender(
+        <CommitGraph
+          {...historyProps}
+          status={[]}
+          commits={many}
+          selectedRow={{ commitId: "id700" }}
+          operationsBlocked={false}
+          onSelectRow={vi.fn()}
+          onBranchFromCommit={vi.fn()}
+          onRebaseFromCommit={vi.fn()}
+        />,
+      );
+      const announcement = screen.getByText("id700 commit 700, 702 of 1001");
+      expect(announcement.closest('[aria-live="polite"]')).not.toBeNull();
+      const list = screen.getByRole("listbox", { name: "Commit history" });
+      expect(list).toHaveAttribute("aria-activedescendant", screen.getByText(/commit 700$/).closest("li")!.id);
     } finally {
       restore();
     }

@@ -111,4 +111,106 @@ describe("useWorkspaceShortcuts and the user's keys (#898)", () => {
     press({ key: "r", code: "KeyR" });
     expect(props.runCommand).toHaveBeenCalledWith("refresh");
   });
+
+  it.each(["Backspace", "Delete", "Home", "End", "PageUp", "PageDown"])(
+    "leaves %s with a modifier to a text field, which edits or moves with it (#1142)",
+    (key) => {
+      setShortcutChords("fetch", [{ mod: true, key }]);
+      const props = setup();
+      const field = document.createElement("textarea");
+      document.body.append(field);
+      field.focus();
+      const event = new KeyboardEvent("keydown", { key, code: key, ctrlKey: true, bubbles: true, cancelable: true });
+      act(() => void field.dispatchEvent(event));
+      expect(props.runCommand).not.toHaveBeenCalled();
+      expect(event.defaultPrevented).toBe(false);
+      field.blur();
+      press({ key, code: key, ctrlKey: true });
+      expect(props.runCommand).toHaveBeenCalledWith("fetch");
+    },
+  );
+});
+
+describe("useWorkspaceShortcuts behind an open dialog (#1117)", () => {
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  function setupWithDialog(control: "button" | "input" = "button") {
+    const props = {
+      active: true,
+      onToggleSidebar: vi.fn(),
+      repositoryOperationDisabled: false,
+      onCloseRepoTab: vi.fn(),
+      onReopenClosedTab: vi.fn(),
+      onNavigateBack: vi.fn(),
+      onNavigateForward: vi.fn(),
+      repoPath: "/repos/a",
+      handleUndo: vi.fn(),
+      handleRedo: vi.fn(),
+      pending: false,
+      transfer: null,
+      runCommand: vi.fn(),
+    };
+    const { result } = renderHook(() => useWorkspaceShortcuts(props));
+    const dialog = document.createElement("dialog");
+    dialog.setAttribute("open", "");
+    const focused = document.createElement(control);
+    dialog.append(focused);
+    document.body.append(dialog);
+    focused.focus();
+    const pressIn = (init: KeyboardEventInit) => {
+      const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
+      act(() => void focused.dispatchEvent(event));
+      return event;
+    };
+    return { props, result, pressIn };
+  }
+
+  it.each([
+    ["undo", { key: "z", code: "KeyZ", ctrlKey: true }, "handleUndo"],
+    ["redo", { key: "y", code: "KeyY", ctrlKey: true }, "handleRedo"],
+    ["close-tab", { key: "w", code: "KeyW", ctrlKey: true }, "onCloseRepoTab"],
+    ["reopen-closed-tab", { key: "T", code: "KeyT", ctrlKey: true, shiftKey: true }, "onReopenClosedTab"],
+    ["go-back", { key: "ArrowLeft", code: "ArrowLeft", altKey: true }, "onNavigateBack"],
+    ["go-forward", { key: "ArrowRight", code: "ArrowRight", altKey: true }, "onNavigateForward"],
+    ["toggle-sidebar", { key: "b", code: "KeyB", ctrlKey: true, altKey: true }, "onToggleSidebar"],
+  ] as const)("doesn't run %s from a button in a dialog", (_id, init, handler) => {
+    const { props, pressIn } = setupWithDialog();
+    const event = pressIn(init);
+    expect(props[handler]).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it.each([
+    ["close-tab", { key: "w", code: "KeyW", ctrlKey: true }, "onCloseRepoTab"],
+    ["reopen-closed-tab", { key: "T", code: "KeyT", ctrlKey: true, shiftKey: true }, "onReopenClosedTab"],
+  ] as const)("doesn't run %s from a text field in a dialog", (_id, init, handler) => {
+    const { props, pressIn } = setupWithDialog("input");
+    pressIn(init);
+    expect(props[handler]).not.toHaveBeenCalled();
+  });
+
+  it("doesn't open the palette or the shortcut sheet on top of a dialog", () => {
+    const { result, pressIn } = setupWithDialog();
+    pressIn({ key: "k", code: "KeyK", ctrlKey: true });
+    pressIn({ key: "?", code: "Slash", shiftKey: true });
+    expect(result.current.paletteOpen).toBe(false);
+    expect(result.current.shortcutsOpen).toBe(false);
+  });
+
+  it("doesn't run a shortcut VSCode handed over while the focus is in a dialog", () => {
+    const { props } = setupWithDialog();
+    act(() => requestWorkspace({ kind: "shortcut", id: "undo" }));
+    act(() => requestWorkspace({ kind: "shortcut", id: "close-tab" }));
+    expect(props.handleUndo).not.toHaveBeenCalled();
+    expect(props.onCloseRepoTab).not.toHaveBeenCalled();
+  });
+
+  it("still runs the shortcuts outside a dialog", () => {
+    const { props } = setupWithDialog();
+    (document.activeElement as HTMLElement).blur();
+    press({ key: "z", code: "KeyZ", ctrlKey: true });
+    expect(props.handleUndo).toHaveBeenCalledOnce();
+  });
 });

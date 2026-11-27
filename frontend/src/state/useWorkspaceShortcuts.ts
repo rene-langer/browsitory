@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { GLOBAL_SHORTCUTS, matchShortcut, type GlobalShortcut, type ShortcutId } from "../lib/keybindings";
+import { TEXT_FIELD_KEYS } from "../lib/keymap";
 import { focusAdjacentPane, paneOf } from "../lib/paneFocus";
 import { isApplePlatform, isVscodeHost } from "../lib/platform";
 import { onWorkspaceRequest } from "../lib/workspaceRequests";
@@ -31,7 +32,7 @@ interface ShortcutPress {
   digit: number | null;
   /** Back (-1) or Forward (1) for the Back/Forward keys. */
   direction: -1 | 1 | null;
-  /** The key types a character in a text field (#898: a user's key may be a plain letter). */
+  /** The key types a character in a text field (#898: a user's key may be a plain letter), or edits or moves there (#1142). */
   typesText: boolean;
 }
 
@@ -40,9 +41,11 @@ function direction(id: ShortcutId): -1 | 1 | null {
 }
 
 function keyPress(event: KeyboardEvent, id: ShortcutId): ShortcutPress {
-  // Option types characters on macOS (Option+C is "ç").
+  // Option types characters on macOS (Option+C is "ç"). The editing and moving keys work there
+  // with any modifier (Ctrl+Backspace deletes a word, Shift+End selects), so they count too.
   const typesText =
-    event.key.length === 1 && !event.ctrlKey && !event.metaKey && (!event.altKey || isApplePlatform());
+    TEXT_FIELD_KEYS.has(event.key) ||
+    (event.key.length === 1 && !event.ctrlKey && !event.metaKey && (!event.altKey || isApplePlatform()));
   return {
     target: event.target,
     preventDefault: () => event.preventDefault(),
@@ -75,6 +78,10 @@ function isTextField(target: EventTarget | null): boolean {
 /** In a dialog, a menu or the palette, which own their keys. */
 function inOverlay(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest('dialog, [role="dialog"], [role="alertdialog"], [role="menu"]') !== null;
+}
+
+function inPalette(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest("[data-command-palette]") !== null;
 }
 
 /**
@@ -193,6 +200,9 @@ export function useWorkspaceShortcuts({
       // Text fields keep their own keys (native undo in the commit message, "?" typed, …), and
       // every key that types there, whatever the user bound to it (#898).
       if ((!shortcut.inTextFields || event.typesText) && isTextField(target)) return;
+      // A dialog, a menu or the palette owns its keys: nothing runs behind it (#1117), except
+      // the palette's own key, which closes the palette.
+      if (inOverlay(target) && !(shortcut.id === "palette" && inPalette(target))) return;
       switch (shortcut.id) {
         case "palette":
           event.preventDefault();
@@ -253,12 +263,11 @@ export function useWorkspaceShortcuts({
         case "next-tab":
         case "previous-tab":
         case "tab-by-number":
-          if (inOverlay(target)) return;
           if (switchTab(event, shortcut.id)) event.preventDefault();
           return;
         case "next-pane":
         case "previous-pane":
-          if (inOverlay(target) || workspaceElement === null) return;
+          if (workspaceElement === null) return;
           event.preventDefault();
           focusAdjacentPane(workspaceElement, shortcut.id === "next-pane" ? 1 : -1, lastFocused.current);
           return;
@@ -266,7 +275,7 @@ export function useWorkspaceShortcuts({
           // Refresh, Fetch, Pull, Push, Stage all and the commit message (#646): the palette's
           // commands, so they follow its rules (`operationBlockers`).
           if (!COMMAND_SHORTCUTS.has(shortcut.id)) return;
-          if (inOverlay(target) || event.defaultPrevented) return;
+          if (event.defaultPrevented) return;
           const runCommand = latest.current.runCommand;
           if (runCommand === undefined) return;
           event.preventDefault();

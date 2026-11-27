@@ -320,16 +320,12 @@ li.fileRow.current {
   align-items: center;
   justify-content: center;
   padding: var(--space-1);
-  /* Always there, muted (#648): full strength on the hovered, focused or current row. */
-  opacity: 0.55;
-  transition: opacity var(--motion-duration-fast) var(--motion-easing-standard);
+  /* Always there (#648), muted: in the muted colour, not faded below its contrast (#1140). */
+  color: var(--color-text-muted);
 }
 
-.fileRow:hover .stageToggle,
-.fileRow:focus-within .stageToggle,
-.fileRow.current .stageToggle,
-.stageToggle:focus-visible {
-  opacity: 1;
+.stageToggle:hover:not(:disabled) {
+  color: var(--color-text);
 }
 
 .conflictBadge {
@@ -503,11 +499,6 @@ li.fileRow.current {
   flex-shrink: 0;
   color: var(--color-text-muted);
   font-size: var(--text-xs);
-}
-
-.folderRow:hover .stageToggle,
-.folderRow:focus-within .stageToggle {
-  opacity: 1;
 }
 
 /* The files a filtered Discard or Delete untracked confirmation acts on (#729). */
