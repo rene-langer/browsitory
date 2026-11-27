@@ -99,6 +99,7 @@ const MARKS: &str =
 /// - `clash` changes `docs/clash.md`;
 /// - `inside` changes `app/main.rs`;
 /// - `grow` adds `app/added.rs` and `docs/more.md`;
+/// - `both` makes `side`'s changes and changes `app/main.rs` (a conflict with `main`);
 /// - `main` changes `app/main.rs` and `docs/clash.md` (so `clash` and `inside` conflict with it);
 /// - `ahead` is `main` plus `side`'s changes (a fast-forward from `main`).
 ///
@@ -128,6 +129,10 @@ fn build(d: &Path) {
     write_file(d, "app/added.rs", "added\n");
     write_file(d, "docs/more.md", "more\n");
     commit(d, "grow");
+    git_ok(d, &["checkout", "-q", "-b", "both", "main"]);
+    side_changes(d);
+    write_file(d, "app/main.rs", "fn main() { both() }\n");
+    commit(d, "both");
     git_ok(d, &["checkout", "-q", "main"]);
     write_file(d, "app/main.rs", "fn main() { run() }\n");
     write_file(d, "docs/clash.md", "clash from main\n");
@@ -413,5 +418,51 @@ fn a_merge_that_changes_a_marked_file_found_on_disk_matches_git() {
 
     assert_eq!(outcome, MergeOutcome::Merged);
     assert_same_as_git(ours.path(), twin.path());
+    assert_nothing_written_outside(ours.path());
+}
+
+/// Abort of a merge that changed, added and deleted files outside the cone, of one that added
+/// files inside and outside it, and of one stopped on a conflict outside it: git's `merge
+/// --abort` puts HEAD's versions back without writing the marked files (the conflicted one is
+/// written, unmarked).
+#[test]
+fn aborting_a_merge_outside_the_cone_matches_git() {
+    for target in ["side", "grow", "clash"] {
+        let (ours, twin) = twins();
+        git_any(twin.path(), &["merge", "-q", "--no-commit", target]);
+        git_ok(twin.path(), &["merge", "--abort"]);
+        let repo = open(ours.path());
+        start_merge(&repo, target, MergeOptions::default()).unwrap();
+
+        git_core::merge::abort_merge(&repo).unwrap();
+
+        assert_same_as_git(ours.path(), twin.path());
+        assert!(!ours.path().join("docs/guide.md").exists(), "{target}");
+    }
+}
+
+/// Abort of a cherry-pick of `both`, stopped on its conflict inside the cone, whose other
+/// changes are outside it.
+#[test]
+fn aborting_a_cherry_pick_outside_the_cone_matches_git() {
+    let (ours, twin) = twins();
+    git_any(twin.path(), &["cherry-pick", "both"]);
+    git_ok(twin.path(), &["cherry-pick", "--abort"]);
+    let repo = open(ours.path());
+    let outcome = cherry_pick(
+        &repo,
+        &id(ours.path(), "both"),
+        None,
+        HookOptions::default(),
+    );
+    assert!(
+        matches!(outcome, Ok(PickOutcome::Conflicted { .. })),
+        "{outcome:?}"
+    );
+
+    git_core::merge::abort_merge(&repo).unwrap();
+
+    assert_same_as_git(ours.path(), twin.path());
+    assert_eq!(ls_files_v(ours.path()), MARKS);
     assert_nothing_written_outside(ours.path());
 }
