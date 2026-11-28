@@ -266,3 +266,50 @@ fn mark_resolved_of_a_link_conflict_kept_as_a_file_stores_the_cleaned_target_as_
     assert_eq!(git_out(twin_dir.path(), &["ls-files", "-s", "l"]), expected);
     assert_eq!(git_out(d, &["ls-files", "-s", "l"]), expected);
 }
+
+/// Stages `x\r\n` into the link kept as a file `l` whose stored target is `target`, in the app
+/// and with `git add` on a copy; returns both index entries.
+fn stage_crlf_over(target: &[u8]) -> (String, String) {
+    let (dir, repo) = link_kept_as_file(target);
+    let d = dir.path();
+    std::fs::write(d.join("l"), "x\r\n").unwrap();
+    let (twin_dir, _twin) = twin(d);
+    git_ok(twin_dir.path(), &["add", "l"]);
+
+    git_core::stage::stage_file(&repo, "l").unwrap();
+
+    (
+        git_out(d, &["ls-files", "-s", "l"]),
+        git_out(twin_dir.path(), &["ls-files", "-s", "l"]),
+    )
+}
+
+/// `x\r\n` and `x\n` as blobs.
+const RAW: &str = "db127bf6be70c2285b1d852d39387a37b01c3032";
+const CLEANED: &str = "587be6b4c3f93f93c489c0111bba5596147a26cb";
+
+/// git's CRLF filter keeps a file's CRs when the blob it replaces holds a CRLF and isn't binary
+/// (the "safer autocrlf" rule, `has_crlf_in_index`), also for a link kept as a file.
+#[test]
+fn a_link_kept_as_file_whose_stored_target_has_a_crlf_keeps_its_crs_as_git_does() {
+    let (app, git) = stage_crlf_over(b"t\r\n");
+    assert_eq!(git, format!("120000 {RAW} 0\tl"));
+    assert_eq!(app, git);
+}
+
+/// A lone CR makes the stored target binary to git, which then cleans the file (libgit2 alone
+/// would keep its CRs for any CR).
+#[test]
+fn a_link_kept_as_file_whose_stored_target_has_a_lone_cr_is_cleaned_as_git_does() {
+    let (app, git) = stage_crlf_over(b"t\r\n\r");
+    assert_eq!(git, format!("120000 {CLEANED} 0\tl"));
+    assert_eq!(app, git);
+}
+
+/// So does a NUL.
+#[test]
+fn a_link_kept_as_file_whose_stored_target_has_a_nul_is_cleaned_as_git_does() {
+    let (app, git) = stage_crlf_over(b"t\r\n\0");
+    assert_eq!(git, format!("120000 {CLEANED} 0\tl"));
+    assert_eq!(app, git);
+}
