@@ -1,3 +1,5 @@
+import type { DroppedFile } from "../ipc/RepoClient";
+
 /**
  * Requests from the app to the active repository workspace (#647): the header's Commands button
  * and Help menu open the palette and the shortcut sheet, whose open state each `RepoWorkspace`
@@ -9,7 +11,7 @@ export type WorkspaceRequest =
   | "shortcuts"
   /** The operation log (#889), from the Help menu. */
   | "operationLog"
-  | { kind: "applyPatches"; paths: string[] }
+  | { kind: "applyPatches"; paths: string[]; files?: DroppedFile[] }
   /** A global shortcut the VSCode extension handed over (#679); `index` is Ctrl/Cmd+1…9's tab. */
   | { kind: "shortcut"; id: string; index?: number };
 

@@ -881,7 +881,7 @@ export function RepoWorkspace({
     return onWorkspaceRequest((request) => {
       if (typeof request !== "object" || request.kind !== "applyPatches") return;
       if (dropBlockedReason !== null) pushToast(`Can't apply the patch now. ${dropBlockedReason}`, { tone: "warning" });
-      else void applyPatchFiles(request.paths);
+      else void applyPatchFiles(request.paths, request.files);
     });
   }, [active, applyPatchFiles, dropBlockedReason, pushToast]);
 

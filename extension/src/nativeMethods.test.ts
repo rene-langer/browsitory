@@ -42,6 +42,8 @@ function bridgeWithoutSidecar() {
     showOpenDialog: async () => undefined,
     showSaveDialog: async () => undefined,
     readFile: async () => new Uint8Array(),
+    readFilePath: async () => new Uint8Array(),
+    droppedUriPath: () => undefined,
     writeFile: async () => {},
     openExternal: async () => true,
     appendLine: () => {},
