@@ -99,7 +99,7 @@ all your local changes, untracked files included, switches, and with **Re-apply 
 choose **Fast-forward if possible** (move the branch when nothing diverged, else create a merge commit), **Always create
 a merge commit** (even when a fast-forward was possible; the commit box is pre-filled and the
 commit gets two parents), or **Fast-forward only** (refuse, changing nothing, when the branches
-have diverged). **Squash** stages the combined changes of the branch without committing and
+have diverged; the error then suggests merging without it or rebasing first). **Squash** stages the combined changes of the branch without committing and
 without recording a merge: HEAD does not move, the commit box is pre-filled with the squashed
 commits' messages, and the commit you make has a single parent; the choices above it don't apply
 then. **Undo** reverts a squash.
