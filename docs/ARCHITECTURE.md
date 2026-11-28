@@ -587,9 +587,23 @@ menu's choice runs back through the session: the pick, the parent picker or a se
   `stash::save_stash` therefore builds a path-limited stash itself and pushes it on `refs/stash`
   before reverting only the stashed paths; stashing everything still uses `stash_save2`,
   except where a route check in `save_stash` sends it through the path-limited stash (a hazard,
-  a kept entry in an untracked folder, an edit removed from the index, a skip-worktree entry).
-  On that route Stash all with untracked files writes the untracked commit also when it is
-  empty, as `stash_save2` and `git stash -u` do (#1184).
+  a kept entry in an untracked folder, an edit removed from the index, a skip-worktree entry, a
+  changed link kept as a file (#802, see below), files left out with `StashOptions.leave_out`
+  (#1107)). On that route Stash all with untracked files writes the untracked commit also when
+  it is empty, as `stash_save2` and `git stash -u` do (#1184).
+- **A link kept as a file** (`core.symlinks` off: a tracked link checked out as a file holding
+  its target). git hashes such a file through the clean filters (`index_path` filters every
+  regular file) and keeps the link mode; it checks it out raw. Every path that hashes one does
+  the same (#802): Stage, Mark resolved, the stash's `worktree_blob` (`read_worktree_file` says
+  whether it read a real link, hashed raw) and `index_marks::edited_skip_worktree` (so a hard
+  reset or rebase doesn't take a file that differs only before the filters for an edit). libgit2's
+  `stash_save2` records it raw and as a regular file, so Stash all with such a change takes the
+  path-limited route (`changes_link_kept_as_file`). libgit2's CRLF filter (`core.autocrlf`,
+  `text=auto`) also passes a file through unchanged when the index entry at its path (stage 0,
+  else 1) isn't a regular file (`has_cr_in_index`), where git only looks for a CR in that
+  entry's blob (stage 0, else "ours"; `has_crlf_in_index`). So these paths filter it through
+  `undo::link_file_filters`: a second handle on the repository whose in-memory index (never
+  written) has that blob there as a regular file.
 - **Path-limited stash shape (deliberate, differs from git).** The worktree commit is HEAD's tree
   plus the selected files' worktree contents, the index commit is HEAD's tree plus the selected
   files' index entries, and the untracked commit holds only the selected untracked files. git
@@ -2626,9 +2640,10 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
     its base, its untracked files). Their guards stay as a backstop.
   - checked by path first: Stage (a file, not a link; an untracked folder's files), hunk and
     line staging and discarding, Mark resolved, taking a side, resolving an add/delete
-    conflict, saving a hunk resolution, Stash (the changed paths, or the chosen ones; also
-    covers `stash_save2`'s reset, which takes no callbacks), an abort's reset of the touched
-    paths, and patch apply and preview (the patch's added or changed files).
+    conflict, saving a hunk resolution, Stash (the changed paths, or the chosen ones, and the
+    other side of a staged rename the path-limited stash takes along; also covers
+    `stash_save2`'s reset, which takes no callbacks), an abort's reset of the touched paths, and
+    patch apply and preview (the patch's added or changed files).
   Not refused: status and diffs (a git-crypt file can show as modified: raw bytes against the
   encrypted blob; see below), side files and the VSCode content provider (see "External tools"), a fresh
   clone and a new worktree (nothing of the user's to overwrite; files the driver would smudge
@@ -2655,6 +2670,15 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   default global attribute files aren't read). The Changes pane shows a dismissible notice for
   them, marks the rows, disables their Stage button and leaves them out of Stage all
   (`lib/stagePaths`); the refusals above are unchanged.
+
+  The other bulk actions leave the marked rows out too (#1107, `lib/externalFilters`'
+  `isLeftOut`, `leftOutNotice`), so one such file no longer makes them fail as a whole: Discard
+  all… (and Discard n shown…) sends the other paths to `discard_all_unstaged` and its
+  confirmation names the files left out; a selection's Stage and Discard act on the rest; the
+  stash dialog and "Stash all changes" send `StashOptions.leave_out` (wire `leaveOut`, optional),
+  and `save_stash` stashes everything (or the chosen paths) but those, through the path-limited
+  stash. Only the paths named are left out: another changed file under a driver (a staged-only
+  change, a file in an untracked folder listed as one entry) still refuses the stash.
 
   `working-tree-encoding` (#1156) has the same effect and the same treatment: git keeps such a
   file as UTF-8 in the repository and converts it to the named encoding in the work tree, and
