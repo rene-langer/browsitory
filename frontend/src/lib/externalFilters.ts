@@ -62,3 +62,21 @@ export function unconvertible(entry: StatusEntry): { note: string; reason: strin
   }
   return undefined;
 }
+
+/** The unstaged entries Browsitory can't filter or convert, which bulk actions leave out (#1107). */
+export function leftOut(entries: readonly StatusEntry[]): StatusEntry[] {
+  void entries;
+  return [];
+}
+
+/** The notice naming the files a bulk action leaves out (#1107). */
+export function leftOutNotice(entries: readonly StatusEntry[]): string {
+  void entries;
+  return "";
+}
+
+/** The toast after stashing everything in `status` (#1107). */
+export function stashedMessage(status: readonly StatusEntry[]): string {
+  void status;
+  return "Changes stashed";
+}

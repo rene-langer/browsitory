@@ -1,5 +1,5 @@
 import { useState, useId } from "react";
-import type { StashOptions } from "../ipc/RepoClient";
+import type { StashOptions, StatusEntry } from "../ipc/RepoClient";
 import { Field } from "./primitives/Field";
 import { describedBy } from "../lib/ariaDescribedBy";
 import { BlockedReason } from "./primitives/BlockedReason";
@@ -22,6 +22,8 @@ export function StashDialog({
   onCancel,
 }: {
   paths: string[];
+  /** The repository's changes, to leave out the files Browsitory can't filter or convert (#1107). */
+  status?: readonly StatusEntry[];
   untrackedOnly?: boolean;
   /** Why stashing is unavailable now, or `null`. */
   blockedReason?: string | null;
