@@ -84,9 +84,10 @@ are taken back), so the working tree, the staged changes and the branch are left
 Each way is one step in [Undo](undo-redo.md) ("Apply patch", "Apply and stage patch" or "Apply
 patch as commits"); undoing the commits moves the branch back.
 
-In the desktop app you can also drop a `.patch`, `.diff` or `.mbox` file from your file manager
-onto the window: it is applied to the working tree at once, without the preview, with the same
-checks; each dropped file is one undo step.
+You can also drop a `.patch`, `.diff` or `.mbox` file from your file manager onto the window: it
+is applied to the working tree at once, without the preview, with the same checks; each dropped
+file is one undo step. In VSCode, drop it from the file manager, or hold Shift while you drag it
+from VSCode's Explorer (see [Dropping files](main-window.md)).
 
 A patch that names a file outside the repository or in `.git` (under any name a file system
 reads as `.git`, such as `git~1`), would write through a symbolic link (one already in the
