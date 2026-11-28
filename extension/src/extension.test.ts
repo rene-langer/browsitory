@@ -55,6 +55,39 @@ function createHarness() {
     }),
     dispose: vi.fn(),
   };
+  /** VSCode's Git extension (#781): its API's commit hover providers, and whether it is enabled. */
+  type HoverProvider = {
+    provideAvatar: (...args: unknown[]) => unknown;
+    provideHoverCommands: (repository: unknown) => unknown;
+    provideMessageLinks: (...args: unknown[]) => unknown;
+  };
+  const hoverProviders = new Set<HoverProvider>();
+  const enablementListeners = new Set<(enabled: boolean) => void>();
+  const gitExports = {
+    enabled: true,
+    onDidChangeEnablement: (listener: (enabled: boolean) => void) => {
+      enablementListeners.add(listener);
+      return { dispose: () => enablementListeners.delete(listener) };
+    },
+    getAPI: vi.fn((_version: number) => {
+      if (!gitExports.enabled) throw new Error("Git model not found");
+      return {
+        registerSourceControlHistoryItemDetailsProvider: vi.fn((provider: HoverProvider) => {
+          hoverProviders.add(provider);
+          return { dispose: () => hoverProviders.delete(provider) };
+        }),
+      };
+    }),
+  };
+  const gitExtension = {
+    isActive: true,
+    exports: gitExports,
+    activate: vi.fn(async () => {
+      gitExtension.isActive = true;
+      return gitExports;
+    }),
+  };
+  let gitInstalled = true;
   let contentProvider:
     | {
         provideTextDocumentContent: (uri: { path: string; query: string }) => Promise<string>;
@@ -152,6 +185,9 @@ function createHarness() {
         return { dispose: vi.fn() };
       }),
     },
+    extensions: {
+      getExtension: vi.fn((id: string) => (id === "vscode.git" && gitInstalled ? gitExtension : undefined)),
+    },
     env: { openExternal: vi.fn(async () => true) },
     Uri: {
       joinPath: (base: Uri, ...parts: string[]) => fakeUri([base.fsPath, ...parts].join("/")),
@@ -220,6 +256,16 @@ function createHarness() {
     watchers,
     statusBarItem,
     commands,
+    hoverProviders,
+    gitExtension,
+    gitExports,
+    uninstallGit: () => {
+      gitInstalled = false;
+    },
+    setGitEnabled: (enabled: boolean) => {
+      gitExports.enabled = enabled;
+      for (const listener of [...enablementListeners]) listener(enabled);
+    },
     changeSetting: (key: string, value: unknown) => {
       settings.set(key, value);
       for (const listener of [...configurationListeners]) listener({ affectsConfiguration: (section) => key.startsWith(section) });
@@ -741,6 +787,101 @@ describe("extension commands and integration points (#677, #678, #679)", () => {
     expect(harness.panel.webview.html).toContain("vscode-main.js");
     await harness.restorePanel();
     expect(harness.panel.dispose).toHaveBeenCalledOnce();
+  });
+
+  describe("the Git extension's commit hovers (#781)", () => {
+    const commitId = "0123456789abcdef0123456789abcdef01234567";
+    /** What the Git extension passes a provider: its API `Repository`, with the work tree root. */
+    const repository = { rootUri: { scheme: "file", fsPath: "/work/lib" } };
+    const onlyProvider = () => {
+      expect(harness.hoverProviders.size).toBe(1);
+      return [...harness.hoverProviders][0]!;
+    };
+
+    it("adds Show in Browsitory to the hovers, which selects the commit in the graph", async () => {
+      activate(harness.context);
+      await vi.waitFor(() => expect(harness.hoverProviders.size).toBe(1));
+      const provider = onlyProvider();
+
+      // The Git extension appends the commit's hash to the arguments.
+      expect(await provider.provideHoverCommands(repository)).toEqual([
+        {
+          command: "browsitory.showHoverCommit",
+          title: "Show in Browsitory",
+          tooltip: "Show Commit in Browsitory",
+          arguments: ["/work/lib"],
+        },
+      ]);
+      // The other provider methods leave avatars and message links to other providers.
+      expect(await provider.provideAvatar(repository, { commits: [], size: 16 })).toBeUndefined();
+      expect(await provider.provideMessageLinks(repository, "Fix #1")).toBeUndefined();
+
+      await harness.runCommand("browsitory.showHoverCommit", "/work/lib", commitId);
+      await harness.dispatch({ jsonrpc: "2.0", method: "hostReady" });
+      expect(hostRequests()).toEqual([{ kind: "showCommit", repoPath: "/work/lib", commitId }]);
+    });
+
+    it("ignores a hover command without a repository and a commit", async () => {
+      activate(harness.context);
+      await harness.runCommand("browsitory.showHoverCommit", "/work/lib", "not a commit");
+      await harness.runCommand("browsitory.showHoverCommit", undefined, commitId);
+      await harness.runCommand("browsitory.showHoverCommit");
+
+      expect(harness.vscode.window.createWebviewPanel).not.toHaveBeenCalled();
+    });
+
+    it("offers nothing for a repository that isn't on disk, so other extensions' links show", async () => {
+      activate(harness.context);
+      await vi.waitFor(() => expect(harness.hoverProviders.size).toBe(1));
+      expect(await onlyProvider().provideHoverCommands({ rootUri: { scheme: "vscode-vfs", fsPath: "/x" } })).toBeUndefined();
+    });
+
+    it("activates the Git extension when it isn't active yet", async () => {
+      harness.gitExtension.isActive = false;
+      activate(harness.context);
+      await vi.waitFor(() => expect(harness.hoverProviders.size).toBe(1));
+      expect(harness.gitExtension.activate).toHaveBeenCalledOnce();
+      expect(harness.gitExports.getAPI).toHaveBeenCalledWith(1);
+    });
+
+    it("adds nothing without the Git extension", async () => {
+      harness.uninstallGit();
+      activate(harness.context);
+      await Promise.resolve();
+      expect(harness.hoverProviders.size).toBe(0);
+      expect(harness.commands.has("browsitory.showHoverCommit")).toBe(true);
+    });
+
+    it("waits until Git is enabled", async () => {
+      harness.gitExports.enabled = false;
+      activate(harness.context);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(harness.hoverProviders.size).toBe(0);
+
+      harness.setGitEnabled(true);
+      await vi.waitFor(() => expect(harness.hoverProviders.size).toBe(1));
+    });
+
+    // VSCode shows only the first provider's links that returns any: the setting gives another
+    // extension's links back.
+    it("leaves the hovers alone while its setting is off", async () => {
+      harness.changeSetting("browsitory.gitHover.enabled", false);
+      activate(harness.context);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(harness.hoverProviders.size).toBe(0);
+
+      harness.changeSetting("browsitory.gitHover.enabled", true);
+      await vi.waitFor(() => expect(harness.hoverProviders.size).toBe(1));
+      harness.changeSetting("browsitory.gitHover.enabled", false);
+      await vi.waitFor(() => expect(harness.hoverProviders.size).toBe(0));
+    });
+
+    it("removes its provider when the extension stops", async () => {
+      activate(harness.context);
+      await vi.waitFor(() => expect(harness.hoverProviders.size).toBe(1));
+      for (const subscription of harness.context.subscriptions as Array<{ dispose: () => void }>) subscription.dispose();
+      expect(harness.hoverProviders.size).toBe(0);
+    });
   });
 });
 
