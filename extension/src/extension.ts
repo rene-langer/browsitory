@@ -10,6 +10,7 @@ import {
 import {
   commandTargetPath,
   contributedShortcutIds,
+  droppedPath,
   findRepositoryRoot,
   type HostRequest,
   repoRelativePath,
@@ -20,6 +21,7 @@ import {
   shortcutRequest,
   timelineCommitId,
 } from "./hostRequests";
+import { GIT_EXTENSION_ID, type GitExtensionExports, HOVER_COMMIT_COMMAND, hoverCommitTarget, registerHoverCommits } from "./gitHover";
 import { effectiveShortcutKeys, keybindingsFileCandidates, parseKeybindingsJson } from "./keybindingsFile";
 import { FILE_VERSION_SCHEME, isChangingVersion, parseFileVersionUri } from "./toolUris";
 import { renderWebviewHtml } from "./webviewHtml";
@@ -109,6 +111,8 @@ async function listSubfolders(folder: string): Promise<string[]> {
 
 /** The setting that hides the status bar button (#759). */
 const STATUS_BAR_SETTING = "browsitory.statusBar.enabled";
+/** The setting that leaves the Git extension's commit hovers alone (#781). */
+const GIT_HOVER_SETTING = "browsitory.gitHover.enabled";
 
 function workspaceFolderPaths(): string[] {
   return (vscode.workspace.workspaceFolders ?? [])
@@ -201,6 +205,16 @@ export function activate(context: vscode.ExtensionContext): void {
       },
       writeFile: (file, content) => vscode.workspace.fs.writeFile(vscode.Uri.file(file), content),
       readFile: (uri) => vscode.workspace.fs.readFile(uri),
+      readFilePath: (file) => vscode.workspace.fs.readFile(vscode.Uri.file(file)),
+      droppedUriPath: (uri) => {
+        let parsed: vscode.Uri;
+        try {
+          parsed = vscode.Uri.parse(uri, true);
+        } catch {
+          return undefined;
+        }
+        return droppedPath(parsed, vscode.env.remoteName !== undefined);
+      },
       openExternal: (url) => vscode.env.openExternal(vscode.Uri.parse(url, true)),
       appendLine: (message) => output.appendLine(message),
       openFile: (file, line) =>
@@ -429,8 +443,52 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
+  /** "Show in Browsitory" in a commit hover of the Git extension (#781). */
+  function showHoverCommit(root?: unknown, hash?: unknown): void {
+    const target = hoverCommitTarget(root, hash);
+    if (target !== undefined) sendHostRequest(showPanel(), { kind: "showCommit", ...target });
+  }
+
+  // The hover link, while the setting is on: VSCode shows one provider's links per hover, so
+  // ours could hide another extension's.
+  let stopHoverCommits: (() => void) | undefined;
+  let hoverSetup = 0;
+  const logError = (what: string, error: unknown) =>
+    output.appendLine(`Browsitory: ${what}: ${error instanceof Error ? error.message : String(error)}`);
+  async function updateHoverCommits(): Promise<void> {
+    const setup = ++hoverSetup;
+    stopHoverCommits?.();
+    stopHoverCommits = undefined;
+    if (!vscode.workspace.getConfiguration("browsitory").get<boolean>("gitHover.enabled", true)) return;
+    const extension = vscode.extensions.getExtension<GitExtensionExports>(GIT_EXTENSION_ID);
+    if (extension === undefined) return;
+    let git: GitExtensionExports;
+    try {
+      git = extension.isActive ? extension.exports : await extension.activate();
+    } catch (error) {
+      logError("the Git extension didn't start", error);
+      return;
+    }
+    if (setup !== hoverSetup) return;
+    stopHoverCommits = registerHoverCommits(git, (error) => logError("couldn't add the commit hover link", error));
+  }
+  void updateHoverCommits();
+  context.subscriptions.push(
+    {
+      dispose: () => {
+        hoverSetup++;
+        stopHoverCommits?.();
+        stopHoverCommits = undefined;
+      },
+    },
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration(GIT_HOVER_SETTING)) void updateHoverCommits();
+    }),
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand("browsitory.open", open),
+    vscode.commands.registerCommand(HOVER_COMMIT_COMMAND, showHoverCommit),
     vscode.commands.registerCommand("browsitory.showCommit", showCommit),
     // The same, as the Explorer and Source Control menus' "Open in Browsitory".
     vscode.commands.registerCommand("browsitory.openRepository", open),

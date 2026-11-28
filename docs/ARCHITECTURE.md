@@ -120,6 +120,33 @@ keys alone in VSCode (`data-host="vscode"`) and runs the shortcut when the reque
 its test keeps `extension/package.json` equal to them. A `WebviewPanelSerializer` brings the
 panel back after a reload.
 
+**Commit hover link (#781).** `extension/src/gitHover.ts` registers a history item details
+provider with VSCode's Git extension (`getAPI(1).registerSourceControlHistoryItemDetailsProvider`,
+stable API since before the `engines` minimum, no proposed API). Its `provideHoverCommands`
+answers "Show in Browsitory" with the repository's root as argument; the Git extension appends the
+commit's hash and shows the link in the inline blame, Timeline and Source Control Graph hovers.
+The command (`browsitory.showHoverCommit`, not contributed) sends the `showCommit` host request.
+The Git extension (1.147) shows the commands of only the first provider that returns any, so
+for a repository with a GitHub remote the built-in GitHub extension's "Open on GitHub" wins, and
+it adds no provider commands for unpublished commits. A provider registered before another
+extension's would hide that one's links, so `browsitory.gitHover.enabled` turns ours off. The
+menus that would fit better (`scm/historyItem/context`) are proposed API.
+
+**File drops in VSCode (#818).** VSCode hands a drag from its Explorer (and other workbench views)
+over a webview to its editor drop overlay, setting the webview's `pointer-events: none`, unless
+Shift is held. A drag from the file manager reaches the page, and VSCode's own `dragenter`
+listener on the content window passes it to the overlay only when the page didn't cancel the
+event. So `vscodeRepoClient.subscribeFileDrops` listens on the document in the capture phase and
+cancels `dragenter`/`dragover` for drags carrying `Files`, `text/uri-list` or VSCode's
+`application/vnd.code.uri-list` (the full list; `text/uri-list` holds only the first URI). An
+Explorer drop's URIs go to the host's `resolve_dropped_uris`, which keeps the `file:` URIs of a
+local window or the `vscode-remote:` ones of a remote window (`droppedPath` in
+`extension/src/hostRequests.ts`) and answers their paths; the patches among them are read with
+`read_patch_file` (desktop limits: a patch's name, 64 MB). The webview never gets a file
+manager drop's paths, only the files' content: such a drop's `FileDropEvent` carries
+`DroppedFile`s, whose patches are read in the page and applied; a folder can't be opened that
+way, and the app says to Shift-drag it from the Explorer instead.
+
 **The user's keys (#898).** `frontend/src/lib/keymap.ts` keeps the user's keys on top of the
 built-in keymap (the global shortcuts and the merge editor's keys, one namespace for conflicts):
 a shortcut gets other keys, a second key, or none. They are kept in `config.toml`'s

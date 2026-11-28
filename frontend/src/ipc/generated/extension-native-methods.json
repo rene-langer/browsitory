@@ -12,6 +12,8 @@
   "open_vscode_keybindings",
   "persist_open_repos",
   "pick_repo_folder",
+  "read_patch_file",
+  "resolve_dropped_uris",
   "reveal_in_file_manager",
   "run_vscode_git_command",
   "save_file_version",

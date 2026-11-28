@@ -422,6 +422,11 @@
           "type": "boolean",
           "default": true,
           "description": "Show a Browsitory button in the status bar that opens the active editor's repository."
+        },
+        "browsitory.gitHover.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Add Show in Browsitory to the commit hovers of VSCode's Git extension (inline blame, Timeline, Source Control Graph). VSCode shows the links of one extension per hover, so turn this off if it hides another extension's links."
         }
       }
     }

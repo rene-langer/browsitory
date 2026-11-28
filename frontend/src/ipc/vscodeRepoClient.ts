@@ -1,4 +1,15 @@
-import type { HookProgress, HostRequest, OpenRepoEntry, OperationLogChange, RepoClient, RepoWatch, TransferProgress } from "./RepoClient";
+import type {
+  DroppedFile,
+  FileDropEvent,
+  HookProgress,
+  HostRequest,
+  OpenRepoEntry,
+  OperationLogChange,
+  PatchContent,
+  RepoClient,
+  RepoWatch,
+  TransferProgress,
+} from "./RepoClient";
 import { createRepoClient } from "./createRepoClient";
 import { RepoError, toRepoError } from "./RepoClient";
 import { __resetHostVisibilityForTests, publishHostVisibility } from "./hostVisibility";
@@ -204,8 +215,110 @@ function call<T>(method: string, params: Record<string, unknown> = {}): Promise<
 }
 
 
+/** VSCode's own list of the URIs dragged from its Explorer: `text/uri-list` holds only the first. */
+const CODE_URI_LIST = "application/vnd.code.uri-list";
+const DROP_TYPES = ["Files", "text/uri-list", CODE_URI_LIST];
+/** The names "Apply patch…" offers, which a dropped patch file must have. */
+const PATCH_FILE_NAME = /\.(patch|diff|mbox|txt)$/i;
+const MAX_PATCH_FILE_BYTES = 64 * 1024 * 1024;
+const dropSubscriptions = new Set<() => void>();
+
+function carriesFiles(event: DragEvent): boolean {
+  const types = event.dataTransfer?.types ?? [];
+  return Array.from(types).some((type) => DROP_TYPES.includes(type));
+}
+
+function droppedUris(transfer: DataTransfer): string[] {
+  const list = transfer.getData(CODE_URI_LIST) || transfer.getData("text/uri-list");
+  return list
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !line.startsWith("#"));
+}
+
+function base64Of(bytes: Uint8Array): string {
+  let binary = "";
+  for (let start = 0; start < bytes.length; start += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(start, start + 0x8000));
+  }
+  return btoa(binary);
+}
+
+/** A file from the file manager: the webview gets its content, never its path. */
+function droppedFile(file: File): DroppedFile {
+  return {
+    name: file.name,
+    read: async (): Promise<PatchContent> => {
+      if (!PATCH_FILE_NAME.test(file.name)) {
+        throw new Error(`${file.name} isn't a patch file (.patch, .diff, .mbox or .txt)`);
+      }
+      if (file.size > MAX_PATCH_FILE_BYTES) throw new Error(`Couldn't read ${file.name}: the file is larger than 64 MB`);
+      return { base64: base64Of(new Uint8Array(await file.arrayBuffer())) };
+    },
+  };
+}
+
+/**
+ * Drags that reach the webview (#818). VSCode lets a drag from its Explorer through only with
+ * Shift held, and hands a file manager drag to its editor drop overlay unless the page takes it
+ * first, by cancelling `dragenter` before VSCode's own listener on the window sees it: hence the
+ * capturing listeners on the document.
+ */
+function subscribeDrops(listener: (event: FileDropEvent) => void): () => void {
+  // `dragenter` and `dragleave` fire for each element the pointer crosses.
+  let depth = 0;
+  const onEnter = (event: DragEvent) => {
+    if (!carriesFiles(event)) return;
+    event.preventDefault();
+    depth += 1;
+    if (depth === 1) listener({ kind: "over" });
+  };
+  const onOver = (event: DragEvent) => {
+    if (!carriesFiles(event)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+  };
+  const onLeave = (event: DragEvent) => {
+    if (!carriesFiles(event) || depth === 0) return;
+    depth -= 1;
+    if (depth === 0) listener({ kind: "leave" });
+  };
+  const onDrop = (event: DragEvent) => {
+    const transfer = event.dataTransfer;
+    if (transfer === null || !carriesFiles(event)) return;
+    event.preventDefault();
+    depth = 0;
+    const uris = droppedUris(transfer);
+    if (uris.length === 0) {
+      listener({ kind: "drop", paths: [], files: Array.from(transfer.files, droppedFile) });
+      return;
+    }
+    call<string[]>("resolve_dropped_uris", { uris }).then(
+      (paths) => listener({ kind: "drop", paths }),
+      (error: unknown) => {
+        listener({ kind: "drop", paths: [] });
+        void vscodeRepoClient.logFrontendError("Reading the dropped files failed", error);
+      },
+    );
+  };
+  const handlers: Array<[string, (event: DragEvent) => void]> = [
+    ["dragenter", onEnter],
+    ["dragover", onOver],
+    ["dragleave", onLeave],
+    ["drop", onDrop],
+  ];
+  for (const [type, handler] of handlers) document.addEventListener(type, handler as EventListener, true);
+  const stop = () => {
+    for (const [type, handler] of handlers) document.removeEventListener(type, handler as EventListener, true);
+    dropSubscriptions.delete(stop);
+  };
+  dropSubscriptions.add(stop);
+  return stop;
+}
+
 /** Test-only lifecycle cleanup for Vitest's shared window. */
 export function __resetVscodeRepoClientForTests() {
+  for (const stop of [...dropSubscriptions]) stop();
   if (listenerRegistered) {
     window.removeEventListener("message", handleMessage);
     listenerRegistered = false;
@@ -278,9 +391,7 @@ export const vscodeRepoClient: RepoClient = {
       hostRequestListeners.delete(listener);
     };
   },
-  // VSCode handles what is dropped on its windows (#649): no drops reach the webview's app.
-  subscribeFileDrops: () => () => {},
-  readPatchFile: () => Promise.reject(new Error("Not supported in the VSCode extension")),
+  subscribeFileDrops: (listener: (event: FileDropEvent) => void) => subscribeDrops(listener),
   // The extension updates through VSCode (#1194).
   recoverFromFailedUpdate: () => Promise.reject(new Error("Not supported in the VSCode extension")),
   // Handled natively by the extension host (see `sidecarBridge.ts`'s `NATIVE_METHODS`), which

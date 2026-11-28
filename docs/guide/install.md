@@ -96,6 +96,15 @@ Enabled** setting (`browsitory.statusBar.enabled`).
 - **Show Commit in Browsitory**: right-click a commit in the **Timeline** view (in the Explorer)
   to select that commit in Browsitory's graph. Browsitory loads as much history as it needs, as
   [Go to commit…](history.md) does.
+- **Show in Browsitory** in the hover of a commit in VSCode's inline blame, the **Timeline** view
+  or the Source Control **Graph** does the same.
+
+??? note "Details: when the hover has no Show in Browsitory"
+    VSCode shows the hover links of only one extension. For a repository with a GitHub remote
+    that is VSCode's own GitHub extension (**Open on GitHub**), and an extension that adds hover
+    links and started before Browsitory keeps its links too. VSCode also adds no extension links
+    for commits you haven't pushed yet. If Browsitory's link hides another extension's links you
+    want, turn off the **Browsitory › Git Hover: Enabled** setting (`browsitory.gitHover.enabled`).
 
 ### Keyboard shortcuts in VSCode
 

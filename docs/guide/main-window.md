@@ -68,11 +68,16 @@ and in a group of their own. Where a key does the same outside the menu, it is s
 right of the item, such as `s` for **Stage 3 files** in the file list or **F2** for **Rename
 tab…**.
 
-**Dropping files** (desktop app). Drag a folder from your file manager onto the window to open it
+**Dropping files.** Drag a folder from your file manager onto the window to open it
 as a repository in a new tab, or a `.patch`, `.diff` or `.mbox` file to apply it to the current
 repository's working tree, as **Apply patch…** does. While you drag, the window says what a drop
 will do. Several items can be dropped at once; patches are applied in order and stop at the
 first one that doesn't apply.
+
+In VSCode, hold Shift while you drag a folder or patch file from VSCode's Explorer onto the
+Browsitory panel; without Shift, VSCode opens it in an editor. From your file manager you can
+drop patch files, but not folders: VSCode doesn't tell Browsitory where a folder dropped from
+there is, so Browsitory asks you to drag it from the Explorer instead.
 
 Drag the dividers between the columns to resize them. Double-click a divider to collapse the
 sidebar, and again to bring it back at its width. With a divider focused, the arrow keys resize
