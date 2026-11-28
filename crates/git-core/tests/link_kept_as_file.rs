@@ -189,3 +189,80 @@ fn a_skip_worktree_link_kept_as_file_differing_only_before_the_filters_does_not_
     assert_eq!(std::fs::read(d.join("l")).unwrap(), b"u\r\n");
     assert_eq!(git_out(d, &["ls-files", "-v", "l"]), "S l");
 }
+
+/// Stage stores the target through the clean filters, as `git add l` does. libgit2's CRLF filter
+/// leaves alone a file whose index entry isn't a regular file; git doesn't.
+#[test]
+fn staging_a_link_kept_as_file_stores_the_cleaned_target_as_git_does() {
+    let (dir, repo) = link_kept_as_file(b"t");
+    let d = dir.path();
+    std::fs::write(d.join("l"), "t\r\n").unwrap();
+    let (twin_dir, _twin) = twin(d);
+    git_ok(twin_dir.path(), &["add", "l"]);
+
+    git_core::stage::stage_file(&repo, "l").unwrap();
+
+    let expected = format!("120000 {} 0\tl", repo.blob(b"t\n").unwrap());
+    assert_eq!(git_out(twin_dir.path(), &["ls-files", "-s", "l"]), expected);
+    assert_eq!(git_out(d, &["ls-files", "-s", "l"]), expected);
+}
+
+/// The link `l` changed to `o` on `main` and to `x` on `side` (`core.symlinks` off, so each is a
+/// file holding its target), then `git merge side` with `core.autocrlf` on: `l` conflicts, every
+/// stage a link.
+fn conflicted_link_kept_as_file() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    let d = dir.path();
+    git_ok(d, &["config", "core.symlinks", "false"]);
+    write_file(d, "a.txt", "a\n");
+    git_ok(d, &["add", "a.txt"]);
+    let set_link = |target: &[u8], message: &str| {
+        let blob = repo.blob(target).unwrap();
+        git_ok(
+            d,
+            &[
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                &format!("120000,{blob},l"),
+            ],
+        );
+        git_ok(d, &["commit", "-q", "-m", message]);
+        git_ok(d, &["checkout", "--", "l"]);
+    };
+    set_link(b"t", "base");
+    git_ok(d, &["branch", "side"]);
+    set_link(b"o", "ours");
+    git_ok(d, &["checkout", "-q", "side"]);
+    set_link(b"x", "theirs");
+    git_ok(d, &["checkout", "-q", "-"]);
+    git_ok(d, &["config", "core.autocrlf", "true"]);
+    let merge = test_support::git(d, &["merge", "side"]);
+    assert!(!merge.status.success(), "{merge:?}");
+    let stages = git_out(d, &["ls-files", "-s", "l"]);
+    assert_eq!(stages.lines().count(), 3, "{stages}");
+    assert!(
+        stages.lines().all(|line| line.starts_with("120000 ")),
+        "{stages}"
+    );
+    drop(repo);
+    let repo = git2::Repository::open(d).unwrap();
+    (dir, repo)
+}
+
+/// Mark resolved stores the file through the clean filters, as `git add l` does, also when every
+/// stage of the conflict is a link (libgit2's CRLF filter looks at stage 1's mode).
+#[test]
+fn mark_resolved_of_a_link_conflict_kept_as_a_file_stores_the_cleaned_target_as_git_does() {
+    let (dir, repo) = conflicted_link_kept_as_file();
+    let d = dir.path();
+    std::fs::write(d.join("l"), "r\r\n").unwrap();
+    let (twin_dir, _twin) = twin(d);
+    git_ok(twin_dir.path(), &["add", "l"]);
+
+    git_core::merge::mark_resolved(&repo, "l", false).unwrap();
+
+    let expected = format!("120000 {} 0\tl", repo.blob(b"r\n").unwrap());
+    assert_eq!(git_out(twin_dir.path(), &["ls-files", "-s", "l"]), expected);
+    assert_eq!(git_out(d, &["ls-files", "-s", "l"]), expected);
+}
