@@ -26,6 +26,17 @@ moved, the log says why and the old folder is left as it was.
 
 Report problems on [GitHub](https://github.com/rene-langer/browsitory/issues).
 
+## Another Git program is using the repository
+
+git writes the index, a branch or the config by first creating a lock file next to it
+(`.git/index.lock`, `.git/refs/heads/main.lock`, `.git/config.lock`) and removing it when done.
+While another Git program (a terminal command, your editor's Git integration, another Git GUI)
+holds one, Browsitory can't write that file, and the error says "Another Git program is using the
+repository". Wait until the other program finishes, then try again. A program that crashed can
+leave its lock file behind: if no Git program is running, delete the file the error names (for
+the index, `index.lock` in the `.git` folder), then try again. A fetch, pull or push that stopped
+on a lock says the same; **Details** shows the file.
+
 ## "Couldn't show …"
 
 If a bug stops Browsitory from drawing a repository's tab, the tab shows "Couldn't show" with the

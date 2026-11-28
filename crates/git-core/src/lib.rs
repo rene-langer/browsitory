@@ -14,6 +14,7 @@ pub mod fold;
 pub mod forge;
 pub mod graph;
 mod hardlink;
+pub mod held_lock;
 pub mod history;
 pub mod hooks;
 mod index_marks;

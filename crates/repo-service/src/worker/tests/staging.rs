@@ -386,3 +386,43 @@ fn a_stage_that_failed_on_a_locked_index_is_not_applied_by_the_next_stage() {
         " M a.txt\nM  b.txt\n"
     );
 }
+
+/// #1033: a write that another Git program's `index.lock` stops reaches the transports as
+/// `ErrorKind::LockHeld`, decided from libgit2's error code in the worker; once the lock is gone
+/// the same request works.
+#[test]
+fn staging_while_another_program_holds_the_index_lock_answers_lock_held() {
+    use crate::wire::ErrorKind;
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a");
+    commit_all(&repo, "base");
+    write_file(dir.path(), "a.txt", "a, edited");
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let lock = repo.path().join("index.lock");
+    std::fs::write(&lock, "").unwrap();
+
+    let error = handle.stage_file("a.txt".into()).unwrap_err();
+
+    assert_eq!(error.kind, ErrorKind::LockHeld, "{}", error.message);
+    std::fs::remove_file(&lock).unwrap();
+    handle.stage_file("a.txt".into()).unwrap();
+}
+
+/// #1033: a branch whose ref another Git program holds locked can't be created: `LockHeld`.
+#[test]
+fn creating_a_branch_whose_ref_is_locked_answers_lock_held() {
+    use crate::wire::ErrorKind;
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a");
+    commit_all(&repo, "base");
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    std::fs::write(repo.path().join("refs/heads/feature.lock"), "").unwrap();
+
+    let error = handle
+        .create_branch("feature".into(), "HEAD".into(), false)
+        .unwrap_err();
+
+    assert_eq!(error.kind, ErrorKind::LockHeld, "{}", error.message);
+}

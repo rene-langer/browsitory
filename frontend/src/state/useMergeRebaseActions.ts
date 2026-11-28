@@ -114,7 +114,7 @@ export function useMergeRebaseActions(
         setState((prev) => ({ ...prev, dialog: withoutDialog(prev.dialog, "merge"), mergeOutcome: null }));
         const outcome: MergeOutcome = await client.mergeBranch(repoPath, branchName, options);
         setState((prev) => ({ ...prev, mergeOutcome: { branchName, outcome } }));
-      }, failedOperation.merge(branchName, options.fastForward === "Only")),
+      }, failedOperation.merge(branchName)),
     [client, runMutation, repoPath, setState],
   );
   const mergeBranch = useCallback(

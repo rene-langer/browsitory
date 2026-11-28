@@ -100,7 +100,7 @@ export type DiffSource = { "kind": "Unstaged" } | { "kind": "Staged", oldPath: s
 
 export type EditRest = "Commit" | "Discard";
 
-export type ErrorKind = "Other" | "WorkerStopped" | "CredentialStoreFailure" | "DirtyWorktree" | "PullFailed" | "Cancelled" | "AddDeleteConflict" | "InvalidSearchQuery" | "PermissionDenied" | "LocalChanges" | "MissingIdentity" | "RestLeft" | "DiffTooLarge" | "BlameUnavailable";
+export type ErrorKind = "Other" | "WorkerStopped" | "CredentialStoreFailure" | "DirtyWorktree" | "PullFailed" | "Cancelled" | "AddDeleteConflict" | "InvalidSearchQuery" | "PermissionDenied" | "LocalChanges" | "MissingIdentity" | "RestLeft" | "DiffTooLarge" | "BlameUnavailable" | "LockHeld" | "NotFastForward";
 
 export type ExternalToolSettings = { editor: string | null, terminal: string | null, };
 
@@ -478,7 +478,7 @@ export type TerminalSequence = { kind: SequenceKind, pausedOnConflict: boolean, 
 
 export type Trailer = { key: string, value: string, };
 
-export type TransferErrorKind = "NonFastForward" | "RejectedRemoteRef" | "StaleLease" | "MissingCredential" | "CredentialStoreFailure" | "SshAgentFailure" | "TransferFailed" | "Cancelled" | "HookFailed";
+export type TransferErrorKind = "NonFastForward" | "RejectedRemoteRef" | "StaleLease" | "MissingCredential" | "CredentialStoreFailure" | "SshAgentFailure" | "TransferFailed" | "Cancelled" | "HookFailed" | "LockHeld";
 
 export type TransferOperation = "Fetch" | "FetchAll" | "Pull" | "PushBranch" | "ForcePushBranch" | "PushTags" | "DeleteRemoteBranch" | "DeleteRemoteTag" | "Clone" | "BackgroundFetch";
 

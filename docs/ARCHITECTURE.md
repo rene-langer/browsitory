@@ -3362,7 +3362,8 @@ reporting on the first `list_operations`, so a session that never opens the log 
 is made (#527): the reply channels carry `Result<T, ErrorDto>`, and a handler turns a typed error
 into one with `ErrorDto::from_error`, which reads the kind from the error's type along its
 `source()` chain (`RemoteError::DirtyWorktree { .. }`, `MergeError::NotATextConflict`,
-`SearchError::InvalidQuery`, a credential store failure, an OS permission error), or builds it
+`MergeError::NotFastForward`, `SearchError::InvalidQuery`, a credential store failure, a held
+lock, an OS permission error), or builds it
 with a constructor (`ErrorDto::worker_stopped`, `ErrorDto::pull_failed`). Every `WorkerHandle`
 method goes through `WorkerHandle::request`, so a stopped worker always answers `WorkerStopped`.
 Text (`ErrorDto::from(String)`) is always `Other`: nothing reads the kind from a message.
@@ -3375,6 +3376,22 @@ typed producer, not a text check.
 kind, or a libgit2 `Os` error. libgit2 keeps no error number, so the latter is recognised by the
 system's own text for `EACCES`/`EPERM` (`ERROR_ACCESS_DENIED` on Windows) at the end of its
 message, as `io::Error` renders it.
+
+`LockHeld` (#1033) comes from `git_core::held_lock::is_lock_held`: a libgit2 error of code
+`Locked` along the chain whose lock is another Git program's lock file (`index.lock`, a ref's,
+`packed-refs.lock`, `config.lock`). libgit2 gives the same code to a file the system refused to
+remove or replace (`EACCES`, or on Windows a file another program holds open: "failed remove -
+'…' is locked") and to a worktree locked with `git worktree lock`, so only an error of class
+`Index` (the index's own message) or one naming a `.lock` file counts. A fetch's ref updates
+(`git_remote_update_tips`) answer any failure with code -1, so there a held lock is recognised by
+libgit2's lock message alone ("failed to lock file '…' for writing", class `Os`); a lock file
+libgit2 couldn't create for another reason ("failed to create locked file", no permission) is not
+held by anyone and doesn't count. The tests pin both against libgit2. It is checked after the
+typed kinds and before `PermissionDenied`. A transfer gets `TransferErrorKind::LockHeld` from the
+same function (`RemoteError::transfer_error_kind`): a fetch whose tracking ref is locked, a pull
+whose checkout can't lock the index. The frontend's next step for both says to wait for the other
+program, or to delete the leftover lock file when none runs; the message (or the operation log,
+for a transfer) names it.
 
 Errors Tauri raises before a command runs (an argument its generated wrapper can't deserialise,
 an unknown command, an ACL refusal) stay bare strings: they go through Tauri's own

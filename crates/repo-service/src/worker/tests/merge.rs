@@ -339,3 +339,34 @@ fn resolving_during_a_paused_merge_keeps_what_was_staged_outside() {
         "M  a.txt\nM  b.txt\nM  c.txt\n"
     );
 }
+
+/// #1033: a fast-forward-only merge of a diverged branch answers `NotFastForward` and changes
+/// nothing, as `git merge --ff-only` refuses it.
+#[test]
+fn a_fast_forward_only_merge_of_a_diverged_branch_answers_not_fast_forward() {
+    let (dir, repo) = diverged_feature_repo();
+    let head = repo.head().unwrap().target();
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+
+    let error = handle
+        .start_merge(
+            "feature".into(),
+            git_core::merge::MergeOptions {
+                fast_forward: git_core::merge::FastForward::Only,
+                squash: false,
+            },
+            no_events(),
+        )
+        .unwrap_err();
+
+    assert_eq!(
+        error.kind,
+        crate::wire::ErrorKind::NotFastForward,
+        "{}",
+        error.message
+    );
+    assert_eq!(repo.head().unwrap().target(), head);
+    let output = test_support::git(dir.path(), &["merge", "--ff-only", "feature"]);
+    assert!(!output.status.success(), "{output:?}");
+}

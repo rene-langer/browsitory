@@ -26,6 +26,9 @@ const HINTS: Partial<Record<RepoErrorKind, string>> = {
   InvalidSearchQuery: "Check the search for a typo, or a branch, tag or path that doesn't exist.",
   LocalChanges: "Commit or stash the changes to those files first, or use Stash and switch.",
   MissingIdentity: "Set your name and email for commits, then commit again.",
+  LockHeld:
+    "Another Git program is using the repository. Wait until it finishes, then try again. If none is running, delete the leftover lock file: index.lock in the .git folder, or the one the message names.",
+  NotFastForward: "The branches have diverged. Merge again without Fast-forward only, or rebase onto the branch first.",
 };
 
 export function describeError(err: unknown): DescribedError {
