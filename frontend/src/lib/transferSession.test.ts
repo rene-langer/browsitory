@@ -334,6 +334,10 @@ describe("transferFailureMessage", () => {
     ["Fetch", "TransferFailed", "Couldn't fetch. Check the remote's URL and your connection, then try again."],
     ["FetchAll", "RejectedRemoteRef", "Couldn't fetch. Check the remote's URL and your connection, then try again."],
     ["Clone", "TransferFailed", "Couldn't finish the transfer. Try again."],
+    // #1033: a lock file another Git program holds, whichever transfer it stopped.
+    ["Fetch", "LockHeld", "Couldn't fetch. Another Git program is using the repository. Wait until it finishes, then try again. If none is running, delete the leftover lock file shown in Details."],
+    ["Pull", "LockHeld", "Couldn't pull. Another Git program is using the repository. Wait until it finishes, then try again. If none is running, delete the leftover lock file shown in Details."],
+    ["PushBranch", "LockHeld", "Couldn't push. Another Git program is using the repository. Wait until it finishes, then try again. If none is running, delete the leftover lock file shown in Details."],
   ])("%s / %s → %s", (operation, errorKind, message) => {
     expect(transferFailureMessage(operation, errorKind, label)).toBe(message);
   });
@@ -404,6 +408,12 @@ describe("transferFailureMessage with what the transfer worked on", () => {
       pushTo(false),
       "Push was rejected because the remote has newer commits. Pull or reconcile history, then try again.",
     ],
+    [
+      "Pull",
+      "LockHeld",
+      { kind: "pull", target: "origin/main" },
+      "Couldn't pull from origin/main. Another Git program is using the repository. Wait until it finishes, then try again. If none is running, delete the leftover lock file shown in Details.",
+    ],
   ])("%s / %s on %o → %s", (operation, errorKind, subject, message) => {
     expect(transferFailureMessage(operation, errorKind, "origin/main", subject)).toBe(message);
   });
@@ -434,6 +444,12 @@ describe("fetchAllFailureMessage", () => {
       ),
     ).toBe(
       "Could not fetch from a, b. b: The operating-system credential store is unavailable. Unlock it and try again.",
+    );
+  });
+
+  it("adds the held lock's next step for a remote a lock stopped (#1033)", () => {
+    expect(fetchAllFailureMessage([{ remoteName: "origin", errorKind: "LockHeld" }], true)).toBe(
+      "Could not fetch from origin. The other remotes were fetched. origin: Another Git program is using the repository. Wait until it finishes, then try again. If none is running, delete the leftover lock file shown in Details.",
     );
   });
 });

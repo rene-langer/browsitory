@@ -3883,11 +3883,17 @@ pub enum ErrorKind {
     /// Blame refused a file over its size limit or a binary file (#1158); the blame view shows
     /// the message.
     BlameUnavailable,
+    /// Another Git program holds a lock file the request had to write (`index.lock`, a ref's or
+    /// the config's), #1033.
+    LockHeld,
+    /// A fast-forward-only merge refused because the branches have diverged (#1033).
+    NotFastForward,
 }
 
 impl ErrorKind {
     /// The kind of a typed error: from its type, or from the first error along its `source()`
-    /// chain that has one. Never from its text.
+    /// chain that has one; else a held lock or a permission error that libgit2 or the system
+    /// reported along it. Never from its text.
     pub fn of_error(error: &(dyn std::error::Error + 'static)) -> Self {
         let mut current = Some(error);
         while let Some(error) = current {
@@ -3896,7 +3902,9 @@ impl ErrorKind {
             }
             current = error.source();
         }
-        if git_core::os_error::is_permission_denied(error) {
+        if git_core::held_lock::is_lock_held(error) {
+            Self::LockHeld
+        } else if git_core::os_error::is_permission_denied(error) {
             Self::PermissionDenied
         } else {
             Self::Other
@@ -3932,8 +3940,12 @@ impl ErrorKind {
                 RemoteError::Cancelled => Some(Self::Cancelled),
                 _ => None,
             }
-        } else if let Some(MergeError::NotATextConflict(_)) = error.downcast_ref::<MergeError>() {
-            Some(Self::AddDeleteConflict)
+        } else if let Some(error) = error.downcast_ref::<MergeError>() {
+            match error {
+                MergeError::NotATextConflict(_) => Some(Self::AddDeleteConflict),
+                MergeError::NotFastForward(_) => Some(Self::NotFastForward),
+                _ => None,
+            }
         } else if let Some(SearchError::InvalidQuery { .. }) = error.downcast_ref::<SearchError>() {
             Some(Self::InvalidSearchQuery)
         } else if let Some(CredentialStoreError::Keychain(_)) =

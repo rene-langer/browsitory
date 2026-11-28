@@ -211,6 +211,9 @@ pub enum TransferErrorKind {
     Cancelled,
     /// The `pre-push` hook failed (or could not run); nothing was sent.
     HookFailed,
+    /// Another Git program holds a lock file the transfer had to write (a tracking ref's, the
+    /// index's), #1033.
+    LockHeld,
 }
 
 /// Stable callback marker used internally to classify a missing keychain token without sending
@@ -677,6 +680,7 @@ impl RemoteError {
             Self::Git(error) if error.message() == SSH_AGENT_FAILURE_ERROR => {
                 TransferErrorKind::SshAgentFailure
             }
+            _ if crate::held_lock::is_lock_held(self) => TransferErrorKind::LockHeld,
             _ => TransferErrorKind::TransferFailed,
         }
     }
@@ -2176,6 +2180,8 @@ fn push_outcome(pushed: Result<(), git2::Error>, state: &PushState) -> Result<()
         Some(TransferErrorKind::Cancelled) => unreachable!(),
         // A hook failure aborts negotiation, never a per-ref rejection.
         Some(TransferErrorKind::HookFailed) => unreachable!(),
+        // A held local lock fails the `push` call itself, never a per-ref rejection.
+        Some(TransferErrorKind::LockHeld) => unreachable!(),
         None => Ok(()),
     }
 }

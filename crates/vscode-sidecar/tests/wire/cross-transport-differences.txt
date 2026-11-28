@@ -155,6 +155,7 @@ TerminalSequence/undamaged key-order
 TransferProgress/Completed-Cancelled key-order
 TransferProgress/Completed-CredentialStoreFailure key-order
 TransferProgress/Completed-HookFailed key-order
+TransferProgress/Completed-LockHeld key-order
 TransferProgress/Completed-MissingCredential key-order
 TransferProgress/Completed-NonFastForward key-order
 TransferProgress/Completed-RejectedRemoteRef key-order
@@ -177,6 +178,7 @@ TransferProgress/Progress-PushTags-Receiving key-order
 TransferProgress/RemoteFailed-Cancelled key-order
 TransferProgress/RemoteFailed-CredentialStoreFailure key-order
 TransferProgress/RemoteFailed-HookFailed key-order
+TransferProgress/RemoteFailed-LockHeld key-order
 TransferProgress/RemoteFailed-MissingCredential key-order
 TransferProgress/RemoteFailed-NonFastForward key-order
 TransferProgress/RemoteFailed-RejectedRemoteRef key-order

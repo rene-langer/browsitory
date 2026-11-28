@@ -124,7 +124,8 @@ pub fn transfer_error_kinds() -> Vec<TransferErrorKind> {
         SshAgentFailure,
         TransferFailed,
         Cancelled,
-        HookFailed
+        HookFailed,
+        LockHeld
     })
 }
 
@@ -206,6 +207,21 @@ pub fn errors() -> Cases<repo_service::wire::ErrorDto> {
             "BlameUnavailableBinary",
             ErrorDto::from_error(git_core::blame::BlameError::Binary),
         ),
+        // libgit2's refusal while another Git program holds `index.lock`, as staging gets it.
+        case(
+            "LockHeld",
+            ErrorDto::from_error(git_core::stage::StageError::Index(git2::Error::new(
+                git2::ErrorCode::Locked,
+                git2::ErrorClass::Index,
+                "the index is locked; this might be due to a concurrent or crashed process",
+            ))),
+        ),
+        case(
+            "NotFastForward",
+            ErrorDto::from_error(git_core::merge::MergeError::NotFastForward(
+                "feature".into(),
+            )),
+        ),
     ];
     assert_every_variant!(
         cases
@@ -227,6 +243,8 @@ pub fn errors() -> Cases<repo_service::wire::ErrorDto> {
         ErrorKind::RestLeft,
         ErrorKind::DiffTooLarge,
         ErrorKind::BlameUnavailable,
+        ErrorKind::LockHeld,
+        ErrorKind::NotFastForward,
     );
     cases
 }

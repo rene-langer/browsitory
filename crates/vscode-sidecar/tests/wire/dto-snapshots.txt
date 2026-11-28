@@ -165,6 +165,7 @@ TransferProgress/RemoteFailed-SshAgentFailure {"current":0,"errorKind":"SshAgent
 TransferProgress/RemoteFailed-TransferFailed {"current":0,"errorKind":"TransferFailed","hookOutput":null,"message":null,"operation":"FetchAll","operationId":"op-2","phase":"RemoteFailed","receivedBytes":0,"remoteName":"backup","total":0}
 TransferProgress/RemoteFailed-Cancelled {"current":0,"errorKind":"Cancelled","hookOutput":null,"message":null,"operation":"FetchAll","operationId":"op-2","phase":"RemoteFailed","receivedBytes":0,"remoteName":"backup","total":0}
 TransferProgress/RemoteFailed-HookFailed {"current":0,"errorKind":"HookFailed","hookOutput":null,"message":null,"operation":"FetchAll","operationId":"op-2","phase":"RemoteFailed","receivedBytes":0,"remoteName":"backup","total":0}
+TransferProgress/RemoteFailed-LockHeld {"current":0,"errorKind":"LockHeld","hookOutput":null,"message":null,"operation":"FetchAll","operationId":"op-2","phase":"RemoteFailed","receivedBytes":0,"remoteName":"backup","total":0}
 TransferProgress/Completed-ok {"current":0,"errorKind":null,"hookOutput":null,"message":null,"operation":"Pull","operationId":"op-2","phase":"Completed","receivedBytes":0,"total":0}
 TransferProgress/Completed-NonFastForward {"current":0,"errorKind":"NonFastForward","hookOutput":null,"message":null,"operation":"PushBranch","operationId":"op-2","phase":"Failed","receivedBytes":0,"total":0}
 TransferProgress/Completed-RejectedRemoteRef {"current":0,"errorKind":"RejectedRemoteRef","hookOutput":null,"message":null,"operation":"PushBranch","operationId":"op-2","phase":"Failed","receivedBytes":0,"total":0}
@@ -175,6 +176,7 @@ TransferProgress/Completed-SshAgentFailure {"current":0,"errorKind":"SshAgentFai
 TransferProgress/Completed-TransferFailed {"current":0,"errorKind":"TransferFailed","hookOutput":null,"message":null,"operation":"PushBranch","operationId":"op-2","phase":"Failed","receivedBytes":0,"total":0}
 TransferProgress/Completed-Cancelled {"current":0,"errorKind":"Cancelled","hookOutput":null,"message":null,"operation":"PushBranch","operationId":"op-2","phase":"Failed","receivedBytes":0,"total":0}
 TransferProgress/Completed-HookFailed {"current":0,"errorKind":"HookFailed","hookOutput":"rejected\n","message":null,"operation":"PushBranch","operationId":"op-2","phase":"Failed","receivedBytes":0,"total":0}
+TransferProgress/Completed-LockHeld {"current":0,"errorKind":"LockHeld","hookOutput":null,"message":null,"operation":"PushBranch","operationId":"op-2","phase":"Failed","receivedBytes":0,"total":0}
 SequenceProgress/CherryPick {"currentCommit":"cccccccccccccccccccccccccccccccccccccccc","currentStep":2,"kind":"CherryPick","totalSteps":3}
 SequenceProgress/Revert {"currentCommit":"cccccccccccccccccccccccccccccccccccccccc","currentStep":2,"kind":"Revert","totalSteps":3}
 RebaseInfo/Paused {"branch":"topic","currentStep":1,"editing":null,"health":{"kind":"Paused"},"onto":"dddddddddddddddddddddddddddddddddddddddd","splitParts":0,"totalSteps":4}
@@ -287,3 +289,5 @@ RepoErrorPayload/RestLeft {"kind":"RestLeft","message":"c.txt has changes that a
 RepoErrorPayload/DiffTooLarge {"kind":"DiffTooLarge","message":"This file is 25.3 MB, over the 20 MB diff limit, so its diff isn't loaded."}
 RepoErrorPayload/BlameUnavailable {"kind":"BlameUnavailable","message":"This file is 25.3 MB, over the 20 MB blame limit, so it isn't blamed."}
 RepoErrorPayload/BlameUnavailableBinary {"kind":"BlameUnavailable","message":"This file is binary, so it has no line-by-line blame."}
+RepoErrorPayload/LockHeld {"kind":"LockHeld","message":"failed to update the index: the index is locked; this might be due to a concurrent or crashed process; class=Index (10); code=Locked (-14)"}
+RepoErrorPayload/NotFastForward {"kind":"NotFastForward","message":"Can't fast-forward: 'feature' has diverged from the current branch."}

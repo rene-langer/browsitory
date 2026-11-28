@@ -758,6 +758,61 @@ fn a_cancelled_fetch_is_not_reported_as_a_generic_transfer_failure() {
     );
 }
 
+/// #1033: a fetch that can't update a tracking ref because another Git program holds its lock
+/// is `LockHeld`, not a transport failure; `git fetch` refuses alike.
+#[test]
+fn a_fetch_stopped_by_a_held_tracking_ref_lock_is_lock_held() {
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit_without_fetch("remote change");
+    let tracking = fixture
+        .local
+        .refname_to_id("refs/remotes/origin/main")
+        .unwrap();
+    let lock = fixture.local.path().join("refs/remotes/origin/main.lock");
+    std::fs::create_dir_all(lock.parent().unwrap()).unwrap();
+    std::fs::write(&lock, "").unwrap();
+    let mut reporter = VecReporter::default();
+
+    let result = fetch_remote(
+        &fixture.local,
+        "origin",
+        None,
+        "fetch-locked".to_string(),
+        &mut NoCredentials,
+        &mut reporter,
+        &|| false,
+    );
+
+    assert_eq!(
+        result.unwrap_err().transfer_error_kind(),
+        TransferErrorKind::LockHeld
+    );
+    assert_eq!(
+        fixture
+            .local
+            .refname_to_id("refs/remotes/origin/main")
+            .unwrap(),
+        tracking
+    );
+    let output = test_support::git(fixture.local_dir.path(), &["fetch", "origin"]);
+    assert!(!output.status.success(), "{output:?}");
+}
+
+/// #1033: a pull whose fast-forward can't write the index because another Git program holds its
+/// lock is `LockHeld`.
+#[test]
+fn a_pull_stopped_by_a_held_index_lock_is_lock_held() {
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit("remote change");
+    let head = fixture.local.head().unwrap().target();
+    std::fs::write(fixture.local.path().join("index.lock"), "").unwrap();
+
+    let error = pull_after_fetch(&fixture.local, "origin", "main").unwrap_err();
+
+    assert_eq!(error.transfer_error_kind(), TransferErrorKind::LockHeld);
+    assert_eq!(fixture.local.head().unwrap().target(), head);
+}
+
 #[test]
 fn fetch_from_an_unreachable_remote_fails_without_creating_a_tracking_ref() {
     // A bad transport must surface as an error, not panic or silently create refs.

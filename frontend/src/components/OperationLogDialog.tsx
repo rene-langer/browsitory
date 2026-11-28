@@ -48,6 +48,7 @@ const TRANSFER_ERROR: Record<TransferErrorKind, string> = {
   TransferFailed: "The transfer failed",
   Cancelled: "Cancelled",
   HookFailed: "The pre-push hook failed",
+  LockHeld: "Another Git program held a lock file",
 };
 
 /** A cancel is the user's own doing, not a failure. */
