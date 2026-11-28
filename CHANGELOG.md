@@ -6,6 +6,241 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-28
+
+0.18.0 fixes the remaining findings of the app audit: staging and file names with pattern
+characters, rebases and merges of commits that are already upstream or whose messages aren't
+UTF-8, files under merge drivers, sparse checkouts in merges, switches and pulls, settings saved
+from several windows at once, and keyboard, focus and screen reader use. Changes in behaviour to
+know about:
+
+- Each VSCode window keeps its own Browsitory tabs; the first time you open Browsitory in a
+  window after the update, it restores no tabs there.
+- Starting the desktop app while it runs brings its window to the front instead of opening a
+  second copy.
+- A rebase or pull with rebase leaves out commits that are already upstream, as `git rebase`
+  does, instead of keeping them as empty commits.
+- A conflicted file under a custom merge driver, `-merge` or `merge=binary` stays conflicted
+  and holds your side; Browsitory doesn't run merge driver programs.
+- A file with a `working-tree-encoding` attribute is refused for stage, discard and checkout.
+- Pull refuses only when a file it changes has local changes, as `git pull` does.
+- Browsitory's undo references hold copies of uncommitted and discarded files and travel with
+  a mirror push: **Clear undo history…** removes them.
+
+### Index, paths and attributes
+
+- Fixed: Unstaging a file whose name holds `[`, `]`, `*` or `?` (`pages/[id].tsx`, a Next.js or
+  SvelteKit route) also unstaged every staged file the name matched as a pattern, so the next
+  commit silently left them out. File names are now always taken as names (#1148).
+- Fixed: **Ignore file**, **Ignore folder**, **Ignore all \*.ext** and a selection's **Ignore**
+  wrote such a name into `.gitignore` as it is, so the line ignored other files and not the one
+  picked. The characters `.gitignore` reads as a pattern (`[`, `*`, `?`, `\`, trailing spaces)
+  now get a backslash (#1168).
+- Fixed: **Stage all**, **Unstage all**, **Discard all…** and the actions on a selection wrote
+  the whole index or scanned the whole work tree once per file: minutes in a large repository
+  with many changes. They now do it once for all files (#1155).
+- Fixed: A file with a `working-tree-encoding` attribute
+  (`*.ps1 working-tree-encoding=UTF-16LE-BOM`) was staged as raw UTF-16 and checked out as
+  UTF-8. Browsitory can't convert it, so, like a file under Git LFS or git-crypt, it now refuses
+  to stage, discard or check such a file out, names the encoding in the Changes list's notice and
+  marks the file (#1156).
+- Fixed: A status read that was killed (a crash, `kill -9`) left a `browsitory-index-refresh-*`
+  folder with a copy of the index in `.git` for good. The next status read removes such folders
+  once no running process owns them (#1162).
+- Fixed: A file added with `git add -N` was shown as untracked: **Delete** emptied it instead of
+  deleting it, and **Stage modified** left it out. It is now shown as git does (**A**, added but
+  not staged), **Stage modified** stages it as `git add -u` does, and **Discard changes…** says
+  that it empties the file, as `git restore` does, which no longer stages the emptied file
+  (#1173).
+
+### Rebase, cherry-pick, merge and commit messages
+
+- Fixed: a rebase (and so Edit commit…, Split commit…, Drop commit and a pull with rebase)
+  replayed a commit whose message isn't UTF-8 (written under another `i18n.commitEncoding`,
+  converted from SVN or CVS) with an empty message; cherry-pick, revert and Fold staged changes
+  replaced its non-ASCII characters. They now keep the message in UTF-8 as git does, reading
+  ISO-8859-1 and Windows-1252 by the commit's `encoding` header. A paused cherry-pick of such a
+  commit no longer crashes the app's backend when its message is read (#1149).
+- Fixed: a rebase and a pull with rebase kept commits that are already upstream (cherry-picked,
+  rebased by a pull request) as empty commits, which then showed as to push. As `git rebase`,
+  they are now left out, and a commit that becomes empty is dropped, also when you resolve its
+  conflict to nothing and continue; a commit empty from the start is kept (#1150).
+- Fixed: a file whose `merge` attribute names a custom merge driver (`merge=ours` with
+  `merge.ours.driver`, lock file mergers) was silently merged as text. Browsitory doesn't run
+  driver programs: when both sides changed such a file, a merge, pull, cherry-pick, revert,
+  rebase or stash apply now leaves it conflicted, and the Changes pane names the driver (#1165).
+- Fixed: a commit whose message is stored in another encoding than UTF-8 (`i18n.commitEncoding`,
+  a repository converted from SVN or CVS) showed an empty subject in the graph, the rebase
+  planner and the reflog, and a garbled one in the commit header, a squash merge's message,
+  Export as patch and a file/folder conflict's file name; each now reads it as git does. The
+  reflog no longer fails to load when git wrote such a subject into it, and the stash list no
+  longer comes up empty after a stash on such a commit (#1203).
+- Fixed: a conflicted file marked `-merge` or `merge=binary` (or `binary`, as lock files often
+  are), or under a custom merge driver, held both sides merged as text, so it could look merged
+  and Mark resolved staged that text merge. Like git, it now holds your side, and the conflict
+  view still shows both (#1204).
+- Fixed: a failed **Abort cherry-pick** or **Abort revert** showed only Git's text; the banner now
+  names the operation and the next step, as for Abort merge and Abort rebase (#1205).
+
+### Sparse checkouts in merges and switches, and Pull with local changes
+
+- Fixed: in a sparse checkout, merging, cherry-picking, reverting or rebasing a commit that
+  changes a file outside the chosen folders was refused ("uncommitted change would be
+  overwritten"), and a file it added there was written to disk. The changed file now keeps its
+  new version in the index without being written, a new one isn't written either, and a conflict
+  in such a file is written with its markers so it can be resolved, as with `git merge` (#1185).
+- Fixed: in a sparse checkout, switching to a branch (or checking out a commit) that changes a
+  file outside the chosen folders was refused as "local changes", and one that added a file there
+  wrote it to disk; both now work as `git switch` does. A refused switch no longer names the
+  missing files outside the folders (#1191).
+- Fixed: Pull refused whenever any file was changed or untracked, even when the pull wouldn't
+  touch it, and always in a sparse checkout. As with `git pull`, it now refuses only when a file
+  it changes has local changes or an untracked file is in its way, and names those files; Undo of
+  the pull keeps your local changes (#1152).
+
+### Clone, pull requests, reflog and undo history
+
+- Added: **Clear undo history…** in the command palette removes the open repository's undo and
+  redo history and the Git references that keep its snapshots, after a confirmation. The
+  privacy notice and the undo guide now say that those references hold copies of uncommitted,
+  untracked and discarded files, and that a mirror push, a bundle of all refs or a mirror clone
+  copies them (#1123).
+- Fixed: Clone and Update submodule no longer crash when `merge.conflictstyle` is written
+  without a value in your own, the system's or the submodule's Git config; they say which
+  setting to fix and where, and change nothing. Other commands now name your global or the
+  system's config when the setting is there (#1189).
+- Fixed: **Cancel clone** stops a clone within a few seconds even while the server sends
+  nothing (still connecting, preparing a big repository, or the network gone); what it
+  downloaded is removed once its connection ends (#1159).
+- Fixed: Listing pull requests no longer holds the repository's status, history and other
+  commands while GitHub or Bitbucket doesn't answer, and creating one no longer holds the
+  status and history; an unreachable forge fails after 10 s instead of 30 s (#1160).
+- Fixed: The Reflog section reads the newest 200 entries, with **Load more** for older ones, and
+  reads them again only when a branch, tag or HEAD moves, not after every staging click (#1161).
+
+### Settings file, the desktop app process and updating
+
+- Fixed: Settings, recent repositories and tabs saved at the same moment no longer overwrite each
+  other: at the start with several restored tabs, between two requests of a VSCode window, or
+  between the desktop app and a VSCode window. A `config.toml` that is a link (for example into
+  a dotfiles folder) stays a link (#1127).
+- Fixed: An older Browsitory no longer deletes settings a newer one saved in the shared
+  `config.toml`, and a setting value it doesn't know costs that setting, not every setting and
+  the restored tabs (#1137).
+- Fixed: Starting the desktop app while it runs brings its window to the front instead of
+  starting a second copy on the same tabs, settings and log file (#1136).
+- Fixed: On Windows, **Restart to update** waits for a running change in a repository to finish,
+  so it leaves no Git lock file behind (#1131).
+- Fixed: with the desktop app and VS Code windows saving settings at once on a slow disk, a save
+  could undo another one or fail: a save waited at most 5 s for the others, however many of
+  them still finished in that time. It now waits as long as they keep finishing (#1212).
+- Fixed: On Windows, when **Restart to update** can't start the installer (for example when you
+  decline the permission prompt), the window comes back and the notice says why, with a
+  **Restart Browsitory** button. Before, the app kept running with its window hidden and its
+  repositories stopped, and showed no error (#1194).
+
+### VSCode extension: tabs per window, sidecar restarts and remote windows
+
+- Changed: each VSCode window keeps its own Browsitory tabs. The desktop app and every VSCode
+  window used to share one list of open tabs and overwrite each other's. The first time you open
+  Browsitory in a window after this update, it restores no tabs there; **Browsitory: Open** opens
+  the workspace's repositories as before, and the desktop app keeps its tabs (#1128).
+- Fixed: after its helper process restarted, Browsitory reopened the tabs another window or the
+  desktop app had saved last, and requests for this window's tabs failed with "repo not open"
+  (#1128).
+- Fixed: reloading or closing a VSCode window while Browsitory switched branches, staged many
+  files or wrote the index could cut that write off halfway, leaving thousands of files shown as
+  changed. The helper process now finishes the running requests first, for up to 5 seconds, and
+  no longer stays behind when one doesn't end (#1129).
+- Fixed: after its helper process restarted, Browsitory no longer noticed changes made outside
+  it at once, only every 30 seconds, until the panel was reopened (#1130).
+- Fixed: an open diff or merge editor kept showing the old index, last commit or conflict side
+  after you staged, committed or resolved; it now shows the current one (#1132).
+- Fixed: in remote windows (WSL, Remote - SSH, Dev Containers), **Open in Browsitory**, **Show
+  File History in Browsitory** and **Show Line History in Browsitory** were missing from the
+  Explorer and editor menus and the Command Palette. The guide now says that remote windows work
+  and that Browsitory shows its built-in shortcut keys there (#1134).
+
+### Tabs, menus and error messages
+
+- Fixed: A failed stage, branch delete, new worktree or other action shown at once undoes only
+  its own change. A fetch that finished meanwhile no longer shows as running for good, and a
+  commit selected meanwhile stays selected (#1115).
+- Fixed: A notification from a tab that isn't shown starts with that tab's name, and its Pull,
+  Push, Undo, Redo and Show output first show that tab, then act there. A fetch, pull or push
+  that fails in a hidden tab says so in a notification. Closing a tab closes its notifications
+  that have buttons, and a hidden tab's command output or operation log no longer leaves the
+  window unresponsive (#1116).
+- Fixed: An open commit search, file history, remote branch list and branch compare start again
+  only when the history changed, not on every saved or staged file. A search that does start
+  again keeps its results on screen until the new ones are in (#1118).
+- Fixed: On a detached HEAD, the commit menu's rebase items, a multi-selection's Interactive
+  rebase, Squash, Fixup and Drop, **Push current branch to ⟨remote⟩** and **Set as upstream for
+  current branch** are disabled and say "Check out a branch first." instead of failing (#1119).
+- Fixed: The current branch's **Delete** is disabled and says "Switch to another branch first."
+  instead of failing (#1120).
+- Fixed: A failed stage, unstage, discard, restore, ignore, conflict resolution, remote,
+  credential, upstream, graph branch choice and pull request connection says what failed and
+  what to do next, not only Git's own text (#1122).
+- Fixed: A failed **Create tag** or **New worktree** shows in its dialog only, without the same
+  error in the banner behind it; a branch the branch switcher can't create shows in the banner
+  only, not also as a success notification (#1124).
+- Added: The commit message you are writing is kept per repository when the app quits, the
+  VSCode panel closes or the window is reloaded, until you commit or clear it (#1143).
+- Changed: The syntax highlighting cache is limited by the size of the code it holds (about
+  25 MB), not by its number of entries (#1163).
+
+### Keyboard, focus and accessibility
+
+- Fixed: Undo, Redo, Close tab, Reopen closed tab, Back/Forward, the sidebar toggle, the shortcut
+  sheet and the command palette's shortcut ran behind an open dialog or menu; Ctrl/Cmd+Z in a
+  confirmation undid the last Git operation behind it. In the palette its own key still closes it
+  (#1117).
+- Fixed: Backspace, Delete, Home, End, Page Up and Page Down on their own can no longer be given to
+  a shortcut, and with a modifier they stay with a text field, so typing keeps working (#1142).
+- Fixed: the multi-selection's "Squash N commits…", "Fixup N commits…" and "Drop N commits…" end
+  in "…", since they open the rebase planner; the Reflog's Restore confirmation says why it is
+  disabled when the repository is busy (#1133).
+- Fixed: with several repository tabs open, the Commit button's reason and the New branch form's
+  label could come from a hidden tab; every element id is now unique (#1135).
+- Fixed: in a diff, the keyboard's line cursor scrolls into view as ↑/↓ move it, so s and d never
+  act on lines off screen (#1138).
+- Fixed: a screen reader reads the commit you move to in the commit history, the file history and
+  the search results (#1139).
+- Fixed: diff line numbers, a file's line numbers, the tabs' close ×, a file row's stage and
+  unstage buttons and the error banner's next step were faded below the theme's contrast; they now
+  use the muted text colour at full strength (#1140).
+- Fixed: deleting a tag, worktree or branch from its menu left the keyboard focus at the top of
+  the window; it moves to the row now in that place, and a notification's Undo or Dismiss returns
+  the focus to where it was (#1141).
+- Fixed: a drag (rebase planner rows, commits, branches) that began right after the view
+  changed could act on the view from before the change; the rebase planner then announced
+  nothing when the drag started (#1207).
+
+### Internal: test and CI infrastructure
+
+- Fixed: local runs of both E2E suites, the VSIX smoke test and the extension's real-sidecar
+  test no longer read the developer's global git config, GnuPG home or SSH agent: they run with
+  a throwaway HOME, XDG dirs, `GIT_CONFIG_GLOBAL` and `GNUPGHOME`, without `SSH_AUTH_SOCK` or
+  inherited `GIT_*` variables (#1112).
+- Fixed: Rust tests that need `gpg`, `ssh-keygen`, `ssh-agent`, `ssh-add`, the git CLI or Git for
+  Windows' `sh.exe` fail on CI when it is missing instead of passing without running; locally
+  they still skip, now with a visible note (`test_support::require_tool`) (#1113).
+- Fixed: `scripts/check-license-compliance.py` also checks the direct dependencies declared in
+  platform-specific `[target.'cfg(...)'.*]` tables, and has unit tests (#1114).
+- Fixed: two E2E runs of the same suite at once (two worktrees) no longer delete each other's
+  fixtures: each run takes a lock in the temp folder before it resets them, and a second run
+  stops at once, naming the first; the Tauri suite also checks its driver ports up front (#1144).
+- Fixed: six E2E specs' comments no longer say the stage control is transparent until hovered,
+  which it hasn't been since #648 (#1199).
+- Internal: the mutants comment says no mutants were generated, not that mutation testing
+  didn't run, when a pull request changes only test code in `src/` (#1201).
+- Internal: the Linux CI jobs' apt installs read only the Ubuntu archive's sources, so a
+  refusing third-party source on the runner (packages.microsoft.com) no longer fails them
+  (#1211).
+- Internal: the tokenizer test compares chunked and whole tokens without Shiki's per-line time
+  limit, which cut the cold first line short on a loaded machine (#1210).
+
 ## [0.17.0] - 2026-11-26
 
 0.17.0 fixes data loss and crashes found in an audit of the app: in sparse checkouts and with
