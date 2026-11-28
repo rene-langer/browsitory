@@ -3188,7 +3188,12 @@ its marketplace, the desktop app through its own updater.
   of 25 writes kept the lock past 5 s, and the waiters then wrote unlocked and undid writes.
   Getters read without the lock: the write replaces the file atomically (a
   temp file, synced, then renamed). A symlinked `config.toml` is resolved first, so the link
-  stays and the file it points to is replaced.
+  stays and the file it points to is replaced. The rename is std's `fs::rename`
+  (`replace.rs`, #1219), not `tempfile`'s `persist`: on Windows `MoveFileExW` refuses to replace
+  a file that a getter in another window has open, and std then renames with POSIX semantics
+  (`FileRenameInfoEx`), which replaces a file opened with `FILE_SHARE_DELETE`, as std opens every
+  file. A refusal that still comes (a handle without that share mode, from another program, or a
+  file system without POSIX renames) is retried for up to 2 s.
 - **What this version doesn't know stays (#1137).** `update_config` also reads the file as a
   plain TOML table, and `compat::merge` writes that table back with only the change from the
   struct as read to the struct after the setter: a key the setter dropped is removed, a changed

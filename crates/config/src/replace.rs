@@ -15,7 +15,6 @@ use std::time::{Duration, Instant};
 const WAIT: Duration = Duration::from_secs(2);
 
 /// Renames `from` onto `to`, replacing it.
-#[allow(dead_code)]
 pub(crate) fn replace(from: &Path, to: &Path) -> io::Result<()> {
     retrying(|| std::fs::rename(from, to), is_sharing_conflict, WAIT)
 }
