@@ -105,6 +105,16 @@ export function commandTargetPath(argument: unknown): string | undefined {
   return uri.scheme === "file" && typeof uri.fsPath === "string" ? uri.fsPath : undefined;
 }
 
+/**
+ * The path of a URI dropped from VSCode's Explorer on the panel (#818), when it names a file of
+ * the extension host's file system: the window writes a remote window's files as
+ * `vscode-remote:` URIs, and a `file:` URI there is a file of the machine VSCode runs on.
+ */
+export function droppedPath(uri: { scheme: string; fsPath: string }, remoteWindow: boolean): string | undefined {
+  const hostScheme = remoteWindow ? "vscode-remote" : "file";
+  return uri.scheme === hostScheme ? uri.fsPath : undefined;
+}
+
 /** The shortcut commands' prefix: `browsitory.shortcut.<id>` runs the global shortcut `<id>`. */
 export const SHORTCUT_COMMAND_PREFIX = "browsitory.shortcut.";
 

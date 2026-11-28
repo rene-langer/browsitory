@@ -242,6 +242,30 @@ describe("dropping files on the window (#649)", () => {
     await waitFor(() => expect(openRepo).toHaveBeenCalledWith("/repos/b"));
     expect(openRepo).not.toHaveBeenCalledWith("/home/me/fix.patch");
   });
+
+  // The VSCode webview gets files from the file manager as content, without a path (#818).
+  it("applies a patch dropped without a path and says why a folder dropped that way doesn't open", async () => {
+    const openRepo = vi.fn(async () => {});
+    const content = { base64: "ZGlmZg==" };
+    const readPatchFile = vi.fn(async () => content);
+    const applyPatch = vi.fn(async () => ({ kind: "Applied" as const }));
+    const { client, emit } = dropClient({ openRepo, readPatchFile, applyPatch });
+    await renderApp(client);
+    openRepo.mockClear();
+    const patch = { name: "fix.patch", read: vi.fn(async () => content) };
+    const folder = { name: "repo", read: vi.fn(async () => content) };
+    emit({ kind: "drop", paths: [], files: [patch, folder] });
+    await waitFor(() => expect(applyPatch).toHaveBeenCalledWith("/repos/a", content, "WorkTree"));
+    expect(patch.read).toHaveBeenCalledOnce();
+    expect(folder.read).not.toHaveBeenCalled();
+    expect(readPatchFile).not.toHaveBeenCalled();
+    expect(openRepo).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText(
+        "VSCode doesn't pass Browsitory the location of repo from the file manager. Hold Shift and drag it from VSCode's Explorer to open it.",
+      ),
+    ).toBeInTheDocument();
+  });
 });
 
 describe("the current-branch switcher (#638)", () => {
