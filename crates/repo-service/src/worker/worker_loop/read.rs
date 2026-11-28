@@ -61,6 +61,7 @@ impl TransferHost for Host<'_> {
                 self.deferred.push_back(command);
                 continue;
             }
+            reload_core_settings(self.repo);
             if let Some(command) = dispatch(self.repo, &mut self.state, command) {
                 // `policy` and `dispatch` disagree; run it after the transfer instead.
                 debug_assert!(false, "a read-lane command `dispatch` doesn't handle");
@@ -74,6 +75,15 @@ impl TransferHost for Host<'_> {
 }
 
 /// Runs `command` if it is one of the read lane's (`None`), or hands it back.
+/// Before each command: a `git config` run in a terminal since the last one counts (#904). It
+/// sets no file, so it fails only when libgit2 can't allocate; the command then runs with the
+/// settings it had.
+pub(super) fn reload_core_settings(repo: &Repository) {
+    if let Err(error) = git_core::repo::reload_core_settings(repo) {
+        eprintln!("browsitory: could not reload the core settings: {error}");
+    }
+}
+
 pub(super) fn dispatch(
     repo: &mut Repository,
     state: &mut ReadState<'_>,

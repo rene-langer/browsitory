@@ -479,8 +479,8 @@ fn build_squash_message(repo: &Repository, their_id: git2::Oid) -> Result<String
         message.push_str(&format!(
             "\ncommit {}\nAuthor: {} <{}>\n\n",
             commit.id(),
-            String::from_utf8_lossy(author.name_bytes()),
-            String::from_utf8_lossy(author.email_bytes()),
+            crate::message_text::name(&commit, &author),
+            crate::message_text::email(&commit, &author),
         ));
         let body = crate::message_text::message(&commit);
         for line in body.trim_end_matches('\n').lines() {

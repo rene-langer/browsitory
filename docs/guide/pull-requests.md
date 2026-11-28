@@ -22,3 +22,9 @@ which forgets the token and hides the list.
 
 The section lists nothing until the repository has a GitHub or Bitbucket remote. Add one with
 **Add remote…** in the **+** menu of the Branches section.
+
+??? note "Details"
+
+    A remote whose https URL holds a user name (Bitbucket's copy URL,
+    `https://alice@bitbucket.org/ws/r.git`) gets a card; the user name is neither shown nor sent.
+    A remote whose URL holds a password, or a GitHub token in place of the user name, gets none.

@@ -50,9 +50,11 @@ cherry-pick** and **Abort cherry-pick** (or revert) in the status strip.
     Files that the commit you reset to adds outside a sparse checkout's folders are marked too,
     as `git reset` marks them: they aren't written to disk and aren't listed as deleted. The
     same for the files **Abort** of a merge, cherry-pick, revert or rebase, and **Undo**, put
-    back. With patterns set by `git sparse-checkout set --no-cone`, which Browsitory doesn't
-    match, each such file that isn't on disk counts as outside; `git sparse-checkout reapply`
-    brings in the ones your patterns hold. Cherry-pick, revert and rebase leave the files outside
+    back. Patterns set by `git sparse-checkout set --no-cone` are matched as git matches them.
+    **Reset** with **Hard**, and **Abort** of a rebase, also apply the sparse checkout to every
+    other file, as git does: a file outside it that is on disk is marked and taken off the disk,
+    and a marked file inside it is written again. A marked file with local edits stays as it is.
+    Cherry-pick, revert and rebase leave the files outside
     a sparse checkout out too, as merging does (see
     [Branches and remotes](branches-and-remotes.md#merging)).
 

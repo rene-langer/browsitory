@@ -106,8 +106,8 @@ impl RefDecorations {
         GraphCommit {
             short_id: id[..7].to_string(),
             summary: crate::message_text::summary(commit),
-            author_name: commit.author().name().ok().unwrap_or_default().to_string(),
-            author_email: commit.author().email().ok().unwrap_or_default().to_string(),
+            author_name: crate::message_text::name(commit, &commit.author()),
+            author_email: crate::message_text::email(commit, &commit.author()),
             timestamp: commit.time().seconds(),
             parent_ids: commit.parent_ids().map(|p| p.to_string()).collect(),
             branch_refs: self.local.get(&oid).cloned().unwrap_or_default(),

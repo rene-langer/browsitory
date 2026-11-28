@@ -43,7 +43,8 @@ pub mod root_file;
 pub mod search;
 pub mod sequence_file;
 pub mod signing;
-mod sparse;
+#[doc(hidden)]
+pub mod sparse;
 pub mod stage;
 pub mod stash;
 pub mod status;
@@ -54,6 +55,7 @@ pub mod undo;
 mod untracked;
 pub mod user_command;
 mod valueless_setting;
+mod wildmatch;
 pub mod worktree;
 pub(crate) mod worktree_guard;
 pub use external_filter::ExternalFilter;

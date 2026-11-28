@@ -3,7 +3,15 @@
 //! has its file under `.git/worktrees/<name>/`). libgit2 knows nothing of it (#1172).
 
 use std::collections::HashSet;
-use std::path::Path;
+
+use crate::wildmatch::{is_glob_special, wildmatch, Flags};
+
+/// Whether the sparse checkout of `repo`'s work tree leaves the file `path` (`/`-separated) out.
+/// A test seam (#1187): the tests compare it with the marks git sets for many patterns.
+#[doc(hidden)]
+pub fn leaves_out(repo: &git2::Repository, path: &str) -> Result<bool, git2::Error> {
+    Ok(Sparse::read(repo)?.excludes(path.as_bytes()))
+}
 
 /// Which paths a work tree's sparse checkout holds.
 #[derive(Debug, PartialEq, Eq)]
@@ -12,8 +20,8 @@ pub(crate) enum Sparse {
     Off,
     /// Cone mode, with patterns of the cone format.
     Cone(Cone),
-    /// Other patterns (gitignore-style), which aren't matched here.
-    Patterns,
+    /// Other patterns (gitignore-style).
+    Patterns(Patterns),
 }
 
 /// Cone-mode patterns as git's hash sets hold them (`add_pattern_to_hashsets`): folders as
@@ -40,25 +48,168 @@ impl Sparse {
         let Ok(bytes) = std::fs::read(repo.path().join("info").join("sparse-checkout")) else {
             return Ok(Self::Off);
         };
-        if !on("core.sparseCheckoutCone") {
-            return Ok(Self::Patterns);
-        }
-        Ok(Cone::parse(&bytes, on("core.ignorecase")).map_or(Self::Patterns, Self::Cone))
+        let ignore_case = on("core.ignorecase");
+        let cone = on("core.sparseCheckoutCone")
+            .then(|| Cone::parse(&bytes, ignore_case))
+            .flatten();
+        Ok(cone.map_or_else(
+            || Self::Patterns(Patterns::parse(&bytes, ignore_case)),
+            Self::Cone,
+        ))
     }
 
-    /// Whether `path` (a file, `/`-separated) lies outside the sparse checkout. With non-cone
-    /// patterns, whether its file is missing from `workdir`: a path that isn't there is left
-    /// out, so nothing outside the patterns is written or listed as deleted.
-    pub(crate) fn excludes(&self, workdir: Option<&Path>, path: &[u8]) -> bool {
+    /// Whether `path` (a file, `/`-separated) lies outside the sparse checkout.
+    pub(crate) fn excludes(&self, path: &[u8]) -> bool {
         match self {
             Self::Off => false,
             Self::Cone(cone) => !cone.contains(path),
-            Self::Patterns => workdir.is_some_and(|workdir| {
-                workdir
-                    .join(crate::worktree_guard::path_from_bytes(path))
-                    .symlink_metadata()
-                    .is_err()
-            }),
+            Self::Patterns(patterns) => !patterns.contains(path),
+        }
+    }
+}
+
+/// Non-cone patterns as git reads them (`add_patterns_from_buffer`, `parse_path_pattern`).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct Patterns {
+    list: Vec<Pattern>,
+    /// `core.ignorecase`: git compares ignoring ASCII case.
+    ignore_case: bool,
+}
+
+/// One pattern line, without its `!` and trailing `/`.
+#[derive(Debug, PartialEq, Eq)]
+struct Pattern {
+    text: Vec<u8>,
+    /// `!`: a path it matches is left out.
+    negative: bool,
+    /// A trailing `/`: it matches folders only.
+    folder_only: bool,
+    /// No `/` but a trailing one: it matches a path's last name, at any depth.
+    basename: bool,
+    /// `*` followed by no other glob character: the name ends with the rest.
+    ends_with: bool,
+    /// The length of the part before the first glob character.
+    literal: usize,
+}
+
+impl Patterns {
+    fn parse(file: &[u8], ignore_case: bool) -> Self {
+        let file = file.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(file);
+        let list = file
+            .split(|byte| *byte == b'\n')
+            .filter(|line| !line.is_empty() && line[0] != b'#')
+            .map(|line| {
+                let line = line.strip_suffix(b"\r").unwrap_or(line);
+                Pattern::parse(trim_trailing_spaces(line))
+            })
+            .collect();
+        Self { list, ignore_case }
+    }
+
+    /// git's `path_in_sparse_checkout` with non-cone patterns, for a file: the last pattern that
+    /// matches it decides; when none does, its folder's verdict counts, up to the top, where a
+    /// path no pattern decides is left out.
+    fn contains(&self, path: &[u8]) -> bool {
+        let mut end = path.len();
+        let mut folder = false;
+        while end > 0 {
+            let slash = path[..end].iter().rposition(|byte| *byte == b'/');
+            let name = slash.map_or(0, |slash| slash + 1);
+            if let Some(negative) = self.last_match(&path[..end], name, folder) {
+                return !negative;
+            }
+            folder = true;
+            end = slash.unwrap_or(0);
+        }
+        false
+    }
+
+    /// git's `last_matching_pattern_from_list`: whether the last pattern that matches `path`
+    /// (whose last name starts at `name`) is negative, `None` when none matches.
+    fn last_match(&self, path: &[u8], name: usize, folder: bool) -> Option<bool> {
+        self.list
+            .iter()
+            .rev()
+            .filter(|pattern| folder || !pattern.folder_only)
+            .find(|pattern| {
+                if pattern.basename {
+                    self.matches_name(pattern, &path[name..])
+                } else {
+                    self.matches_path(pattern, path)
+                }
+            })
+            .map(|pattern| pattern.negative)
+    }
+
+    /// git's `match_basename`.
+    fn matches_name(&self, pattern: &Pattern, name: &[u8]) -> bool {
+        let text = &pattern.text;
+        if pattern.literal == text.len() {
+            self.same(text, name)
+        } else if pattern.ends_with {
+            let suffix = &text[1..];
+            name.len() >= suffix.len() && self.same(suffix, &name[name.len() - suffix.len()..])
+        } else {
+            wildmatch(text, name, self.flags(false))
+        }
+    }
+
+    /// git's `match_pathname`, from the top (the base of `info/sparse-checkout`).
+    fn matches_path(&self, pattern: &Pattern, path: &[u8]) -> bool {
+        let (text, literal) = match pattern.text.strip_prefix(b"/") {
+            Some(text) => (text, pattern.literal - 1),
+            None => (&pattern.text[..], pattern.literal),
+        };
+        if literal > path.len() || !self.same(&text[..literal], &path[..literal]) {
+            return false;
+        }
+        // The literal part's last byte stays, as in git, so a `**` right after it knows it
+        // doesn't start a folder name.
+        let keep = literal.saturating_sub(1);
+        wildmatch(&text[keep..], &path[keep..], self.flags(true))
+    }
+
+    fn same(&self, a: &[u8], b: &[u8]) -> bool {
+        if self.ignore_case {
+            a.eq_ignore_ascii_case(b)
+        } else {
+            a == b
+        }
+    }
+
+    fn flags(&self, pathname: bool) -> Flags {
+        Flags {
+            pathname,
+            casefold: self.ignore_case,
+        }
+    }
+}
+
+impl Pattern {
+    /// git's `parse_path_pattern`.
+    fn parse(line: &[u8]) -> Self {
+        let (negative, line) = match line.strip_prefix(b"!") {
+            Some(rest) => (true, rest),
+            None => (false, line),
+        };
+        let (folder_only, text) = match line.strip_suffix(b"/") {
+            Some(text) => (true, text),
+            None => (false, line),
+        };
+        let literal = line
+            .iter()
+            .position(|byte| is_glob_special(*byte))
+            .unwrap_or(line.len())
+            .min(text.len());
+        let ends_with =
+            line.first() == Some(&b'*') && !line[1..].iter().any(|byte| is_glob_special(*byte));
+        Self {
+            negative,
+            folder_only,
+            basename: !text.contains(&b'/'),
+            ends_with,
+            literal,
+            text: text.to_vec(),
         }
     }
 }

@@ -741,7 +741,7 @@ fn commit_step(
     let (author, message) = match kind {
         // In UTF-8, as git writes it (#1149).
         Kind::CherryPick => (
-            target.author().to_owned(),
+            crate::message_text::author(target)?,
             crate::message_text::message(target),
         ),
         Kind::Revert => (committer.clone(), revert_message(target, mainline)),
@@ -1192,7 +1192,7 @@ fn finish_paused(
         .filter(|message| !message.trim().is_empty());
     let (author, message) = match state.kind {
         SequenceKind::CherryPick => (
-            target.author().to_owned(),
+            crate::message_text::author(&target)?,
             message.unwrap_or_else(|| crate::message_text::message(&target)),
         ),
         SequenceKind::Revert => (
@@ -1350,7 +1350,11 @@ pub(crate) fn commit_carries_pick(
     if head.parent_count() != 1 || head.parent_id(0)? != expected_parent {
         return Ok(None);
     }
-    let (ours, theirs) = (head.author(), picked.author());
+    // As git reads them: a commit git made from `picked` has its author in UTF-8.
+    let (ours, theirs) = (
+        crate::message_text::author(head)?,
+        crate::message_text::author(picked)?,
+    );
     let same_author = ours.name_bytes() == theirs.name_bytes()
         && ours.email_bytes() == theirs.email_bytes()
         && ours.when() == theirs.when();

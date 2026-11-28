@@ -120,8 +120,7 @@ then. **Undo** reverts a squash.
     the disk. **Abort** puts the earlier versions back the same way, without writing them. A file outside the folders that is on disk anyway and that the operation changes
     is taken off the disk again, as git does; other files keep their state (git would take off
     every unchanged file outside the folders too; `git sparse-checkout reapply` does that).
-    With patterns set by `git sparse-checkout set --no-cone`, which Browsitory doesn't match,
-    a file the operation adds counts as outside when it isn't on disk.
+    Patterns set by `git sparse-checkout set --no-cone` are matched as git matches them.
 
 **Dragging a branch onto a branch.** Drag a branch onto the current branch, or the current
 branch onto another branch, to merge or rebase. On release a small menu lets you choose, with

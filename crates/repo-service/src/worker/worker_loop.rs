@@ -224,6 +224,7 @@ where
     /// Runs one command, noted in the operation log unless it is a read (#887): from before the
     /// state lock is taken (so refusals are noted too) to after its undo entry.
     pub(super) fn step(&mut self, mut command: Command) {
+        read::reload_core_settings(&self.repo);
         match journal::Tracker::start(&self.journal, &mut command) {
             Some(tracker) => {
                 git_core::process::record_runs(tracker.runs(), || self.run_step(command));

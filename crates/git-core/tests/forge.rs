@@ -66,6 +66,92 @@ fn detects_a_bitbucket_https_remote() {
     );
 }
 
+/// The identity of a remote whose https URL holds a user name: host, owner and name only, the
+/// user name neither kept nor shown (#1101).
+fn detects_without_the_user_name(url: &str, provider: ForgeProvider, host: &str) {
+    let (_dir, repo) = common::init_repo();
+    add_remote(&repo, "origin", url);
+
+    let repositories = detect_forge_repositories(&repo).expect("detect forge repositories");
+
+    assert_eq!(
+        repositories,
+        vec![ForgeRepository {
+            provider,
+            host: host.to_string(),
+            owner: "ws".to_string(),
+            name: "r".to_string(),
+            remote_name: "origin".to_string(),
+        }]
+    );
+    assert!(!format!("{repositories:?}").contains("alice"));
+}
+
+#[test]
+fn detects_a_bitbucket_https_remote_with_a_user_name() {
+    // Bitbucket's copy URL, as `git clone` stores it.
+    detects_without_the_user_name(
+        "https://alice@bitbucket.org/ws/r.git",
+        ForgeProvider::Bitbucket,
+        "bitbucket.org",
+    );
+}
+
+#[test]
+fn detects_a_github_https_remote_with_a_user_name() {
+    detects_without_the_user_name(
+        "https://alice@github.com/ws/r.git",
+        ForgeProvider::GitHub,
+        "github.com",
+    );
+}
+
+#[test]
+fn detects_an_http_remote_with_a_user_name_and_an_upper_case_host() {
+    detects_without_the_user_name(
+        "http://alice@GitHub.com/ws/r",
+        ForgeProvider::GitHub,
+        "github.com",
+    );
+}
+
+#[test]
+fn excludes_a_remote_whose_user_name_is_a_github_token() {
+    for token in [
+        "ghp_abcd1234",
+        "gho_abcd1234",
+        "ghu_abcd1234",
+        "ghs_abcd1234",
+        "ghr_abcd1234",
+        "github_pat_11ABCD_efgh",
+    ] {
+        let (_dir, repo) = common::init_repo();
+        add_remote(
+            &repo,
+            "origin",
+            &format!("https://{token}@github.com/acme/widget.git"),
+        );
+
+        let repositories = detect_forge_repositories(&repo).expect("detect forge repositories");
+
+        assert!(repositories.is_empty(), "{token}: {repositories:?}");
+    }
+}
+
+#[test]
+fn excludes_a_remote_with_an_empty_user_name_and_a_password() {
+    let (_dir, repo) = common::init_repo();
+    add_remote(
+        &repo,
+        "origin",
+        "https://:secret@github.com/acme/widget.git",
+    );
+
+    let repositories = detect_forge_repositories(&repo).expect("detect forge repositories");
+
+    assert!(repositories.is_empty());
+}
+
 #[test]
 fn does_not_classify_an_unsupported_host() {
     let (_dir, repo) = common::init_repo();

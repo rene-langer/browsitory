@@ -305,7 +305,7 @@ pub fn commits_patch(
         crate::diff::detect_renames(&mut diff)?;
         let message = crate::message_text::message(&commit);
         let (summary, body) = split_message(&message);
-        let author = commit.author();
+        let author = crate::message_text::author(&commit)?;
         let mut email_opts = git2::EmailCreateOptions::new();
         let email = git2::Email::from_diff(
             &diff,

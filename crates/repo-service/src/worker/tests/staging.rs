@@ -386,3 +386,61 @@ fn a_stage_that_failed_on_a_locked_index_is_not_applied_by_the_next_stage() {
         " M a.txt\nM  b.txt\n"
     );
 }
+
+/// What `git config` in a terminal changes while the repository is open: libgit2 caches
+/// `core.autocrlf` and the other core settings per open repository (#904).
+fn set_outside(dir: &Path, key: &str, value: &str) {
+    let output = test_support::git(dir, &["config", key, value]);
+    assert!(output.status.success(), "{output:?}");
+}
+
+/// The staged content of `path`, as git reads it.
+fn staged(dir: &Path, path: &str) -> Vec<u8> {
+    let output = test_support::git(dir, &["cat-file", "blob", &format!(":{path}")]);
+    assert!(output.status.success(), "{output:?}");
+    output.stdout
+}
+
+#[test]
+fn staging_follows_core_autocrlf_set_outside_the_app_while_the_repository_is_open() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "base\n");
+    commit_all(&repo, "base");
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    write_file(dir.path(), "a.txt", "one\r\n");
+    handle.stage_file("a.txt".into()).unwrap();
+    assert_eq!(staged(dir.path(), "a.txt"), b"one\r\n");
+
+    set_outside(dir.path(), "core.autocrlf", "true");
+    write_file(dir.path(), "b.txt", "two\r\n");
+    handle.stage_file("b.txt".into()).unwrap();
+    write_file(dir.path(), "c.txt", "three\r\n");
+    let added = test_support::git(dir.path(), &["add", "c.txt"]);
+    assert!(added.status.success(), "{added:?}");
+
+    assert_eq!(staged(dir.path(), "c.txt"), b"three\n");
+    assert_eq!(staged(dir.path(), "b.txt"), b"two\n");
+}
+
+#[test]
+fn staging_follows_core_autocrlf_unset_outside_the_app_while_the_repository_is_open() {
+    let (dir, repo) = init_repo();
+    repo.config()
+        .unwrap()
+        .set_bool("core.autocrlf", true)
+        .unwrap();
+    write_file(dir.path(), "base.txt", "base\n");
+    commit_all(&repo, "base");
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    write_file(dir.path(), "a.txt", "one\r\n");
+    handle.stage_file("a.txt".into()).unwrap();
+    assert_eq!(staged(dir.path(), "a.txt"), b"one\n");
+
+    set_outside(dir.path(), "core.autocrlf", "false");
+    write_file(dir.path(), "b.txt", "two\r\n");
+    handle.stage_file("b.txt".into()).unwrap();
+
+    assert_eq!(staged(dir.path(), "b.txt"), b"two\r\n");
+}
