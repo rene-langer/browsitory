@@ -74,10 +74,11 @@ fn changing_the_config_while_it_is_locked_is_a_held_lock() {
         .unwrap_err();
 
     assert!(is_lock_held(&error), "{error}");
+    // git names the file it couldn't lock, not its lock file.
     git_refuses_on_the_lock(
         dir.path(),
         &["remote", "add", "origin", "https://example.test/r.git"],
-        "config.lock",
+        "could not lock config file",
     );
 }
 
