@@ -932,6 +932,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     runOptimisticMutation,
     setState,
     state.stashes,
+    state.status,
   );
 
   const mergeRebase = useMergeRebaseActions(client, repoPath, runMutation, setState);

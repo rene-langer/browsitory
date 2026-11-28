@@ -134,6 +134,11 @@ export interface SelectionSummary {
   actionable: number;
   /** Selected untracked files: what "Ignore" acts on. */
   untracked: number;
+  /**
+   * The notice naming the selected files Browsitory can't filter or convert, which the actions
+   * leave out (#1107); `null` (or absent) when there are none.
+   */
+  leftOut?: string | null;
 }
 
 function files(n: number): string {
@@ -157,7 +162,7 @@ export function selectionMenuItems(
   const n = summary.actionable;
   const blocked = (extra: boolean, reason: string | null = busyReason) => ({
     disabled: reason !== null || extra,
-    title: reason ?? undefined,
+    title: reason ?? summary.leftOut ?? undefined,
   });
   const items: ContextMenuItem[] = [];
   if (summary.staged) {
@@ -181,7 +186,9 @@ export function selectionMenuItems(
     if (summary.untracked > 0) {
       items.push({
         label: `Ignore ${summary.untracked} untracked ${summary.untracked === 1 ? "file" : "files"}`,
-        ...blocked(false),
+        // Ignoring writes only `.gitignore`: it leaves nothing out.
+        disabled: busyReason !== null,
+        title: busyReason ?? undefined,
         onSelect: () => onPick({ kind: "ignoreSelection" }),
         group: "file",
       });

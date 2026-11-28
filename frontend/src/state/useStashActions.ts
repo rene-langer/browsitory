@@ -1,6 +1,7 @@
 import { failedOperation } from "../lib/operationErrors";
 import { useCallback } from "react";
-import type { RepoClient, StashEntry, StashOptions } from "../ipc/RepoClient";
+import type { RepoClient, StashEntry, StashOptions, StatusEntry } from "../ipc/RepoClient";
+import { leftOut } from "../lib/externalFilters";
 import type { AppState } from "./useAppState";
 import type { RunMutation, RunOptimisticMutation } from "./useMutationRunner";
 import { withoutDialog } from "./workspaceDialog";
@@ -11,8 +12,9 @@ const STASH_EVERYTHING: StashOptions = { message: null, keepIndex: false, includ
 
 export interface StashActions {
   /**
-   * Stashes with `options`; without them, everything (tracked and untracked, no message). Closes
-   * the stash dialog (`dialog` kind "stash") if open.
+   * Stashes with `options`; without them, everything (tracked and untracked, no message) but the
+   * files Browsitory can't filter or convert (`leftOut`, #1107). Closes the stash dialog (`dialog`
+   * kind "stash") if open.
    */
   saveStash(options?: StashOptions): Promise<void>;
   /**
@@ -31,14 +33,17 @@ export function useStashActions(
   runOptimisticMutation: RunOptimisticMutation,
   setState: (updater: (prev: AppState) => AppState) => void,
   stashes: StashEntry[],
+  status: readonly StatusEntry[],
 ): StashActions {
   const saveStash = useCallback(
-    (options: StashOptions = STASH_EVERYTHING) =>
+    (options?: StashOptions) =>
       runMutation(async () => {
         setState((prev) => ({ ...prev, dialog: withoutDialog(prev.dialog, "stash") }));
-        await client.saveStash(repoPath, options);
+        const leaveOut = leftOut(status).map((entry) => entry.path);
+        const everything = leaveOut.length === 0 ? STASH_EVERYTHING : { ...STASH_EVERYTHING, leaveOut };
+        await client.saveStash(repoPath, options ?? everything);
       }, failedOperation.saveStash()),
-    [client, runMutation, repoPath, setState],
+    [client, runMutation, repoPath, setState, status],
   );
   // Apply/Pop/Drop send the listed stash's commit id along with its index; the backend refuses
   // when `stash@{index}` is now another stash. An index this list doesn't know is refused here.
