@@ -188,7 +188,8 @@ in view while you scroll: **Close** (or Escape, or a click outside the dialog) c
 **Updates (desktop app).** Browsitory checks for a new version when it starts and every six
 hours, and downloads it in the background. If a check or download fails (for example while the
 download server is down), it tries again after 10 minutes, then waits twice as long each time, up
-to 3 hours, until a check succeeds. When it is ready, a notice with the notifications says
+to 3 hours, until a check succeeds. A failed automatic check or download shows no message; each
+one writes its reason to the [log file](troubleshooting.md). When it is ready, a notice with the notifications says
 "Update v… ready" and stays until you restart.
 Click **Restart to update** to install it, or keep working: nothing changes until you restart.
 A change that is still running in a repository (a checkout, a commit, a fetch) finishes first,
