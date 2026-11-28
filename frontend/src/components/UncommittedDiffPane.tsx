@@ -38,7 +38,7 @@ import { useDiffLayout, writeDiffLayout } from "../lib/diffLayoutPreference";
 import { buildFileTree, type FileTreeNode } from "../lib/fileTree";
 import { ChevronDown, ChevronRight, Minus, Plus } from "lucide-react";
 import { GoToNotice } from "./GoToNotice";
-import { externalFiltersNotice } from "../lib/externalFilters";
+import { externalFiltersNotice, isLeftOut, leftOut, leftOutNotice } from "../lib/externalFilters";
 import { mergeDriverReason } from "../lib/mergeDrivers";
 import { stableMemo } from "../lib/stableMemo";
 
@@ -585,14 +585,17 @@ export function UncommittedDiffPane({
       (path) => groupEntries(staged).find((entry) => entry.path === path) as StatusEntry,
     );
   // The selection's actions skip conflicted files, as "Stage all" and "Discard all…" do: staging a
-  // conflicted file marks it resolved with whatever is in the working tree.
+  // conflicted file marks it resolved with whatever is in the working tree. They leave out files
+  // Browsitory can't filter or convert too, and say so (#1107).
   const summaryOf = (staged: boolean): SelectionSummary | null => {
     const entries = selectedEntries(staged);
     if (entries.length < 2) return null;
+    const left = leftOut(entries).filter((entry) => entry.kind !== "Conflicted");
     return {
       staged,
-      actionable: entries.filter((entry) => entry.kind !== "Conflicted").length,
+      actionable: entries.filter((entry) => entry.kind !== "Conflicted" && !isLeftOut(entry)).length,
       untracked: entries.filter(isUntracked).length,
+      leftOut: left.length === 0 ? null : leftOutNotice(left),
     };
   };
   const unstagedSummary = summaryOf(false);
@@ -632,16 +635,19 @@ export function UncommittedDiffPane({
   const runSelectionAction = (staged: boolean, kind: SelectionActionKind) => {
     const entries = selectedEntries(staged);
     const paths = entries.filter((entry) => entry.kind !== "Conflicted").map((entry) => entry.path);
+    // Without the files Browsitory can't filter or convert (#1107); the stash dialog and the
+    // discard confirmation leave those out themselves, and name them.
+    const actionable = entries.filter((entry) => entry.kind !== "Conflicted" && !isLeftOut(entry));
     if (kind === "stashSelection") {
-      if (stashReason !== null || selectionBusyReason !== null || paths.length === 0) return;
+      if (stashReason !== null || selectionBusyReason !== null || actionable.length === 0) return;
       onOpenStashDialog(paths);
       return;
     }
     if (selectionBusyReason !== null) return;
     switch (kind) {
       case "stageSelection":
-        if (paths.length === 0) return;
-        onStageAllFiles(paths);
+        if (actionable.length === 0) return;
+        onStageAllFiles(actionable.map((entry) => entry.path));
         break;
       case "unstageSelection":
         if (paths.length === 0) return;
@@ -649,7 +655,7 @@ export function UncommittedDiffPane({
         break;
       case "discardSelection":
         // Opens the confirmation; nothing is discarded until it is confirmed.
-        if (paths.length > 0) setDiscardRequest({ kind: "files", paths });
+        if (actionable.length > 0) setDiscardRequest({ kind: "files", paths });
         return;
       case "ignoreSelection": {
         const patterns = entries.filter(isUntracked).map((entry) => `/${escapeIgnorePattern(entry.path)}`);
@@ -747,9 +753,20 @@ export function UncommittedDiffPane({
     }
   };
 
-  // Every unstaged file but conflicts, shown or not: the palette's "Discard all…" acts on all.
-  const discardableEntries = status.filter((entry) => !entry.staged && entry.kind !== "Conflicted");
-  const shownDiscardablePaths = shownOtherChanges.map((entry) => entry.path);
+  // Every unstaged file but conflicts and the files Browsitory can't filter or convert (#1107),
+  // shown or not: the palette's "Discard all…" acts on all.
+  const discardableEntries = status.filter(
+    (entry) => !entry.staged && entry.kind !== "Conflicted" && !isLeftOut(entry),
+  );
+  // The files left out instead, named in the confirmation.
+  const discardLeftOut = leftOut(status).filter((entry) => entry.kind !== "Conflicted");
+  const shownDiscardablePaths = shownOtherChanges.filter((entry) => !isLeftOut(entry)).map((entry) => entry.path);
+  const shownLeftOut = leftOut(shownOtherChanges);
+  // The left-out files of `paths` (all when `undefined`), and the notice naming them.
+  const leftOutOf = (paths: readonly string[] | undefined, entries = discardLeftOut) => {
+    const left = paths === undefined ? entries : entries.filter((entry) => paths.includes(entry.path));
+    return left.length === 0 ? null : leftOutNotice(left);
+  };
   // "Discard all…" (or "Discard n shown…" under a filter, #729): its files that still exist.
   const discardAllEntries =
     discardRequest?.kind === "all"
@@ -757,6 +774,7 @@ export function UncommittedDiffPane({
         ? discardableEntries
         : discardableEntries.filter((entry) => discardRequest.paths?.includes(entry.path))
       : [];
+  const discardAllLeftOut = discardRequest?.kind === "all" ? leftOutOf(discardRequest.paths) : null;
   // "Delete untracked…" (or "Delete n untracked shown…"): its files that still exist.
   const deleteUntrackedPaths =
     discardRequest?.kind === "untracked"
@@ -768,10 +786,8 @@ export function UncommittedDiffPane({
   const discardFilesBlockedReason = discardBlockedReason ?? selectionBusyReason;
 
   // With the files shown under an untracked folder entry (#845).
-  const discardableListed = [
-    ...discardableEntries,
-    ...Object.values(folderFiles).flatMap((files) => files ?? []),
-  ];
+  const folderFileEntries = Object.values(folderFiles).flatMap((files) => files ?? []);
+  const discardableListed = [...discardableEntries, ...folderFileEntries.filter((entry) => !isLeftOut(entry))];
   const discardFileEntry =
     discardRequest?.kind === "file"
       ? discardableListed.find((entry) => entry.path === discardRequest.path)
@@ -781,6 +797,10 @@ export function UncommittedDiffPane({
     discardRequest?.kind === "files"
       ? discardableListed.filter((entry) => discardRequest.paths.includes(entry.path))
       : [];
+  const discardFilesLeftOut =
+    discardRequest?.kind === "files"
+      ? leftOutOf(discardRequest.paths, [...discardLeftOut, ...leftOut(folderFileEntries)])
+      : null;
 
   // A request whose target is gone (refresh, staging, unmount) must not linger: otherwise the
   // destructive dialog would pop up unprompted when the path later reappears.
@@ -1290,9 +1310,12 @@ export function UncommittedDiffPane({
                 type="button"
                 data-tone="danger"
                 onClick={() =>
-                  setDiscardRequest(filtering ? { kind: "all", paths: shownDiscardablePaths } : { kind: "all" })
+                  setDiscardRequest(
+                    filtering ? { kind: "all", paths: shownOtherChanges.map((entry) => entry.path) } : { kind: "all" },
+                  )
                 }
                 disabled={(filtering ? shownDiscardablePaths.length : discardableEntries.length) === 0}
+                title={leftOutOf(undefined, filtering ? shownLeftOut : discardLeftOut) ?? undefined}
               >
                 {filtering ? `Discard ${shownDiscardablePaths.length} shown…` : "Discard all…"}
               </button>
@@ -1374,7 +1397,14 @@ export function UncommittedDiffPane({
           title={discardRequest.paths === undefined ? "Discard all changes" : "Discard shown changes"}
           message={
             discardRequest.paths === undefined ? (
-              discardAllConfirmMessage(discardAllEntries, true)
+              discardAllLeftOut === null ? (
+                discardAllConfirmMessage(discardAllEntries, true)
+              ) : (
+                <>
+                  <p>{discardAllConfirmMessage(discardAllEntries, true)}</p>
+                  <p>{discardAllLeftOut}</p>
+                </>
+              )
             ) : (
               // Under a filter (#729) the dialog names exactly the files it discards.
               <>
@@ -1384,6 +1414,7 @@ export function UncommittedDiffPane({
                     <li key={entry.path}>{entry.path}</li>
                   ))}
                 </ul>
+                {discardAllLeftOut !== null && <p>{discardAllLeftOut}</p>}
               </>
             )
           }
@@ -1439,7 +1470,16 @@ export function UncommittedDiffPane({
       {discardRequest?.kind === "files" && discardFilesEntries.length > 0 && (
         <ConfirmDialog
           title="Discard selected changes"
-          message={discardAllConfirmMessage(discardFilesEntries)}
+          message={
+            discardFilesLeftOut === null ? (
+              discardAllConfirmMessage(discardFilesEntries)
+            ) : (
+              <>
+                <p>{discardAllConfirmMessage(discardFilesEntries)}</p>
+                <p>{discardFilesLeftOut}</p>
+              </>
+            )
+          }
           confirmLabel={`Discard ${discardFilesEntries.length} ${discardFilesEntries.length === 1 ? "file" : "files"}`}
           tone="danger"
           confirmReason={discardFilesBlockedReason}

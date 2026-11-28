@@ -86,7 +86,10 @@ Actions that don't touch such a file work as usual.
 When the repository uses such a filter, the **Changes** list says so at the top ("This repository
 uses the 'lfs' filter, which Browsitory can't run.") until you dismiss it with ✕. A changed file
 under the filter is marked with the filter's name ("'git-crypt' filter"), its Stage button is
-off, and **Stage all** and **Stage modified** leave it out. Its diff compares the file on disk
+off, and **Stage all** and **Stage modified** leave it out. **Discard all…**, **Stash** and the
+actions on several selected files leave it out too and act on the other files; their
+confirmation, the stash dialog or the message after stashing names the files left out ("secret.env
+is left out: Browsitory can't run its 'git-crypt' filter."). Its diff compares the file on disk
 with the version Git stored (the encrypted bytes, the LFS pointer), so the difference may be only
 the filter's; a note above the diff says so.
 
@@ -117,8 +120,9 @@ refuses every action that would store or write it, with an error such as "'setup
 working-tree-encoding=UTF-16LE-BOM, which Browsitory can't convert, so it refused this change. Use
 git on the command line for it instead." The notice at the top of **Changes** names the encodings
 too, a changed file is marked with its encoding ("UTF-16LE-BOM encoding") and its Stage button is
-off, and **Stage all** and **Stage modified** leave it out. Its diff compares the file on disk with
-the UTF-8 version Git stored, so the difference may be only the encoding's.
+off, and **Stage all**, **Stage modified**, **Discard all…**, **Stash** and the actions on several
+selected files leave it out, naming it. Its diff compares the file on disk with the UTF-8 version
+Git stored, so the difference may be only the encoding's.
 
 ??? note "Details"
 

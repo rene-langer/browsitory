@@ -62,3 +62,44 @@ export function unconvertible(entry: StatusEntry): { note: string; reason: strin
   }
   return undefined;
 }
+
+/**
+ * Whether bulk actions leave `entry` out (#1107): an unstaged change Browsitory can't filter or
+ * convert, which the backend would refuse, refusing the whole action with it.
+ */
+export function isLeftOut(entry: Partial<Pick<StatusEntry, "staged" | "externalFilter" | "workingTreeEncoding">>): boolean {
+  return !entry.staged && (entry.externalFilter !== undefined || entry.workingTreeEncoding !== undefined);
+}
+
+/** The unstaged entries Browsitory can't filter or convert, which bulk actions leave out (#1107). */
+export function leftOut(entries: readonly StatusEntry[]): StatusEntry[] {
+  return entries.filter(isLeftOut);
+}
+
+/** The notice naming the files a bulk action leaves out (`leftOut`, at least one, #1107). */
+export function leftOutNotice(entries: readonly StatusEntry[]): string {
+  if (entries.length === 1) {
+    const [entry] = entries;
+    const what =
+      entry.externalFilter !== undefined
+        ? `run its ${quoted(entry.externalFilter)} filter`
+        : `convert its ${quoted(entry.workingTreeEncoding ?? "")} encoding`;
+    return `${entry.path} is left out: Browsitory can't ${what}. Use git on the command line for it.`;
+  }
+  const filters = entries.some((entry) => entry.externalFilter !== undefined);
+  const encodings = entries.some((entry) => entry.externalFilter === undefined);
+  const what = [filters ? "run their filters" : null, encodings ? "convert their encodings" : null]
+    .filter((part) => part !== null)
+    .join(" or ");
+  const files = entries.map((entry) => `${entry.path} (${unconvertible(entry)?.note ?? ""})`).join(", ");
+  return (
+    `${entries.length} files are left out because Browsitory can't ${what}: ${files}. ` +
+    "Use git on the command line for them."
+  );
+}
+
+/** The toast after stashing everything in `status`, naming the files left out (#1107). */
+export function stashedMessage(status: readonly StatusEntry[]): string {
+  const left = leftOut(status);
+  return left.length === 0 ? "Changes stashed" : `Changes stashed. ${leftOutNotice(left)}`;
+}

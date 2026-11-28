@@ -1050,6 +1050,11 @@ export interface StashOptions {
   includeUntracked: boolean;
   /** File paths limiting the stash; empty stashes everything. */
   paths: string[];
+  /**
+   * File paths the stash leaves alone, of `paths` or of everything (#1107): files under a filter
+   * driver or working-tree-encoding Browsitory can't run (`unconvertible`). Absent: none.
+   */
+  leaveOut?: string[];
 }
 export type StashApplyOutcome = { kind: "Applied" } | { kind: "Conflicted"; files: string[] };
 export interface StashFiles {

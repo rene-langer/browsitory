@@ -197,6 +197,10 @@ pub struct StashOptions {
     pub include_untracked: bool,
     /// Literal file paths limiting the stash; empty stashes everything.
     pub paths: Vec<String>,
+    /// Literal file paths the stash leaves alone, of `paths` or of everything: the files under a
+    /// filter driver or working-tree-encoding Browsitory can't run, which Stash all and a
+    /// selection leave out (#1107).
+    pub leave_out: Vec<String>,
 }
 
 impl Default for StashOptions {
@@ -206,6 +210,7 @@ impl Default for StashOptions {
             keep_index: false,
             include_untracked: true,
             paths: Vec::new(),
+            leave_out: Vec::new(),
         }
     }
 }
@@ -265,21 +270,36 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
         return Err(StashError::ConflictsBeforeStash);
     }
     refuse_staged_repository(repo, &index, &opts.paths)?;
+    let left_out = |path: &String| opts.leave_out.contains(path);
     if !opts.paths.is_empty() {
+        let paths: Vec<String> = opts
+            .paths
+            .iter()
+            .filter(|path| !left_out(path))
+            .cloned()
+            .collect();
+        if paths.is_empty() {
+            return Err(StashError::NothingToStash);
+        }
         // Stashed raw, then reset to HEAD's blob unfiltered (#1063).
-        crate::external_filter::refuse_paths::<StashError, _>(repo, &opts.paths)?;
-        return save_path_limited_stash(repo, opts, message, true);
+        crate::external_filter::refuse_paths::<StashError, _>(repo, &paths)?;
+        let picked = StashOptions {
+            paths,
+            ..opts.clone()
+        };
+        return save_path_limited_stash(repo, &picked, message, true);
     }
     // Before `entry_in_the_way`, which on macOS and Windows takes the deleted `Old` of a
     // case-only rename for an ignored file removed from the index (#370).
     refuse_staged_case_only_rename(repo, &index)?;
     // One status pass and one walk of HEAD's tree for every check below (#243).
     let scan = WorktreeScan::new(repo)?;
+    // The changes to stash: all but those left out (#1107), which take the path-limited route.
+    let changed = scan.changed_paths(opts.include_untracked);
+    let leaves_out = changed.iter().any(left_out);
+    let kept: Vec<String> = changed.into_iter().filter(|path| !left_out(path)).collect();
     // Stashed raw, then reset to HEAD's blobs unfiltered (#1063); before either route below.
-    crate::external_filter::refuse_paths::<StashError, _>(
-        repo,
-        scan.changed_paths(opts.include_untracked),
-    )?;
+    crate::external_filter::refuse_paths::<StashError, _>(repo, &kept)?;
     let head_files = head_files(repo)?;
     // The reset after stashing would delete an untracked file (#186), an ignored file or folder
     // (#208) or a nested repository (#211) in the way of a tracked path. The path-limited stash
@@ -318,19 +338,21 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
     // `edit_removed_from_index`).
     // And a skip-worktree entry (every file outside a sparse checkout, #1184): libgit2's stash
     // records its missing file as deleted, and its reset writes the file and drops the mark.
-    if crate::worktree_guard::has_hazard(repo)?
+    // And a link kept as a file (`changes_link_kept_as_file`, #802).
+    if leaves_out
+        || crate::worktree_guard::has_hazard(repo)?
         || index
             .iter()
             .any(|entry| entry.flags_extended & crate::index_marks::SKIP_WORKTREE != 0)
         || (opts.include_untracked && kept_entry_in_untracked_folder(repo, &scan, &head_files)?)
         || edit_removed_from_index(repo)?
+        || changes_link_kept_as_file(repo, &index, &scan)?
     {
-        let paths = scan.changed_paths(opts.include_untracked);
-        if paths.is_empty() {
+        if kept.is_empty() {
             return Err(StashError::NothingToStash);
         }
         let routed = StashOptions {
-            paths,
+            paths: kept,
             ..opts.clone()
         };
         return save_path_limited_stash(repo, &routed, message, false);
@@ -517,6 +539,9 @@ fn save_path_limited_stash(
     let base = StashBase::of(repo)?;
 
     let paths = with_rename_partners(repo, &opts.paths, picked)?;
+    // The other side of a staged rename comes along, stashed raw and reset too (#1063); the
+    // caller checked only `opts.paths`.
+    crate::external_filter::refuse_paths::<StashError, _>(repo, &paths[opts.paths.len()..])?;
     let mut selection = collect_paths(repo, &paths, opts.include_untracked)?;
     check_selection(repo, opts, &workdir, &base.commit, &paths, &mut selection)?;
     let Selection {
@@ -1427,6 +1452,31 @@ fn kept_entry_in_untracked_folder(
     }))
 }
 
+/// True when a changed path is a link kept as a file (`core.symlinks` off: a regular file where
+/// the index has a link). libgit2's stash records it raw and as a regular file; git keeps the link
+/// mode and cleans the file (#802), as the path-limited stash does.
+fn changes_link_kept_as_file(
+    repo: &Repository,
+    index: &git2::Index,
+    scan: &WorktreeScan,
+) -> Result<bool, StashError> {
+    let Some(workdir) = repo.workdir() else {
+        return Ok(false);
+    };
+    if crate::undo::worktree_config(repo)
+        .map_err(undo_error)?
+        .symlinks
+    {
+        return Ok(false);
+    }
+    Ok(scan.changed_paths(false).iter().any(|path| {
+        index
+            .get_path(std::path::Path::new(path), 0)
+            .is_some_and(|entry| entry.mode == crate::undo::MODE_LINK)
+            && std::fs::symlink_metadata(workdir.join(path)).is_ok_and(|meta| meta.is_file())
+    }))
+}
+
 /// True when a file the index no longer has is still in the worktree and not ignored (`git rm
 /// --cached`, often followed by an edit; status `INDEX_DELETED | WT_NEW`). libgit2 1.9.6's whole
 /// stash mishandles it (#247):
@@ -1733,8 +1783,8 @@ fn entry_in_the_way(
     Ok(None)
 }
 
-/// Blob id and mode of a worktree file, with clean filters applied (as `git add` would);
-/// `None` when the file is gone.
+/// Blob id and mode of a worktree file, with clean filters applied (as `git add` would, also to
+/// a link kept as a file); `None` when the file is gone.
 pub(crate) fn worktree_blob<E>(
     repo: &Repository,
     workdir: &std::path::Path,
@@ -1745,17 +1795,18 @@ pub(crate) fn worktree_blob<E>(
 where
     E: From<git2::Error> + From<std::io::Error>,
 {
-    let Some((bytes, mode)) =
-        crate::undo::read_worktree_file(workdir, path, config, previous_mode)?
-    else {
+    let Some(file) = crate::undo::read_worktree_file(workdir, path, config, previous_mode)? else {
         return Ok(None);
     };
-    let id = if mode == crate::undo::MODE_LINK {
-        repo.blob(&bytes)?
+    let id = if file.link {
+        repo.blob(&file.bytes)?
+    } else if file.mode == crate::undo::MODE_LINK {
+        let index_blob = crate::undo::blob_git_compares(&repo.index()?, path);
+        crate::undo::filtered_link_file_blob::<E>(repo, path, &file.bytes, index_blob)?
     } else {
-        crate::undo::filtered_blob::<E>(repo, path, &bytes)?
+        crate::undo::filtered_blob::<E>(repo, path, &file.bytes)?
     };
-    Ok(Some((id, mode)))
+    Ok(Some((id, file.mode)))
 }
 
 fn undo_error(error: crate::undo::UndoError) -> StashError {
@@ -2809,6 +2860,27 @@ mod tests {
                 "include_untracked: {include_untracked}"
             );
         }
+    }
+
+    /// With `core.symlinks` off, only a changed link kept as a file sends Stash all through the
+    /// path-limited stash (#802); a changed regular file still takes libgit2's route.
+    #[test]
+    fn without_symlinks_a_whole_stash_of_a_regular_file_takes_libgit2s_route() {
+        let (dir, mut repo) = repo_with_a_commit();
+        repo.config()
+            .unwrap()
+            .set_bool("core.symlinks", false)
+            .unwrap();
+        write(dir.path(), "a.txt", "edited\n");
+        let before = status_passes();
+
+        save_stash(&mut repo, &StashOptions::default()).unwrap();
+
+        assert_eq!(status_passes() - before, 1);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+            "a\n"
+        );
     }
 
     /// The routed stash (an ignored file in an untracked folder, kept by the path-limited

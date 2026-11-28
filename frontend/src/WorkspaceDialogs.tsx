@@ -272,6 +272,7 @@ export function WorkspaceDialogs({
       {active && stashDialog !== null && (
         <StashDialog
           paths={stashDialog.paths}
+          status={appState.state.status}
           untrackedOnly={
             stashDialog.paths.length > 0 &&
             stashDialog.paths.every((path) =>

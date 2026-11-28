@@ -1,10 +1,11 @@
 import { useState, useId } from "react";
-import type { StashOptions } from "../ipc/RepoClient";
+import type { StashOptions, StatusEntry } from "../ipc/RepoClient";
 import { Field } from "./primitives/Field";
 import { describedBy } from "../lib/ariaDescribedBy";
 import { BlockedReason } from "./primitives/BlockedReason";
 import { DialogActions } from "./primitives/DialogActions";
 import { FormDialog } from "./primitives/FormDialog";
+import { leftOut, leftOutNotice } from "../lib/externalFilters";
 import styles from "./StashDialog.module.css";
 
 /**
@@ -12,16 +13,21 @@ import styles from "./StashDialog.module.css";
  * keep-staged / include-untracked switches. Nothing here is remembered between openings. For an
  * untracked file (`untrackedOnly`) untracked files are always included: leaving them out would
  * leave nothing to stash. `blockedReason` (`stashBlockReason`) disables Stash while it applies:
- * a rebase or cherry-pick/revert sequence can start after the dialog opened (#508).
+ * a rebase or cherry-pick/revert sequence can start after the dialog opened (#508). The changed
+ * files in `status` Browsitory can't filter or convert are left out, of `paths` or of everything,
+ * and named; with only such files picked, nothing is stashed (#1107).
  */
 export function StashDialog({
-  paths,
+  paths: picked,
+  status = [],
   untrackedOnly = false,
-  blockedReason = null,
+  blockedReason: busyReason = null,
   onStash,
   onCancel,
 }: {
   paths: string[];
+  /** The repository's changes, to leave out the files Browsitory can't filter or convert (#1107). */
+  status?: readonly StatusEntry[];
   untrackedOnly?: boolean;
   /** Why stashing is unavailable now, or `null`. */
   blockedReason?: string | null;
@@ -33,6 +39,11 @@ export function StashDialog({
   const [message, setMessage] = useState("");
   const [keepIndex, setKeepIndex] = useState(false);
   const [includeUntracked, setIncludeUntracked] = useState(true);
+  const left = leftOut(status).filter((entry) => picked.length === 0 || picked.includes(entry.path));
+  const leaveOut = left.map((entry) => entry.path);
+  const paths = picked.filter((path) => !leaveOut.includes(path));
+  const notice = left.length === 0 ? null : leftOutNotice(left);
+  const blockedReason = busyReason ?? (picked.length > 0 && paths.length === 0 ? notice : null);
 
   return (
     <FormDialog title="Stash changes" onCancel={onCancel}>
@@ -48,10 +59,12 @@ export function StashDialog({
             keepIndex,
             includeUntracked: untrackedOnly || includeUntracked,
             paths,
+            ...(leaveOut.length === 0 ? {} : { leaveOut }),
           });
         }}
       >
         {paths.length > 0 && <p className={styles.scope}>Only: {paths.join(", ")}</p>}
+        {notice !== null && notice !== blockedReason && <p className={styles.scope}>{notice}</p>}
         <Field label="Message">
           {(controlProps) => (
             <input

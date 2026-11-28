@@ -420,7 +420,11 @@ export type StashEntry = { index: number, message: string, commitId: string, bra
 
 export type StashFiles = { tracked: Array<string>, untracked: Array<string>, untrackedCommitId: string | null, };
 
-export type StashOptions = { message: string | null, keepIndex: boolean, includeUntracked: boolean, paths: Array<string>, };
+export type StashOptions = { message: string | null, keepIndex: boolean, includeUntracked: boolean, paths: Array<string>, 
+/**
+ * The files the stash leaves alone (#1107); absent: none.
+ */
+leaveOut?: Array<string>, };
 
 export type StashSwitchOutcome = { "kind": "Stashed" } | { "kind": "Reapplied" } | { "kind": "Conflicted", files: Array<string>, } | { "kind": "NotReapplied", reason: string, };
 

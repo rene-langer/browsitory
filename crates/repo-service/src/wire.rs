@@ -2732,6 +2732,9 @@ pub struct StashOptionsDto {
     pub keep_index: bool,
     pub include_untracked: bool,
     pub paths: Vec<String>,
+    /// The files the stash leaves alone (#1107); absent: none.
+    #[cfg_attr(any(test, feature = "ts"), ts(optional))]
+    pub leave_out: Option<Vec<String>>,
 }
 
 impl From<StashOptionsDto> for git_core::stash::StashOptions {
@@ -2741,6 +2744,7 @@ impl From<StashOptionsDto> for git_core::stash::StashOptions {
             keep_index: dto.keep_index,
             include_untracked: dto.include_untracked,
             paths: dto.paths,
+            leave_out: dto.leave_out.unwrap_or_default(),
         }
     }
 }
@@ -4386,6 +4390,45 @@ mod blame_conversion {
             .collect();
         assert_eq!(lines, [("a", 0), ("b", 1), ("c", 0), ("d", 2), ("e", 1)]);
         assert_eq!(blame.commits[1].author_name, "author 2");
+    }
+}
+
+/// #1107: the files a stash leaves out reach `git_core` as sent; absent, none.
+#[cfg(test)]
+mod stash_options_conversion {
+    use super::StashOptionsDto;
+
+    fn options(json: serde_json::Value) -> git_core::stash::StashOptions {
+        let dto: StashOptionsDto = serde_json::from_value(json).unwrap();
+        dto.into()
+    }
+
+    #[test]
+    fn the_files_left_out_reach_git_core() {
+        let sent = options(serde_json::json!({
+            "message": "wip",
+            "keepIndex": true,
+            "includeUntracked": false,
+            "paths": ["a.txt", "secret.env"],
+            "leaveOut": ["secret.env"],
+        }));
+        assert_eq!(
+            sent,
+            git_core::stash::StashOptions {
+                message: Some("wip".into()),
+                keep_index: true,
+                include_untracked: false,
+                paths: vec!["a.txt".into(), "secret.env".into()],
+                leave_out: vec!["secret.env".into()],
+            }
+        );
+        let without = options(serde_json::json!({
+            "message": null,
+            "keepIndex": false,
+            "includeUntracked": true,
+            "paths": [],
+        }));
+        assert_eq!(without.leave_out, Vec::<String>::new());
     }
 }
 

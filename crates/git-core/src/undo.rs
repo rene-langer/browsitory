@@ -492,7 +492,7 @@ fn write_branch_settings(
 
 pub(crate) struct WorktreeConfig {
     filemode: bool,
-    symlinks: bool,
+    pub(crate) symlinks: bool,
 }
 
 pub(crate) fn worktree_config(repo: &Repository) -> Result<WorktreeConfig, UndoError> {
@@ -631,6 +631,17 @@ fn identify_worktree_file(
     )
 }
 
+/// A work-tree path as [`read_worktree_file`] read it.
+pub(crate) struct WorktreeFile {
+    /// Raw, no clean filters applied.
+    pub(crate) bytes: Vec<u8>,
+    /// The git mode.
+    pub(crate) mode: u32,
+    /// `bytes` are a symbolic link's target, which git hashes raw. A link kept as a file
+    /// (`core.symlinks` off) is a file: git cleans it as any other (#802).
+    pub(crate) link: bool,
+}
+
 /// Raw bytes (no clean filters) and git mode of the worktree path `rel`; `None` when absent, a
 /// directory, not a regular file (a FIFO never blocks the snapshot), or below a symlinked
 /// directory (git sees no file there, and reading would follow the link, possibly out of the
@@ -642,15 +653,22 @@ pub(crate) fn read_worktree_file(
     rel: &str,
     config: &WorktreeConfig,
     previous_mode: Option<u32>,
-) -> io::Result<Option<(Vec<u8>, u32)>> {
-    let (bytes, executable) = match crate::worktree_guard::read_beneath(workdir, rel)? {
-        None => return Ok(None),
-        Some(Leaf::Link { target, .. }) => return Ok(Some((target, MODE_LINK))),
+) -> io::Result<Option<WorktreeFile>> {
+    Ok(match crate::worktree_guard::read_beneath(workdir, rel)? {
+        None => None,
+        Some(Leaf::Link { target, .. }) => Some(WorktreeFile {
+            bytes: target,
+            mode: MODE_LINK,
+            link: true,
+        }),
         Some(Leaf::File {
             bytes, executable, ..
-        }) => (bytes, executable),
-    };
-    Ok(Some((bytes, file_mode(config, executable, previous_mode))))
+        }) => Some(WorktreeFile {
+            bytes,
+            mode: file_mode(config, executable, previous_mode),
+            link: false,
+        }),
+    })
 }
 
 /// The git mode of a regular work-tree file, as git records it: the exec bit unless
@@ -686,6 +704,68 @@ where
     let mut writer = repo.blob_writer(Some(Path::new(path)))?;
     io::Write::write_all(&mut writer, bytes)?;
     Ok(writer.commit()?)
+}
+
+/// [`filtered_blob`] for a link kept as a file (`core.symlinks` off) at `path`, cleaned as git
+/// cleans it (#802); `index_blob` as [`link_file_filters`] takes it.
+pub(crate) fn filtered_link_file_blob<E>(
+    repo: &Repository,
+    path: &str,
+    bytes: &[u8],
+    index_blob: Option<Oid>,
+) -> Result<Oid, E>
+where
+    E: From<git2::Error> + From<io::Error>,
+{
+    filtered_blob(&link_file_filters(repo, path, index_blob)?, path, bytes)
+}
+
+/// A handle on `repo` to send a link kept as a file at `path` through the clean filters with,
+/// as git does (#802). libgit2's CRLF filter (`core.autocrlf`, `text=auto`) leaves a file as it
+/// is when the index entry at its path isn't a regular file, or its blob holds a CR; git keeps
+/// the CRs only when that entry's blob holds a CRLF and isn't binary (`has_crlf_in_index`). The
+/// handle's index, read from disk and never written, has `index_blob` (see
+/// [`blob_git_compares`]) there as a regular file when git would read it as text, else nothing.
+pub(crate) fn link_file_filters(
+    repo: &Repository,
+    path: &str,
+    index_blob: Option<Oid>,
+) -> Result<Repository, git2::Error> {
+    // The git folder when the work tree has no `.git` of its own (`core.worktree`).
+    let handle = match repo.workdir() {
+        Some(workdir) => Repository::open(workdir).or_else(|_| Repository::open(repo.path()))?,
+        None => Repository::open(repo.path())?,
+    };
+    let mut index = handle.index()?;
+    index.remove_path(Path::new(path))?;
+    let text = index_blob.filter(|id| {
+        repo.find_blob(*id)
+            .is_ok_and(|blob| !binary_for_crlf(blob.content()))
+    });
+    if let Some(id) = text {
+        index.add(&index_entry(path, id, MODE_FILE))?;
+    }
+    Ok(handle)
+}
+
+/// Whether git takes `content` for binary in its safer-autocrlf check (`convert_is_binary`): it
+/// holds a lone CR or a NUL. Its third rule, more than one control character per 128 printable
+/// ones, is left out: a link's target doesn't reach it.
+fn binary_for_crlf(content: &[u8]) -> bool {
+    let lone_cr = content
+        .iter()
+        .enumerate()
+        .any(|(at, &byte)| byte == b'\r' && content.get(at + 1) != Some(&b'\n'));
+    lone_cr || content.contains(&0)
+}
+
+/// The blob of `path`'s entry in `index` that git's CRLF filter looks for a CR in: stage 0,
+/// else "ours"' during a merge.
+pub(crate) fn blob_git_compares(index: &Index, path: &str) -> Option<Oid> {
+    [0, 2]
+        .into_iter()
+        .find_map(|stage| index.get_path(Path::new(path), stage))
+        .map(|entry| entry.id)
 }
 
 pub(crate) fn index_entry(path: &str, id: Oid, mode: u32) -> IndexEntry {

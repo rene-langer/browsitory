@@ -46,6 +46,7 @@ import {
 import { useAbortWork } from "./state/useAbortWork";
 import { CommitDragContext, useCommitDragSession } from "./state/useCommitDrag";
 import { stashBlockers } from "./lib/actions/stashActions";
+import { stashedMessage } from "./lib/externalFilters";
 import { useCommitSearch } from "./state/useCommitSearch";
 import { useCompare } from "./state/useCompare";
 import { CurrentDiffContext, useCurrentDiffRegistry } from "./state/useCurrentDiff";
@@ -825,7 +826,7 @@ export function RepoWorkspace({
     commitFlow,
     onAmendCommit: (message, options) => announce("Amended commit", amendAndRecord, { undoable: true })(message, appState.state.skipHooks, options),
     onSetAmendMode: appState.setAmendMode,
-    onSaveStash: announce("Changes stashed", () => appState.saveStash()),
+    onSaveStash: announce(stashedMessage(appState.state.status), () => appState.saveStash()),
     onOpenStashDialog: (paths) => openDialog({ kind: "stash", paths }),
     onRebaseEditMessage: appState.setRebaseEditMessage,
     onRebaseCommitPart: appState.rebaseCommitPart,
@@ -1137,7 +1138,7 @@ export function RepoWorkspace({
           },
           stash: {
             reason: stashBlockReason(appState.state),
-            onStash: announce("Changes stashed", () => appState.saveStash()),
+            onStash: announce(stashedMessage(appState.state.status), () => appState.saveStash()),
             onStashWithOptions: () => openDialog({ kind: "stash", paths: [] }),
           },
         }}

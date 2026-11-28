@@ -285,6 +285,17 @@ describe("stashBlockReason (#495)", () => {
       }),
     ).toBe("A git am started in a terminal is in progress.");
   });
+
+  // #1107: a stash leaves out files Browsitory can't filter or convert.
+  it("refuses when every change is a file a stash leaves out, naming it", () => {
+    const secret = { path: "secret.env", oldPath: null, staged: false, kind: "Modified" as const, externalFilter: "crypt" };
+    expect(stashBlockReason({ status: [secret], rebaseProgress: null, headInfo })).toBe(
+      "Nothing to stash: secret.env is left out: Browsitory can't run its 'crypt' filter. Use git on the command line for it.",
+    );
+    expect(
+      stashBlockReason({ status: [secret, { ...secret, staged: true, externalFilter: undefined }], rebaseProgress: null, headInfo }),
+    ).toBeNull();
+  });
 });
 
 describe("mergeSource and mergeContext (#665)", () => {

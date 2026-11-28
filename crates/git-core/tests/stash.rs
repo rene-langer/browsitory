@@ -214,6 +214,7 @@ fn stash_options_default_to_stash_everything_without_a_message() {
             keep_index: false,
             include_untracked: true,
             paths: vec![],
+            leave_out: vec![],
         }
     );
 }

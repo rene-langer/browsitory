@@ -313,6 +313,7 @@ pub fn stash_and_switch(
         keep_index: false,
         include_untracked: true,
         paths: Vec::new(),
+        leave_out: Vec::new(),
     };
     crate::stash::save_stash(repo, &options)?;
     let stash_id = crate::stash::list_stashes(repo)?

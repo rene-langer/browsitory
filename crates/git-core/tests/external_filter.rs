@@ -639,3 +639,140 @@ fn a_driver_name_that_is_not_utf8_is_refused_too() {
     );
     assert_eq!(state(dir.path(), &repo), before);
 }
+
+// --- Leaving files under a driver out of a stash (#1107) ---
+
+fn leaving_out(paths: &[&str], leave_out: &[&str]) -> StashOptions {
+    StashOptions {
+        paths: paths.iter().map(|path| path.to_string()).collect(),
+        leave_out: leave_out.iter().map(|path| path.to_string()).collect(),
+        ..StashOptions::default()
+    }
+}
+
+/// The content of `path` in `tree`, if it has it.
+fn in_tree(repo: &Repository, tree: &git2::Tree<'_>, path: &str) -> Option<Vec<u8>> {
+    let entry = tree.get_path(Path::new(path)).ok()?;
+    Some(repo.find_blob(entry.id()).unwrap().content().to_vec())
+}
+
+/// Stash all leaving out the filtered file stashes every other change, untracked files
+/// included, and never touches that file: its change stays in the work tree, unstashed.
+#[test]
+fn stash_all_leaving_out_a_filtered_file_stashes_the_other_changes() {
+    let (dir, mut repo) = fixture();
+    configure_driver(&repo);
+    write_file(dir.path(), SECRET, "plaintext\n");
+    write_file(dir.path(), PLAIN, "p2\n");
+    write_file(dir.path(), "untracked.txt", "u\n");
+    let before = state(dir.path(), &repo);
+
+    git_core::stash::save_stash(&mut repo, &leaving_out(&[], &[SECRET])).unwrap();
+
+    let after = state(dir.path(), &repo);
+    assert_eq!(after.stashes, 1);
+    assert_eq!(after.secret, Some(b"plaintext\n".to_vec()));
+    assert_eq!(after.plain, Some(b"p1\n".to_vec()));
+    assert_eq!(after.index, before.index);
+    assert!(!dir.path().join("untracked.txt").exists());
+    let stash = repo
+        .revparse_single("stash@{0}")
+        .unwrap()
+        .peel_to_commit()
+        .unwrap();
+    let worktree = stash.tree().unwrap();
+    assert_eq!(in_tree(&repo, &worktree, PLAIN), Some(b"p2\n".to_vec()));
+    assert_eq!(in_tree(&repo, &worktree, SECRET), Some(b"v1\n".to_vec()));
+    let untracked = stash.parent(2).unwrap().tree().unwrap();
+    assert_eq!(
+        in_tree(&repo, &untracked, "untracked.txt"),
+        Some(b"u\n".to_vec())
+    );
+}
+
+/// Only the files named are left out: another changed file under the driver still refuses the
+/// whole stash.
+#[test]
+fn stash_all_leaving_out_a_filtered_file_still_refuses_another_one() {
+    let (dir, mut repo) = fixture();
+    configure_driver(&repo);
+    write_file(dir.path(), SECRET, "plaintext\n");
+    write_file(dir.path(), PLAIN, "p2\n");
+    write_file(dir.path(), "new/a.txt", "plaintext\n");
+    let before = state(dir.path(), &repo);
+
+    let result = git_core::stash::save_stash(&mut repo, &leaving_out(&[], &[SECRET]));
+
+    assert_refused(result, "new/a.txt");
+    assert_eq!(state(dir.path(), &repo), before);
+}
+
+/// A selection leaving out its filtered file stashes the rest of it.
+#[test]
+fn a_stash_of_a_selection_leaves_out_a_filtered_file() {
+    let (dir, mut repo) = fixture();
+    configure_driver(&repo);
+    write_file(dir.path(), SECRET, "plaintext\n");
+    write_file(dir.path(), PLAIN, "p2\n");
+
+    git_core::stash::save_stash(&mut repo, &leaving_out(&[SECRET, PLAIN], &[SECRET])).unwrap();
+
+    let after = state(dir.path(), &repo);
+    assert_eq!(after.stashes, 1);
+    assert_eq!(after.secret, Some(b"plaintext\n".to_vec()));
+    assert_eq!(after.plain, Some(b"p1\n".to_vec()));
+    let stash = repo.revparse_single("stash@{0}").unwrap().id().to_string();
+    let files = git_core::stash::stash_files(&mut repo, &stash).unwrap();
+    assert_eq!(files.tracked, [PLAIN]);
+}
+
+/// With every change left out there is nothing to stash; nothing changes.
+#[test]
+fn leaving_out_the_only_change_leaves_nothing_to_stash() {
+    let (dir, mut repo) = fixture();
+    configure_driver(&repo);
+    write_file(dir.path(), SECRET, "plaintext\n");
+    let before = state(dir.path(), &repo);
+
+    for options in [
+        leaving_out(&[], &[SECRET]),
+        leaving_out(&[SECRET], &[SECRET]),
+    ] {
+        let result = git_core::stash::save_stash(&mut repo, &options);
+
+        assert!(
+            matches!(result, Err(git_core::stash::StashError::NothingToStash)),
+            "{options:?}: {result:?}"
+        );
+        assert_eq!(state(dir.path(), &repo), before);
+    }
+}
+
+/// `plain.txt` renamed to `new/p.txt` (under the driver) and staged, before the driver is
+/// configured.
+fn staged_rename_into_the_filter() -> (TempDir, Repository) {
+    let (dir, repo) = fixture();
+    std::fs::create_dir_all(dir.path().join("new")).unwrap();
+    std::fs::rename(dir.path().join(PLAIN), dir.path().join("new/p.txt")).unwrap();
+    let mut index = repo.index().unwrap();
+    index.remove_path(Path::new(PLAIN)).unwrap();
+    index.add_path(Path::new("new/p.txt")).unwrap();
+    index.write().unwrap();
+    configure_driver(&repo);
+    (dir, repo)
+}
+
+/// A stash takes the other side of a staged rename along; when that side is under the driver,
+/// the stash is refused, whether the path was picked (Stash file…) or left after leaving out.
+#[test]
+fn a_rename_partner_under_the_filter_refuses_the_stash() {
+    for options in [leaving_out(&[PLAIN], &[]), leaving_out(&[], &["new/p.txt"])] {
+        let (dir, mut repo) = staged_rename_into_the_filter();
+        let before = state(dir.path(), &repo);
+
+        let result = git_core::stash::save_stash(&mut repo, &options);
+
+        assert_refused(result, "new/p.txt");
+        assert_eq!(state(dir.path(), &repo), before, "{options:?}");
+    }
+}

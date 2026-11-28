@@ -12,8 +12,10 @@ import type {
   SequenceOutcome,
   SequenceProgress,
   TerminalRebase,
+  StatusEntry,
   TerminalSequence,
 } from "../ipc/RepoClient";
+import { isLeftOut, leftOutNotice } from "./externalFilters";
 import { type TransferSubject, transferBusyReason } from "./transferCopy";
 
 /** Visible reason a merge/rebase step is blocked, or `undefined` when nothing blocks it. */
@@ -321,7 +323,7 @@ function operationBlockReason(state: OperationState): string | null {
  * palette's stash commands (#495).
  */
 export function stashBlockReason(state: {
-  status: readonly unknown[];
+  status: readonly Partial<StatusEntry>[];
   rebaseProgress: object | null;
   headInfo: Pick<HeadInfo, "sequence" | "terminalRebase">;
 }): string | null {
@@ -330,6 +332,10 @@ export function stashBlockReason(state: {
   if (headInfo.sequence !== null) return `A ${sequenceNoun(headInfo.sequence.kind)} is in progress.`;
   if (headInfo.terminalRebase !== null) return terminalRebaseReason(headInfo.terminalRebase);
   if (state.status.length === 0) return "No changes to stash.";
+  // Every change is a file a stash leaves out (#1107).
+  if (state.status.every(isLeftOut)) {
+    return `Nothing to stash: ${leftOutNotice(state.status as StatusEntry[])}`;
+  }
   return null;
 }
 

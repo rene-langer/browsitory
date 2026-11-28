@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { StatusEntry } from "../ipc/RepoClient";
 import { StashDialog } from "./StashDialog";
 
 function renderDialog(paths: string[] = [], blockedReason: string | null = null) {
@@ -74,5 +75,67 @@ describe("StashDialog for an untracked file", () => {
     fireEvent.click(screen.getByRole("button", { name: "Stash" }));
 
     expect(onStash).toHaveBeenCalledWith({ message: null, keepIndex: false, includeUntracked: true, paths: ["new.txt"] });
+  });
+});
+
+// #1107: files Browsitory can't filter or convert (`unconvertible`) are left out, and named.
+describe("StashDialog with files it leaves out", () => {
+  const change = (path: string, extra: Partial<StatusEntry> = {}): StatusEntry => ({
+    path,
+    oldPath: null,
+    staged: false,
+    kind: "Modified",
+    ...extra,
+  });
+  const secret = change("secret.env", { externalFilter: "crypt" });
+  const status = [change("a.txt"), secret, { ...secret, staged: true, externalFilter: undefined }];
+
+  function renderWith(paths: string[]) {
+    const onStash = vi.fn();
+    render(<StashDialog paths={paths} status={status} onStash={onStash} onCancel={() => {}} />);
+    return onStash;
+  }
+
+  it("stashes everything but them, and names them", () => {
+    const onStash = renderWith([]);
+    expect(screen.getByText(/secret\.env is left out: Browsitory can't run its 'crypt' filter/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Stash" }));
+    expect(onStash).toHaveBeenCalledWith({
+      message: null,
+      keepIndex: false,
+      includeUntracked: true,
+      paths: [],
+      leaveOut: ["secret.env"],
+    });
+  });
+
+  it("stashes the rest of a selection", () => {
+    const onStash = renderWith(["secret.env", "a.txt"]);
+    expect(screen.getByText("Only: a.txt")).toBeInTheDocument();
+    expect(screen.getByText(/secret\.env is left out/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Stash" }));
+    expect(onStash).toHaveBeenCalledWith({
+      message: null,
+      keepIndex: false,
+      includeUntracked: true,
+      paths: ["a.txt"],
+      leaveOut: ["secret.env"],
+    });
+  });
+
+  it("stashes nothing when only such files are picked, saying why", () => {
+    const onStash = renderWith(["secret.env"]);
+    const stash = screen.getByRole("button", { name: "Stash" });
+    expect(stash).toBeDisabled();
+    expect(stash).toHaveAttribute("title", expect.stringContaining("secret.env is left out"));
+    fireEvent.submit(stash.closest("form")!);
+    expect(onStash).not.toHaveBeenCalled();
+  });
+
+  it("leaves nothing out of a selection without them", () => {
+    const onStash = renderWith(["a.txt"]);
+    expect(screen.queryByText(/is left out/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Stash" }));
+    expect(onStash).toHaveBeenCalledWith({ message: null, keepIndex: false, includeUntracked: true, paths: ["a.txt"] });
   });
 });

@@ -122,6 +122,27 @@ describe("useAppState merge and stash options", () => {
     expect(saveStash).toHaveBeenCalledWith(TEST_REPO_PATH, defaultStash);
   });
 
+  // #1107: "Stash all changes" leaves out files Browsitory can't filter or convert.
+  it("saveStash of everything leaves out the files Browsitory can't filter or convert", async () => {
+    const saveStash = vi.fn(async () => {});
+    const change = { oldPath: null, staged: false, kind: "Modified" as const };
+    const client = transferClient({
+      saveStash,
+      getStatus: async () => [
+        { ...change, path: "a.txt" },
+        { ...change, path: "secret.env", externalFilter: "crypt" },
+        { ...change, path: "notes.txt", workingTreeEncoding: "UTF-16" },
+      ],
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    expect(result.current.state.status).toHaveLength(3);
+
+    await act(() => result.current.saveStash());
+
+    expect(saveStash).toHaveBeenCalledWith(TEST_REPO_PATH, { ...defaultStash, leaveOut: ["secret.env", "notes.txt"] });
+  });
+
   it("saveStash passes dialog options and closes the dialog", async () => {
     const saveStash = vi.fn(async () => {});
     const client = transferClient({ saveStash });
