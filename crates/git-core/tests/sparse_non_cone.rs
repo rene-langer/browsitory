@@ -175,15 +175,18 @@ fn disagreements(ignore_case: bool) -> Vec<String> {
     write_paths(d);
     git_ok(d, &["add", "-A"]);
     git_ok(d, &["commit", "-q", "-m", "all"]);
-    git_ok(d, &["sparse-checkout", "init", "--no-cone"]);
     let mut wrong = Vec::new();
     for patterns in PATTERNS {
+        git_ok(d, &["sparse-checkout", "init", "--no-cone"]);
         std::fs::write(d.join(".git/info/sparse-checkout"), patterns).unwrap();
         let output = test_support::git(d, &["sparse-checkout", "reapply"]);
         assert!(output.status.success(), "{patterns:?}: {output:?}");
         let marked = marked_by_git(d);
-        // Every file back on disk: the patterns alone decide, not what git removed.
-        write_paths(d);
+        // Every file back on disk, so the patterns alone decide, not what git removed; git
+        // brings them back clean, so its next reapply starts from a full work tree too.
+        git_ok(d, &["sparse-checkout", "disable"]);
+        git_ok(d, &["config", "--worktree", "core.sparseCheckout", "true"]);
+        std::fs::write(d.join(".git/info/sparse-checkout"), patterns).unwrap();
         let repo = git2::Repository::open(d).unwrap();
         for path in PATHS {
             let ours = git_core::sparse::leaves_out(&repo, path).unwrap();
@@ -194,6 +197,7 @@ fn disagreements(ignore_case: bool) -> Vec<String> {
                 ));
             }
         }
+        git_ok(d, &["config", "--worktree", "core.sparseCheckout", "false"]);
     }
     wrong
 }
