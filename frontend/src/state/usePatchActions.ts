@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import type { CommitChangeRequest, GraphCommit, PatchApply, PatchApplyOutcome, PatchContent, PatchPreview, PatchSource, RepoClient } from "../ipc/RepoClient";
+import type { CommitChangeRequest, DroppedFile, GraphCommit, PatchApply, PatchApplyOutcome, PatchContent, PatchPreview, PatchSource, RepoClient } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
 import { failedOperation, hookNextStep } from "../lib/operationErrors";
 import { failureError, type RunMutationWithOutcome } from "./useMutationRunner";
@@ -26,7 +26,7 @@ export interface PatchActions {
    * Applies the patch files at `paths` (dropped on the window, #649) in order, each its own undo
    * step; the first that can't be read or doesn't apply stops the rest.
    */
-  applyPatchFiles(paths: string[]): Promise<void>;
+  applyPatchFiles(paths: string[], files?: DroppedFile[]): Promise<void>;
 }
 
 /** The file name at the end of `path`, for messages. */
@@ -147,12 +147,17 @@ export function usePatchActions(
   );
 
   const applyPatchFiles = useCallback(
-    async (paths: string[]) => {
+    async (paths: string[], files: DroppedFile[] = []) => {
       setState((prev) => ({ ...prev, patchOutcome: null, error: null }));
-      for (const path of paths) {
+      // A file dropped without a path (#818) is named by its name instead.
+      const sources = [
+        ...paths.map((path) => ({ path, read: () => client.readPatchFile(path) })),
+        ...files.map((file) => ({ path: file.name, read: () => file.read() })),
+      ];
+      for (const { path, read } of sources) {
         let content;
         try {
-          content = await client.readPatchFile(path);
+          content = await read();
         } catch (err) {
           // The backend's message names the file already ("Couldn't read /tmp/a.patch: …").
           const { error, errorHint } = failureError(err);

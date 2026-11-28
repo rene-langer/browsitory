@@ -10,6 +10,7 @@ import {
 import {
   commandTargetPath,
   contributedShortcutIds,
+  droppedPath,
   findRepositoryRoot,
   type HostRequest,
   repoRelativePath,
@@ -204,6 +205,16 @@ export function activate(context: vscode.ExtensionContext): void {
       },
       writeFile: (file, content) => vscode.workspace.fs.writeFile(vscode.Uri.file(file), content),
       readFile: (uri) => vscode.workspace.fs.readFile(uri),
+      readFilePath: (file) => vscode.workspace.fs.readFile(vscode.Uri.file(file)),
+      droppedUriPath: (uri) => {
+        let parsed: vscode.Uri;
+        try {
+          parsed = vscode.Uri.parse(uri, true);
+        } catch {
+          return undefined;
+        }
+        return droppedPath(parsed, vscode.env.remoteName !== undefined);
+      },
       openExternal: (url) => vscode.env.openExternal(vscode.Uri.parse(url, true)),
       appendLine: (message) => output.appendLine(message),
       openFile: (file, line) =>
