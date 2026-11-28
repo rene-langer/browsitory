@@ -3,6 +3,6 @@
   "private": true,
   "packageManager": "pnpm@12.23.0",
   "devDependencies": {
-    "ovsx": "1.3.0"
+    "ovsx": "1.4.0"
   }
 }
