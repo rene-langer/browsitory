@@ -5,6 +5,13 @@
 use std::collections::HashSet;
 use std::path::Path;
 
+/// Whether the sparse checkout of `repo`'s work tree leaves the file `path` (`/`-separated) out.
+/// A test seam (#1187): the tests compare it with the marks git sets for many patterns.
+#[doc(hidden)]
+pub fn leaves_out(repo: &git2::Repository, path: &str) -> Result<bool, git2::Error> {
+    Ok(Sparse::read(repo)?.excludes(repo.workdir(), path.as_bytes()))
+}
+
 /// Which paths a work tree's sparse checkout holds.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Sparse {

@@ -43,7 +43,8 @@ pub mod root_file;
 pub mod search;
 pub mod sequence_file;
 pub mod signing;
-mod sparse;
+#[doc(hidden)]
+pub mod sparse;
 pub mod stage;
 pub mod stash;
 pub mod status;

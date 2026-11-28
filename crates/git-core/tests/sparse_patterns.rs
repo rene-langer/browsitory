@@ -677,3 +677,184 @@ fn aborting_a_merge_in_a_sparse_checkout_matches_git() {
     assert_same_as_git(ours.path(), twin.path());
     assert!(ls_files_v(ours.path()).contains("S docs/guide.md\n"));
 }
+
+// #1187: Reset hard and Abort rebase apply the sparse patterns to every entry, as git's
+// unpack-trees does (`apply_sparse_checkout`): an entry outside them gets the mark and loses its
+// file, one inside loses the mark and gets its file. A mixed reset doesn't.
+
+/// [`cone`], then `docs/guide.md` (outside the cone) unmarked and written, as a manual
+/// `git update-index --no-skip-worktree` and `git checkout` leave it.
+fn unmarked_outside(d: &Path) -> String {
+    let two = cone(d);
+    git_ok(d, &["update-index", "--no-skip-worktree", "docs/guide.md"]);
+    git_ok(d, &["checkout", "--", "docs/guide.md"]);
+    assert!(ls_files_v(d).contains("H docs/guide.md\n"));
+    two
+}
+
+/// [`cone`], then `app/main.rs` (inside the cone) marked and its file removed.
+fn marked_inside(d: &Path) -> String {
+    let two = cone(d);
+    git_ok(d, &["update-index", "--skip-worktree", "app/main.rs"]);
+    std::fs::remove_file(d.join("app/main.rs")).unwrap();
+    two
+}
+
+/// Resets ours and the twin hard to `target` (HEAD, or the commit `two`) and compares them.
+fn hard_reset_matches_git(build: impl Fn(&Path) -> String, to_two: bool) {
+    let (ours, our_two, twin, twin_two) = twins(build);
+    let twin_target = if to_two {
+        twin_two
+    } else {
+        rev(twin.path(), "HEAD")
+    };
+    git_ok(twin.path(), &["reset", "-q", "--hard", &twin_target]);
+    let our_target = if to_two {
+        our_two
+    } else {
+        rev(ours.path(), "HEAD")
+    };
+    let repo = git2::Repository::open(ours.path()).unwrap();
+
+    reset_to(&repo, &our_target, ResetMode::Hard).unwrap();
+
+    assert_same_as_git(ours.path(), twin.path());
+}
+
+#[test]
+fn a_hard_reset_marks_and_removes_an_unmarked_file_outside_the_cone_as_git_does() {
+    hard_reset_matches_git(unmarked_outside, false);
+}
+
+#[test]
+fn a_hard_reset_to_another_commit_marks_an_unmarked_file_outside_the_cone_as_git_does() {
+    hard_reset_matches_git(unmarked_outside, true);
+}
+
+#[test]
+fn a_hard_reset_removes_an_edited_unmarked_file_outside_the_cone_as_git_does() {
+    hard_reset_matches_git(
+        |d| {
+            let two = unmarked_outside(d);
+            write_file(d, "docs/guide.md", "edited\n");
+            two
+        },
+        false,
+    );
+}
+
+#[test]
+fn a_hard_reset_unmarks_and_writes_a_marked_file_inside_the_cone_as_git_does() {
+    hard_reset_matches_git(marked_inside, false);
+}
+
+#[test]
+fn a_hard_reset_to_another_commit_unmarks_a_marked_file_inside_the_cone_as_git_does() {
+    hard_reset_matches_git(marked_inside, true);
+}
+
+/// git drops the mark of a marked file it finds on disk, then the reset marks it again and
+/// removes the file.
+#[test]
+fn a_hard_reset_removes_the_unchanged_file_of_a_marked_entry_outside_the_cone_as_git_does() {
+    hard_reset_matches_git(
+        |d| {
+            let two = cone(d);
+            write_file(d, "docs/guide.md", "guide\n");
+            two
+        },
+        false,
+    );
+}
+
+#[test]
+fn a_hard_reset_applies_non_cone_patterns_to_existing_entries_as_git_does() {
+    hard_reset_matches_git(
+        |d| {
+            let two = non_cone(d);
+            git_ok(d, &["update-index", "--no-skip-worktree", "lib/top.rs"]);
+            git_ok(d, &["checkout", "--", "lib/top.rs"]);
+            git_ok(d, &["update-index", "--skip-worktree", "top.txt"]);
+            std::fs::remove_file(d.join("top.txt")).unwrap();
+            two
+        },
+        true,
+    );
+}
+
+/// A mixed reset leaves the marks of the entries already in the index as they are, as git's
+/// does.
+#[test]
+fn a_mixed_reset_keeps_the_marks_of_existing_entries_as_git_does() {
+    let (ours, our_two, twin, twin_two) = twins(|d| {
+        let two = unmarked_outside(d);
+        git_ok(d, &["update-index", "--skip-worktree", "app/main.rs"]);
+        two
+    });
+    git_ok(twin.path(), &["reset", "-q", "--mixed", &twin_two]);
+    let repo = git2::Repository::open(ours.path()).unwrap();
+
+    reset_to(&repo, &our_two, ResetMode::Mixed).unwrap();
+
+    assert_same_as_git(ours.path(), twin.path());
+}
+
+/// Owner decision (#1187): git drops the mark of a marked file it finds on disk, so its hard
+/// reset overwrites a hidden edit to one inside the patterns. Browsitory leaves such a file as
+/// it is, marked: nothing would show the edit or bring it back.
+#[test]
+fn a_hard_reset_leaves_an_edited_marked_file_inside_the_cone_alone() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let d = dir.path();
+    marked_inside(d);
+    write_file(d, "app/main.rs", "edited\n");
+    let repo = git2::Repository::open(d).unwrap();
+
+    reset_to(&repo, &rev(d, "HEAD"), ResetMode::Hard).unwrap();
+
+    // Read without git, which drops the mark of a file on disk when it reads the index.
+    let index = git2::Index::open(&d.join(".git/index")).unwrap();
+    let entry = index.get_path(Path::new("app/main.rs"), 0).unwrap();
+    let skip_worktree = git2::IndexEntryExtendedFlag::SKIP_WORKTREE.bits();
+    assert_ne!(entry.flags_extended & skip_worktree, 0);
+    assert_eq!(
+        std::fs::read_to_string(d.join("app/main.rs")).unwrap(),
+        "edited\n"
+    );
+}
+
+#[test]
+fn aborting_a_rebase_applies_the_sparse_patterns_to_every_entry_as_git_does() {
+    let (ours, our_onto, twin, _) = twins(|d| {
+        let onto = rebase_history(d);
+        git_ok(d, &["update-index", "--no-skip-worktree", "docs/guide.md"]);
+        git_ok(d, &["checkout", "--", "docs/guide.md"]);
+        git_ok(d, &["update-index", "--skip-worktree", "top.txt"]);
+        std::fs::remove_file(d.join("top.txt")).unwrap();
+        onto
+    });
+    let output = test_support::git(twin.path(), &["rebase", "onto"]);
+    assert!(!output.status.success(), "{output:?}");
+    git_ok(twin.path(), &["rebase", "--abort"]);
+    let repo = git2::Repository::open(ours.path()).unwrap();
+    let plan = git_core::rebase::commits_since(&repo, &our_onto)
+        .unwrap()
+        .into_iter()
+        .map(|commit| git_core::rebase::RebasePlanEntry {
+            commit_id: commit.id,
+            action: git_core::rebase::RebaseAction::Pick,
+            combined_message: None,
+        })
+        .collect();
+    let (state, result) = git_core::rebase::start_rebase(&repo, &our_onto, plan).unwrap();
+    assert!(matches!(
+        result,
+        git_core::rebase::RebaseStepResult::Conflicted { .. }
+    ));
+
+    git_core::rebase::abort_rebase(&repo, &state).unwrap();
+
+    assert_same_as_git(ours.path(), twin.path());
+    assert!(ls_files_v(ours.path()).contains("S docs/guide.md\n"));
+    assert!(ls_files_v(ours.path()).contains("H top.txt\n"));
+}
