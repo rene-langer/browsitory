@@ -21,6 +21,7 @@ import { useAppearanceSettingsContext } from "../state/useAppearanceSettings";
 import { useCommitMessageSettingsContext } from "../state/useCommitMessageSettings";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
 import { useFileListLayout, writeFileListLayout } from "../lib/fileListLayoutPreference";
+import { useDiffLayout, writeDiffLayout } from "../lib/diffLayoutPreference";
 import { useExternalToolSettings } from "../state/useExternalToolSettings";
 import { useFetchSettingsContext } from "../state/useFetchSettings";
 import { useUpdateSettingsContext } from "../state/useUpdateSettings";
@@ -318,6 +319,7 @@ const DIFF_ALGORITHM_LABEL: Record<DiffAlgorithm, string> = {
 export function DiffSection() {
   const { settings, update, error, dismissError } = useDiffSettingsContext();
   const fileListLayout = useFileListLayout();
+  const diffLayout = useDiffLayout();
   return (
     <PreferencesSection title="Diff">
       <Field label="Word wrap">
@@ -381,6 +383,19 @@ export function DiffSection() {
       <p className={styles.hint}>
         Groups the working tree&apos;s changed files by folder. The Flat and Tree buttons above the
         file list switch it too. Kept on this computer.
+      </p>
+      <label className={styles.checkbox}>
+        <input
+          type="checkbox"
+          checked={diffLayout === "stacked"}
+          onChange={(event) => writeDiffLayout(event.target.checked ? "stacked" : "list")}
+        />
+        Show all diffs stacked
+      </label>
+      <p className={styles.hint}>
+        Shows every changed file&apos;s diff in the working tree, one below the other, instead of
+        the current file&apos;s only. The List and Stacked buttons above the file list switch it
+        too. Kept on this computer.
       </p>
       {error !== null && (
         <p role="alert" className={styles.problem}>

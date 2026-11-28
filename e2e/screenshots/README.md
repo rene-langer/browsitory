@@ -47,6 +47,7 @@ Then look at every changed image before you commit it.
 |---|---|
 | `overview.png` | The main window: sidebar, commit graph, working tree changes |
 | `staging.png` | A selected file's diff with a commit message typed |
+| `staging-stacked.png` | The same changes in the stacked view: every file's diff under the file list |
 | `commit-diff.png` | A commit from history with its diff |
 | `branches.png` | The Branches section with the `origin` folder open |
 | `stashes.png` | The Stashes section |

@@ -148,6 +148,14 @@ describe("Documentation screenshots", () => {
     await shoot("staging");
   });
 
+  it("staging-stacked", async () => {
+    await clickInPage("button", "Stacked");
+    await waitUntilInPage('section[aria-label^="Changes in "] .diff-line-add');
+    await shoot("staging-stacked");
+    // Back to one viewer for the shots after this one.
+    await clickInPage("button", "List");
+  });
+
   it("commit-diff", async () => {
     await click("li*=Limit the tile cache to 200 entries");
     await waitUntilInPage(".diff-line-add");
