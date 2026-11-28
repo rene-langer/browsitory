@@ -46,6 +46,10 @@ pub fn open(path: &Path) -> Result<git2::Repository, RepoError> {
     Ok(git2::Repository::discover(path)?)
 }
 
+pub fn reload_core_settings(_repo: &git2::Repository) -> Result<(), git2::Error> {
+    Ok(())
+}
+
 /// Creates an empty repository at `path` (and any missing parents). The initial branch honours
 /// the user's global `init.defaultBranch`, else `main`.
 pub fn init_repo(path: &Path) -> Result<(), RepoError> {
