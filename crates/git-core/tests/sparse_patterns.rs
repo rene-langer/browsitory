@@ -854,6 +854,25 @@ fn a_hard_reset_marks_an_intent_to_add_entry_outside_the_cone_that_the_target_ha
     );
 }
 
+/// A marked file outside the cone that is missing stays as it is: an empty folder it would be in
+/// stays too, as git leaves it.
+#[test]
+fn a_hard_reset_leaves_the_empty_folder_of_a_missing_marked_file_as_git_does() {
+    let (ours, _, twin, _) = twins(|d| {
+        let two = cone(d);
+        std::fs::create_dir(d.join("docs")).unwrap();
+        two
+    });
+    git_ok(twin.path(), &["reset", "-q", "--hard"]);
+    let repo = git2::Repository::open(ours.path()).unwrap();
+
+    reset_to(&repo, &rev(ours.path(), "HEAD"), ResetMode::Hard).unwrap();
+
+    assert_same_as_git(ours.path(), twin.path());
+    assert!(twin.path().join("docs").is_dir());
+    assert!(ours.path().join("docs").is_dir());
+}
+
 /// `main` changes `docs/g` (outside the cone) against `onto`, which changes it too: the rebase
 /// stops on a conflict outside the cone. Sparse `app`.
 fn conflict_outside_history(d: &Path) -> String {
