@@ -1,18 +1,52 @@
-//! Replacing `config.toml` with the written temp file (#1219).
+//! Replacing `config.toml` with the written temp file (#1219). Getters read without the write
+//! lock, so another window can have the file open while a save replaces it. Linux and macOS
+//! replace an open file. On Windows `MoveFileExW` refuses ("Access is denied"); std's
+//! `fs::rename` then renames with POSIX semantics (`FileRenameInfoEx`), which replaces a file
+//! that is open with `FILE_SHARE_DELETE`, as std opens every file it reads. A handle opened
+//! without that share mode (another program, a virus scanner) or a file system without POSIX
+//! renames still refuses: such a replace is tried again until the wait runs out.
 
 use std::io;
-use std::time::Duration;
+use std::path::Path;
+use std::time::{Duration, Instant};
 
+/// How long a refused replace is retried. A reader keeps the file open for a millisecond or
+/// two; a virus scanner for longer.
+const WAIT: Duration = Duration::from_secs(2);
+
+/// Renames `from` onto `to`, replacing it.
 #[allow(dead_code)]
-fn retrying(
-    mut attempt: impl FnMut() -> io::Result<()>,
-    _transient: impl Fn(&io::Error) -> bool,
-    _wait: Duration,
-) -> io::Result<()> {
-    attempt()
+pub(crate) fn replace(from: &Path, to: &Path) -> io::Result<()> {
+    retrying(|| std::fs::rename(from, to), is_sharing_conflict, WAIT)
 }
 
-#[allow(dead_code)]
+fn retrying(
+    mut attempt: impl FnMut() -> io::Result<()>,
+    transient: impl Fn(&io::Error) -> bool,
+    wait: Duration,
+) -> io::Result<()> {
+    let deadline = Instant::now() + wait;
+    let mut pause = Duration::from_millis(1);
+    loop {
+        match attempt() {
+            Err(error) if transient(&error) && Instant::now() < deadline => {
+                std::thread::sleep(pause.min(deadline.saturating_duration_since(Instant::now())));
+                pause = (pause * 2).min(Duration::from_millis(50));
+            }
+            result => return result,
+        }
+    }
+}
+
+/// ERROR_ACCESS_DENIED (5): the destination is open; ERROR_SHARING_VIOLATION (32): it is open
+/// without sharing.
+#[cfg(windows)]
+fn is_sharing_conflict(error: &io::Error) -> bool {
+    matches!(error.raw_os_error(), Some(5 | 32))
+}
+
+/// Elsewhere a rename replaces an open file.
+#[cfg(not(windows))]
 fn is_sharing_conflict(_error: &io::Error) -> bool {
     false
 }
