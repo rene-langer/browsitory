@@ -133,7 +133,7 @@ describe("stacked view of all diffs (#793)", () => {
 
   it("offers a List | Stacked toggle, List by default, and remembers Stacked on this computer", () => {
     render(<Pane client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")} status={status} />);
-    const toggle = screen.getByRole("group", { name: "Diff layout" });
+    const toggle = screen.getByRole("group", { name: "Diffs shown" });
     expect(within(toggle).getByRole("button", { name: "List" })).toHaveAttribute("aria-pressed", "true");
     expect(within(toggle).getByRole("button", { name: "Stacked" })).toHaveAttribute("aria-pressed", "false");
     expect(sectionNames()).toHaveLength(1);
