@@ -893,6 +893,7 @@ refused!(
             keep_index: false,
             include_untracked: false,
             paths: Vec::new(),
+            leave_out: Vec::new(),
         }
     ))
 );

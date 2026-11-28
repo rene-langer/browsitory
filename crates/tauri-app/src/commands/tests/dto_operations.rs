@@ -329,7 +329,8 @@ fn stash_dtos_serialize_camel_case() {
             message: None,
             keep_index: true,
             include_untracked: false,
-            paths: vec!["a.txt".into()]
+            paths: vec!["a.txt".into()],
+            leave_out: vec![]
         }
     );
     assert_eq!(

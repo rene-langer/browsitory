@@ -2732,6 +2732,9 @@ pub struct StashOptionsDto {
     pub keep_index: bool,
     pub include_untracked: bool,
     pub paths: Vec<String>,
+    /// The files the stash leaves alone (#1107); absent: none.
+    #[cfg_attr(any(test, feature = "ts"), ts(optional))]
+    pub leave_out: Option<Vec<String>>,
 }
 
 impl From<StashOptionsDto> for git_core::stash::StashOptions {
@@ -2741,6 +2744,7 @@ impl From<StashOptionsDto> for git_core::stash::StashOptions {
             keep_index: dto.keep_index,
             include_untracked: dto.include_untracked,
             paths: dto.paths,
+            leave_out: dto.leave_out.unwrap_or_default(),
         }
     }
 }

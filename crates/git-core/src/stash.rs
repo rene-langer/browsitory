@@ -197,6 +197,10 @@ pub struct StashOptions {
     pub include_untracked: bool,
     /// Literal file paths limiting the stash; empty stashes everything.
     pub paths: Vec<String>,
+    /// Literal file paths the stash leaves alone, of `paths` or of everything: the files under a
+    /// filter driver or working-tree-encoding Browsitory can't run, which Stash all and a
+    /// selection leave out (#1107).
+    pub leave_out: Vec<String>,
 }
 
 impl Default for StashOptions {
@@ -206,6 +210,7 @@ impl Default for StashOptions {
             keep_index: false,
             include_untracked: true,
             paths: Vec::new(),
+            leave_out: Vec::new(),
         }
     }
 }

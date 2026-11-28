@@ -274,6 +274,7 @@ fn stash_over_a_change() -> (tempfile::TempDir, git2::Repository) {
         keep_index: false,
         include_untracked: false,
         paths: Vec::new(),
+        leave_out: Vec::new(),
     };
     git_core::stash::save_stash(&mut repo, &options).unwrap();
     write_file(d, "version.txt", OURS);
