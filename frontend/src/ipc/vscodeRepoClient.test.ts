@@ -1629,3 +1629,149 @@ describe("vscodeRepoClient host requests (#677, #679)", () => {
     expect(listener).toHaveBeenCalledOnce();
   });
 });
+
+describe("vscodeRepoClient file drops (#818)", () => {
+  let postMessage: ReturnType<typeof vi.fn>;
+  let client: RepoClient;
+  let reset: (() => void) | undefined;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    postMessage = vi.fn();
+    (globalThis as unknown as { acquireVsCodeApi: () => { postMessage: typeof postMessage } }).acquireVsCodeApi = () => ({
+      postMessage,
+    });
+    const clientModule = await import("./vscodeRepoClient");
+    client = clientModule.vscodeRepoClient;
+    reset = clientModule.__resetVscodeRepoClientForTests;
+  });
+
+  afterEach(() => {
+    reset?.();
+    document.body.replaceChildren();
+  });
+
+  /** A drag event as the webview gets it: jsdom has no `DataTransfer`, so a stand-in carries it. */
+  function drag(
+    type: string,
+    transfer: { types: string[]; data?: Record<string, string>; files?: unknown[] },
+    target: EventTarget = document.body,
+  ) {
+    const dataTransfer = {
+      types: transfer.types,
+      dropEffect: "none",
+      files: transfer.files ?? [],
+      getData: (format: string) => transfer.data?.[format] ?? "",
+    };
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
+    target.dispatchEvent(event);
+    return { prevented: event.defaultPrevented, dataTransfer };
+  }
+
+  function respond(id: number, result: unknown) {
+    window.dispatchEvent(new MessageEvent("message", { data: { jsonrpc: "2.0", id, result } }));
+  }
+
+  const FILES = { types: ["Files"] };
+  const CODE_URI_LIST = "application/vnd.code.uri-list";
+
+  it("takes drags of files and URIs from VSCode, reports them hovering until they leave, and leaves text drags alone", () => {
+    const events: unknown[] = [];
+    const stop = client.subscribeFileDrops((event) => events.push(event));
+    const inner = document.body.appendChild(document.createElement("div"));
+
+    // Taking the drag keeps VSCode from passing it to its editor drop overlay.
+    expect(drag("dragenter", FILES).prevented).toBe(true);
+    expect(drag("dragenter", { types: ["text/uri-list", CODE_URI_LIST] }, inner).prevented).toBe(true);
+    const over = drag("dragover", FILES, inner);
+    expect(over.prevented).toBe(true);
+    expect(over.dataTransfer.dropEffect).toBe("copy");
+    // Moving from the body onto an element in it leaves the body, not the page.
+    drag("dragleave", FILES);
+    expect(events).toEqual([{ kind: "over" }]);
+    drag("dragleave", FILES, inner);
+    expect(events).toEqual([{ kind: "over" }, { kind: "leave" }]);
+
+    expect(drag("dragenter", { types: ["text/plain", "text/html"] }).prevented).toBe(false);
+    expect(drag("dragover", { types: ["text/plain"] }).prevented).toBe(false);
+    expect(events).toHaveLength(2);
+
+    stop();
+    expect(drag("dragenter", FILES).prevented).toBe(false);
+    expect(events).toHaveLength(2);
+    expect(postMessage).not.toHaveBeenCalled();
+  });
+
+  it("turns the URIs of a drop from VSCode's Explorer into paths through the extension host", async () => {
+    const events: unknown[] = [];
+    client.subscribeFileDrops((event) => events.push(event));
+    const uris = ["file:///repos/app", "file:///home/me/fix.patch#3,1"];
+    drag("dragenter", { types: ["text/uri-list", CODE_URI_LIST] });
+    // `text/uri-list` holds only the first URI (a Chromium limit); VSCode's own list holds all.
+    const dropped = drag("drop", {
+      types: ["text/uri-list", CODE_URI_LIST],
+      data: { "text/uri-list": uris[0]!, [CODE_URI_LIST]: uris.join("\r\n") },
+    });
+
+    expect(dropped.prevented).toBe(true);
+    expect(postMessage).toHaveBeenCalledExactlyOnceWith({ jsonrpc: "2.0", id: 1, method: "resolve_dropped_uris", params: { uris } });
+    respond(1, ["/repos/app", "/home/me/fix.patch"]);
+    await vi.waitFor(() => expect(events.at(-1)).toEqual({ kind: "drop", paths: ["/repos/app", "/home/me/fix.patch"] }));
+    expect(events[0]).toEqual({ kind: "over" });
+  });
+
+  it("reads a plain uri-list when VSCode's own list is missing, without its comment lines", () => {
+    client.subscribeFileDrops(() => {});
+    drag("drop", { types: ["text/uri-list"], data: { "text/uri-list": "# from a browser\r\nfile:///repos/b\r\n\r\n" } });
+    expect(postMessage).toHaveBeenCalledExactlyOnceWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "resolve_dropped_uris",
+      params: { uris: ["file:///repos/b"] },
+    });
+  });
+
+  it("drops nothing when the extension host can't resolve the URIs", async () => {
+    const events: unknown[] = [];
+    client.subscribeFileDrops((event) => events.push(event));
+    drag("drop", { types: ["text/uri-list"], data: { "text/uri-list": "file:///repos/b" } });
+    window.dispatchEvent(
+      new MessageEvent("message", { data: { jsonrpc: "2.0", id: 1, error: { code: -32000, message: "boom" } } }),
+    );
+    await vi.waitFor(() => expect(events).toEqual([{ kind: "drop", paths: [] }]));
+  });
+
+  it("hands over files from the file manager, which come without a path, as their content", async () => {
+    const events: Array<{ kind: string; paths?: string[]; files?: Array<{ name: string; read: () => Promise<unknown> }> }> = [];
+    client.subscribeFileDrops((event) => events.push(event));
+    const text = "--- a/x\n+++ b/x\n";
+    const patch = new File([text], "fix.patch");
+    const folder = new File([], "repo");
+    const big = { name: "big.diff", size: 64 * 1024 * 1024 + 1, arrayBuffer: vi.fn() };
+    const dropped = drag("drop", { types: ["Files"], files: [patch, folder, big] });
+
+    expect(dropped.prevented).toBe(true);
+    expect(postMessage).not.toHaveBeenCalled();
+    const drop = events.at(-1)!;
+    expect(drop.kind).toBe("drop");
+    expect(drop.paths).toEqual([]);
+    expect(drop.files?.map((file) => file.name)).toEqual(["fix.patch", "repo", "big.diff"]);
+    await expect(drop.files![0]!.read()).resolves.toEqual({ base64: btoa(text) });
+    await expect(drop.files![1]!.read()).rejects.toThrow("repo isn't a patch file (.patch, .diff, .mbox or .txt)");
+    await expect(drop.files![2]!.read()).rejects.toThrow("Couldn't read big.diff: the file is larger than 64 MB");
+    expect(big.arrayBuffer).not.toHaveBeenCalled();
+  });
+
+  it("reads a dropped patch file through the extension host, with the desktop's limits", async () => {
+    const reading = client.readPatchFile("/home/me/fix.patch");
+    expect(postMessage).toHaveBeenCalledExactlyOnceWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "read_patch_file",
+      params: { path: "/home/me/fix.patch" },
+    });
+    respond(1, { base64: "ZGlmZg==" });
+    await expect(reading).resolves.toEqual({ base64: "ZGlmZg==" });
+  });
+});

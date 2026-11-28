@@ -1377,10 +1377,24 @@ export const ROOT_FILE_NAMES = [".gitignore", ".gitattributes"] as const;
 export type RootFileName = (typeof ROOT_FILE_NAMES)[number];
 
 /**
- * Files or folders dragged from the file manager onto the window (#649): `over` while they hover
- * (repeated), `leave` when they go without a drop, `drop` with their absolute paths.
+ * A file dropped on the window without a path the backend could read (#818): the VSCode webview
+ * gets files from the file manager only as their content.
  */
-export type FileDropEvent = { kind: "over" } | { kind: "leave" } | { kind: "drop"; paths: string[] };
+export interface DroppedFile {
+  name: string;
+  /** The file as a patch; rejects for a name not like a patch's or a file larger than 64 MB. */
+  read(): Promise<PatchContent>;
+}
+
+/**
+ * Files or folders dragged onto the window (#649): `over` while they hover (repeated), `leave`
+ * when they go without a drop, `drop` with their absolute paths. In VSCode (#818) a drop from the
+ * file manager holds `files` instead, and one from VSCode's Explorer the paths.
+ */
+export type FileDropEvent =
+  | { kind: "over" }
+  | { kind: "leave" }
+  | { kind: "drop"; paths: string[]; files?: DroppedFile[] };
 
 /**
  * What the VSCode extension host asks the app to do (#677, #678, #679, #759); `extension/src/
@@ -1623,9 +1637,8 @@ export interface RepoClient {
   /** Asks the user for a patch file: its content, or `null` when cancelled. */
   openPatchFile(): Promise<PatchContent | null>;
   /**
-   * Reads the patch file at `path`, one dropped on the window (#649). Rejects for a file not
-   * named like a patch (`.patch`, `.diff`, `.mbox`, `.txt`) or larger than 64 MB. Desktop only:
-   * the VSCode extension gets no file drops and rejects without calling anything.
+   * Reads the patch file at `path`, one dropped on the window (#649, #818). Rejects for a file not
+   * named like a patch (`.patch`, `.diff`, `.mbox`, `.txt`) or larger than 64 MB.
    */
   readPatchFile(path: string): Promise<PatchContent>;
   ignorePath(repoPath: string, pattern: string): Promise<void>;
@@ -1739,8 +1752,9 @@ export interface RepoClient {
    */
   subscribeOperationLog(listener: (change: OperationLogChange) => void): () => void;
   /**
-   * File manager drags onto the window (#649), until the returned function is called. Desktop
-   * only: in the VSCode extension, VSCode handles drops itself and this never calls `listener`.
+   * Files dragged onto the window (#649), until the returned function is called. In VSCode
+   * (#818) only drags that reach the webview: from the file manager, and from VSCode's Explorer
+   * with Shift held.
    */
   subscribeFileDrops(listener: (event: FileDropEvent) => void): () => void;
   /**

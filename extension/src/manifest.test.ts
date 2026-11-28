@@ -61,4 +61,11 @@ describe("extension/package.json's integration points (#759)", () => {
       default: true,
     });
   });
+
+  it("has a setting that leaves the Git extension's commit hovers alone (#781)", () => {
+    expect(manifest.contributes.configuration.properties["browsitory.gitHover.enabled"]).toMatchObject({
+      type: "boolean",
+      default: true,
+    });
+  });
 });

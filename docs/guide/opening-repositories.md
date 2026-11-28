@@ -34,8 +34,8 @@ Git's message in either case.
 Browsitory reopens the tabs you had open last time. To open another repository next to them,
 click **+** at the end of the tab bar: the picker opens as the **Open repository** dialog (**×**
 or Escape closes it). A repository that is already open in a tab is marked **Open in a tab**,
-and clicking it switches to that tab. In the desktop app you can also drag a repository's folder
-from your file manager onto the window.
+and clicking it switches to that tab. You can also drag a repository's folder from your file
+manager onto the window; in VSCode, drag it from VSCode's Explorer with Shift held instead.
 
 ## Cloning and creating repositories
 

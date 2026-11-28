@@ -460,15 +460,23 @@ function AppContent({
   useE2eAutoOpen(openRepos, openRepoTab);
 
   // Folders dropped on the window open as tabs, one after the other; patch files are applied to
-  // the active tab's working tree (#649).
-  const fileDragging = useFileDrops(client, ({ folders, patches }) => {
+  // the active tab's working tree (#649). VSCode doesn't give the page the path of a folder
+  // dropped from the file manager (#818).
+  const fileDragging = useFileDrops(client, ({ folders, patches, patchFiles = [], otherFiles = [] }) => {
     void folders.reduce<Promise<unknown>>((previous, folder) => previous.then(() => openRepoTab(folder)), Promise.resolve());
-    if (patches.length === 0) return;
+    if (otherFiles.length > 0) {
+      setOpenError({
+        kind: "failed",
+        message: `VSCode doesn't pass Browsitory the location of ${otherFiles.join(", ")} from the file manager. Hold Shift and drag it from VSCode's Explorer to open it.`,
+        path: "",
+      });
+    }
+    if (patches.length === 0 && patchFiles.length === 0) return;
     if (activePath === null) {
-      const names = patches.map((path) => path.split(/[\\/]/).pop() ?? path).join(", ");
+      const names = [...patches.map((path) => path.split(/[\\/]/).pop() ?? path), ...patchFiles.map((file) => file.name)].join(", ");
       setOpenError({ kind: "failed", message: `Open a repository to apply ${names} to.`, path: "" });
     } else {
-      requestWorkspace({ kind: "applyPatches", paths: patches });
+      requestWorkspace({ kind: "applyPatches", paths: patches, files: patchFiles });
     }
   });
   const dropHint = fileDragging && (
