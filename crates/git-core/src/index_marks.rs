@@ -194,8 +194,9 @@ where
     for entry in index.iter() {
         let stage = (entry.flags >> 12) & 0x3;
         let path = crate::worktree_guard::path_from_bytes(&entry.path);
+        // A conflicted path ends unmarked, as git's abort leaves it; an intent-to-add entry is
+        // judged as any other, the target's entry taking its place.
         if stage != 0
-            || entry.flags_extended & INTENT_TO_ADD != 0
             || tree.get_path(&path).is_err()
             || edited.contains(&String::from_utf8_lossy(&entry.path).into_owned())
         {
