@@ -384,6 +384,12 @@ describe("failureError with the operation that failed", () => {
     ["DirtyWorktree", "Commit or stash your changes, then try again."],
     ["PermissionDenied", "File permissions blocked this. Check that you can read and write the file or folder."],
     ["Cancelled", "It was cancelled before it finished. Run it again when you are ready."],
+    // #1033: in place of the operation's guess for an error only git's text explains.
+    [
+      "LockHeld",
+      "Another Git program is using the repository. Wait until it finishes, then try again. If none is running, delete the leftover lock file: index.lock in the .git folder, or the one the message names.",
+    ],
+    ["NotFastForward", "The branches have diverged. Merge again without Fast-forward only, or rebase onto the branch first."],
   ] as const)("ends with the next step %s has", (kind, hint) => {
     expect(failureError(new RepoError(kind, "raw"), operation)).toEqual({
       error: "Couldn't switch to feature/x: raw",

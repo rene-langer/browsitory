@@ -3883,6 +3883,11 @@ pub enum ErrorKind {
     /// Blame refused a file over its size limit or a binary file (#1158); the blame view shows
     /// the message.
     BlameUnavailable,
+    /// Another Git program holds a lock file the request had to write (`index.lock`, a ref's or
+    /// the config's), #1033.
+    LockHeld,
+    /// A fast-forward-only merge refused because the branches have diverged (#1033).
+    NotFastForward,
 }
 
 impl ErrorKind {

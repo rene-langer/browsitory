@@ -321,6 +321,15 @@ describe("OperationLogDialog's details, cause first (#1022)", () => {
     expect(order).toEqual([...order].sort((a, b) => a - b));
   });
 
+  it("names a lock file another Git program held as a transfer's cause (#1033)", async () => {
+    const message = "failed to lock file '/repo/.git/refs/remotes/origin/main.lock' for writing";
+    const details = await renderEntry(entry(1, "Fetch", { target: "origin", outcome: "Failed", transferError: "LockHeld", message }));
+    await waitFor(() => expect(details).toHaveTextContent(message));
+    const order = positions(details, ["Another Git program held a lock file", message, "Result"]);
+    expect(order.every((position) => position >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
   it("copies the details with git's full text, libgit2's codes included", async () => {
     const writeText = vi.fn(async () => {});
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });

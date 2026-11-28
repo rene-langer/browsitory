@@ -129,6 +129,14 @@ describe("tauriRepoClient failure logging", () => {
     expect(String(error)).toBe(message);
   });
 
+  it.each(["LockHeld", "NotFastForward"] as const)("reads a rejection of kind %s as that kind (#1033)", async (kind) => {
+    vi.mocked(invoke).mockRejectedValueOnce({ kind, message: "raw" });
+
+    const error: unknown = await tauriRepoClient.stageFile(TEST_REPO_PATH, "a.txt").catch((caught: unknown) => caught);
+
+    expect(error).toEqual(new RepoError(kind, "raw"));
+  });
+
   it("reads a bare string rejection, and a kind it doesn't know, as Other", async () => {
     vi.mocked(invoke).mockRejectedValueOnce("invalid args `repoPath` for command `get_status`");
     const bare: unknown = await tauriRepoClient.getStatus(TEST_REPO_PATH).catch((caught: unknown) => caught);

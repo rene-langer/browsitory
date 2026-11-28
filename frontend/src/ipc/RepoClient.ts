@@ -593,7 +593,7 @@ export type TransferOperation =
   /** The quiet Fetch all of the "Fetch automatically" setting (`backgroundFetch`). */
   | "BackgroundFetch";
 /** Mirrors `git_core::remote::TransferErrorKind`; the wire value is its Rust variant name. */
-export type TransferErrorKind = "NonFastForward" | "RejectedRemoteRef" | "MissingCredential" | "CredentialStoreFailure" | "SshAgentFailure" | "TransferFailed" | "Cancelled" | "StaleLease" | "HookFailed";
+export type TransferErrorKind = "NonFastForward" | "RejectedRemoteRef" | "MissingCredential" | "CredentialStoreFailure" | "SshAgentFailure" | "TransferFailed" | "Cancelled" | "StaleLease" | "HookFailed" | "LockHeld";
 
 /**
  * Mirrors `repo_service::wire::ErrorKind` (#496): what kind of failure a rejected request was,
@@ -615,7 +615,11 @@ export type ErrorKind =
   /** A file's diff over the backend's size limit (#1066); `noSizeLimit` loads it anyway. */
   | "DiffTooLarge"
   /** Blame refused a file over its size limit or a binary file (#1158); the message says which. */
-  | "BlameUnavailable";
+  | "BlameUnavailable"
+  /** Another Git program holds a lock file the request had to write (`index.lock`, a ref's), #1033. */
+  | "LockHeld"
+  /** A fast-forward-only merge refused because the branches have diverged (#1033). */
+  | "NotFastForward";
 
 /** A rejected request as the backend sends it (`repo_service::wire::ErrorDto`). */
 export interface RepoErrorPayload {
