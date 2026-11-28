@@ -50,14 +50,14 @@ export function UpdateBanner({ client }: { client: Pick<RepoClient, "recoverFrom
       try {
         update = await checkForUpdate();
       } catch (error) {
-        console.error("Update check failed", error);
+        logFailure("Checking for updates failed", error);
         return { kind: "failed", message: errorMessage(error) };
       }
       if (update === null) return { kind: "none" };
       try {
         await update.download();
       } catch (error) {
-        console.error("Update download failed", error);
+        logFailure(`Downloading update v${update.version} failed`, error);
         return { kind: "failed", message: errorMessage(error) };
       }
       ready.current = update;

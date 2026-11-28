@@ -2877,6 +2877,16 @@ work to a `HighlightTransport` (`highlightWorkerProtocol.ts`):
 - The working tree's Changes list renders only the rows in view in both layouts (#845, #1157):
   the tree layout flattens its folders and the files of expanded folders into one row list
   (`treeRows`), indented by depth, so `useVirtualRows`' one-row-height window applies to it.
+- The working tree's stacked view (#793, the `working-tree-diff-layout` preference in
+  `lib/diffLayoutPreference.ts`) renders one `UncommittedFileViewer` per listed file, in its own
+  scroller under the file list. A viewer renders its body and fetches its diff only once it is
+  within 400 px of the stack's view (`useNearView`, an `IntersectionObserver` with the stack as
+  its root: with the viewport as root the inner scroller would clip the section before the
+  margin applies). A rendered diff stays rendered; a refresh refetches only the diffs near the
+  view, and the others when they come back with a changed version or options. Sections aren't
+  windowed (each one's height is its diff's), so the stack holds `STACK_PAGE` (100) files at a
+  time, more with "Show N more" or a file picked further down the list, and each viewer is a
+  `stableMemo` so a key in the list doesn't re-render every loaded diff.
 
 ## External tools
 
@@ -3215,7 +3225,12 @@ its marketplace, the desktop app through its own updater.
   of 25 writes kept the lock past 5 s, and the waiters then wrote unlocked and undid writes.
   Getters read without the lock: the write replaces the file atomically (a
   temp file, synced, then renamed). A symlinked `config.toml` is resolved first, so the link
-  stays and the file it points to is replaced.
+  stays and the file it points to is replaced. The rename is std's `fs::rename`
+  (`replace.rs`, #1219), not `tempfile`'s `persist`: on Windows `MoveFileExW` refuses to replace
+  a file that a getter in another window has open, and std then renames with POSIX semantics
+  (`FileRenameInfoEx`), which replaces a file opened with `FILE_SHARE_DELETE`, as std opens every
+  file. A refusal that still comes (a handle without that share mode, from another program, or a
+  file system without POSIX renames) is retried for up to 2 s.
 - **What this version doesn't know stays (#1137).** `update_config` also reads the file as a
   plain TOML table, and `compat::merge` writes that table back with only the change from the
   struct as read to the struct after the setter: a key the setter dropped is removed, a changed

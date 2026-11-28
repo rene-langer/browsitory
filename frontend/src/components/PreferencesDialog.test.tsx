@@ -375,6 +375,26 @@ describe("DiffSection — changed files as a tree", () => {
   });
 });
 
+// #793: the working tree's list | stacked choice, also on the file list's own toggle.
+describe("DiffSection — stacked diffs", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("shows the per-machine diff layout, one file at a time by default, and saves a change", () => {
+    render(
+      <PreferencesDialog onClose={vi.fn()} groups={[{ id: "diff", label: "Diff", content: <DiffSection /> }]} />,
+    );
+    const stacked = within(screen.getByRole("group", { name: "Diff" })).getByRole("checkbox", {
+      name: "Show all diffs stacked",
+    });
+    expect(stacked).not.toBeChecked();
+    fireEvent.click(stacked);
+    expect(stacked).toBeChecked();
+    expect(localStorage.getItem("working-tree-diff-layout")).toBe("stacked");
+    fireEvent.click(stacked);
+    expect(localStorage.getItem("working-tree-diff-layout")).toBe("list");
+  });
+});
+
 describe("Fetch preferences", () => {
   afterEach(() => {
     localStorage.clear();

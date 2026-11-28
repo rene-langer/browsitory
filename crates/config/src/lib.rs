@@ -27,6 +27,7 @@ pub enum ConfigError {
 }
 
 mod compat;
+mod replace;
 mod user_commands;
 mod write_lock;
 pub use user_commands::*;
@@ -1062,7 +1063,13 @@ fn write_config(path: &Path, contents: &str) -> Result<(), ConfigError> {
     std::io::Write::write_all(&mut tmp, contents.as_bytes())?;
     // On disk before the rename, so a power loss can't leave an empty or cut-off file.
     tmp.as_file().sync_all()?;
-    tmp.persist(&path).map_err(|e| e.error)?;
+    // Not `persist`: its MoveFileExW can't replace a file a getter has open on Windows (#1219).
+    // `keep` clears the temp file's FILE_ATTRIBUTE_TEMPORARY there.
+    let kept = tmp.into_temp_path().keep().map_err(|e| e.error)?;
+    if let Err(error) = replace::replace(&kept, &path) {
+        let _ = fs::remove_file(&kept);
+        return Err(error.into());
+    }
     Ok(())
 }
 
