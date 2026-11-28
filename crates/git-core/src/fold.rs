@@ -68,7 +68,7 @@ pub fn fold_staged_into(
             repo,
             &mut hooks,
             None,
-            &head.author(),
+            &crate::message_text::author(&head)?,
             &committer,
             &message,
             &staged,

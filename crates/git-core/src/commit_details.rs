@@ -69,8 +69,8 @@ pub fn commit_details(
             }
             None => (Vec::new(), Vec::new(), Vec::new(), false),
         };
-    let author = person(&commit.author());
-    let committer = person(&commit.committer());
+    let author = person(&commit, &commit.author());
+    let committer = person(&commit, &commit.committer());
     Ok(CommitDetails {
         author,
         committer,
@@ -81,10 +81,10 @@ pub fn commit_details(
     })
 }
 
-fn person(signature: &git2::Signature<'_>) -> Person {
+fn person(commit: &git2::Commit<'_>, signature: &git2::Signature<'_>) -> Person {
     Person {
-        name: String::from_utf8_lossy(signature.name_bytes()).into_owned(),
-        email: String::from_utf8_lossy(signature.email_bytes()).into_owned(),
+        name: crate::message_text::name(commit, signature),
+        email: crate::message_text::email(commit, signature),
         timestamp: signature.when().seconds(),
     }
 }

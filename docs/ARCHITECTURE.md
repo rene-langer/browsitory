@@ -1746,6 +1746,15 @@ certificate.
   panics on such a message. libgit2's own stash names HEAD's subject as stored, so a stash on
   such a HEAD gets git's UTF-8 message in its reflog entry afterwards (the stash commit keeps
   libgit2's). Twinned with git in `tests/message_encoding.rs`.
+  Such a commit stores its author and committer lines in the same encoding, and git re-encodes
+  the whole commit (`logmsg_reencode`), so their names and emails are read the same way (#1214,
+  `message_text::name`/`email`/`author`): in the graph, the commit details, blame, the rebase
+  planner, recent authors, an `author:`/`committer:` search, `SQUASH_MSG` and Export as patch.
+  A commit made from one (a rebase step, a cherry-pick, a fold, an amend, the commit box
+  concluding a pick) gets the author in UTF-8 with its time, as git writes it; an author
+  already in UTF-8 is copied unchanged. Recognising a step committed outside the app compares
+  the authors so decoded. A reflog entry's committer is read with the Latin-1 fallback, like its
+  message. Twinned with git in `tests/author_encoding.rs`.
 - To git a paused Browsitory rebase is a cherry-pick on a detached HEAD: an edit or conflict
   stop is `CherryPick` with `CHERRY_PICK_HEAD` = the step (plus `MERGE_MSG` and, for a conflict,
   the conflicted index); an error stop (a step refused, e.g. a local edit in the way) is `Clean`.

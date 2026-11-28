@@ -898,9 +898,9 @@ fn line_term_commits(
     }
 }
 
-fn signature_contains(signature: &git2::Signature, needle: &str) -> bool {
-    contains_ignoring_case(signature.name().ok().unwrap_or_default(), needle)
-        || contains_ignoring_case(signature.email().ok().unwrap_or_default(), needle)
+fn signature_contains(commit: &git2::Commit, signature: &git2::Signature, needle: &str) -> bool {
+    contains_ignoring_case(&crate::message_text::name(commit, signature), needle)
+        || contains_ignoring_case(&crate::message_text::email(commit, signature), needle)
 }
 
 /// Whether `haystack` lowercased contains `needle` (already lowercased), as
@@ -1143,8 +1143,8 @@ impl<'a, 'r> Subject<'a, 'r> {
             Prepared::Merges(MergeFilter::NoMerges) => commit.parent_count() <= 1,
             Prepared::After(d) => self.day >= *d,
             Prepared::Before(d) => self.day <= *d,
-            Prepared::Author(n) => signature_contains(&commit.author(), n),
-            Prepared::Committer(n) => signature_contains(&commit.committer(), n),
+            Prepared::Author(n) => signature_contains(commit, &commit.author(), n),
+            Prepared::Committer(n) => signature_contains(commit, &commit.committer(), n),
             Prepared::Text { needle, sha } => {
                 (*sha && id_starts_with(commit.id(), needle)) || self.message_contains(needle)
             }

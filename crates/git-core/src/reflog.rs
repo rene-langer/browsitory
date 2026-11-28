@@ -90,8 +90,9 @@ pub fn read_reflog_newest(
                 reference: reference.to_string(),
                 old_id: entry.id_old().to_string(),
                 new_id: new_id.to_string(),
-                committer_name: committer.name().ok().unwrap_or_default().to_string(),
-                committer_email: committer.email().ok().unwrap_or_default().to_string(),
+                // As configured when the entry was written, in no encoding git records.
+                committer_name: crate::message_text::text(committer.name_bytes()),
+                committer_email: crate::message_text::text(committer.email_bytes()),
                 timestamp: committer.when().seconds(),
                 // git writes the subject's bytes as committed, in any encoding.
                 message: crate::message_text::text(entry.message_bytes().unwrap_or_default()),

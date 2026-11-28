@@ -116,7 +116,7 @@ pub fn blame_file_limited(
             let author = commit.author();
             slot.insert((
                 owner.to_string(),
-                author.name().unwrap_or_default().to_string(),
+                crate::message_text::name(&commit, &author),
                 author.when().seconds(),
             ));
         }

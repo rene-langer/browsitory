@@ -348,17 +348,13 @@ pub fn recent_authors(
     for oid in walk.take(RECENT_AUTHORS_WALK_LIMIT) {
         let commit = repo.find_commit(oid?)?;
         let author = commit.author();
-        let (Ok(name), Ok(email)) = (author.name(), author.email()) else {
-            continue;
-        };
+        let name = crate::message_text::name(&commit, &author);
+        let email = crate::message_text::email(&commit, &author);
         let key = email.to_lowercase();
         if email.trim().is_empty() || Some(&key) == me.as_ref() || !seen.insert(key) {
             continue;
         }
-        authors.push(SignatureInput {
-            name: name.to_string(),
-            email: email.to_string(),
-        });
+        authors.push(SignatureInput { name, email });
         if authors.len() == limit {
             break;
         }
@@ -836,7 +832,7 @@ fn pick_author(repo: &git2::Repository) -> Option<git2::Signature<'static>> {
         repo.find_reference("CHERRY_PICK_HEAD")
             .ok()
             .and_then(|r| r.peel_to_commit().ok())
-            .map(|c| c.author().to_owned())
+            .map(|c| crate::message_text::author(&c).unwrap_or_else(|_| c.author().to_owned()))
     } else {
         None
     }
@@ -1343,7 +1339,7 @@ fn rewrite_head(
     // Like `git commit --amend --author`: the new name and email, the original author time.
     let author = match author {
         Some((name, email)) => git2::Signature::new(name, email, &head.author().when())?,
-        None => head.author().to_owned(),
+        None => crate::message_text::author(&head)?,
     };
     let parents: Vec<git2::Commit> = head.parents().collect();
     let parent_refs: Vec<&git2::Commit> = parents.iter().collect();

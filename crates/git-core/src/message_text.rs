@@ -8,8 +8,11 @@
 //! same for ISO-8859-1 and Windows-1252, which cover nearly every such repository; any other
 //! encoding is read as UTF-8 with the Latin-1 fallback, as git does for an encoding iconv
 //! doesn't know.
+//!
+//! The author and committer lines are stored in the same encoding (#1214): git re-encodes the
+//! whole commit, so [`name`], [`email`] and [`author`] read them the same way.
 
-use git2::Commit;
+use git2::{Commit, Signature};
 
 /// `commit`'s message as git writes it into a commit made from it.
 pub(crate) fn message(commit: &Commit<'_>) -> String {
@@ -20,6 +23,27 @@ pub(crate) fn message(commit: &Commit<'_>) -> String {
 /// the message.
 pub(crate) fn summary(commit: &Commit<'_>) -> String {
     decode(commit.summary_bytes().unwrap_or_default(), encoding(commit))
+}
+
+/// The name in `signature`, `commit`'s author or committer, as git shows it.
+pub(crate) fn name(commit: &Commit<'_>, signature: &Signature<'_>) -> String {
+    decode(signature.name_bytes(), encoding(commit))
+}
+
+/// The email in `signature`, `commit`'s author or committer, as git shows it.
+pub(crate) fn email(commit: &Commit<'_>, signature: &Signature<'_>) -> String {
+    decode(signature.email_bytes(), encoding(commit))
+}
+
+/// `commit`'s author for a new commit made from it (a rebase, a pick, an amend), in UTF-8 as git
+/// writes it; its time is kept.
+pub(crate) fn author(commit: &Commit<'_>) -> Result<Signature<'static>, git2::Error> {
+    let author = commit.author();
+    let (name, email) = (name(commit, &author), email(commit, &author));
+    if name.as_bytes() == author.name_bytes() && email.as_bytes() == author.email_bytes() {
+        return Ok(author.to_owned());
+    }
+    Signature::new(&name, &email, &author.when())
 }
 
 /// `bytes` as UTF-8, any byte that isn't read as Latin-1 (git's `verify_utf8`).
