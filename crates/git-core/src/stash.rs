@@ -2862,6 +2862,27 @@ mod tests {
         }
     }
 
+    /// With `core.symlinks` off, only a changed link kept as a file sends Stash all through the
+    /// path-limited stash (#802); a changed regular file still takes libgit2's route.
+    #[test]
+    fn without_symlinks_a_whole_stash_of_a_regular_file_takes_libgit2s_route() {
+        let (dir, mut repo) = repo_with_a_commit();
+        repo.config()
+            .unwrap()
+            .set_bool("core.symlinks", false)
+            .unwrap();
+        write(dir.path(), "a.txt", "edited\n");
+        let before = status_passes();
+
+        save_stash(&mut repo, &StashOptions::default()).unwrap();
+
+        assert_eq!(status_passes() - before, 1);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+            "a\n"
+        );
+    }
+
     /// The routed stash (an ignored file in an untracked folder, kept by the path-limited
     /// route) reads the worktree's status once before it routes.
     #[test]

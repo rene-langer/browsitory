@@ -4381,6 +4381,45 @@ mod blame_conversion {
     }
 }
 
+/// #1107: the files a stash leaves out reach `git_core` as sent; absent, none.
+#[cfg(test)]
+mod stash_options_conversion {
+    use super::StashOptionsDto;
+
+    fn options(json: serde_json::Value) -> git_core::stash::StashOptions {
+        let dto: StashOptionsDto = serde_json::from_value(json).unwrap();
+        dto.into()
+    }
+
+    #[test]
+    fn the_files_left_out_reach_git_core() {
+        let sent = options(serde_json::json!({
+            "message": "wip",
+            "keepIndex": true,
+            "includeUntracked": false,
+            "paths": ["a.txt", "secret.env"],
+            "leaveOut": ["secret.env"],
+        }));
+        assert_eq!(
+            sent,
+            git_core::stash::StashOptions {
+                message: Some("wip".into()),
+                keep_index: true,
+                include_untracked: false,
+                paths: vec!["a.txt".into(), "secret.env".into()],
+                leave_out: vec!["secret.env".into()],
+            }
+        );
+        let without = options(serde_json::json!({
+            "message": null,
+            "keepIndex": false,
+            "includeUntracked": true,
+            "paths": [],
+        }));
+        assert_eq!(without.leave_out, Vec::<String>::new());
+    }
+}
+
 /// #898: the keyboard shortcuts a client saves reach `config` as sent, both ways.
 #[cfg(test)]
 mod keybinding_settings_conversion {
