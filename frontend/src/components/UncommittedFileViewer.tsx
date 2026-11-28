@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useContext, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { Blame, DiffHunk, DiffOptions, DiffSource, HunkOptions, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { describeError, type DescribedError } from "../lib/errorMessages";
 import { imageMimeType, isSvgPath } from "../lib/imageTypes";
@@ -17,6 +17,7 @@ import { ImageDiff, ImageTextToggle } from "./ImageDiff";
 import { InlineError } from "./primitives/InlineError";
 import { isUntracked, statusLetter } from "../lib/statusLetter";
 import { useMarkResolved } from "./useMarkResolved";
+import { useNearView } from "./useNearView";
 
 type HunkCallback = (path: string, oldStart: number, newStart: number, hunk: HunkOptions) => void;
 type LineCallback = (
@@ -29,9 +30,10 @@ type LineCallback = (
 ) => void;
 
 /**
- * The working tree's one diff viewer (#639): the current file's header (path, kind, Blame,
- * History) and its diff with hunk and line actions, its blame, its conflict pane or its image
- * preview. The parent keys it by file, so switching files starts it afresh.
+ * The working tree's diff viewer (#639): a file's header (path, kind, Blame, History) and its
+ * diff with hunk and line actions, its blame, its conflict pane or its image preview. The parent
+ * keys it by file, so switching files starts it afresh. The list view shows one, the current
+ * file's; the stacked view one per file (`stacked`, #793).
  */
 export function UncommittedFileViewer({
   repoPath,
@@ -50,7 +52,24 @@ export function UncommittedFileViewer({
   onStageLines,
   onUnstageLines,
   onDiscardLines,
+  current = true,
+  stacked = false,
+  stackRoot = null,
+  onStackFocus,
+  onStackSection,
 }: {
+  /** The palette's "Wrap lines" and "Show whole file" act on this diff (see `DiffView`). */
+  current?: boolean;
+  /**
+   * In the stacked view (#793): the body renders, and the diff loads, once the viewer is near
+   * what `stackRoot` (the scrolling stack) shows.
+   */
+  stacked?: boolean;
+  stackRoot?: HTMLElement | null;
+  /** Stacked: focus moved into the viewer of `entry`. */
+  onStackFocus?: (entry: StatusEntry) => void;
+  /** Stacked: the section of `entry`'s viewer, `null` once it goes. Kept the same across renders. */
+  onStackSection?: (entry: StatusEntry, element: HTMLElement | null) => void;
   repoPath: string;
   client: RepoClient;
   entry: StatusEntry;
@@ -84,6 +103,13 @@ export function UncommittedFileViewer({
     onResolveWholeFile,
   } = useWorkspaceActions();
   const { markResolved, confirmDialog } = useMarkResolved(entry.path);
+  // In the stack, only what is near the view is rendered and fetched; once rendered, a diff stays
+  // (no jumps while scrolling back), and a refresh refetches it when it next comes near.
+  const [sectionElement, setSectionElement] = useState<HTMLElement | null>(null);
+  const nearView = useNearView(sectionElement, stackRoot, stacked);
+  const [seen, setSeen] = useState(!stacked);
+  if (nearView && !seen) setSeen(true);
+  const active = !stacked || nearView;
   const [mode, setMode] = useState<"diff" | "blame">("diff");
   const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
   // The options `hunks` were fetched with. Hunk/line actions must use these, not the current
@@ -114,12 +140,18 @@ export function UncommittedFileViewer({
     ...sizeLimit.options,
   };
 
+  // What the shown hunks were fetched for: a stacked diff coming back into view refetches only
+  // when this changed meanwhile.
+  const loadSignature = JSON.stringify([diffVersion, diffOptions]);
+  const loadedSignature = useRef<string | null>(null);
+
   // Pulled out of the effect (returning its own cleanup) so the failure banner's Retry button can
   // re-run the same fetch. `diffVersion`, not `status`, is the staleness signal: a status array
   // that is new by reference but not the product of a refresh must not refetch anything.
   const loadDiff = () => {
     let ignore = false;
     const requested = diffOptions;
+    const signature = loadSignature;
     (renamedFrom === null
       ? client.getWorkingDiff(repoPath, entry.path, entry.staged, requested)
       : client.getWorkingDiff(repoPath, entry.path, entry.staged, requested, renamedFrom)
@@ -130,6 +162,7 @@ export function UncommittedFileViewer({
           setFetchedOptions(requested);
           setError(null);
           sizeLimit.loaded();
+          loadedSignature.current = signature;
         }
       })
       .catch((err: unknown) => {
@@ -143,10 +176,11 @@ export function UncommittedFileViewer({
   };
 
   useEffect(() => {
-    if (mode !== "diff" || isConflicted || showImage || contentsHidden) return;
+    if (mode !== "diff" || isConflicted || showImage || contentsHidden || !active) return;
+    if (stacked && loadedSignature.current === loadSignature) return;
     return loadDiff();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repoPath, client, entry.path, entry.staged, renamedFrom, isConflicted, showImage, mode, diffVersion, contentsHidden, settings.ignoreWhitespace, wholeFile.contextLines, settings.algorithm, sizeLimit.options]);
+  }, [repoPath, client, entry.path, entry.staged, renamedFrom, isConflicted, showImage, mode, diffVersion, contentsHidden, settings.ignoreWhitespace, wholeFile.contextLines, settings.algorithm, sizeLimit.options, active]);
 
   // A hunk that empties the file starts at line 0, which no editor accepts.
   const firstLine = hunks?.[0]?.newStart ?? 0;
@@ -188,6 +222,16 @@ export function UncommittedFileViewer({
   // Focus lands on the viewer at once; the diff takes it over once its hunks load (`DiffView`'s
   // `focusKey`), which also covers a diff with nothing to focus (an image, a conflict).
   const sectionRef = useRef<HTMLElement | null>(null);
+  const setSection = useCallback(
+    (element: HTMLElement | null) => {
+      sectionRef.current = element;
+      setSectionElement(element);
+      onStackSection?.(entry, element);
+    },
+    // The parent keys the viewer by file, so `entry` names the same file for its whole life.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [onStackSection],
+  );
   const focusedKey = useRef(0);
   useEffect(() => {
     if (focusKey === 0 || focusKey === focusedKey.current) return;
@@ -223,15 +267,19 @@ export function UncommittedFileViewer({
 
   return (
     <section
-      ref={sectionRef}
+      ref={setSection}
       className={styles.viewer}
       aria-label={`Changes in ${entry.path} (${side})`}
       aria-keyshortcuts="j k"
       tabIndex={-1}
       onKeyDown={handleKeyDown}
+      onFocus={onStackFocus === undefined ? undefined : () => onStackFocus(entry)}
     >
       <div className={styles.viewerHeader}>
-        <span className={styles.path}>{entry.path}</span>
+        {/* In the stack, a heading per file lets a screen reader move between them. */}
+        <span className={styles.path} role={stacked ? "heading" : undefined} aria-level={stacked ? 3 : undefined}>
+          {entry.path}
+        </span>
         {/* "Untracked" says it all; the rest name the side plainly (#1027). */}
         <span className={styles.viewerKind}>
           {kind === "Untracked" ? kind : `${kind}, ${entry.staged ? "staged" : "not staged"}`}
@@ -257,7 +305,9 @@ export function UncommittedFileViewer({
         </div>
       </div>
       <div className={styles.viewerBody} data-file-body="">
-        {mode === "blame" ? (
+        {!seen ? (
+          <p className={styles.stackPlaceholder}>The diff loads when it scrolls into view.</p>
+        ) : mode === "blame" ? (
           isBlameRefusal(error) ? (
             <BlameUnavailableNote message={error.message} />
           ) : error !== null ? (
@@ -313,7 +363,7 @@ export function UncommittedFileViewer({
               onDiscardLines={unstagedActions ? (o, n, idx, shown) => onDiscardLines(entry.path, o, n, fetchedHunk, idx, shown) : undefined}
               partialActionsDisabled={fetchedOptions?.ignoreWhitespace ?? settings.ignoreWhitespace}
               wholeFile={wholeFile}
-              current
+              current={current}
               focusKey={focusKey === 0 ? undefined : focusKey}
             />
           </>
