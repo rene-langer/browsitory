@@ -622,3 +622,78 @@ describe("UpdateBanner with the update settings (#630)", () => {
     expect(isRegistered()).toBe(false);
   });
 });
+
+describe("UpdateBanner logging of failed checks and downloads (#1084)", () => {
+  const MINUTE = 60 * 1000;
+  let logFrontendError: ReturnType<typeof vi.fn<(context: string, error: unknown) => Promise<void>>>;
+  let uninstallLogging: () => void;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.mocked(updater.checkForUpdate).mockReset();
+    vi.stubEnv("VITE_E2E_REPO_PATH", undefined);
+    logFrontendError = vi.fn(async (_context: string, _error: unknown) => {});
+    uninstallLogging = installGlobalErrorLogging(fakeRepoClient({ logFrontendError }));
+  });
+
+  afterEach(() => {
+    uninstallLogging();
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+  });
+
+  async function advance(ms: number) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  }
+
+  it("writes a failed automatic check to the app log and shows the user nothing", async () => {
+    const failure = new Error("could not fetch a valid release JSON from the remote");
+    vi.mocked(updater.checkForUpdate).mockRejectedValue(failure);
+
+    const { container } = render(<UpdateBanner client={stillRunning()} />);
+    await advance(0);
+
+    expect(logFrontendError).toHaveBeenCalledWith("Checking for updates failed", failure);
+    expect(logFrontendError).toHaveBeenCalledTimes(1);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("writes a failed download to the app log with the version, and shows the user nothing", async () => {
+    const failure = new Error("signature verification failed");
+    vi.mocked(updater.checkForUpdate).mockResolvedValue({
+      version: "1.2.3",
+      download: vi.fn().mockRejectedValue(failure),
+      installAndRelaunch: vi.fn(),
+    });
+
+    const { container } = render(<UpdateBanner client={stillRunning()} />);
+    await advance(0);
+
+    expect(logFrontendError).toHaveBeenCalledWith("Downloading update v1.2.3 failed", failure);
+    expect(logFrontendError).toHaveBeenCalledTimes(1);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("logs one line per failed retry", async () => {
+    vi.mocked(updater.checkForUpdate).mockRejectedValue(new Error("504"));
+
+    render(<UpdateBanner client={stillRunning()} />);
+    await advance(0);
+    await advance(10 * MINUTE);
+    await advance(20 * MINUTE);
+
+    expect(logFrontendError).toHaveBeenCalledTimes(3);
+  });
+
+  it("logs nothing when the check finds no update", async () => {
+    vi.mocked(updater.checkForUpdate).mockResolvedValue(null);
+
+    render(<UpdateBanner client={stillRunning()} />);
+    await advance(0);
+
+    expect(updater.checkForUpdate).toHaveBeenCalledTimes(1);
+    expect(logFrontendError).not.toHaveBeenCalled();
+  });
+});

@@ -34,11 +34,13 @@ import { stageAllPaths, stageModifiedPaths, untrackedPaths } from "../lib/stageP
 import { escapeIgnorePattern } from "../lib/ignorePattern";
 import { isUntracked } from "../lib/statusLetter";
 import { useFileListLayout, writeFileListLayout } from "../lib/fileListLayoutPreference";
+import { useDiffLayout, writeDiffLayout } from "../lib/diffLayoutPreference";
 import { buildFileTree, type FileTreeNode } from "../lib/fileTree";
 import { ChevronDown, ChevronRight, Minus, Plus } from "lucide-react";
 import { GoToNotice } from "./GoToNotice";
 import { externalFiltersNotice, isLeftOut, leftOut, leftOutNotice } from "../lib/externalFilters";
 import { mergeDriverReason } from "../lib/mergeDrivers";
+import { stableMemo } from "../lib/stableMemo";
 
 // The change lists' keys (#449): arrows/j/k move (on to the other group past either end, #639),
 // Shift extends, Ctrl/Cmd+A selects the group, Escape keeps only the current file, `s` stages or
@@ -137,6 +139,20 @@ function useFolderFiles(tree: FileTreeNode<StatusEntry>[] | null): ReadonlyMap<s
 function entryKey(entry: { path: string; staged: boolean }): string {
   return `${entry.staged}:${entry.path}`;
 }
+
+/**
+ * How many files the stacked view (#793) adds at a time. Each diff loads only near the view, but
+ * every stacked file is a rendered section, and a loaded diff stays rendered: past this many the
+ * stack grows on request ("Show n more") or up to a file picked in the list.
+ */
+const STACK_PAGE = 100;
+
+/**
+ * A stacked file's viewer (#793): renders again only when something it shows changed, not on
+ * every render of the pane (a key in the file list, a selection), which would redraw every
+ * loaded diff in the stack.
+ */
+const StackedFileViewer = stableMemo(UncommittedFileViewer, "StackedFileViewer");
 
 export function UncommittedDiffPane({
   repoPath,
@@ -242,8 +258,8 @@ export function UncommittedDiffPane({
   // Asks the viewer to take focus once it shows `key` (Enter in a list, j/k in the viewer). Any
   // other way of changing the current file drops it, so a later visit doesn't steal focus.
   const [focusRequest, setFocusRequest] = useState<{ key: string; n: number } | null>(null);
-  // The first changed line of the current file's loaded diff, for its row's "Open in editor".
-  const [firstChangedLine, setFirstChangedLine] = useState<{ key: string; line: number | null } | null>(null);
+  // The first changed line of each loaded diff, by `entryKey`, for its row's "Open in editor".
+  const [firstChangedLines, setFirstChangedLines] = useState<Readonly<Record<string, number | null>>>({});
   // Per-`entryKey` version counters: the per-path half of the viewer's staleness signal (the
   // other half is `refreshGeneration`, see `staleness` below). A hunk stage/unstage/discard bumps
   // *both* sides of the affected path — staging a hunk of a partially-staged file changes its
@@ -291,6 +307,8 @@ export function UncommittedDiffPane({
   // The path filter and the flat | tree layout (#729). The filter is a case-insensitive part of
   // the path; while it hides files, the bulk actions act on the shown ones only and say so.
   const layout = useFileListLayout();
+  // The current file's diff only, or every shown file's diff stacked (#793).
+  const stackedView = useDiffLayout() === "stacked";
   const [filterText, setFilterText] = useState("");
   const needle = filterText.trim().toLowerCase();
   const filtering = needle !== "";
@@ -473,7 +491,8 @@ export function UncommittedDiffPane({
   const currentKey = currentEntry === undefined ? null : entryKey(currentEntry);
   // A conflicted file is open (#980): the file list collapses to the conflicts, and the diff
   // options (which don't apply to the merge editor) go, until "Show all changes" for this file.
-  const conflictOpen = currentEntry !== undefined && currentEntry.kind === "Conflicted";
+  // In the stacked view the merge editor is one diff among the others: the list stays.
+  const conflictOpen = !stackedView && currentEntry !== undefined && currentEntry.kind === "Conflicted";
   const [fileListExpandedFor, setFileListExpandedFor] = useState<string | null>(null);
   const fileListCollapsed = conflictOpen && fileListExpandedFor !== currentKey;
   const fileGroupsRef = useRef<HTMLDivElement>(null);
@@ -513,11 +532,17 @@ export function UncommittedDiffPane({
   const groupEntries = (staged: boolean) => (staged ? stagedEntries : unstagedEntries);
   const groupPaths = (staged: boolean) => groupEntries(staged).map((entry) => entry.path);
 
+  // A file picked in the list (or reached with j/k in a diff): the stacked view scrolls to its
+  // diff. Nothing else scrolls the stack, so opening it or focusing a diff doesn't jump.
+  const [jumpRequest, setJumpRequest] = useState<{ key: string; n: number } | null>(null);
+  const requestJump = (key: string) => setJumpRequest((prev) => ({ key, n: (prev?.n ?? 0) + 1 }));
+
   /** Makes `entry` the current file with `next` as the selection. */
   const focusEntry = (entry: StatusEntry, next: FileSelection) => {
     setCurrent({ path: entry.path, staged: entry.staged });
     setSelection(next);
     setFocusRequest(null);
+    requestJump(entryKey(entry));
   };
   const selectEntry = (entry: StatusEntry) => focusEntry(entry, selectOnlyFile(entry.staged, entry.path));
 
@@ -698,6 +723,7 @@ export function UncommittedDiffPane({
     } else if (event.key === "Enter" && event.target === event.currentTarget && currentKey !== null) {
       event.preventDefault();
       setFocusRequest((prev) => ({ key: currentKey, n: (prev?.n ?? 0) + 1 }));
+      requestJump(currentKey);
     } else if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "a") {
       if (entries.length === 0) return;
       event.preventDefault();
@@ -897,7 +923,7 @@ export function UncommittedDiffPane({
         onRequestDiscardFile={(path) => setDiscardRequest({ kind: "file", path })}
         onStashFile={(path) => onOpenStashDialog([path])}
         stashDisabledReason={stashReason}
-        editorLine={() => (firstChangedLine?.key === key ? firstChangedLine.line : null)}
+        editorLine={() => (stackedView || key === currentKey ? (firstChangedLines[key] ?? null) : null)}
         rowRef={(el) => {
           rowRefs.current[key] = el;
         }}
@@ -978,16 +1004,122 @@ export function UncommittedDiffPane({
     return { paddingTop: padTop, paddingBottom: padBottom };
   };
 
-  // j/k in the viewer: the next or previous file in list order, focus staying in the diff.
-  const navigateFromViewer = (direction: 1 | -1) => {
-    if (currentEntry === undefined) return;
-    const next = allEntries[allEntries.indexOf(currentEntry) + direction];
+  // j/k in a viewer: the file after or before its own in list order, focus staying in the diff.
+  const navigateFromViewer = (from: StatusEntry, direction: 1 | -1) => {
+    const next = allEntries[allEntries.indexOf(from) + direction];
     if (next === undefined) return;
     selectEntry(next);
     setFocusRequest((prev) => ({ key: entryKey(next), n: (prev?.n ?? 0) + 1 }));
   };
-  const reportFirstLine = (line: number | null) => {
-    if (currentKey !== null) setFirstChangedLine({ key: currentKey, line });
+  const reportFirstLine = (key: string) => (line: number | null) =>
+    setFirstChangedLines((prev) => (key in prev && prev[key] === line ? prev : { ...prev, [key]: line }));
+
+  // The stacked view (#793): every file on screen in the list, in list order, `stackLimit` at a
+  // time; a file picked further down extends it to that file's page.
+  const [stackElement, setStackElement] = useState<HTMLDivElement | null>(null);
+  const [stackLimit, setStackLimit] = useState(STACK_PAGE);
+  const stackSections = useRef<Record<string, HTMLElement | null>>({});
+  const jumpIndex =
+    stackedView && jumpRequest !== null ? allEntries.findIndex((entry) => entryKey(entry) === jumpRequest.key) : -1;
+  if (jumpIndex >= stackLimit) setStackLimit(Math.ceil((jumpIndex + 1) / STACK_PAGE) * STACK_PAGE);
+  const stackedEntries = stackedView ? allEntries.slice(0, stackLimit) : [];
+  // Each jump once: switching to the stacked view doesn't replay the last pick.
+  const handledJump = useRef(0);
+  useLayoutEffect(() => {
+    if (jumpRequest === null || jumpRequest.n === handledJump.current) return;
+    handledJump.current = jumpRequest.n;
+    if (stackedView) stackSections.current[jumpRequest.key]?.scrollIntoView?.({ block: "start" });
+  }, [stackedView, jumpRequest]);
+  const focusInRef = useRef<(key: string) => void>(() => {});
+  useEffect(() => {
+    // Focus moving into a stacked diff makes its file the current one, without a jump.
+    focusInRef.current = (key) => {
+      if (key === currentKey) return;
+      const entry = allEntries.find((candidate) => entryKey(candidate) === key);
+      if (entry === undefined) return;
+      setCurrent({ path: entry.path, staged: entry.staged });
+      setSelection(selectOnlyFile(entry.staged, entry.path));
+    };
+  });
+  // The same callbacks every render: a new `onStackSection` would re-attach every section.
+  const onStackFocus = useCallback((entry: StatusEntry) => focusInRef.current(entryKey(entry)), []);
+  const onStackSection = useCallback((entry: StatusEntry, element: HTMLElement | null) => {
+    stackSections.current[entryKey(entry)] = element;
+  }, []);
+
+  // An untracked folder listed as one entry (#845): its actions instead of a diff.
+  const renderFolderPanel = (entry: StatusEntry) => (
+    <section aria-label={`Untracked folder ${entry.path}`} className={styles.folderPanel}>
+      <p>{entry.path} is a new folder with more than 500 files that git doesn&apos;t ignore.</p>
+      <div className={styles.folderPanelActions}>
+        <button type="button" onClick={() => onStageFile(entry.path)}>
+          Stage folder
+        </button>
+        <button type="button" onClick={() => actions.onIgnorePath(`/${entry.path}`)}>
+          Ignore folder
+        </button>
+        <button type="button" onClick={() => setDiscardRequest({ kind: "file", path: entry.path })}>
+          Delete folder…
+        </button>
+      </div>
+    </section>
+  );
+
+  // Why a file's diff may not be what staging it would do: a filter, an encoding or a merge
+  // driver Browsitory can't run.
+  const renderEntryNotes = (entry: StatusEntry) => (
+    <>
+      {entry.externalFilter !== undefined && (
+        <p className={styles.filterNote}>
+          Browsitory can&apos;t run the &apos;{entry.externalFilter}&apos; filter, so this compares the file
+          on disk with the version git stored: the difference may be only the filter&apos;s. Use git on the
+          command line to stage or discard it.
+        </p>
+      )}
+      {entry.workingTreeEncoding !== undefined && (
+        <p className={styles.filterNote}>
+          Browsitory can&apos;t convert the &apos;{entry.workingTreeEncoding}&apos; encoding, so this
+          compares the file on disk with the UTF-8 version git stored: the difference may be only the
+          encoding&apos;s. Use git on the command line to stage or discard it.
+        </p>
+      )}
+      {entry.mergeDriver !== undefined && (
+        <p className={styles.filterNote} role="note">
+          {mergeDriverReason(entry.mergeDriver)}
+        </p>
+      )}
+    </>
+  );
+
+  const renderViewer = (entry: StatusEntry, stacked = false) => {
+    const key = entryKey(entry);
+    const Viewer = stacked ? StackedFileViewer : UncommittedFileViewer;
+    return (
+      <Viewer
+        key={key}
+        repoPath={repoPath}
+        client={client}
+        entry={entry}
+        status={status}
+        diffVersion={staleness(key)}
+        contentsHidden={contentsHidden(entry)}
+        onShowContents={() => setRevealedUntracked((prev) => new Set(prev).add(key))}
+        focusKey={focusRequest !== null && focusRequest.key === key ? focusRequest.n : 0}
+        onNavigate={(direction) => navigateFromViewer(entry, direction)}
+        onFirstChangedLine={reportFirstLine(key)}
+        onStageHunk={wrapHunkAction(onStageHunk)}
+        onUnstageHunk={wrapHunkAction(onUnstageHunk)}
+        onDiscardHunk={wrapHunkAction(onDiscardHunk)}
+        onStageLines={wrapLineAction(onStageLines)}
+        onUnstageLines={wrapLineAction(onUnstageLines)}
+        onDiscardLines={wrapLineAction(onDiscardLines)}
+        current={!stacked || entry === currentEntry}
+        stacked={stacked}
+        stackRoot={stacked ? stackElement : null}
+        onStackFocus={stacked ? onStackFocus : undefined}
+        onStackSection={stacked ? onStackSection : undefined}
+      />
+    );
   };
 
   const renderGroup = (staged: boolean) => {
@@ -1050,7 +1182,7 @@ export function UncommittedDiffPane({
   };
 
   return (
-    <div className={styles.workingTree}>
+    <div className={stackedView ? `${styles.workingTree} ${styles.stacked}` : styles.workingTree}>
       <span aria-live="polite" aria-atomic="true" className={styles.srOnly} data-testid="file-selection-announcement">
         {selectionAnnouncement}
       </span>
@@ -1103,6 +1235,24 @@ export function UncommittedDiffPane({
               </button>
               <button type="button" aria-pressed={treeLayout} onClick={() => writeFileListLayout("tree")}>
                 Tree
+              </button>
+            </div>
+            <div className={styles.layoutToggle} role="group" aria-label="Diffs shown">
+              <button
+                type="button"
+                aria-pressed={!stackedView}
+                title="Show the current file's diff"
+                onClick={() => writeDiffLayout("list")}
+              >
+                List
+              </button>
+              <button
+                type="button"
+                aria-pressed={stackedView}
+                title="Show every file's diff, one below the other"
+                onClick={() => writeDiffLayout("stacked")}
+              >
+                Stacked
               </button>
             </div>
           </div>
@@ -1207,64 +1357,39 @@ export function UncommittedDiffPane({
           {renderGroup(true)}
         </div>
       )}
-      {currentEntry !== undefined && currentEntry.untrackedFolder === true && (
-        // An untracked folder listed as one entry (#845): its actions instead of a diff.
-        <section aria-label={`Untracked folder ${currentEntry.path}`} className={styles.folderPanel}>
-          <p>{currentEntry.path} is a new folder with more than 500 files that git doesn't ignore.</p>
-          <div className={styles.folderPanelActions}>
-            <button type="button" onClick={() => onStageFile(currentEntry.path)}>
-              Stage folder
-            </button>
-            <button type="button" onClick={() => actions.onIgnorePath(`/${currentEntry.path}`)}>
-              Ignore folder
-            </button>
-            <button type="button" onClick={() => setDiscardRequest({ kind: "file", path: currentEntry.path })}>
-              Delete folder…
-            </button>
-          </div>
-        </section>
-      )}
-      {currentEntry !== undefined && currentEntry.untrackedFolder !== true && (
+      {!stackedView && currentEntry !== undefined && currentEntry.untrackedFolder === true && renderFolderPanel(currentEntry)}
+      {!stackedView && currentEntry !== undefined && currentEntry.untrackedFolder !== true && (
         <>
           {!conflictOpen && <DiffOptionsToolbar sticky />}
-          {currentEntry.externalFilter !== undefined && (
-            <p className={styles.filterNote}>
-              Browsitory can&apos;t run the &apos;{currentEntry.externalFilter}&apos; filter, so this compares the file
-              on disk with the version git stored: the difference may be only the filter&apos;s. Use git on the
-              command line to stage or discard it.
-            </p>
-          )}
-          {currentEntry.workingTreeEncoding !== undefined && (
-            <p className={styles.filterNote}>
-              Browsitory can&apos;t convert the &apos;{currentEntry.workingTreeEncoding}&apos; encoding, so this
-              compares the file on disk with the UTF-8 version git stored: the difference may be only the
-              encoding&apos;s. Use git on the command line to stage or discard it.
-            </p>
-          )}
-          {currentEntry.mergeDriver !== undefined && (
-            <p className={styles.filterNote} role="note">
-              {mergeDriverReason(currentEntry.mergeDriver)}
-            </p>
-          )}
-          <UncommittedFileViewer
-            key={currentKey}
-            repoPath={repoPath}
-            client={client}
-            entry={currentEntry}
-            status={status}
-            diffVersion={staleness(currentKey as string)}
-            contentsHidden={contentsHidden(currentEntry)}
-            onShowContents={() => setRevealedUntracked((prev) => new Set(prev).add(currentKey as string))}
-            focusKey={focusRequest !== null && focusRequest.key === currentKey ? focusRequest.n : 0}
-            onNavigate={navigateFromViewer}
-            onFirstChangedLine={reportFirstLine}
-            onStageHunk={wrapHunkAction(onStageHunk)}
-            onUnstageHunk={wrapHunkAction(onUnstageHunk)}
-            onDiscardHunk={wrapHunkAction(onDiscardHunk)}
-            onStageLines={wrapLineAction(onStageLines)}
-            onUnstageLines={wrapLineAction(onUnstageLines)}
-            onDiscardLines={wrapLineAction(onDiscardLines)}
-          />
+          {renderEntryNotes(currentEntry)}
+          {renderViewer(currentEntry)}
+        </>
+      )}
+      {stackedView && status.length > 0 && (
+        <>
+          <DiffOptionsToolbar />
+          <div ref={setStackElement} className={styles.stack} role="region" aria-label="Diffs of all changed files">
+            {stackedEntries.map((entry) =>
+              entry.untrackedFolder === true ? (
+                <div key={entryKey(entry)} className={styles.stackItem}>
+                  {renderFolderPanel(entry)}
+                </div>
+              ) : (
+                <div key={entryKey(entry)} className={styles.stackItem}>
+                  {renderEntryNotes(entry)}
+                  {renderViewer(entry, true)}
+                </div>
+              ),
+            )}
+            {allEntries.length > stackedEntries.length && (
+              <p className={styles.stackMore}>
+                Showing the diffs of the first {stackedEntries.length} of {allEntries.length} files.{" "}
+                <button type="button" onClick={() => setStackLimit(stackedEntries.length + STACK_PAGE)}>
+                  Show {Math.min(STACK_PAGE, allEntries.length - stackedEntries.length)} more
+                </button>
+              </p>
+            )}
+          </div>
         </>
       )}
       {discardRequest?.kind === "all" && discardAllEntries.length > 0 && (

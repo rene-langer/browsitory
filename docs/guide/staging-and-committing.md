@@ -2,7 +2,8 @@
 
 Select **Uncommitted changes** at the top of the commit graph to see your working tree in the
 right-hand pane. At the top is a compact list of the changed files in two groups, **Changes** and
-**Staged**; below it, one diff viewer shows the current file.
+**Staged**; below it, one diff viewer shows the current file, or with **Stacked** every file's
+diff one below the other (see [All diffs at once](#all-diffs-at-once)).
 
 To commit:
 
@@ -121,11 +122,39 @@ The options above the viewer (**Unified view** / **Split view**, the context lin
 [Diff options](history.md#diff-options).
 
 ??? note "Details"
-    Only the current file's diff is loaded. To keep large new or generated files from loading
+    Only the current file's diff is loaded (in the stacked view, the diffs near what is on
+    screen). To keep large new or generated files from loading
     when you move onto them, turn off **Preferences → Diff → Expand untracked files**: an
     untracked file then shows **Show contents** (and **Diff preferences**, which opens that
     setting) in the viewer and loads only when you press it (it stays shown when the list
     refreshes); changes to tracked files always load at once.
+
+## All diffs at once
+
+To read every change before you commit, click **Stacked** next to **Flat** and **Tree**: the
+viewer gives way to every listed file's diff, one below the other, Changes first and then
+Staged, each under a header with the file's name, **Blame** and **History**. **List** goes back
+to the one viewer. The choice is remembered on this computer for every repository, and
+**Preferences → Diff → Show all diffs stacked** sets it too.
+
+![Every changed file's diff, stacked under the file list](assets/staging-stacked.png)
+
+The file list stays above the diffs as an index: click a file (or move to it with the arrow keys)
+and the stack scrolls to its diff; **Enter** puts the focus in that diff. With the focus in a
+diff, `j` and `k` go to the next and previous file's diff. Every diff has the same hunk and line
+actions as the one viewer: **Stage hunk**, **Unstage hunk**, **Discard hunk**, and staging or
+discarding selected lines. The filter and a collapsed folder in the tree leave their files out
+of the stack too. Screen readers find each file by its heading.
+
+??? note "Details"
+    A diff loads when it scrolls near the view, and stays shown after that; when the files
+    change, the diffs on screen load again at once and the others when you scroll back to them.
+    The stack holds 100 files at first: below the last one, **Show 100 more** adds the next 100,
+    and a file further down that you pick in the list adds every file up to it. Large and
+    generated files show collapsed, as in the one viewer.
+
+    A conflicted file shows its merge editor in the stack, among the other diffs; the file list
+    doesn't shrink to the conflicts as it does when you open a conflict in the list view.
 
 ## Selecting several files
 

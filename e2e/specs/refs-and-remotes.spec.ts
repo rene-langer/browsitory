@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { withFailureDiagnostics } from "../support/diagnostics";
 import { waitUntilGoneInPage } from "../support/dom";
 import { expandSidebarSection, sidebarRemoteFolder } from "../support/sidebar";
 import { git, gitWith } from "../support/git";
@@ -31,6 +32,23 @@ function localHas(ref: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** The remote folder as the page shows it, for a failure message: open, its rows, an error. */
+async function remoteFolderState(remote: string): Promise<unknown> {
+  return browser.execute((name) => {
+    const header = Array.from(document.querySelectorAll("[data-active-repo='true'] button[aria-expanded]")).find(
+      (button) => button.nextElementSibling?.getAttribute("aria-label") === `Actions for remote ${name}`,
+    );
+    const folder = header?.closest("li");
+    const section = header?.closest("section");
+    return {
+      expanded: header?.getAttribute("aria-expanded") ?? null,
+      rows: (folder?.querySelector("ul")?.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 300),
+      alerts: Array.from(section?.querySelectorAll("[role='alert']") ?? []).map((alert) => alert.textContent),
+      activity: document.querySelector("[data-active-repo='true'] [role='group'][aria-label='Repository']")?.textContent,
+    };
+  }, remote);
 }
 
 // Right-click via a synthetic DOM event (see rebase.spec.ts on why not `.click({ button: "right" })`).
@@ -116,10 +134,34 @@ describe("Browsitory refs and remotes", () => {
       { timeoutMsg: "expected Set as upstream to record the upstream" },
     );
 
-    // Expand the remote folder and delete the branch from its row's menu.
+    // The git CLI sees the push land before the app has finished it: its toolbar still shows
+    // the push, and its end moves the sidebar under a click (#1188). Go on once the app says
+    // it's done, as a user would.
+    await browser.waitUntil(
+      async () =>
+        (await browser.execute(() => document.body.textContent ?? "")).includes(
+          `Pushed ${BRANCH} to ${REMOTE}/${BRANCH} and set it as the upstream.`,
+        ),
+      { timeoutMsg: "expected the app to report the push" },
+    );
+
+    // Expand the remote folder and delete the branch from its row's menu. The click is repeated
+    // until the folder says it's open: a click while the page moves can land beside it (#824).
     const remoteFolder = await $(sidebarRemoteFolder(REMOTE));
     await remoteFolder.waitForExist();
-    await remoteFolder.click();
+    await browser.waitUntil(
+      async () => {
+        if ((await remoteFolder.getAttribute("aria-expanded")) === "true") return true;
+        await remoteFolder.click();
+        return (await remoteFolder.getAttribute("aria-expanded")) === "true";
+      },
+      { interval: 250, timeoutMsg: `expected the ${REMOTE} folder to open` },
+    );
+    await withFailureDiagnostics(
+      "remote-tracking-row",
+      () => $(`//button[@aria-label="Show ${REMOTE}/${BRANCH} in graph"]`).waitForExist(),
+      () => remoteFolderState(REMOTE),
+    );
     await contextMenu(`//button[@aria-label="Show ${REMOTE}/${BRANCH} in graph"]/ancestor::li[1]`);
     const deleteItem = await $(`button=Delete ${REMOTE}/${BRANCH}…`);
     await deleteItem.waitForEnabled();
