@@ -116,8 +116,8 @@ export type BackendCall = <T>(method: string, params?: Record<string, unknown>) 
  *   extension host an object (#1128).
  * - the two progress subscriptions and the repository watchers' reports: Tauri events on the
  *   desktop, JSON-RPC notifications in VSCode.
- * - file drops (#649): the desktop webview's drag and drop events and `readPatchFile`; none in
- *   VSCode, which handles drops on its windows itself.
+ * - file drops (#649, #818): the desktop webview's drag and drop events; the page's own in VSCode,
+ *   whose Explorer drops the extension host turns into paths.
  * - `recoverFromFailedUpdate` (#1194): only the desktop app updates itself.
  * - `logFrontendError`: the desktop app writes through its log plugin and has no command for it.
  * - `subscribeHostRequests` (#677): the VSCode extension host's notifications; none on the desktop.
@@ -137,7 +137,6 @@ export type TransportSpecific =
   | "subscribeRepoWatch"
   | "subscribeOperationLog"
   | "subscribeFileDrops"
-  | "readPatchFile"
   | "recoverFromFailedUpdate"
   | "subscribeHostRequests"
   | "logFrontendError";
@@ -278,6 +277,7 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
     savePatchFile: (suggestedName: string, content: PatchContent) =>
       call<string | null>("save_patch_file", { suggestedName, content }),
     openPatchFile: () => call<PatchContent | null>("open_patch_file"),
+    readPatchFile: (path: string) => call<PatchContent>("read_patch_file", { path }),
     ignorePath: (repoPath: string, pattern: string) => call<void>("ignore_path", { repoPath, pattern }),
     ignorePaths: (repoPath: string, patterns: string[]) => call<void>("ignore_paths", { repoPath, patterns }),
     getDiffSettings: () => call<DiffSettings>("get_diff_settings"),

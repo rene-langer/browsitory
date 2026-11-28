@@ -32,6 +32,9 @@ export const NATIVE_METHODS: ReadonlySet<string> = new Set([
   // "Save as patch…" / "Apply patch…" (#448): the dialogs and the file I/O.
   "save_patch_file",
   "open_patch_file",
+  // Drops on the panel (#818): a dropped patch file, and the paths of URIs from the Explorer.
+  "read_patch_file",
+  "resolve_dropped_uris",
   // The picker's Clone… and New repository… buttons (#680): VSCode's own Git commands.
   "run_vscode_git_command",
   // Preferences > Keyboard (#900): VSCode's Keyboard Shortcuts, on Browsitory's shortcuts.
@@ -55,6 +58,8 @@ const VSCODE_GIT_COMMANDS: Readonly<Record<string, string>> = {
 
 /** The largest patch file "Apply patch…" reads. */
 const MAX_PATCH_FILE_BYTES = 64 * 1024 * 1024;
+/** The names "Apply patch…" offers, which a dropped patch file must have (#818). */
+const PATCH_FILE_NAME = /\.(patch|diff|mbox|txt)$/i;
 
 // Sidecar methods only the extension host calls (#306). The webview may not call them: a
 // request for one gets an error reply instead of reaching the sidecar. Listed in
@@ -130,6 +135,10 @@ export interface SidecarBridgeDependencies {
   /** Writes `content` to the file at `path` (a patch the user chose to save). */
   readonly writeFile: (path: string, content: Uint8Array) => PromiseLike<void>;
   readonly readFile: (uri: Uri) => PromiseLike<Uint8Array>;
+  /** Reads the file at `path` on the extension host's file system (a dropped patch, #818). */
+  readonly readFilePath: (path: string) => PromiseLike<Uint8Array>;
+  /** The path a URI dropped on the panel names on the extension host's file system, if any. */
+  readonly droppedUriPath: (uri: string) => string | undefined;
   readonly openExternal: (url: string) => PromiseLike<boolean>;
   readonly appendLine: (message: string) => void;
   /** Opens a work tree file in a VSCode editor, at the 1-based `line` when given. */
@@ -758,6 +767,32 @@ export class SidecarBridge {
             throw new Error(`Couldn't read ${file.fsPath}: the file is larger than 64 MB`);
           }
           result = { base64: Buffer.from(bytes).toString("base64") };
+          break;
+        }
+        case "read_patch_file": {
+          // The desktop's `read_patch_file`: only a file named like a patch, up to 64 MB.
+          const file = requireStringParam(request, "path");
+          if (!PATCH_FILE_NAME.test(file)) {
+            throw new Error(`${file} isn't a patch file (.patch, .diff, .mbox or .txt)`);
+          }
+          let bytes: Uint8Array;
+          try {
+            bytes = await this.dependencies.readFilePath(file);
+          } catch (error) {
+            throw new Error(`Couldn't read ${file}: ${errorMessage(error)}`);
+          }
+          if (bytes.byteLength > MAX_PATCH_FILE_BYTES) {
+            throw new Error(`Couldn't read ${file}: the file is larger than 64 MB`);
+          }
+          result = { base64: Buffer.from(bytes).toString("base64") };
+          break;
+        }
+        case "resolve_dropped_uris": {
+          const uris = (request.params as { uris?: unknown }).uris;
+          if (!Array.isArray(uris) || !uris.every((uri) => typeof uri === "string")) {
+            throw new InvalidParamsError("resolve_dropped_uris requires { uris: string[] }");
+          }
+          result = uris.flatMap((uri) => this.dependencies.droppedUriPath(uri) ?? []);
           break;
         }
         case "run_vscode_git_command": {
