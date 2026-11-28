@@ -834,6 +834,67 @@ describe("external filter drivers (#1087)", () => {
     expect(onStageAllFiles).toHaveBeenCalledWith(["a.txt"]);
   });
 
+  // #1107: Discard all… and a selection's actions leave filtered files out instead of being
+  // refused for them, and say so.
+  it("leaves filtered files out of Discard all…, naming them in the confirmation", () => {
+    const onDiscardAllUnstaged = vi.fn();
+    render(
+      <Pane
+        client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")}
+        status={[secret, entry("a.txt", false)]}
+        actions={{ onDiscardAllUnstaged }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Discard all…" }));
+    const dialog = screen.getByRole("dialog", { name: "Discard all changes" });
+    expect(dialog).toHaveTextContent("Discard changes to 1 file?");
+    expect(dialog).toHaveTextContent("secret.env is left out: Browsitory can't run its 'crypt' filter.");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Discard all" }));
+    expect(onDiscardAllUnstaged).toHaveBeenCalledWith(["a.txt"]);
+  });
+
+  it("disables Discard all… when every change is a filtered file, saying why", () => {
+    render(<Pane client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")} status={[secret]} />);
+    const discardAll = screen.getByRole("button", { name: "Discard all…" });
+    expect(discardAll).toBeDisabled();
+    expect(discardAll).toHaveAttribute("title", expect.stringContaining("secret.env is left out"));
+  });
+
+  it("leaves filtered files out of a selection's Stage, Discard and Stash", async () => {
+    const onStageAllFiles = vi.fn();
+    const onDiscardFiles = vi.fn();
+    const onOpenStashDialog = vi.fn();
+    render(
+      <Pane
+        client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")}
+        status={[secret, entry("a.txt", false)]}
+        actions={{ onStageAllFiles, onDiscardFiles, onOpenStashDialog }}
+      />,
+    );
+    await screen.findByText(/unstaged (a\.txt|secret\.env)/);
+    fireEvent.keyDown(unstagedList(), { key: "a", ctrlKey: true });
+    const bar = () => screen.getByRole("group", { name: "Selected unstaged files" });
+    expect(within(bar()).getByText("2 selected")).toBeInTheDocument();
+
+    const stage = within(bar()).getByRole("button", { name: "Stage 1 file" });
+    expect(stage).toHaveAttribute("title", expect.stringContaining("secret.env is left out"));
+    fireEvent.click(stage);
+    expect(onStageAllFiles).toHaveBeenCalledWith(["a.txt"]);
+
+    fireEvent.keyDown(unstagedList(), { key: "a", ctrlKey: true });
+    fireEvent.click(within(bar()).getByRole("button", { name: "Discard 1 file…" }));
+    const dialog = screen.getByRole("dialog", { name: "Discard selected changes" });
+    expect(dialog).toHaveTextContent("secret.env is left out: Browsitory can't run its 'crypt' filter.");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Discard 1 file" }));
+    expect(onDiscardFiles).toHaveBeenCalledWith(["a.txt"]);
+
+    fireEvent.keyDown(unstagedList(), { key: "a", ctrlKey: true });
+    // The stash dialog names what it leaves out (StashDialog's tests).
+    fireEvent.click(within(bar()).getByRole("button", { name: "Stash 1 file…" }));
+    expect(onOpenStashDialog).toHaveBeenCalledTimes(1);
+    expect([...onOpenStashDialog.mock.calls[0][0]].sort()).toEqual(["a.txt", "secret.env"]);
+  });
+
   it("says above a filtered file's diff that the difference may be only the filter's", async () => {
     render(
       <Pane client={fakeRepoClient({ getWorkingDiff: diffNamingFile }, "empty")} status={[secret, entry("a.txt", false)]} />,
