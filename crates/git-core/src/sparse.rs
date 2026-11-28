@@ -163,11 +163,10 @@ impl Patterns {
         if literal > path.len() || !self.same(&text[..literal], &path[..literal]) {
             return false;
         }
-        let (text, path) = (&text[literal..], &path[literal..]);
-        if literal > 0 && text.is_empty() && path.is_empty() {
-            return true;
-        }
-        wildmatch(text, path, self.flags(true))
+        // The literal part's last byte stays, as in git, so a `**` right after it knows it
+        // doesn't start a folder name.
+        let keep = literal.saturating_sub(1);
+        wildmatch(&text[keep..], &path[keep..], self.flags(true))
     }
 
     fn same(&self, a: &[u8], b: &[u8]) -> bool {
