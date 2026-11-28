@@ -2914,8 +2914,13 @@ work to a `HighlightTransport` (`highlightWorkerProtocol.ts`):
   libgit2 (as `index_refresh` does `git_index_set_caps`). That applies libgit2's built-in
   filters, CRLF/eol (`core.autocrlf`, `core.eol`, `text`/`eol` attributes) and `ident`;
   libgit2 runs no external filter driver (Git LFS shows its pointer). Binary blobs are returned
-  as stored. libgit2 caches `core.autocrlf` per open repository, so a change made outside the
-  app applies once the repository is opened again. For a p4merge add/add conflict,
+  as stored. libgit2 caches `core.autocrlf` and its other core settings (`core.eol`,
+  `core.safecrlf`, `core.filemode`, `core.symlinks`, `core.ignorecase`, …) per open repository
+  and forgets them only when that repository's config object writes; the worker makes it read
+  them again before each command (`repo::reload_core_settings`, #904), so a `git config` run in
+  a terminal counts from the next command on (staging, status, side files). It sets an empty
+  config and then the repository's own again: that clears the cache and keeps the config
+  object, whose file backends reread a changed file by themselves. For a p4merge add/add conflict,
   `prepare_merge_tool` writes git's virtual base (`create_virtual_base`, #159).
 - A commit's file tree (#446, `git-core::tree`): `get_commit_tree` lists one folder per call
   (the frontend loads folders as they open) or, with a filter, walks the whole tree for matching

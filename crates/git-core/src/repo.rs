@@ -46,8 +46,18 @@ pub fn open(path: &Path) -> Result<git2::Repository, RepoError> {
     Ok(git2::Repository::discover(path)?)
 }
 
-pub fn reload_core_settings(_repo: &git2::Repository) -> Result<(), git2::Error> {
-    Ok(())
+/// Makes `repo` read `core.autocrlf`, `core.eol`, `core.safecrlf`, `core.filemode` and libgit2's
+/// other cached core settings again (#904). libgit2 caches them per open repository and forgets
+/// them only when the repository's own config object writes, so a `git config` in a terminal
+/// isn't seen otherwise. The config object itself reads its files afresh when they change.
+///
+/// Setting another config and then the repository's own one again clears the cache and keeps
+/// that config object, with any level added to it; setting the same object alone would leave it
+/// without its owner, and its writes would no longer clear the cache.
+pub fn reload_core_settings(repo: &git2::Repository) -> Result<(), git2::Error> {
+    let config = repo.config()?;
+    repo.set_config(&git2::Config::new()?)?;
+    repo.set_config(&config)
 }
 
 /// Creates an empty repository at `path` (and any missing parents). The initial branch honours
