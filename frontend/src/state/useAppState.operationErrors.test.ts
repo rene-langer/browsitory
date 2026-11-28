@@ -527,20 +527,34 @@ describe("a failed operation's banner (#1032)", () => {
     expect(hint).toBe("Fix what the hook reports, then apply the patch again.");
   });
 
-  // Without a typed kind (#1033) a diverged branch can't be told from other failures, so a
-  // fast-forward-only merge adds no next step of its own: git's text says what happened.
-  it("adds no guessed next step to a fast-forward-only merge that failed", async () => {
+  // #1033: the backend types a diverged branch, so the banner says what to do about it.
+  it("says what to do about a fast-forward-only merge of a diverged branch", async () => {
     const { error, hint } = await failed(
       {
         setMergeOptions: async () => {},
         mergeBranch: async () => {
-          throw new RepoError("Other", "Can't fast-forward: 'feature' has diverged from the current branch.");
+          throw new RepoError("NotFastForward", "Can't fast-forward: 'feature' has diverged from the current branch.");
         },
       },
       (app) => app.mergeBranch("feature", { fastForward: "Only", squash: false }),
     );
     expect(error).toBe("Couldn't merge feature: Can't fast-forward: 'feature' has diverged from the current branch.");
-    expect(hint).toBeNull();
+    expect(hint).toBe("The branches have diverged. Merge again without Fast-forward only, or rebase onto the branch first.");
+  });
+
+  // #1033: any other failure of a fast-forward-only merge gets the merge's own next step.
+  it("adds the merge's next step to a fast-forward-only merge that failed otherwise", async () => {
+    const { error, hint } = await failed(
+      {
+        setMergeOptions: async () => {},
+        mergeBranch: async () => {
+          throw new RepoError("Other", "reference 'refs/heads/feature' not found");
+        },
+      },
+      (app) => app.mergeBranch("feature", { fastForward: "Only", squash: false }),
+    );
+    expect(error).toBe("Couldn't merge feature: reference 'refs/heads/feature' not found");
+    expect(hint).toBe("Check that no other Git program is using the repository, then merge again.");
   });
 
   it("adds no next step when the history changed under a history edit: the message is the remediation", async () => {

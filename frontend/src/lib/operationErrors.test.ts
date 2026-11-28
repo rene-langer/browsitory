@@ -103,12 +103,6 @@ describe("failedOperation", () => {
       },
     ],
     [
-      "merge fast-forward only",
-      failedOperation.merge("feature", true),
-      // Its failure may be a diverged branch or anything else; git's text says which (#1033).
-      { failed: "Couldn't merge feature", next: null },
-    ],
-    [
       "rebase",
       failedOperation.rebaseOnto("refs/remotes/origin/main"),
       {
