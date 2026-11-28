@@ -600,10 +600,11 @@ menu's choice runs back through the session: the pick, the parent picker or a se
   `stash_save2` records it raw and as a regular file, so Stash all with such a change takes the
   path-limited route (`changes_link_kept_as_file`). libgit2's CRLF filter (`core.autocrlf`,
   `text=auto`) also passes a file through unchanged when the index entry at its path (stage 0,
-  else 1) isn't a regular file (`has_cr_in_index`), where git only looks for a CR in that
-  entry's blob (stage 0, else "ours"; `has_crlf_in_index`). So these paths filter it through
-  `undo::link_file_filters`: a second handle on the repository whose in-memory index (never
-  written) has that blob there as a regular file.
+  else 1) isn't a regular file or its blob holds any CR (`has_cr_in_index`), where git keeps the
+  CRs only when that entry's blob (stage 0, else "ours") holds a CRLF and isn't binary (no lone
+  CR, no NUL; `has_crlf_in_index`). So these paths filter it through `undo::link_file_filters`:
+  a second handle on the repository whose in-memory index (never written) has that blob there
+  as a regular file when git reads it as text, else nothing.
 - **Path-limited stash shape (deliberate, differs from git).** The worktree commit is HEAD's tree
   plus the selected files' worktree contents, the index commit is HEAD's tree plus the selected
   files' index entries, and the untracked commit holds only the selected untracked files. git

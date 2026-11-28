@@ -722,9 +722,10 @@ where
 
 /// A handle on `repo` to send a link kept as a file at `path` through the clean filters with,
 /// as git does (#802). libgit2's CRLF filter (`core.autocrlf`, `text=auto`) leaves a file as it
-/// is when the index entry at its path isn't a regular file; git keeps the CRs only when that
-/// entry's blob holds one (`has_crlf_in_index`). The handle's index, read from disk and never
-/// written, has `index_blob` (see [`blob_git_compares`]) there as a regular file, or nothing.
+/// is when the index entry at its path isn't a regular file, or its blob holds a CR; git keeps
+/// the CRs only when that entry's blob holds a CRLF and isn't binary (`has_crlf_in_index`). The
+/// handle's index, read from disk and never written, has `index_blob` (see
+/// [`blob_git_compares`]) there as a regular file when git would read it as text, else nothing.
 pub(crate) fn link_file_filters(
     repo: &Repository,
     path: &str,
@@ -737,10 +738,25 @@ pub(crate) fn link_file_filters(
     };
     let mut index = handle.index()?;
     index.remove_path(Path::new(path))?;
-    if let Some(id) = index_blob {
+    let text = index_blob.filter(|id| {
+        repo.find_blob(*id)
+            .is_ok_and(|blob| !binary_for_crlf(blob.content()))
+    });
+    if let Some(id) = text {
         index.add(&index_entry(path, id, MODE_FILE))?;
     }
     Ok(handle)
+}
+
+/// Whether git takes `content` for binary in its safer-autocrlf check (`convert_is_binary`): it
+/// holds a lone CR or a NUL. Its third rule, more than one control character per 128 printable
+/// ones, is left out: a link's target doesn't reach it.
+fn binary_for_crlf(content: &[u8]) -> bool {
+    let lone_cr = content
+        .iter()
+        .enumerate()
+        .any(|(at, &byte)| byte == b'\r' && content.get(at + 1) != Some(&b'\n'));
+    lone_cr || content.contains(&0)
 }
 
 /// The blob of `path`'s entry in `index` that git's CRLF filter looks for a CR in: stage 0,
