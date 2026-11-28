@@ -112,12 +112,9 @@ impl OutsideCone {
     /// checkout, or when the operation changes no marked path and adds none outside.
     fn plan(repo: &Repository, outcome: &Outcome<'_, '_>) -> Result<Option<Self>, git2::Error> {
         let sparse = crate::sparse::Sparse::read(repo)?;
-        let Some(workdir) = repo
-            .workdir()
-            .filter(|_| sparse != crate::sparse::Sparse::Off)
-        else {
+        if sparse == crate::sparse::Sparse::Off || repo.workdir().is_none() {
             return Ok(None);
-        };
+        }
         let mut index = repo.index()?;
         index.read(false)?;
         let mut changed = Vec::new();
@@ -140,7 +137,7 @@ impl OutsideCone {
             changed.push(entry.path);
         }
         for (path, version) in outcome.entries()? {
-            if !present.contains(&path) && sparse.excludes(Some(workdir), &path) {
+            if !present.contains(&path) && sparse.excludes(&path) {
                 restaged.push((path, version));
             }
         }

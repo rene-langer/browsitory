@@ -94,7 +94,7 @@ pub(crate) fn marks_after(
     let mut flat = git2::Index::new()?;
     flat.read_tree(tree)?;
     for entry in flat.iter() {
-        if !present.contains(&entry.path) && sparse.excludes(repo.workdir(), &entry.path) {
+        if !present.contains(&entry.path) && sparse.excludes(&entry.path) {
             marks.skip_worktree.push(entry.path.clone());
             marks.added.insert(entry.path);
         }

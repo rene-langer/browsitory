@@ -55,6 +55,7 @@ pub mod undo;
 mod untracked;
 pub mod user_command;
 mod valueless_setting;
+mod wildmatch;
 pub mod worktree;
 pub(crate) mod worktree_guard;
 pub use external_filter::ExternalFilter;

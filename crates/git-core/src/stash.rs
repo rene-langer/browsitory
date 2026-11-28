@@ -1979,9 +1979,9 @@ fn outside_cone(
     let mut repo_index = repo.index()?;
     repo_index.read(false)?;
     let marked = crate::index_marks::skip_worktree_paths(&repo_index);
-    let Some(workdir) = repo.workdir().filter(|_| !marked.is_empty()) else {
+    if marked.is_empty() || repo.workdir().is_none() {
         return Ok(None);
-    };
+    }
     // No such stash: the apply reports it.
     let Some(id) = repo
         .reflog("refs/stash")?
@@ -2016,8 +2016,7 @@ fn outside_cone(
         flat.read_tree(staged)?;
         for entry in flat.iter() {
             let new = !present.contains(&entry.path);
-            if (new || changed.contains(&entry.path)) && sparse.excludes(Some(workdir), &entry.path)
-            {
+            if (new || changed.contains(&entry.path)) && sparse.excludes(&entry.path) {
                 let in_worktree = version(&worktree, &entry.path);
                 restaged.push((entry.path, in_worktree));
             }
