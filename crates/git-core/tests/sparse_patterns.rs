@@ -405,39 +405,34 @@ fn non_cone(d: &Path) -> String {
     two
 }
 
-/// Every new path of `two` marked, whether the non-cone patterns hold it or not.
-const NON_CONE_MARKS: &str = "H app/main.rs\nS app/new.rs\nS docs/guide.md\nS docs/new.md\n\
-    S docs/sub/s.md\nS lib/core/c.rs\nS lib/core/deep/d.rs\nS lib/new.rs\nS lib/other/n.rs\n\
-    S lib/other/o.rs\nS lib/top.rs\nH top.txt\nS top2.txt\n";
-
-/// Non-cone patterns aren't matched: a new path whose file is missing is marked, so nothing is
-/// listed as deleted. Outside the patterns that is what git does.
+/// Non-cone patterns are matched as git matches them (#1187): a new path outside them is
+/// marked, one inside isn't, so the mixed reset lists it as deleted, as git's does.
 #[test]
-fn a_mixed_reset_with_non_cone_patterns_marks_the_new_paths_whose_files_are_missing() {
+fn a_mixed_reset_with_non_cone_patterns_marks_the_new_paths_outside_them_as_git_does() {
     let (ours, our_two, twin, twin_two) = twins(non_cone);
     git_ok(twin.path(), &["reset", "-q", "--mixed", &twin_two]);
     let repo = git2::Repository::open(ours.path()).unwrap();
 
     reset_to(&repo, &our_two, ResetMode::Mixed).unwrap();
 
-    assert_eq!(ls_files_v(ours.path()), NON_CONE_MARKS);
-    assert_eq!(status_short(ours.path()), "");
-    assert_eq!(git_core::status::status(&repo).unwrap(), Vec::new());
-    let outside = [
+    assert_same_as_git(ours.path(), twin.path());
+    let marks = ls_files_v(ours.path());
+    for path in [
         "docs/new.md",
         "docs/sub/s.md",
         "lib/new.rs",
         "lib/other/n.rs",
-    ];
-    let twin_marks = ls_files_v(twin.path());
-    for path in outside {
-        assert!(twin_marks.contains(&format!("S {path}\n")), "{twin_marks}");
+    ] {
+        assert!(marks.contains(&format!("S {path}\n")), "{marks}");
+    }
+    for path in ["app/new.rs", "top2.txt"] {
+        assert!(marks.contains(&format!("H {path}\n")), "{marks}");
     }
 }
 
 /// Without `core.sparseCheckoutCone`, a file in the cone format is read as non-cone patterns,
-/// as git reads it: `/app/` alone leaves the top-level files out, so the missing `top2.txt` is
-/// marked (in cone mode it would be in).
+/// as git reads it: `/app/` alone leaves the top-level files out, so `top2.txt` is marked (in
+/// cone mode it would be in).
 #[test]
 fn cone_style_lines_without_cone_mode_are_non_cone_patterns() {
     let (ours, our_two, twin, twin_two) = twins(|d| {
@@ -450,59 +445,56 @@ fn cone_style_lines_without_cone_mode_are_non_cone_patterns() {
 
     reset_to(&repo, &our_two, ResetMode::Mixed).unwrap();
 
-    assert!(ls_files_v(twin.path()).contains("S top2.txt\n"));
+    assert_same_as_git(ours.path(), twin.path());
     assert!(ls_files_v(ours.path()).contains("S top2.txt\n"));
-    assert_eq!(status_short(ours.path()), "");
 }
 
-/// Non-cone patterns, Reset hard: no new file is written.
+/// Non-cone patterns, Reset hard: the new files inside the patterns are written, as git writes
+/// them.
 #[test]
-fn a_hard_reset_with_non_cone_patterns_writes_no_new_file() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let d = dir.path();
-    let two = non_cone(d);
-    let repo = git2::Repository::open(d).unwrap();
+fn a_hard_reset_with_non_cone_patterns_writes_the_new_files_inside_them_as_git_does() {
+    let (ours, our_two, twin, twin_two) = twins(non_cone);
+    git_ok(twin.path(), &["reset", "-q", "--hard", &twin_two]);
+    let repo = git2::Repository::open(ours.path()).unwrap();
 
-    reset_to(&repo, &two, ResetMode::Hard).unwrap();
+    reset_to(&repo, &our_two, ResetMode::Hard).unwrap();
 
-    assert_eq!(ls_files_v(d), NON_CONE_MARKS);
-    assert_eq!(status_short(d), "");
-    assert_eq!(
-        files(d),
-        [
-            ("app/main.rs".to_string(), "fn main() {}\n".to_string()),
-            ("top.txt".to_string(), "top\n".to_string()),
-        ]
-    );
+    assert_same_as_git(ours.path(), twin.path());
+    assert!(files(ours.path()).contains(&("app/new.rs".to_string(), "new app\n".to_string())));
+}
+
+/// [`cone`], then `info/sparse-checkout` replaced with `patterns` (`core.sparseCheckoutCone`
+/// still on).
+fn cone_with(patterns: &str) -> impl Fn(&Path) -> String + '_ {
+    move |d| {
+        let two = cone(d);
+        std::fs::write(d.join(".git/info/sparse-checkout"), patterns).unwrap();
+        two
+    }
+}
+
+/// A mixed reset to `two` of ours and the twin, both built by `build`, ends the same.
+fn mixed_reset_matches_git(build: impl Fn(&Path) -> String) {
+    let (ours, our_two, twin, twin_two) = twins(build);
+    git_ok(twin.path(), &["reset", "-q", "--mixed", &twin_two]);
+    let repo = git2::Repository::open(ours.path()).unwrap();
+
+    reset_to(&repo, &our_two, ResetMode::Mixed).unwrap();
+
+    assert_same_as_git(ours.path(), twin.path());
 }
 
 /// `core.sparseCheckoutCone` on, but a pattern git doesn't accept in cone mode: git reads the
 /// file as non-cone patterns ("disabling cone pattern matching"), and so does Browsitory.
 #[test]
 fn a_pattern_outside_the_cone_format_turns_cone_matching_off() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let d = dir.path();
-    let two = cone(d);
-    std::fs::write(
-        d.join(".git/info/sparse-checkout"),
+    mixed_reset_matches_git(cone_with(
         "/*\n!/*/\n/app/\n/lib/\n!/lib/*/\n/lib/core/\n/*.md\n",
-    )
-    .unwrap();
-    let repo = git2::Repository::open(d).unwrap();
-
-    reset_to(&repo, &two, ResetMode::Mixed).unwrap();
-
-    assert!(
-        ls_files_v(d).contains("S app/new.rs\n"),
-        "{}",
-        ls_files_v(d)
-    );
-    assert_eq!(status_short(d), "");
+    ));
 }
 
 /// Each line git doesn't accept in cone mode, after `/*`, `!/*/`, `/app/`: git reads the file
-/// as non-cone patterns, and so does Browsitory, which marks the missing `app/new.rs` (inside
-/// the cone it would stay unmarked).
+/// as non-cone patterns, and so does Browsitory.
 #[test]
 fn every_line_git_rejects_in_cone_mode_turns_cone_matching_off() {
     for line in [
@@ -521,19 +513,7 @@ fn every_line_git_rejects_in_cone_mode_turns_cone_matching_off() {
         "!/*",
         "/lib/\n!/lib/*/\n/lib/",
     ] {
-        let dir = tempfile::TempDir::new().unwrap();
-        let d = dir.path();
-        let two = cone(d);
-        std::fs::write(
-            d.join(".git/info/sparse-checkout"),
-            format!("/*\n!/*/\n/app/\n{line}\n"),
-        )
-        .unwrap();
-        let repo = git2::Repository::open(d).unwrap();
-
-        reset_to(&repo, &two, ResetMode::Mixed).unwrap();
-
-        assert!(ls_files_v(d).contains("S app/new.rs\n"), "{line:?}");
+        mixed_reset_matches_git(cone_with(&format!("/*\n!/*/\n/app/\n{line}\n")));
     }
 }
 
