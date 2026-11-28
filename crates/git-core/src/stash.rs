@@ -318,12 +318,14 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
     // `edit_removed_from_index`).
     // And a skip-worktree entry (every file outside a sparse checkout, #1184): libgit2's stash
     // records its missing file as deleted, and its reset writes the file and drops the mark.
+    // And a link kept as a file (`changes_link_kept_as_file`, #802).
     if crate::worktree_guard::has_hazard(repo)?
         || index
             .iter()
             .any(|entry| entry.flags_extended & crate::index_marks::SKIP_WORKTREE != 0)
         || (opts.include_untracked && kept_entry_in_untracked_folder(repo, &scan, &head_files)?)
         || edit_removed_from_index(repo)?
+        || changes_link_kept_as_file(repo, &index, &scan)?
     {
         let paths = scan.changed_paths(opts.include_untracked);
         if paths.is_empty() {
@@ -1427,6 +1429,31 @@ fn kept_entry_in_untracked_folder(
     }))
 }
 
+/// True when a changed path is a link kept as a file (`core.symlinks` off: a regular file where
+/// the index has a link). libgit2's stash records it raw and as a regular file; git keeps the link
+/// mode and cleans the file (#802), as the path-limited stash does.
+fn changes_link_kept_as_file(
+    repo: &Repository,
+    index: &git2::Index,
+    scan: &WorktreeScan,
+) -> Result<bool, StashError> {
+    let Some(workdir) = repo.workdir() else {
+        return Ok(false);
+    };
+    if crate::undo::worktree_config(repo)
+        .map_err(undo_error)?
+        .symlinks
+    {
+        return Ok(false);
+    }
+    Ok(scan.changed_paths(false).iter().any(|path| {
+        index
+            .get_path(std::path::Path::new(path), 0)
+            .is_some_and(|entry| entry.mode == crate::undo::MODE_LINK)
+            && std::fs::symlink_metadata(workdir.join(path)).is_ok_and(|meta| meta.is_file())
+    }))
+}
+
 /// True when a file the index no longer has is still in the worktree and not ignored (`git rm
 /// --cached`, often followed by an edit; status `INDEX_DELETED | WT_NEW`). libgit2 1.9.6's whole
 /// stash mishandles it (#247):
@@ -1733,8 +1760,8 @@ fn entry_in_the_way(
     Ok(None)
 }
 
-/// Blob id and mode of a worktree file, with clean filters applied (as `git add` would);
-/// `None` when the file is gone.
+/// Blob id and mode of a worktree file, with clean filters applied (as `git add` would, also to
+/// a link kept as a file); `None` when the file is gone.
 pub(crate) fn worktree_blob<E>(
     repo: &Repository,
     workdir: &std::path::Path,
@@ -1745,17 +1772,18 @@ pub(crate) fn worktree_blob<E>(
 where
     E: From<git2::Error> + From<std::io::Error>,
 {
-    let Some((bytes, mode)) =
-        crate::undo::read_worktree_file(workdir, path, config, previous_mode)?
-    else {
+    let Some(file) = crate::undo::read_worktree_file(workdir, path, config, previous_mode)? else {
         return Ok(None);
     };
-    let id = if mode == crate::undo::MODE_LINK {
-        repo.blob(&bytes)?
+    let id = if file.link {
+        repo.blob(&file.bytes)?
+    } else if file.mode == crate::undo::MODE_LINK {
+        let index_blob = crate::undo::blob_git_compares(&repo.index()?, path);
+        crate::undo::filtered_link_file_blob::<E>(repo, path, &file.bytes, index_blob)?
     } else {
-        crate::undo::filtered_blob::<E>(repo, path, &bytes)?
+        crate::undo::filtered_blob::<E>(repo, path, &file.bytes)?
     };
-    Ok(Some((id, mode)))
+    Ok(Some((id, file.mode)))
 }
 
 fn undo_error(error: crate::undo::UndoError) -> StashError {

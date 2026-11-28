@@ -291,16 +291,24 @@ where
         let changed =
             match crate::undo::read_worktree_file(workdir, &path, &config, Some(entry.mode)) {
                 Ok(None) => false,
-                Ok(Some((bytes, mode))) => {
-                    let raw = git2::Oid::hash_object(git2::ObjectType::Blob, &bytes)?;
+                Ok(Some(file)) => {
+                    let raw = git2::Oid::hash_object(git2::ObjectType::Blob, &file.bytes)?;
                     if raw == entry.id {
                         false
-                    } else if mode == crate::undo::MODE_LINK {
+                    } else if file.link {
                         true
+                    } else if file.mode == crate::undo::MODE_LINK {
+                        // A link kept as a file: git's status cleans it too.
+                        crate::undo::filtered_link_file_blob::<E>(
+                            repo,
+                            &path,
+                            &file.bytes,
+                            Some(entry.id),
+                        )? != entry.id
                     } else {
                         // Apply git's filters as status would (`core.autocrlf`, attributes); this
                         // writes a loose object, only when the raw bytes differ.
-                        crate::undo::filtered_blob::<E>(repo, &path, &bytes)? != entry.id
+                        crate::undo::filtered_blob::<E>(repo, &path, &file.bytes)? != entry.id
                     }
                 }
                 Err(_) => true,

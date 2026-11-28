@@ -203,15 +203,44 @@ fn stage_into(
         if meta.file_type().is_symlink() {
             // A link that replaced a tracked folder takes the folder's place, like `git add`.
             index.remove_dir(rel, 0)?;
+            index.add_path(Path::new(path))?;
         } else {
             // git doesn't filter a link; a file goes through the clean filters (#1063).
             drivers.refuse(repo, [rel])?;
+            let index_blob = crate::undo::blob_git_compares(index, path);
+            index.add_path(Path::new(path))?;
+            clean_link_kept_as_file(repo, workdir, index, path, index_blob)?;
         }
-        index.add_path(Path::new(path))?;
     } else {
         index.remove_path(Path::new(path))?;
     }
     Ok(true)
+}
+
+/// After `add_path` staged the regular file `path`: when it is a link kept as a file
+/// (`core.symlinks` off, libgit2 kept the link mode), its blob as git stores it, cleaned as git
+/// cleans it (#802). `index_blob` is [`crate::undo::blob_git_compares`] before staging.
+fn clean_link_kept_as_file(
+    repo: &git2::Repository,
+    workdir: &Path,
+    index: &mut git2::Index,
+    path: &str,
+    index_blob: Option<git2::Oid>,
+) -> Result<(), StageError> {
+    let Some(mut entry) = index
+        .get_path(Path::new(path), 0)
+        .filter(|entry| entry.mode == crate::undo::MODE_LINK)
+    else {
+        return Ok(());
+    };
+    let Some(crate::worktree_guard::Leaf::File { bytes, .. }) =
+        crate::worktree_guard::read_beneath(workdir, path)?
+    else {
+        return Ok(());
+    };
+    entry.id = crate::undo::filtered_link_file_blob::<StageError>(repo, path, &bytes, index_blob)?;
+    index.add(&entry)?;
+    Ok(())
 }
 
 /// Stages the files of the untracked folder `folder` (`dir/`, #845) into `index`, as `git add

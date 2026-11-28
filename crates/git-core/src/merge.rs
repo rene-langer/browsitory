@@ -943,8 +943,17 @@ pub fn mark_resolved_with_pauses(
             crate::external_filter::refuse_paths::<MergeError, _>(repo, [path])?;
             // Streamed from the opened handle into the object database, checked on the way
             // (#212). Through the clean filters (the path as hint), also for a link kept as a
-            // file, as git does.
-            let mut writer = repo.blob_writer(Some(Path::new(path)))?;
+            // file, as git does (#802).
+            let link_file = (mode == crate::undo::MODE_LINK)
+                .then(|| {
+                    let index_blob = crate::undo::blob_git_compares(&index, path);
+                    crate::undo::link_file_filters(repo, path, index_blob)
+                })
+                .transpose()?;
+            let mut writer = link_file
+                .as_ref()
+                .unwrap_or(repo)
+                .blob_writer(Some(Path::new(path)))?;
             let mut scan = MarkerScan::default();
             let mut buffer = vec![0; STREAM_CHUNK];
             loop {
