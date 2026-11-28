@@ -80,6 +80,8 @@ const PATTERNS: &[&str] = &[
     "/**/c.rs\n",
     "**\n!**/*.rs\n",
     "a**/c.rs\nlib**\n",
+    "lib**/c.rs\n",
+    "deep/**.rs\n",
     "lib/**/\n",
     "foo/*/baz.txt\n",
     "foo/*\n",
