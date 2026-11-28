@@ -95,6 +95,31 @@ fn a_file_the_system_refused_is_no_held_lock() {
     assert!(!is_lock_held(&refused));
 }
 
+/// A fetch's ref updates (`git_remote_update_tips`) answer any failure with code -1, so a held
+/// tracking-ref lock reaches the caller without `Locked`: still libgit2's lock message, class
+/// `Os`. `remote.rs`'s fetch test gets it from a real held lock.
+#[test]
+fn a_held_lock_whose_code_a_ref_update_dropped_is_a_held_lock() {
+    let flattened = git2::Error::new(
+        git2::ErrorCode::GenericError,
+        git2::ErrorClass::Os,
+        "failed to lock file '/work/.git/refs/remotes/origin/main.lock' for writing: ",
+    );
+    assert!(is_lock_held(&flattened));
+}
+
+/// A lock file libgit2 couldn't create for another reason (no permission, a full disk) is held
+/// by no other program.
+#[test]
+fn a_lock_file_that_could_not_be_created_is_no_held_lock() {
+    let refused = git2::Error::new(
+        git2::ErrorCode::GenericError,
+        git2::ErrorClass::Os,
+        "failed to create locked file '/work/.git/index.lock': Permission denied",
+    );
+    assert!(!is_lock_held(&refused));
+}
+
 #[test]
 fn other_failures_are_no_held_lock() {
     let (_dir, repo) = repo_with_a_commit();
