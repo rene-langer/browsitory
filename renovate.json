@@ -91,6 +91,12 @@
       "groupName": null
     },
     {
+      "description": "The crate tools the workflows pin (a `# renovate: datasource=crate` comment above a `*_VERSION:` line, #1097) name an exact version, not a Cargo requirement. Under the crate datasource's default `cargo` versioning a bare `0.22.0` is the range `^0.22.0`, which the newest patch or in-range minor already satisfies, so Renovate never proposed one",
+      "matchManagers": ["custom.regex"],
+      "matchDatasources": ["crate"],
+      "versioning": "semver"
+    },
+    {
       "description": "0.x minor bumps are breaking (Cargo and npm treat 0.y as major): own PR, after approval",
       "matchUpdateTypes": ["minor"],
       "matchCurrentVersion": "/^[\\^~=]?0\\./",
