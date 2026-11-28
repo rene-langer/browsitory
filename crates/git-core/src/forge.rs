@@ -41,7 +41,8 @@ pub enum ForgeError {
 /// Remotes on unrecognized hosts are silently skipped (no HTTP request is ever implied by
 /// this function — it's pure parsing). Remotes on a recognized forge host whose path can't be
 /// read as exactly `owner/name`, and remotes whose URL carries embedded `user:pass`
-/// credentials, are likewise skipped rather than surfaced through this Vec — each remote is
+/// credentials or a GitHub token as its user name, are likewise skipped (a plain user name is
+/// ignored) rather than surfaced through this Vec — each remote is
 /// judged independently, so one unsupported/ambiguous/credential-bearing remote never hides
 /// the other, perfectly good, remotes on the same repository. `Err` is reserved for a truly
 /// fatal failure to enumerate the repo's remotes at all.
@@ -96,8 +97,10 @@ fn classify_scheme_url(url: &str) -> Result<Option<ForgeIdentity>, ClassifyError
     let Ok(parsed) = Url::parse(url) else {
         return Ok(None);
     };
+    // A user name alone (Bitbucket's copy URL, #1101) is left out of the identity, so it is never
+    // sent or shown; a password or a token in its place keeps the remote out.
     if matches!(parsed.scheme(), "http" | "https")
-        && (!parsed.username().is_empty() || parsed.password().is_some())
+        && (parsed.password().is_some() || is_github_token(parsed.username()))
     {
         return Err(ClassifyError::CredentialBearingUrl);
     }
@@ -105,6 +108,14 @@ fn classify_scheme_url(url: &str) -> Result<Option<ForgeIdentity>, ClassifyError
         return Ok(None);
     };
     classify_host_and_path(&host.to_ascii_lowercase(), parsed.path())
+}
+
+/// Whether `user` has the prefix of a GitHub token, which git sends as the user name of an
+/// https URL.
+fn is_github_token(user: &str) -> bool {
+    ["ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_"]
+        .iter()
+        .any(|prefix| user.starts_with(prefix))
 }
 
 /// Splits owner/name out of `path`, stripping only a terminal `.git` off the last segment,
