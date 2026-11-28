@@ -680,6 +680,7 @@ impl RemoteError {
             Self::Git(error) if error.message() == SSH_AGENT_FAILURE_ERROR => {
                 TransferErrorKind::SshAgentFailure
             }
+            _ if crate::held_lock::is_lock_held(self) => TransferErrorKind::LockHeld,
             _ => TransferErrorKind::TransferFailed,
         }
     }

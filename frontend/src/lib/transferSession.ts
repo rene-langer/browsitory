@@ -298,6 +298,11 @@ const BY_KIND: Partial<Record<TransferErrorKind, (upstreamLabel: string) => stri
   StaleLease: (upstreamLabel) => `${upstreamLabel} changed since your last fetch. Fetch and review before force pushing.`,
 };
 
+// A lock file another Git program holds (#1033). The transfer event carries no text; the
+// operation log (Details) has git's, which names the file.
+const LOCK_HELD =
+  "Another Git program is using the repository. Wait until it finishes, then try again. If none is running, delete the leftover lock file shown in Details.";
+
 const NON_FAST_FORWARD_PUSH =
   "Push was rejected because the remote has newer commits. Pull or reconcile history, then try again.";
 const REJECTED_PUSHED_REF = "The remote rejected the pushed reference.";
@@ -320,15 +325,16 @@ export function transferFailureMessage(
   const family = FAMILY[operation];
   if (errorKind === null) return generic(family, subject);
   if (errorKind === "Cancelled") return CANCELLED[family];
+  if (errorKind === "LockHeld") return `${whatFailed(family, subject)}. ${LOCK_HELD}`;
   return BY_KIND[errorKind]?.(upstreamLabel) ?? OVERRIDES[family]?.[errorKind] ?? generic(family, subject);
 }
 
 // The same fixed hints `transferFailureMessage` gives a single-remote transfer.
-function credentialHint(errorKind: TransferErrorKind | null): string | null {
+function remoteHint(errorKind: TransferErrorKind | null): string | null {
   if (errorKind === "MissingCredential" || errorKind === "CredentialStoreFailure" || errorKind === "SshAgentFailure") {
     return credentialRemediation(errorKind);
   }
-  return null;
+  return errorKind === "LockHeld" ? LOCK_HELD : null;
 }
 
 /** What a Fetch all with failed remotes shows; `othersFetched` when it still completed. */
@@ -336,7 +342,7 @@ export function fetchAllFailureMessage(failed: FailedRemote[], othersFetched: bo
   const parts = [`Could not fetch from ${failed.map((remote) => remote.remoteName).join(", ")}.`];
   if (othersFetched) parts.push("The other remotes were fetched.");
   for (const remote of failed) {
-    const hint = credentialHint(remote.errorKind);
+    const hint = remoteHint(remote.errorKind);
     if (hint !== null) parts.push(`${remote.remoteName}: ${hint}`);
   }
   return parts.join(" ");

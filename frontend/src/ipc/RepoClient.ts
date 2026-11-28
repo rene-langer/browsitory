@@ -669,6 +669,8 @@ const ERROR_KINDS: ReadonlySet<string> = new Set<ErrorKind>([
   "RestLeft",
   "DiffTooLarge",
   "BlameUnavailable",
+  "LockHeld",
+  "NotFastForward",
 ]);
 
 /**
