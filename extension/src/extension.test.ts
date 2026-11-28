@@ -885,6 +885,23 @@ describe("extension commands and integration points (#677, #678, #679)", () => {
   });
 });
 
+// #818: the webview hands over the URIs dropped from VSCode's Explorer as the window wrote them;
+// a remote window's files are `vscode-remote:` there, while the extension host runs beside them.
+describe("droppedPath", () => {
+  it("takes a local window's files and a remote window's remote files, nothing else", async () => {
+    const { droppedPath } = await import("./hostRequests.js");
+    expect(droppedPath({ scheme: "file", fsPath: "/repos/app" }, false)).toBe("/repos/app");
+    expect(droppedPath({ scheme: "vscode-remote", fsPath: "/home/me/app" }, true)).toBe("/home/me/app");
+    // A remote window's `file:` URI is a file of the machine VSCode runs on, not of the host's.
+    expect(droppedPath({ scheme: "file", fsPath: "/repos/app" }, true)).toBeUndefined();
+    expect(droppedPath({ scheme: "vscode-remote", fsPath: "/home/me/app" }, false)).toBeUndefined();
+    for (const scheme of ["untitled", "https", "browsitory-file", "git"]) {
+      expect(droppedPath({ scheme, fsPath: "/x" }, false)).toBeUndefined();
+      expect(droppedPath({ scheme, fsPath: "/x" }, true)).toBeUndefined();
+    }
+  });
+});
+
 describe("selectedLines", () => {
   it("counts from 1 and leaves out a last line the selection only touches", async () => {
     const { selectedLines } = await import("./hostRequests.js");

@@ -69,6 +69,8 @@ function createBridge(overrides: {
   trusted?: boolean;
   /** The repositories the window's state lists as open tabs (#1128). */
   openRepos?: readonly string[];
+  /** The files `readFilePath` reads, by path (#818); others fail with ENOENT. */
+  files?: Record<string, Uint8Array>;
 } = {}) {
   const child = new FakeSidecar();
   const spawnResults = overrides.spawnResults ?? [child];
@@ -83,6 +85,15 @@ function createBridge(overrides: {
   const showSaveDialog = vi.fn(async (_fileName: string) => overrides.savePath);
   const readFile = vi.fn(async (_uri: Uri) => overrides.fileBytes ?? new Uint8Array());
   const writeFile = vi.fn(async (_path: string, _content: Uint8Array) => {});
+  const readFilePath = vi.fn(async (file: string) => {
+    const bytes = overrides.files?.[file];
+    if (bytes === undefined) throw new Error("ENOENT: no such file or directory");
+    return bytes;
+  });
+  // A dropped URI's path (#818): `file:` URIs only, as in a local window.
+  const droppedUriPath = vi.fn((uri: string) =>
+    uri.startsWith("file://") ? decodeURIComponent(uri.slice(7).split("#")[0]!) : undefined,
+  );
   const openExternal = vi.fn(async () => overrides.externalResult ?? true);
   const appendLine = vi.fn();
   const openFile = vi.fn(async (_path: string, _line: number | null) => undefined);
@@ -103,6 +114,8 @@ function createBridge(overrides: {
     showOpenDialog,
     showSaveDialog,
     readFile,
+    readFilePath,
+    droppedUriPath,
     writeFile,
     openExternal,
     appendLine,
@@ -122,6 +135,8 @@ function createBridge(overrides: {
     showOpenDialog,
     showSaveDialog,
     readFile,
+    readFilePath,
+    droppedUriPath,
     writeFile,
     openExternal,
     appendLine,
@@ -340,6 +355,49 @@ describe("SidecarBridge", () => {
 
     expect(readFile).toHaveBeenCalledWith(file);
     expect(postToWebview).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 1, result: { base64: "aGk=" } });
+  });
+
+  it("reads a patch file dropped on the panel, with the desktop's limits (#818)", async () => {
+    const big = new Uint8Array(64 * 1024 * 1024 + 1);
+    const { bridge, postToWebview, readFilePath, spawn } = createBridge({
+      files: { "/home/me/fix.PATCH": new Uint8Array([0x68, 0x69]), "/home/me/big.diff": big },
+    });
+    const read = (id: number, file: unknown) =>
+      bridge.handleWebviewMessage({ jsonrpc: "2.0", id, method: "read_patch_file", params: { path: file } });
+
+    await read(1, "/home/me/fix.PATCH");
+    await read(2, "/home/me/notes.md");
+    await read(3, "/home/me/big.diff");
+    await read(4, "/home/me/gone.mbox");
+    await read(5, 42);
+
+    expect(spawn).not.toHaveBeenCalled();
+    expect(readFilePath.mock.calls.map(([file]) => file)).toEqual(["/home/me/fix.PATCH", "/home/me/big.diff", "/home/me/gone.mbox"]);
+    expect(postToWebview.mock.calls.map(([message]) => message)).toEqual([
+      { jsonrpc: "2.0", id: 1, result: { base64: "aGk=" } },
+      { jsonrpc: "2.0", id: 2, error: { code: -32000, message: "/home/me/notes.md isn't a patch file (.patch, .diff, .mbox or .txt)" } },
+      { jsonrpc: "2.0", id: 3, error: { code: -32000, message: "Couldn't read /home/me/big.diff: the file is larger than 64 MB" } },
+      { jsonrpc: "2.0", id: 4, error: { code: -32000, message: "Couldn't read /home/me/gone.mbox: ENOENT: no such file or directory" } },
+      expect.objectContaining({ id: 5, error: expect.objectContaining({ code: -32602 }) }),
+    ]);
+  });
+
+  it("answers the paths of the URIs dropped on the panel that name files of its file system (#818)", async () => {
+    const { bridge, postToWebview, spawn } = createBridge();
+
+    await bridge.handleWebviewMessage({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "resolve_dropped_uris",
+      params: { uris: ["file:///repos/app", "untitled:Untitled-1", "file:///home/me/fix.patch#3,1"] },
+    });
+    await bridge.handleWebviewMessage({ jsonrpc: "2.0", id: 2, method: "resolve_dropped_uris", params: { uris: ["a", 1] } });
+
+    expect(spawn).not.toHaveBeenCalled();
+    expect(postToWebview.mock.calls.map(([message]) => message)).toEqual([
+      { jsonrpc: "2.0", id: 1, result: ["/repos/app", "/home/me/fix.patch"] },
+      expect.objectContaining({ id: 2, error: expect.objectContaining({ code: -32602 }) }),
+    ]);
   });
 
   it("fails open_external_url when VSCode doesn't open the link (#320)", async () => {

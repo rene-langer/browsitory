@@ -32,4 +32,28 @@ describe("useFileDrops (#649)", () => {
     unmount();
     expect(unsubscribe).toHaveBeenCalledOnce();
   });
+
+  // The VSCode webview gets files from the file manager without their paths (#818).
+  it("splits files dropped without a path into patches to apply and others it can't open", () => {
+    let emit: (event: FileDropEvent) => void = () => {};
+    const client = fakeRepoClient({
+      subscribeFileDrops: (listener: (event: FileDropEvent) => void) => {
+        emit = listener;
+        return () => {};
+      },
+    });
+    const onDrop = vi.fn();
+    renderHook(() => useFileDrops(client, onDrop));
+    const file = (name: string) => ({ name, read: vi.fn() });
+    const [patch, folder, mails] = [file("1.patch"), file("repo"), file("series.MBOX")];
+    act(() => emit({ kind: "drop", paths: [], files: [patch, folder, mails] }));
+    expect(onDrop).toHaveBeenCalledExactlyOnceWith({
+      folders: [],
+      patches: [],
+      patchFiles: [patch, mails],
+      otherFiles: ["repo"],
+    });
+    act(() => emit({ kind: "drop", paths: [], files: [] }));
+    expect(onDrop).toHaveBeenCalledOnce();
+  });
 });

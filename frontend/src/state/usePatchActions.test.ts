@@ -166,6 +166,35 @@ describe("usePatchActions — dropped patch files (#649)", () => {
     expect(client.readPatchFile).toHaveBeenCalledOnce();
     expect(state().patchOutcome).toBeNull();
   });
+
+  // Files the VSCode webview got from the file manager, without a path (#818).
+  it("applies patch files dropped without a path from their content", async () => {
+    const { client, actions, state } = setup();
+    const other = { base64: "b3RoZXI=" };
+    const files = [
+      { name: "0001-a.patch", read: vi.fn(async () => CONTENT) },
+      { name: "0002-b.diff", read: vi.fn(async () => other) },
+    ];
+    await actions.applyPatchFiles([], files);
+    expect(client.readPatchFile).not.toHaveBeenCalled();
+    expect(client.applyPatch.mock.calls).toEqual([
+      ["/repo", CONTENT, "WorkTree"],
+      ["/repo", other, "WorkTree"],
+    ]);
+    expect(state().patchOutcome).toEqual({ message: "Applied 0002-b.diff to the working tree", undoable: true });
+  });
+
+  it("stops at a patch dropped without a path that can't be read", async () => {
+    const { client, actions, state } = setup();
+    const files = [
+      { name: "big.patch", read: vi.fn(async () => Promise.reject(new Error("Couldn't read big.patch: the file is larger than 64 MB"))) },
+      { name: "b.patch", read: vi.fn(async () => CONTENT) },
+    ];
+    await actions.applyPatchFiles([], files);
+    expect(files[1]!.read).not.toHaveBeenCalled();
+    expect(client.applyPatch).not.toHaveBeenCalled();
+    expect(state().error).toBe("Couldn't read big.patch: the file is larger than 64 MB");
+  });
 });
 
 describe("patch names and messages", () => {
