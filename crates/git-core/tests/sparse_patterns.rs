@@ -838,3 +838,65 @@ fn aborting_a_rebase_applies_the_sparse_patterns_to_every_entry_as_git_does() {
     assert!(ls_files_v(ours.path()).contains("S docs/guide.md\n"));
     assert!(ls_files_v(ours.path()).contains("H top.txt\n"));
 }
+
+/// An intent-to-add entry outside the cone that the target has gets the target's entry, marked,
+/// and its file goes, as with git.
+#[test]
+fn a_hard_reset_marks_an_intent_to_add_entry_outside_the_cone_that_the_target_has() {
+    hard_reset_matches_git(
+        |d| {
+            let two = cone(d);
+            write_file(d, "docs/new.md", "local\n");
+            git_ok(d, &["add", "-N", "--sparse", "docs/new.md"]);
+            two
+        },
+        true,
+    );
+}
+
+/// `main` changes `docs/g` (outside the cone) against `onto`, which changes it too: the rebase
+/// stops on a conflict outside the cone. Sparse `app`.
+fn conflict_outside_history(d: &Path) -> String {
+    init(d);
+    write_file(d, "app/a", "a\n");
+    write_file(d, "docs/g", "base\n");
+    commit(d, "base");
+    git_ok(d, &["checkout", "-q", "-b", "onto"]);
+    write_file(d, "docs/g", "onto\n");
+    commit(d, "onto");
+    git_ok(d, &["checkout", "-q", "main"]);
+    write_file(d, "docs/g", "mine\n");
+    commit(d, "mine");
+    git_ok(d, &["sparse-checkout", "set", "app"]);
+    rev(d, "onto")
+}
+
+/// The conflicted entries of a path outside the cone end as its unmarked entry, with its file
+/// written, as git's abort leaves it.
+#[test]
+fn aborting_a_rebase_with_a_conflict_outside_the_cone_matches_git() {
+    let (ours, our_onto, twin, _) = twins(conflict_outside_history);
+    let output = test_support::git(twin.path(), &["rebase", "onto"]);
+    assert!(!output.status.success(), "{output:?}");
+    git_ok(twin.path(), &["rebase", "--abort"]);
+    let repo = git2::Repository::open(ours.path()).unwrap();
+    let plan = git_core::rebase::commits_since(&repo, &our_onto)
+        .unwrap()
+        .into_iter()
+        .map(|commit| git_core::rebase::RebasePlanEntry {
+            commit_id: commit.id,
+            action: git_core::rebase::RebaseAction::Pick,
+            combined_message: None,
+        })
+        .collect();
+    let (state, result) = git_core::rebase::start_rebase(&repo, &our_onto, plan).unwrap();
+    assert!(matches!(
+        result,
+        git_core::rebase::RebaseStepResult::Conflicted { .. }
+    ));
+
+    git_core::rebase::abort_rebase(&repo, &state).unwrap();
+
+    assert_same_as_git(ours.path(), twin.path());
+    assert!(ls_files_v(ours.path()).contains("H docs/g\n"));
+}
