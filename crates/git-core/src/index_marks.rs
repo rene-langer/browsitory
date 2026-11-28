@@ -69,6 +69,9 @@ pub(crate) struct Marks {
     pub(crate) added: HashSet<Vec<u8>>,
     /// A sparse checkout with readable patterns applies (git applies none without them).
     pub(crate) sparse: bool,
+    /// The paths whose file goes because the sparse patterns leave them out (#1187): see
+    /// [`apply_sparse_patterns`].
+    pub(crate) removed: HashSet<Vec<u8>>,
 }
 
 /// [`Marks`] for resetting `index` (as it is now, before anything is written) to `tree`. A
@@ -84,6 +87,7 @@ pub(crate) fn marks_after(
         skip_worktree: skip_worktree_paths(index),
         added: HashSet::new(),
         sparse: false,
+        removed: HashSet::new(),
     };
     let sparse = crate::sparse::Sparse::read(repo)?;
     if sparse == crate::sparse::Sparse::Off {
@@ -161,6 +165,84 @@ where
         }
     }
     Ok(left)
+}
+
+/// For a hard reset of `index` to `tree` (Reset hard, Abort rebase) in a sparse checkout: the
+/// patterns applied to every entry the index already has, as git's unpack-trees does
+/// (`apply_sparse_checkout`, #1187), once [`left_alone`] has judged the marked ones. An unmarked
+/// entry outside the patterns gets the mark and its file goes; a marked one inside loses the mark
+/// and gets its file; a marked one outside whose unchanged file is on disk loses that file (git
+/// drops the mark of a file it finds, then marks it again). A marked file with local edits keeps
+/// its mark and stays as it is (git would overwrite or remove it): nothing shows the edit or
+/// brings it back. The files go with [`remove_left_out_files`], after the checkout.
+pub(crate) fn apply_sparse_patterns<E>(
+    repo: &git2::Repository,
+    index: &git2::Index,
+    tree: &git2::Tree<'_>,
+    marks: &mut Marks,
+    left: &mut LeftAlone,
+) -> Result<(), E>
+where
+    E: From<git2::Error> + From<std::io::Error>,
+{
+    if !marks.sparse {
+        return Ok(());
+    }
+    let sparse = crate::sparse::Sparse::read(repo)?;
+    let (_, edited) = edited_skip_worktree::<E>(repo)?;
+    let workdir = repo.workdir();
+    for entry in index.iter() {
+        let stage = (entry.flags >> 12) & 0x3;
+        let path = crate::worktree_guard::path_from_bytes(&entry.path);
+        if stage != 0
+            || entry.flags_extended & INTENT_TO_ADD != 0
+            || tree.get_path(&path).is_err()
+            || edited.contains(&String::from_utf8_lossy(&entry.path).into_owned())
+        {
+            continue;
+        }
+        let marked = entry.flags_extended & SKIP_WORKTREE != 0;
+        let on_disk =
+            || workdir.is_some_and(|workdir| workdir.join(&path).symlink_metadata().is_ok());
+        match (marked, sparse.excludes(&entry.path)) {
+            (true, false) => {
+                marks.skip_worktree.retain(|marked| *marked != entry.path);
+                left.paths.remove(&entry.path);
+            }
+            (false, true) => {
+                marks.skip_worktree.push(entry.path.clone());
+                left.paths.insert(entry.path.clone());
+                marks.removed.insert(entry.path);
+            }
+            (true, true) if on_disk() => {
+                left.paths.insert(entry.path.clone());
+                marks.removed.insert(entry.path);
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Removes the file of each of [`Marks::removed`], and the folders that empty, as git does. One
+/// that can't be removed stays and goes unmarked, as git leaves a file it can't remove.
+pub(crate) fn remove_left_out_files(repo: &git2::Repository, marks: &mut Marks) {
+    let Some(workdir) = repo.workdir() else {
+        return;
+    };
+    let kept: HashSet<Vec<u8>> = marks
+        .removed
+        .iter()
+        .filter(|path| {
+            crate::worktree_guard::remove_and_prune_beneath(
+                workdir,
+                &crate::worktree_guard::path_from_bytes(path),
+            )
+            .is_err()
+        })
+        .cloned()
+        .collect();
+    marks.skip_worktree.retain(|path| !kept.contains(path));
 }
 
 /// `index.read_tree(tree)`, then the skip-worktree mark back on each of `skip_worktree` that is

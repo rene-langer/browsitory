@@ -70,12 +70,16 @@ pub fn reset_to(repo: &Repository, commit_id: &str, mode: ResetMode) -> Result<(
         let mut index = repo.index()?;
         index.read(false)?;
         // Read before the checkout, which rewrites the entries it writes without the mark.
-        let marks = crate::index_marks::marks_after(repo, &index, &tree)?;
+        let mut marks = crate::index_marks::marks_after(repo, &index, &tree)?;
         if mode == ResetMode::Hard {
-            let left = crate::index_marks::left_alone::<ResetError>(repo, &index, &tree, &marks)?;
+            let mut left =
+                crate::index_marks::left_alone::<ResetError>(repo, &index, &tree, &marks)?;
             if let Some(name) = left.edited {
                 return Err(ResetError::SkipWorktreeEdited(name));
             }
+            crate::index_marks::apply_sparse_patterns::<ResetError>(
+                repo, &index, &tree, &mut marks, &mut left,
+            )?;
             let paths = if left.paths.is_empty() {
                 None
             } else {
@@ -87,6 +91,7 @@ pub fn reset_to(repo: &Repository, commit_id: &str, mode: ResetMode) -> Result<(
             if paths.as_ref().is_none_or(|paths| !paths.is_empty()) {
                 check_out(repo, &tree, paths.as_deref())?;
             }
+            crate::index_marks::remove_left_out_files(repo, &mut marks);
         }
         // git's order: the index first, the ref last (#796). Moving HEAD first left a window in
         // which HEAD named the target while the index still held the old tree, and a reset whose

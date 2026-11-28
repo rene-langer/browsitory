@@ -1530,11 +1530,14 @@ fn restore_original_branch(
     // As Reset hard (#1145, #1172): a forced checkout of the whole tree would write every file
     // outside a sparse checkout and drop the skip-worktree marks. An edited skip-worktree file
     // is left as it is rather than refused: Abort must always work.
-    let (marks, left) = {
+    let (mut marks, left) = {
         let mut index = repo.index()?;
         index.read(false)?;
-        let marks = crate::index_marks::marks_after(repo, &index, &tree)?;
-        let left = crate::index_marks::left_alone::<RebaseError>(repo, &index, &tree, &marks)?;
+        let mut marks = crate::index_marks::marks_after(repo, &index, &tree)?;
+        let mut left = crate::index_marks::left_alone::<RebaseError>(repo, &index, &tree, &marks)?;
+        crate::index_marks::apply_sparse_patterns::<RebaseError>(
+            repo, &index, &tree, &mut marks, &mut left,
+        )?;
         (marks, left.paths)
     };
     if pairs.is_empty() && left.is_empty() {
@@ -1548,6 +1551,7 @@ fn restore_original_branch(
             check_out_original(repo, &tree, &original_tree, Some(&others))?;
         }
         crate::worktree_guard::restore_case_pairs::<RebaseError>(repo, &tree, &pairs)?;
+        crate::index_marks::remove_left_out_files(repo, &mut marks);
         // The limited checkout updated only the other paths' entries; the pair's, the ones left
         // alone (and any conflict on them) go too.
         let mut index = repo.index()?;

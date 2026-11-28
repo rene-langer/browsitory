@@ -509,9 +509,16 @@ menu's choice runs back through the session: the pick, the parent picker or a se
     deleted it); Reset hard refuses, before writing anything, when the target changes a
     skip-worktree file with local edits (git: "Entry '…' not uptodate"), since the status hides
     that edit and Undo couldn't bring it back; Abort rebase leaves such a file as it is.
-    Entries already in the index keep their mark: git's `reset --hard` and `rebase --abort`
-    also re-apply the patterns to them, which matters only when the marks and patterns
-    disagree. Stash (#1184): libgit2's `stash_save2` recorded a missing marked file as deleted
+    In a sparse checkout both then apply the patterns to every entry already in the index too,
+    as git's unpack-trees does (`apply_sparse_checkout`, #1187;
+    `index_marks::apply_sparse_patterns`): an unmarked entry outside them is marked and its
+    file removed after the checkout (`remove_left_out_files`, which prunes emptied folders and
+    leaves a file it can't remove unmarked), a marked one inside is unmarked and written, and a
+    marked one outside whose unchanged file is on disk loses that file (git drops the mark of a
+    file it finds, then marks it again). Deliberate difference: a marked file with local edits
+    keeps its mark and its file (git would overwrite or remove it), since nothing shows the
+    edit or brings it back. A mixed reset leaves the marks of existing entries, as git's does.
+    Stash (#1184): libgit2's `stash_save2` recorded a missing marked file as deleted
     and its reset wrote the file and dropped the mark, so with any skip-worktree entry Stash
     all takes the path-limited route. Its status passes (`Marked::as_git_sees`) drop a marked
     file's deletion (libgit2's diff already reports a marked file that is there as
@@ -554,7 +561,8 @@ menu's choice runs back through the session: the pick, the parent picker or a se
     with readable patterns (`Sparse` not `Off`): without them git applies no sparse checkout.
     Abort of a merge, cherry-pick or revert (`apply_operation_reset`) leaves a touched marked
     path whose file is missing out of its forced checkout: only its index entry goes back to
-    HEAD's, marked, as git's `reset --merge` leaves it. As for Reset (decision 2 of #1172), entries the operation doesn't change keep their mark as
+    HEAD's, marked, as git's `reset --merge` leaves it. Unlike Reset hard and Abort rebase
+    (#1187), entries the operation doesn't change keep their mark as
     they are; git's unpack-trees also re-applies the patterns to them (an unmarked clean file
     outside the cone is marked and removed, a marked one inside is written), which matters only
     when marks and patterns disagree. `branch::changes_in_the_way` (the files a refused switch
@@ -567,9 +575,15 @@ menu's choice runs back through the session: the pick, the parent picker or a se
     (`/a/` then `!/a/*/`) or a folder above it is recursive (`/a/b/`); `/*` alone takes
     everything; escapes are removed; folders compare ignoring ASCII case under
     `core.ignorecase`. A line that doesn't fit the cone format turns cone matching off, as in
-    git. Non-cone patterns (gitignore-style) aren't matched: a path new to the index is taken
-    as outside when its file is missing, so nothing outside the patterns is written or listed
-    as deleted (inside them git would write it, or list it as deleted).
+    git. Non-cone patterns (gitignore-style) are matched as git's `path_in_sparse_checkout`
+    matches them (#1187): the last matching pattern decides (a negative one leaves the path
+    out), a pattern with a trailing `/` matches only the folders above a file, one without a
+    `/` matches a path's last name at any depth, a path no pattern decides takes its folder's
+    verdict, and one undecided up to the top is out. Globs go through `git_core::wildmatch`, a
+    port of git's `wildmatch.c` (`*`, `**`, `?`, classes with ranges, `!`/`^` and `[:name:]`,
+    escapes, ASCII case folding under `core.ignorecase`). `tests/sparse_non_cone.rs` compares
+    the verdict for 46 paths and 70 patterns files with the marks `git sparse-checkout reapply`
+    sets.
   - **intent-to-add** (`git add -N`): an entry with the empty blob. libgit2's status reports it
     as a staged new file and `write_tree` commits the empty blob (#1164). The status lists it as
     one unstaged new file (deleted when its file is gone) with `StatusEntry.intent_to_add` (wire
