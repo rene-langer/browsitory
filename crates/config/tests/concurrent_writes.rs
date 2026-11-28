@@ -3,6 +3,7 @@
 //! window share the file. No writer may undo another's change.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
 
 use config::{
@@ -141,5 +142,80 @@ fn a_symlinked_config_file_stays_a_link() {
     assert_eq!(
         get_last_seen_version_at(&target).unwrap().as_deref(),
         Some("0.18.0")
+    );
+}
+
+/// #1219: getters read without the write lock, so another window can have `config.toml` open
+/// while a save replaces it. Windows refused to replace an open file ("Access is denied"), and
+/// that save failed.
+#[test]
+fn saves_go_through_while_other_threads_read_the_file() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let file = dir.path().join("config.toml");
+    set_last_seen_version_at(&file, "0.0.0").unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let readers: Vec<_> = (0..3)
+        .map(|_| {
+            let (file, stop) = (file.clone(), Arc::clone(&stop));
+            std::thread::spawn(move || {
+                let mut failures = Vec::new();
+                while !stop.load(Ordering::Relaxed) {
+                    if let Err(error) = get_last_seen_version_at(&file) {
+                        failures.push(error.to_string());
+                    }
+                }
+                failures
+            })
+        })
+        .collect();
+
+    let mut failed_saves = Vec::new();
+    for save in 1..=100 {
+        if let Err(error) = set_last_seen_version_at(&file, &format!("0.{save}.0")) {
+            failed_saves.push(format!("save {save}: {error}"));
+        }
+    }
+    stop.store(true, Ordering::Relaxed);
+    let failed_reads: Vec<String> = readers
+        .into_iter()
+        .flat_map(|reader| reader.join().unwrap())
+        .collect();
+
+    assert!(
+        failed_saves.is_empty(),
+        "{} of 100 saves failed:\n{}",
+        failed_saves.len(),
+        failed_saves.join("\n")
+    );
+    assert!(
+        failed_reads.is_empty(),
+        "{} reads failed, first: {}",
+        failed_reads.len(),
+        failed_reads[0]
+    );
+    assert_eq!(
+        get_last_seen_version_at(&file).unwrap().as_deref(),
+        Some("0.100.0")
+    );
+}
+
+/// The saved file is an ordinary file: the temp file's FILE_ATTRIBUTE_TEMPORARY (0x100), which
+/// lets Windows keep a file in the cache only, doesn't come along.
+#[cfg(windows)]
+#[test]
+fn a_saved_file_is_not_marked_temporary() {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_TEMPORARY: u32 = 0x100;
+    let dir = tempfile::TempDir::new().unwrap();
+    let file = dir.path().join("config.toml");
+
+    set_last_seen_version_at(&file, "0.18.0").unwrap();
+    set_last_seen_version_at(&file, "0.19.0").unwrap();
+
+    let attributes = std::fs::metadata(&file).unwrap().file_attributes();
+    assert_eq!(
+        attributes & FILE_ATTRIBUTE_TEMPORARY,
+        0,
+        "attributes {attributes:#x}"
     );
 }

@@ -27,6 +27,7 @@ pub enum ConfigError {
 }
 
 mod compat;
+mod replace;
 mod user_commands;
 mod write_lock;
 pub use user_commands::*;
