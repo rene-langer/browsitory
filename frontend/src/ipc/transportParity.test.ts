@@ -58,7 +58,6 @@ const SUBSCRIPTIONS = [
 /**
  * Desktop only. VSCode has its own Git: Clone and Git: Initialize Repository commands, so the
  * extension reports `supportsCloneAndInit: false` and these reject without calling anything.
- * `readPatchFile` reads a file dropped on the window (#649); VSCode handles drops itself.
  * `recoverFromFailedUpdate` follows a failed "Restart to update" (#1194); the extension updates
  * through VSCode.
  */
@@ -66,7 +65,6 @@ const VSCODE_UNSUPPORTED = [
   "cloneRepo",
   "cancelClone",
   "initRepo",
-  "readPatchFile",
   "recoverFromFailedUpdate",
 ] as const satisfies readonly Method[];
 
@@ -97,6 +95,13 @@ const TAURI_LOCAL = ["userCommandsBlocked"] as const satisfies readonly Method[]
  * merge editor, and to write a file version to the path picked in its save dialog.
  */
 const SIDECAR_HOST_ONLY = ["check_merge_target", "read_file_version", "repo_workdir", "write_file_version"];
+
+/**
+ * Extension host methods the VSCode client calls from a subscription, not from a method of its
+ * own: `subscribeFileDrops` asks the host for the paths of the URIs dropped from VSCode's
+ * Explorer (#818), which only the host can map to its file system.
+ */
+const VSCODE_SUBSCRIPTION_ONLY = ["resolve_dropped_uris"];
 
 const sorted = (names: Iterable<string>) => [...names].sort();
 
@@ -201,10 +206,10 @@ describe("transport parity", () => {
     expect(extensionNativeMethods.filter((name) => sidecar.has(name))).toEqual([]);
   });
 
-  it("every sidecar and extension host method is called, except the host-only ones", () => {
+  it("every sidecar and extension host method is called, except the host-only and subscription-only ones", () => {
     const called = new Set(vscodeNames.values());
     const uncalled = [...sidecarMethods, ...extensionNativeMethods].filter((name) => !called.has(name));
-    expect(sorted(uncalled)).toEqual(sorted(SIDECAR_HOST_ONLY));
+    expect(sorted(uncalled)).toEqual(sorted([...SIDECAR_HOST_ONLY, ...VSCODE_SUBSCRIPTION_ONLY]));
   });
 
   it("the host-only sidecar methods are the ones the extension host calls, and exist", () => {
